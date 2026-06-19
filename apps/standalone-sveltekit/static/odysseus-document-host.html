@@ -81,6 +81,7 @@
       let lastSnapshotSignature = '';
       let hasReceivedParentOpenRequest = false;
       let defaultOpenTimer = null;
+      let openStabilization = null;
       const pending = [];
 
       function post(type, payload = {}) {
@@ -109,6 +110,13 @@
 
       function normalizePreferredView(value) {
         return value === 'edit' || value === 'preview' || value === 'auto' ? value : 'auto';
+      }
+
+      function contentHash(value) {
+        const text = String(value || '');
+        let hash = 5381;
+        for (let index = 0; index < text.length; index += 1) hash = ((hash << 5) + hash) ^ text.charCodeAt(index);
+        return (hash >>> 0).toString(36);
       }
 
       function isRenderPreviewLanguage(language) {
@@ -149,6 +157,63 @@
               logHostTelemetry({ event: 'document_host.preferred_view_applied', mode: preferredView, ok: true });
             }
           });
+        });
+      }
+
+      function afterAnimationFrames(count, callback) {
+        if (count <= 0) {
+          callback();
+          return;
+        }
+        requestAnimationFrame(() => afterAnimationFrames(count - 1, callback));
+      }
+
+      function writeEditorDomFromRecord(documentRecord) {
+        const titleInput = document.getElementById('doc-title-input');
+        const languageSelect = document.getElementById('doc-language-select');
+        const textarea = document.getElementById('doc-editor-textarea');
+        const badge = document.getElementById('doc-version-badge');
+        if (titleInput) titleInput.value = documentRecord.title || '';
+        if (languageSelect) languageSelect.value = documentRecord.language || 'markdown';
+        if (textarea) textarea.value = documentRecord.current_content || '';
+        if (badge) {
+          const version = Number(documentRecord.version_count || 1);
+          badge.textContent = `v${version}`;
+          badge.style.display = version > 1 ? '' : 'none';
+        }
+      }
+
+      function refreshRenderedPreview(documentRecord) {
+        const language = (documentRecord.language || '').toLowerCase();
+        if (isRenderPreviewLanguage(language)) {
+          const iframe = document.getElementById('doc-html-preview');
+          if (iframe && iframe.style.display !== 'none') iframe.srcdoc = documentRecord.current_content || '';
+        }
+      }
+
+      function stabilizeOpenedDocument(documentRecord, payload) {
+        openStabilization = {
+          documentId: documentRecord.id,
+          title: documentRecord.title,
+          language: documentRecord.language,
+          version_count: Number(documentRecord.version_count || 1),
+          contentHash: contentHash(documentRecord.current_content),
+          until: Date.now() + 500
+        };
+
+        afterAnimationFrames(3, () => {
+          writeEditorDomFromRecord(documentRecord);
+          refreshRenderedPreview(documentRecord);
+          applyPreferredView({ ...payload, language: documentRecord.language });
+          logHostTelemetry({
+            event: 'document_host.stabilized_open',
+            documentId: documentRecord.id,
+            documentVersion: documentRecord.version_count,
+            title: documentRecord.title,
+            mode: resolvePreferredView({ ...payload, language: documentRecord.language }),
+            ok: true
+          });
+          queueSnapshot('active', { force: true, clearStabilization: true });
         });
       }
 
@@ -202,11 +267,10 @@
             version_count: documentRecord.version_count,
             version: documentRecord.version_count
           });
-          applyPreferredView({ ...payload, language: documentRecord.language });
+          stabilizeOpenedDocument(documentRecord, payload);
           loading?.remove();
           post('sonik:odysseus-document:opened', { document: documentRecord, preferredView: normalizePreferredView(payload?.preferredView) });
           logHostTelemetry({ event: 'document_host.opened', documentId: documentRecord.id, documentVersion: documentRecord.version_count, title: documentRecord.title, mode: resolvePreferredView({ ...payload, language: documentRecord.language }), ok: true });
-          queueSnapshot('active');
         } catch (error) {
           console.error('[sonik-agent-ui] Odysseus document open failed', error);
           if (loading) loading.textContent = `Odysseus document open failed: ${error?.message || error}`;
@@ -248,14 +312,43 @@
         };
       }
 
-      function queueSnapshot(type = 'active') {
+      function shouldSuppressStaleOpenSnapshot(type, snapshot) {
+        if (type !== 'changed' || !openStabilization) return false;
+        if (Date.now() > openStabilization.until) {
+          openStabilization = null;
+          return false;
+        }
+        if (snapshot.id !== openStabilization.documentId) return false;
+        const stale = snapshot.title !== openStabilization.title
+          || snapshot.language !== openStabilization.language
+          || Number(snapshot.version_count || 1) < openStabilization.version_count
+          || contentHash(snapshot.current_content) !== openStabilization.contentHash;
+        if (!stale) return false;
+        logHostTelemetry({
+          event: 'document_host.stale_snapshot_suppressed',
+          documentId: snapshot.id,
+          documentVersion: snapshot.version_count,
+          title: snapshot.title,
+          mode: 'changed',
+          ok: true
+        });
+        return true;
+      }
+
+      function queueSnapshot(type = 'active', options = {}) {
         requestAnimationFrame(() => {
           const snapshot = readActiveDocumentSnapshot();
           if (!snapshot) return;
-          const signature = `${snapshot.id}\n${snapshot.title}\n${snapshot.language}\n${snapshot.version_count}\n${snapshot.current_content}`;
-          if (type === 'changed' && signature === lastSnapshotSignature) return;
+          if (shouldSuppressStaleOpenSnapshot(type, snapshot)) return;
+          const signature = `${snapshot.id}
+${snapshot.title}
+${snapshot.language}
+${snapshot.version_count}
+${snapshot.current_content}`;
+          if (!options.force && type === 'changed' && signature === lastSnapshotSignature) return;
           lastSnapshotSignature = signature;
           post(`sonik:odysseus-document:${type}`, { document: snapshot });
+          if (options.clearStabilization) openStabilization = null;
         });
       }
 

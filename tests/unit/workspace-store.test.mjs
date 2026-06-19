@@ -154,3 +154,60 @@ assert.equal(telemetryRoute.includes("writeAgentTelemetry"), true, "telemetry AP
 const telemetryServer = await import("node:fs/promises").then((fs) => fs.readFile("apps/standalone-sveltekit/src/lib/server/agent-telemetry.ts", "utf8"));
 assert.equal(telemetryServer.includes("agent-ui-telemetry.jsonl"), true, "server telemetry should write local JSONL logs");
 assert.equal(generateRoute.includes("api.generate.stream_attached"), true, "generate route should log stream attachment");
+
+assert.equal(hostHtml.includes("function stabilizeOpenedDocument"), true, "host should stabilize the editor after Odysseus deferred switchToDoc");
+assert.equal(hostHtml.includes("writeEditorDomFromRecord(documentRecord)"), true, "host stabilization should rewrite DOM from the just-opened document record");
+assert.equal(hostHtml.includes("refreshRenderedPreview(documentRecord)"), true, "host stabilization should refresh rendered HTML/SVG/XML preview from updated content");
+assert.equal(hostHtml.includes("function shouldSuppressStaleOpenSnapshot"), true, "host should suppress stale changed snapshots during open stabilization");
+assert.equal(hostHtml.includes("document_host.stale_snapshot_suppressed"), true, "host should trace stale snapshot suppression");
+assert.equal(hostHtml.includes("queueSnapshot('active', { force: true, clearStabilization: true })"), true, "host should emit a fresh active snapshot after stabilization");
+
+const vm = await import("node:vm");
+const contentHashSource = hostHtml.match(/      function contentHash\(value\) \{[\s\S]*?\n      \}\n/)?.[0];
+const suppressSource = hostHtml.match(/      function shouldSuppressStaleOpenSnapshot\(type, snapshot\) \{[\s\S]*?\n      \}\n\n      function queueSnapshot/)?.[0]?.replace(/\n\n      function queueSnapshot[\s\S]*$/, "\n");
+assert.equal(Boolean(contentHashSource && suppressSource), true, "host stale snapshot guard should be extractable for behavior tests");
+const guardHarness = `
+let openStabilization = null;
+const telemetry = [];
+function logHostTelemetry(event) { telemetry.push(event); }
+${contentHashSource}
+${suppressSource}
+const expectedContent = '<html><body>Tokyo</body></html>';
+openStabilization = {
+  documentId: 'doc-weather',
+  title: 'Tokyo Weather Dashboard',
+  language: 'html',
+  version_count: 4,
+  contentHash: contentHash(expectedContent),
+  until: Date.now() + 500
+};
+const staleSuppressed = shouldSuppressStaleOpenSnapshot('changed', {
+  id: 'doc-weather',
+  title: 'NYC Weather Dashboard',
+  language: 'html',
+  version_count: 4,
+  current_content: '<html><body>NYC</body></html>'
+});
+const matchingSuppressed = shouldSuppressStaleOpenSnapshot('changed', {
+  id: 'doc-weather',
+  title: 'Tokyo Weather Dashboard',
+  language: 'html',
+  version_count: 4,
+  current_content: expectedContent
+});
+openStabilization = null;
+const realEditSuppressedAfterClear = shouldSuppressStaleOpenSnapshot('changed', {
+  id: 'doc-weather',
+  title: 'Tokyo Weather Dashboard',
+  language: 'html',
+  version_count: 4,
+  current_content: '<html><body>Tokyo edited</body></html>'
+});
+({ staleSuppressed, matchingSuppressed, realEditSuppressedAfterClear, telemetry });
+`;
+const guardResult = vm.runInNewContext(guardHarness);
+assert.equal(guardResult.staleSuppressed, true, "stale same-id NYC snapshot should be suppressed during stabilization");
+assert.equal(guardResult.matchingSuppressed, false, "matching Tokyo snapshot should not be suppressed");
+assert.equal(guardResult.realEditSuppressedAfterClear, false, "real edit after stabilization clear should not be suppressed");
+assert.equal(guardResult.telemetry.some((event) => event.event === "document_host.stale_snapshot_suppressed"), true, "stale suppression should be traced");
+assert.equal(hostHtml.includes("clearStabilization: true"), true, "host should clear stabilization after the forced active snapshot");
