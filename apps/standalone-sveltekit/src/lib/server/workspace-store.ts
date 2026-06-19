@@ -423,7 +423,6 @@ export function summarizeWorkspaceContext(input: { activeDocument?: WorkspaceDoc
     `- title: ${document.title}`,
     `- language: ${document.language}`,
     `- version: ${document.version_count}`,
-    "- available actions: readActiveDocument, createDocumentArtifact, updateDocumentArtifact, createJsonArtifact",
     "Document content:",
     "```" + document.language,
     content,

@@ -31,6 +31,12 @@ importers:
       '@sonik-agent-ui/json-ui-runtime':
         specifier: workspace:*
         version: link:../../packages/json-ui-runtime
+      '@sonik-agent-ui/platform-adapters':
+        specifier: workspace:*
+        version: link:../../packages/platform-adapters
+      '@sonik-agent-ui/tool-contracts':
+        specifier: workspace:*
+        version: link:../../packages/tool-contracts
       '@sonik-agent-ui/workspace-core':
         specifier: workspace:*
         version: link:../../packages/workspace-core
@@ -187,6 +193,19 @@ importers:
         specifier: ^5.4.5
         version: 5.9.3
 
+  packages/platform-adapters:
+    dependencies:
+      '@sonik-agent-ui/tool-contracts':
+        specifier: workspace:*
+        version: link:../tool-contracts
+    devDependencies:
+      '@internal/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+
   packages/svelte:
     dependencies:
       '@json-render/core':
@@ -211,6 +230,19 @@ importers:
       svelte-check:
         specifier: ^4.0.0
         version: 4.4.3(picomatch@4.0.3)(svelte@5.56.3)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+
+  packages/tool-contracts:
+    dependencies:
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@internal/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
       typescript:
         specifier: ^5.4.5
         version: 5.9.3

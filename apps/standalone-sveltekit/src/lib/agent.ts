@@ -7,6 +7,7 @@ import { getHackerNewsTop } from "./tools/hackernews";
 import { webSearch } from "./tools/search";
 import { createJsonArtifact } from "./tools/artifact";
 import { createDocumentTools, type DocumentToolContext } from "./tools/document";
+import { createToolManifestTools } from "./tools/tool-manifest";
 import { MODEL_ID, gateway } from "./ai-gateway";
 
 const AGENT_INSTRUCTIONS = `You are a knowledgeable assistant that helps users explore data and learn about any topic. You look up real-time information, build visual dashboards, and create rich educational content.
@@ -23,7 +24,7 @@ RULES:
 - For document tools, set preferredView to "preview" for rendered Markdown/HTML/SVG/XML the user should visually inspect, "edit" for source/code-first work, and "auto" only when indifferent.
 - createJsonArtifact requires a valid flat spec: spec.root MUST be the key of an element in spec.elements. Minimal valid shape: { "root": "main", "elements": { "main": { "type": "Card", "props": { "title": "Hello" }, "children": [] } }, "state": {} }.
 - Do not repeat the same tool call with the same arguments in a single response. Do not call createJsonArtifact more than once for a single user turn. Use the first result you already have.
-- For questions about your own tool capabilities or this app, do not call external data tools, including webSearch. Describe these tools from your known tool list: getWeather, getGitHubRepo, getGitHubPullRequests, getCryptoPrice, getCryptoPriceHistory, getHackerNewsTop, webSearch, createJsonArtifact, readActiveDocument, readDocumentArtifact, createDocumentArtifact, updateDocumentArtifact. Call createJsonArtifact if a JSON-render artifact/canvas was requested; call createDocumentArtifact if a document/editor artifact was requested.
+- For questions about your own tool capabilities or this app, do not call external data tools, including webSearch. Call listAvailableTools when the user asks what tools, ORPC app-state capabilities, approval gates, UI targets, or contract-derived capabilities are available. Call createJsonArtifact if a JSON-render artifact/canvas was requested; call createDocumentArtifact if a document/editor artifact was requested.
 - Embed the fetched data directly in /state paths so components can reference it.
 - Use Card components to group related information.
 - NEVER nest a Card inside another Card. If you need sub-sections inside a Card, use Stack, Separator, Heading, or Accordion instead.
@@ -80,6 +81,7 @@ ${explorerCatalog.prompt({
 
 export function createAgent(context: DocumentToolContext = {}) {
   const documentTools = createDocumentTools(context);
+  const toolManifestTools = createToolManifestTools();
   return new ToolLoopAgent({
     model: gateway(MODEL_ID),
     instructions: AGENT_INSTRUCTIONS,
@@ -93,6 +95,7 @@ export function createAgent(context: DocumentToolContext = {}) {
       webSearch,
       createJsonArtifact,
       ...documentTools,
+      ...toolManifestTools,
     },
     stopWhen: stepCountIs(5),
     temperature: 0.35,

@@ -11,6 +11,7 @@ import { pipeArtifactToolOutputsToSpecParts } from "$lib/artifacts/artifact-stre
 import { logArtifactTelemetry } from "$lib/artifacts/artifact-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
 import { summarizeWorkspaceContext, syncActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord } from "$lib/server/workspace-store";
+import { createStandaloneToolManifestSummary } from "$lib/server/tool-manifest";
 import {
   routeString,
   WORKSPACE_CONTENT_MAX_CHARS,
@@ -77,9 +78,19 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const modelMessages = await convertToModelMessages(uiMessages);
   const contextSummary = summarizeWorkspaceContext({ activeDocument });
-  const contextualModelMessages = contextSummary
-    ? [{ role: "system" as const, content: contextSummary }, ...modelMessages]
+  const toolManifestSummary = createStandaloneToolManifestSummary({ includeApprovalRequired: true });
+  const systemContext = [contextSummary, `CONTRACT-DERIVED TOOL MANIFEST:\n${toolManifestSummary}`].filter(Boolean).join("\n\n");
+  const contextualModelMessages = systemContext
+    ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;
+  await writeAgentTelemetry({
+    source: "server",
+    event: "api.generate.tool_manifest_context",
+    requestId,
+    messageId: lastMessage?.id,
+    elementCount: toolManifestSummary.split("\n- ").length - 1,
+    ok: true,
+  });
   const agent = createAgent({ activeDocument });
 
   try {

@@ -13,6 +13,7 @@ import {
   listWorkspaceSessions,
   patchWorkspaceSession,
   restoreWorkspaceDocumentVersion,
+  summarizeWorkspaceContext,
   updateWorkspaceDocument,
   workspaceProcedures,
 } from "../../apps/standalone-sveltekit/src/lib/server/workspace-store.ts";
@@ -79,6 +80,7 @@ assert.equal(candidate?.document.id, restored.id);
 assert.equal(typeof workspaceProcedures["workspace.document.create"], "function");
 assert.equal(typeof workspaceProcedures["workspace.document.library"], "function");
 assert.equal(typeof workspaceProcedures["workspace.artifact.create"], "function");
+assert.equal(summarizeWorkspaceContext({ activeDocument: restored }).includes("available actions:"), false, "document context should not duplicate tool capability prose; tool manifest is the capability source");
 
 assert.equal(archiveWorkspaceDocument(document.id, true)?.archived, true);
 assert.equal(listDocumentLibrary({ search: "sheet" }).documents.some((entry) => entry.id === document.id), false);

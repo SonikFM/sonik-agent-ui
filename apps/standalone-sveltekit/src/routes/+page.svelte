@@ -368,6 +368,7 @@
     updateDocumentArtifact: ["Updating document", "Updated document"],
     readActiveDocument: ["Reading document", "Read document"],
     readDocumentArtifact: ["Reading document", "Read document"],
+    listAvailableTools: ["Reading tool manifest", "Read tool manifest"],
   };
 
   // =============================================================================
