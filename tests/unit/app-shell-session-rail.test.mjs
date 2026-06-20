@@ -14,6 +14,10 @@ const appCss = await readFile("apps/standalone-sveltekit/src/app.css", "utf8");
 const layoutSource = await readFile("apps/standalone-sveltekit/src/routes/+layout.svelte", "utf8");
 const odysseusFrameSource = await readFile("packages/workspace-core/src/components/OdysseusDocumentFrame.svelte", "utf8");
 const odysseusHostSource = await readFile("apps/standalone-sveltekit/static/odysseus-document-host.html", "utf8");
+const agentMessageSource = await readFile("packages/chat-surface/src/components/AgentMessage.svelte", "utf8");
+const chatTextSource = await readFile("packages/chat-surface/src/components/ChatText.svelte", "utf8");
+const chatTextParserSource = await readFile("packages/chat-surface/src/chat-text.ts", "utf8");
+const canvasViewportSource = await readFile("packages/workspace-core/src/components/CanvasViewport.svelte", "utf8");
 const themeRuntimeSource = await readFile("apps/standalone-sveltekit/src/lib/theme/theme-runtime.ts", "utf8");
 const themePickerSource = await readFile("apps/standalone-sveltekit/src/lib/theme/ThemePicker.svelte", "utf8");
 const themeRegistrySource = await readFile("apps/standalone-sveltekit/src/lib/theme/theme-registry.ts", "utf8");
@@ -112,5 +116,13 @@ assert.equal(odysseusHostSource.includes("if (event.origin !== allowedParentOrig
 assert.equal(odysseusHostSource.includes("document_host.theme_applied"), true, "Odysseus document host should apply and log theme bridge events");
 assert.equal(odysseusHostSource.includes("'--bg': payload.background"), true, "Odysseus document host should bridge canonical app theme vars into Odysseus native vars");
 assert.equal(odysseusHostSource.includes("'--panel': panel"), true, "Odysseus document host should bridge panel colors into Odysseus native vars");
+assert.equal(agentMessageSource.includes("chat-bubble"), false, "chat message display should not use Daisy chat-bubble wrappers that add bubble tails");
+assert.equal(agentMessageSource.includes("MessagePrimitive"), false, "chat message display should not use Daisy chat primitives for flat Claude-style rows");
+assert.equal(agentMessageSource.includes("<ChatText"), true, "chat messages should render text through the safe rich-text renderer");
+assert.equal(agentMessageSource.includes("white-space: pre-wrap"), true, "user-authored chat text should preserve multiline prompt fidelity");
+assert.equal(chatTextParserSource.includes("parseTable"), true, "chat text renderer should present markdown tables instead of leaving raw pipes in chat");
+assert.equal(chatTextSource.includes("{@html"), false, "chat text renderer should avoid HTML injection and render structured Svelte elements");
+assert.equal(canvasViewportSource.includes("documentTitle"), true, "artifact canvas should accept document title metadata for document-only mode");
+assert.equal(canvasViewportSource.includes("Document editor active"), true, "artifact canvas should expose a document-aware subtitle when no JSON artifact is promoted");
 
 console.log("app-shell-session-rail tests passed");

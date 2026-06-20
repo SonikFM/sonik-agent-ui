@@ -19,8 +19,8 @@
 </script>
 
 <script lang="ts">
-  import * as MessagePrimitive from "../vendor/amplify-chat/Message/index.js";
   import { getSegments, getSpec, getText, hasSpec } from "../message-parts.js";
+  import ChatText from "./ChatText.svelte";
   import ToolCallBlock from "./ToolCallBlock.svelte";
 
   let {
@@ -43,14 +43,13 @@
   const canRenderArtifact = $derived(shouldRenderArtifact?.(message) ?? true);
 </script>
 
-<MessagePrimitive.Root {from} class="w-full">
+<div class="agent-message" data-role={from}>
   {#if message.role === "user"}
     {#if text}
-      <div class="flex justify-end">
-        <MessagePrimitive.Content
-          class="ml-auto w-fit max-w-[78%] rounded-2xl rounded-br-md bg-[var(--app-user-message-bg)] px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-foreground shadow-sm">
+      <div class="agent-message__user">
+        <div class="agent-message__user-content">
           {text}
-        </MessagePrimitive.Content>
+        </div>
       </div>
     {/if}
   {:else}
@@ -58,14 +57,12 @@
     {@const showLoader = isLast && isStreaming && !hasAnything}
     {@const showSpecAtEnd = messageHasSpec && !specInserted}
 
-    <div class="w-full max-w-3xl flex flex-col gap-3 text-foreground">
+    <div class="agent-message__assistant">
       {#each segments as seg, i (`${seg.kind}-${i}`)}
         {#if seg.kind === "text"}
-          <MessagePrimitive.Content class="bg-transparent px-0 py-0 shadow-none text-foreground">
-            <div class="text-sm leading-relaxed [&_p+p]:mt-3 [&_ul]:mt-2 [&_ol]:mt-2 [&_pre]:mt-2">
-              {seg.text}
-            </div>
-          </MessagePrimitive.Content>
+          <div class="agent-message__assistant-text">
+            <ChatText text={seg.text} />
+          </div>
         {:else if seg.kind === "spec"}
           {#if spec && canRenderArtifact}
             <div class="w-full">
@@ -92,4 +89,41 @@
       {/if}
     </div>
   {/if}
-</MessagePrimitive.Root>
+</div>
+
+<style>
+  .agent-message {
+    width: 100%;
+    color: var(--foreground);
+  }
+
+  .agent-message__user {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .agent-message__user-content {
+    max-width: min(78%, 42rem);
+    border: 1px solid var(--sonik-border-color);
+    border-radius: 1rem;
+    background: var(--app-user-message-bg);
+    padding: 0.65rem 0.9rem;
+    color: var(--foreground);
+    font-size: 0.875rem;
+    line-height: 1.55;
+    box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 8%, transparent);
+    white-space: pre-wrap;
+  }
+
+  .agent-message__assistant {
+    display: flex;
+    width: 100%;
+    max-width: 48rem;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .agent-message__assistant-text {
+    color: var(--foreground);
+  }
+</style>

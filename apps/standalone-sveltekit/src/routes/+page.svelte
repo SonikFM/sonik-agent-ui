@@ -134,6 +134,7 @@
   const documentFrameContent = $derived(documentSeed?.current_content ?? initialOdysseusDocumentContent);
   const documentFrameId = $derived(documentSeed?.id);
   const documentFramePreferredView = $derived(documentPreferredView);
+  const documentFrameSubtitle = $derived(`${documentFrameLanguage} · v${documentSeed?.version_count ?? 1}`);
   const artifactOpen = $derived(Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen));
   const latestJsonRenderSpec = $derived.by<{ id: string; spec: Spec; sourceUserMessageId: string; userPrompt: string; title?: string; forcePromote?: boolean } | null>(() => {
     for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
@@ -927,6 +928,8 @@
       onClear={handleClearArtifact}
       onApplyRawSpec={handleApplyRawSpec}
       documentAvailable={documentEditorOpen}
+      documentTitle={documentFrameTitle}
+      documentSubtitle={documentFrameSubtitle}
     >
       {#snippet document()}
         <OdysseusDocumentFrame

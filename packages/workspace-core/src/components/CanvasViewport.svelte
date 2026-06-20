@@ -14,6 +14,8 @@
     onClear?: () => void;
     onApplyRawSpec?: (rawSpec: string) => string | null | void;
     documentAvailable?: boolean;
+    documentTitle?: string | null;
+    documentSubtitle?: string | null;
   }
 </script>
 
@@ -31,6 +33,8 @@
     onClear,
     onApplyRawSpec,
     documentAvailable = false,
+    documentTitle = null,
+    documentSubtitle = null,
   }: CanvasViewportProps = $props();
 
   let panel = $state<CanvasPanel>("canvas");
@@ -39,9 +43,12 @@
   let editMessage = $state<string | null>(null);
   let lastDraftArtifactKey = $state("");
 
-  const title = $derived(artifact?.title ?? "Artifact workspace");
+  const title = $derived(
+    artifact?.title ?? (documentAvailable ? (documentTitle ?? "Document workspace") : "Artifact workspace"),
+  );
   const subtitle = $derived.by(() => {
     if (artifact) return `${artifact.kind} · v${artifact.version}`;
+    if (documentAvailable) return documentSubtitle ?? "Document editor active";
     if (pendingArtifactIntent) return "Preparing artifact...";
     return "No promoted artifact yet";
   });
