@@ -1,11 +1,9 @@
 import {
-  createStandaloneCommandCatalog,
-  createStandaloneCommandFamilyRegistry,
+  createStandaloneStartupCommandIndex,
+  createStandaloneSurfaceCommandIndex,
   createStandaloneToolManifest,
 } from "@sonik-agent-ui/platform-adapters";
 import {
-  createStartupCommandIndex,
-  createSurfaceCommandIndex,
   filterAvailableTools,
   summarizeToolManifest,
   type CommandIndex,
@@ -46,16 +44,16 @@ export function createStandaloneToolManifestSummary(input: StandaloneToolManifes
 }
 
 export function createStandaloneCommandIndex(input: StandaloneToolManifestInput = {}): CommandIndex {
-  const catalog = createStandaloneCommandCatalog({
+  const generatedAt = new Date().toISOString();
+  const context = {
     sessionId: input.sessionId,
     organizationId: input.organizationId,
     authenticated: input.authenticated,
     scopes: input.scopes,
-  });
-  const registry = createStandaloneCommandFamilyRegistry(catalog.generatedAt);
+  };
   return input.indexContext
-    ? createSurfaceCommandIndex(catalog, input.indexContext, { registry, limit: input.indexLimit ?? 20 })
-    : createStartupCommandIndex(catalog, { registry, limit: input.indexLimit ?? 12 });
+    ? createStandaloneSurfaceCommandIndex(context, input.indexContext, generatedAt, { limit: input.indexLimit ?? 20 })
+    : createStandaloneStartupCommandIndex(context, generatedAt, { limit: input.indexLimit ?? 12 });
 }
 
 export function createStandaloneCommandIndexSummary(input: StandaloneToolManifestInput = {}): string {

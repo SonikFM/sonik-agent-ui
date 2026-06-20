@@ -176,6 +176,7 @@ assert.equal(defaultFamilyRegistry.families.some((family) => family.id === "camp
 assert.equal(createStandaloneCommandFamilyRegistry("2026-06-20T00:00:00.000Z").families.some((family) => family.id === "artifact"), true, "standalone adapter exposes the core family registry");
 
 const startupIndex = createStartupCommandIndex(commandCatalog, { registry: defaultFamilyRegistry, limit: 3 });
+assert.equal(startupIndex.version, "sonik-agent-ui.command-index.v1", "startup command index should carry a version discriminator");
 assert.equal(startupIndex.commands.length, 3, "startup index should honor a bounded limit");
 assert.equal(startupIndex.truncated, true, "startup index should report truncation");
 assert.equal(startupIndex.commands.every((command) => command.loadPolicy.mode === "eager-summary"), true, "startup index should only include eager summaries");
@@ -184,6 +185,7 @@ assert.equal(startupIndex.families.every((family) => ["artifact", "document", "u
 
 const standaloneStartupIndex = createStandaloneStartupCommandIndex({ sessionId: "s-index" }, "2026-06-20T00:00:00.000Z");
 assert.equal(standaloneStartupIndex.commands.some((command) => command.id === "createJsonArtifact"), true, "standalone startup index includes core artifact creation summary");
+assert.equal(createStandaloneStartupCommandIndex({ sessionId: "s-index" }, "2026-06-20T00:00:00.000Z", { limit: 1 }).commands.length, 1, "standalone adapter owns bounded startup index assembly");
 const standaloneCommandIndexSummary = createStandaloneCommandIndexSummary({ sessionId: "s-index", indexLimit: 4 });
 assert.equal(standaloneCommandIndexSummary.includes("Command index standalone-local"), true, "standalone command index summary should be available for server prompt context");
 assert.equal(standaloneCommandIndexSummary.includes("Use searchCommandCatalog"), true, "standalone command index summary should direct lazy discovery");

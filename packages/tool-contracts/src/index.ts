@@ -349,6 +349,7 @@ export const commandIndexSummarySchema = z.object({
 });
 
 export const commandIndexSchema = z.object({
+  version: z.literal("sonik-agent-ui.command-index.v1"),
   provider: z.string(),
   generatedAt: z.string(),
   commands: z.array(commandIndexSummarySchema),
@@ -400,6 +401,8 @@ export type CommandIndexContext = {
   artifactType?: string;
   skillFamilies?: string[];
   commandFamilies?: string[];
+  authenticated?: boolean;
+  organizationId?: string | null;
   scopes?: string[];
 };
 
@@ -540,12 +543,14 @@ export function searchCommandCatalogWithMetadata(catalog: CommandCatalog, query 
 export function createStartupCommandIndex(catalog: CommandCatalog, input: { registry?: CommandFamilyRegistry; limit?: number } = {}): CommandIndex {
   const registry = input.registry ?? createDefaultCommandFamilyRegistry(catalog.generatedAt);
   assertCommandFamiliesKnown(catalog, registry);
+  assertExplicitVisibilityMetadata(catalog);
   return createCommandIndex(catalog, registry, catalog.commands.filter((command) => command.loadPolicy.mode === "eager-summary"), input.limit ?? 12);
 }
 
 export function createSurfaceCommandIndex(catalog: CommandCatalog, context: CommandIndexContext = {}, input: { registry?: CommandFamilyRegistry; limit?: number } = {}): CommandIndex {
   const registry = input.registry ?? createDefaultCommandFamilyRegistry(catalog.generatedAt);
   assertCommandFamiliesKnown(catalog, registry);
+  assertExplicitVisibilityMetadata(catalog);
   const commands = catalog.commands.filter((command) => {
     if (command.loadPolicy.mode === "hidden") return false;
     if (command.loadPolicy.mode === "eager-summary") return true;
@@ -635,6 +640,7 @@ function createCommandIndex(catalog: CommandCatalog, registry: CommandFamilyRegi
   const sorted = [...commands].sort((a, b) => (b.loadPolicy.priority - a.loadPolicy.priority) || a.id.localeCompare(b.id));
   const commandFamilyIds = new Set(sorted.slice(0, boundedLimit).map((command) => command.familyId));
   return commandIndexSchema.parse({
+    version: "sonik-agent-ui.command-index.v1",
     provider: catalog.provider,
     generatedAt: catalog.generatedAt,
     commands: sorted.slice(0, boundedLimit).map(commandIndexSummary),
@@ -669,10 +675,31 @@ function assertCommandFamiliesKnown(catalog: CommandCatalog, registry: CommandFa
   }
 }
 
+function assertExplicitVisibilityMetadata(catalog: CommandCatalog): void {
+  const implicitVisibleCommands = catalog.commands
+    .filter((command) => command.source !== "local-ui")
+    .filter((command) => command.loadPolicy.mode === "eager-summary" || command.loadPolicy.mode === "surface-eager")
+    .filter((command) => !hasExplicitVisibilityMetadata(command))
+    .map((command) => command.id)
+    .sort();
+  if (implicitVisibleCommands.length > 0) {
+    throw new Error(`Visible non-local commands require explicit family/load/context metadata: ${implicitVisibleCommands.join(", ")}`);
+  }
+}
+
+function hasExplicitVisibilityMetadata(command: CommandDescriptor): boolean {
+  return typeof command.metadata.familyId === "string"
+    && command.metadata.loadPolicy !== undefined
+    && command.metadata.contextHints !== undefined;
+}
+
 function commandMatchesIndexContext(command: CommandDescriptor, context: CommandIndexContext): boolean {
+  if (command.auth.required && context.authenticated !== true) return false;
+  if (command.auth.orgScoped && !context.organizationId) return false;
   const hints = command.contextHints;
   const scopes = new Set(context.scopes ?? []);
-  const scopeGatePassed = hints.requiredScopes.length === 0 || hints.requiredScopes.every((scope) => scopes.has(scope));
+  const requiredScopes = [...new Set([...hints.requiredScopes, ...command.auth.scopes])];
+  const scopeGatePassed = requiredScopes.length === 0 || requiredScopes.every((scope) => scopes.has(scope));
   if (!scopeGatePassed) return false;
   return Boolean(
     (context.surface && hints.surfaces.includes(context.surface)) ||

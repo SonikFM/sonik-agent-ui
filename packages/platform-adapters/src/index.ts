@@ -84,15 +84,22 @@ export function createStandaloneCommandFamilyRegistry(generatedAt = new Date().t
   return createDefaultCommandFamilyRegistry(generatedAt);
 }
 
-export function createStandaloneStartupCommandIndex(context: PlatformAdapterContext = {}, generatedAt = new Date().toISOString()): CommandIndex {
+export function createStandaloneStartupCommandIndex(context: PlatformAdapterContext = {}, generatedAt = new Date().toISOString(), input: { limit?: number } = {}): CommandIndex {
   return createStartupCommandIndex(createStandaloneCommandCatalog(context, generatedAt), {
     registry: createStandaloneCommandFamilyRegistry(generatedAt),
+    limit: input.limit,
   });
 }
 
-export function createStandaloneSurfaceCommandIndex(context: PlatformAdapterContext = {}, indexContext: CommandIndexContext = {}, generatedAt = new Date().toISOString()): CommandIndex {
-  return createSurfaceCommandIndex(createStandaloneCommandCatalog(context, generatedAt), indexContext, {
+export function createStandaloneSurfaceCommandIndex(context: PlatformAdapterContext = {}, indexContext: CommandIndexContext = {}, generatedAt = new Date().toISOString(), input: { limit?: number } = {}): CommandIndex {
+  return createSurfaceCommandIndex(createStandaloneCommandCatalog(context, generatedAt), {
+    authenticated: context.authenticated,
+    organizationId: context.organizationId,
+    scopes: context.scopes,
+    ...indexContext,
+  }, {
     registry: createStandaloneCommandFamilyRegistry(generatedAt),
+    limit: input.limit,
   });
 }
 
