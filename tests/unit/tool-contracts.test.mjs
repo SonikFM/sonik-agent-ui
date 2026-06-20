@@ -35,6 +35,12 @@ import {
   createStandaloneAvailableToolManifest,
   createStandaloneCommandIndexSummary,
 } from "../../apps/standalone-sveltekit/src/lib/server/tool-manifest.ts";
+import {
+  STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID,
+  STANDALONE_DEMO_BOOKING_WRITE_COMMAND_ID,
+  STANDALONE_HOST_RUNTIME_PROVIDER,
+  createStandaloneHostCommandRuntimeBundle,
+} from "../../apps/standalone-sveltekit/src/lib/server/host-command-runtime.ts";
 
 assert.equal(inferEffectFromHttpMethod("GET"), "read");
 assert.equal(inferEffectFromHttpMethod("POST"), "write");
@@ -716,6 +722,48 @@ await assert.rejects(
   /Duplicate runtime binding/,
   "runtime adapters should fail fast on duplicate command bindings",
 );
+
+
+const hostRuntimeBundle = createStandaloneHostCommandRuntimeBundle({
+  sessionId: "s-host-runtime",
+  pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
+}, "2026-06-20T00:00:00.000Z");
+assert.equal(hostRuntimeBundle.registry.families.some((family) => family.id === "booking" && family.source === "host"), true, "standalone host runtime bundle should inject booking as a host family, not a core family");
+assert.equal(createStandaloneCommandCatalog({ sessionId: "s-host-runtime" }).commands.some((command) => command.id === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID), false, "base standalone catalog should not include host-only runtime commands");
+assert.equal(hostRuntimeBundle.catalog.commands.some((command) => command.id === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID && command.familyId === "booking"), true, "host runtime catalog should include the read-only booking command through adapter composition");
+const hostRuntimeSearch = searchCommandCatalog(hostRuntimeBundle.catalog, "booking contexts");
+assert.equal(hostRuntimeSearch.some((command) => command.id === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID), true, "host runtime commands should be discoverable through catalog search");
+const hostRuntimeLearn = learnCommandDescriptor(hostRuntimeBundle.catalog, STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID, ["transport", "auth", "policy", "schema"]);
+assert.equal(hostRuntimeLearn.transport.runtimeStatus, "mounted", "read-only host runtime command should expose mounted transport in the command catalog path");
+assert.deepEqual(hostRuntimeLearn.auth.scopes, ["booking:read"], "learned host runtime command should expose required auth scopes");
+const hostRuntimeReceipt = await executeHostCatalogCommand({
+  catalog: hostRuntimeBundle.catalog,
+  commandId: STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID,
+  commandInput: { limit: 2 },
+  runtimeAdapters: hostRuntimeBundle.runtimeAdapters,
+  execution: { ...hostRuntimeBundle.executionContext, requestId: "req_standalone_host_runtime" },
+});
+assert.equal(hostRuntimeReceipt.ok, true, "standalone host runtime read command should execute through the runtime adapter");
+assert.equal(hostRuntimeReceipt.trace.provider, STANDALONE_HOST_RUNTIME_PROVIDER, "host runtime receipt should trace the runtime provider");
+assert.equal(hostRuntimeReceipt.summary.contexts.length, 2, "host runtime fixture should honor bounded read input");
+assert.equal(hostRuntimeReceipt.summary.fixtureOnly, true, "manual smoke runtime result should clearly mark fixture-only data");
+const hostRuntimeWriteExecute = await executeHostCatalogCommand({
+  catalog: hostRuntimeBundle.catalog,
+  commandId: STANDALONE_DEMO_BOOKING_WRITE_COMMAND_ID,
+  commandInput: { name: "VIP" },
+  runtimeAdapters: hostRuntimeBundle.runtimeAdapters,
+  execution: { ...hostRuntimeBundle.executionContext, requestId: "req_standalone_host_write_execute" },
+});
+assert.equal(hostRuntimeWriteExecute.ok, false, "standalone host write command should remain non-executable without a write runtime binding");
+assert.equal(hostRuntimeWriteExecute.policy.reasons.includes("runtime_unavailable"), true);
+const hostRuntimeIndexSummary = createStandaloneCommandIndexSummary({
+  sessionId: "s-host-runtime",
+  includeHostRuntime: true,
+  pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
+});
+assert.equal(hostRuntimeIndexSummary.includes("Command index standalone-demo-host"), true, "host runtime command index summary should opt into the host-composed provider");
+assert.equal(hostRuntimeIndexSummary.includes(STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID), true, "page-context command index summary should include the mounted host read command for matching booking surfaces");
+assert.equal(hostRuntimeIndexSummary.includes("booking:host"), true, "page-context command index summary should show host family provenance");
 
 const sandboxTool = mixedManifest.tools.find((tool) => tool.id === "sandbox.shell.run");
 assert.ok(sandboxTool);

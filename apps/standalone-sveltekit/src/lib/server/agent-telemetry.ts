@@ -19,10 +19,19 @@ export interface AgentTelemetryEvent {
   title?: string;
   root?: string;
   elementCount?: number;
+  totalMatches?: number;
+  query?: string;
   surface?: string;
   route?: string;
   commandFamilies?: string[];
   skillFamilies?: string[];
+  commandFamily?: string;
+  commandSource?: string;
+  commandEffect?: string;
+  runtimeStatus?: string;
+  runtimeProvider?: string;
+  loadMode?: string;
+  policyReasons?: string[];
   contextSource?: string;
   reason?: string;
   mode?: string;
@@ -70,10 +79,19 @@ export function sanitizeAgentTelemetry(event: AgentTelemetryEvent): AgentTelemet
     title: event.title,
     root: event.root,
     elementCount: event.elementCount,
+    totalMatches: event.totalMatches,
+    query: event.query,
     surface: event.surface,
     route: event.route,
     commandFamilies: sanitizeTelemetryStringList(event.commandFamilies),
     skillFamilies: sanitizeTelemetryStringList(event.skillFamilies),
+    commandFamily: event.commandFamily,
+    commandSource: event.commandSource,
+    commandEffect: event.commandEffect,
+    runtimeStatus: event.runtimeStatus,
+    runtimeProvider: event.runtimeProvider,
+    loadMode: event.loadMode,
+    policyReasons: sanitizeTelemetryStringList(event.policyReasons),
     contextSource: event.contextSource,
     reason: event.reason,
     mode: event.mode,

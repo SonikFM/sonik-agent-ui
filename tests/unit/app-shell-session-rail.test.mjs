@@ -5,6 +5,8 @@ const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.sv
 const rootSource = await readFile("packages/workspace-core/src/components/WorkspaceRoot.svelte", "utf8");
 const generateRoute = await readFile("apps/standalone-sveltekit/src/routes/api/generate/+server.ts", "utf8");
 const streamTelemetrySource = await readFile("apps/standalone-sveltekit/src/lib/server/stream-telemetry.ts", "utf8");
+const commandCatalogToolsSource = await readFile("apps/standalone-sveltekit/src/lib/tools/command-catalog.ts", "utf8");
+const hostCommandRuntimeSource = await readFile("apps/standalone-sveltekit/src/lib/server/host-command-runtime.ts", "utf8");
 const sessionRailSource = await readFile("apps/standalone-sveltekit/src/lib/session/SessionRail.svelte", "utf8");
 const sessionDetailRoute = await readFile("apps/standalone-sveltekit/src/routes/api/session/[id]/+server.ts", "utf8");
 const sessionMessagesRoute = await readFile("apps/standalone-sveltekit/src/routes/api/session/[id]/messages/+server.ts", "utf8");
@@ -85,7 +87,18 @@ assert.equal(sessionMessagesRoute.includes("role must be system, user, assistant
 
 assert.equal(generateRoute.includes("workspace.sessionId"), true, "generate route should validate workspace session id");
 assert.equal(generateRoute.includes("activeDocument?.session_id ?? workspaceSessionId"), true, "generate telemetry should prefer active document session and fall back to shell session");
-assert.equal(generateRoute.includes("createAgent({ activeDocument, sessionId: telemetrySessionId })"), true, "agent tools should receive the active workspace session id");
+assert.equal(generateRoute.includes("includeHostRuntime: true"), true, "generate route should opt into host-composed command indexes without changing the neutral default helper");
+assert.equal(generateRoute.includes("createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext })"), true, "agent tools should receive active workspace session id and page context");
+assert.equal(commandCatalogToolsSource.includes("executeHostCatalogCommand"), true, "command catalog tools should execute through the host runtime adapter seam");
+assert.equal(commandCatalogToolsSource.includes("createStandaloneHostCommandRuntimeBundle"), true, "command catalog tools should compose host catalog/runtime adapters for standalone smoke testing");
+assert.equal(commandCatalogToolsSource.includes("searchCommandCatalogWithMetadata(catalog, query, 50)"), true, "command catalog search should rank context-loaded commands before slicing to the requested limit");
+assert.equal(commandCatalogToolsSource.includes(".slice(0, boundedLimit)"), true, "command catalog search should apply the requested limit after context-aware ranking");
+assert.equal(commandCatalogToolsSource.includes("contextLoadedCommandIds"), true, "command catalog search should expose page-context-loaded command ids separately from global lazy discovery");
+assert.equal(commandCatalogToolsSource.includes("contextLoaded: contextCommandIds.has(commandId)"), true, "learnCommand should reveal whether a command was loaded by the current page context");
+assert.equal(commandCatalogToolsSource.includes("policyReasons: receipt.policy.reasons"), true, "command execution telemetry should include policy reasons for manual debugging");
+assert.equal(commandCatalogToolsSource.includes("runtimeProvider: receipt.trace.provider"), true, "command execution telemetry should include runtime provider provenance");
+assert.equal(hostCommandRuntimeSource.includes("STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID"), true, "standalone host runtime should expose a stable manual-smoke booking command id");
+assert.equal(hostCommandRuntimeSource.includes("fixtureOnly: true"), true, "standalone host runtime must label demo data as fixture-only");
 
 assert.equal(documentToolsSource.includes("sessionId?: string | null"), true, "document tool context should accept a workspace session id");
 assert.equal(documentToolsSource.includes("session_id: runtime.sessionId"), true, "new document artifacts should be created inside the active workspace session");

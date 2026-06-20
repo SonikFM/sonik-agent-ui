@@ -146,7 +146,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const modelMessages = await convertToModelMessages(uiMessages);
   const contextSummary = summarizeWorkspaceContext({ activeDocument });
-  const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, sessionId: telemetrySessionId, pageContext });
+  const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, sessionId: telemetrySessionId, pageContext });
   const systemContext = [contextSummary, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
@@ -165,7 +165,7 @@ export const POST: RequestHandler = async ({ request }) => {
     contextSource: pageContextSource,
     ok: true,
   }).catch(() => undefined);
-  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId });
+  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

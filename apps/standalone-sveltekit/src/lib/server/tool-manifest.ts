@@ -12,6 +12,7 @@ import {
   type ToolAvailabilityContext,
   type ToolManifest,
 } from "@sonik-agent-ui/tool-contracts";
+import { createStandaloneHostCommandIndex } from "./host-command-runtime.ts";
 
 export type StandaloneToolManifestInput = {
   sessionId?: string | null;
@@ -23,6 +24,7 @@ export type StandaloneToolManifestInput = {
   pageContext?: AgentPageContext;
   indexContext?: CommandIndexContext;
   indexLimit?: number;
+  includeHostRuntime?: boolean;
 };
 
 export function createStandaloneAvailableToolManifest(input: StandaloneToolManifestInput = {}): ToolManifest {
@@ -46,6 +48,7 @@ export function createStandaloneToolManifestSummary(input: StandaloneToolManifes
 }
 
 export function createStandaloneCommandIndex(input: StandaloneToolManifestInput = {}): CommandIndex {
+  if (input.includeHostRuntime === true) return createStandaloneHostCommandIndex(input);
   const generatedAt = new Date().toISOString();
   const context = {
     sessionId: input.sessionId,

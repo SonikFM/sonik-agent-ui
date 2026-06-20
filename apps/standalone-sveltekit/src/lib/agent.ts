@@ -10,6 +10,7 @@ import { createDocumentTools, type DocumentToolContext } from "./tools/document"
 import { createToolManifestTools } from "./tools/tool-manifest";
 import { createCommandCatalogTools } from "./tools/command-catalog";
 import { MODEL_ID, gateway } from "./ai-gateway";
+import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 
 const AGENT_INSTRUCTIONS = `You are a knowledgeable assistant that helps users explore data and learn about any topic. You look up real-time information, build visual dashboards, and create rich educational content.
 
@@ -26,7 +27,7 @@ RULES:
 - createJsonArtifact requires a valid flat spec: spec.root MUST be the key of an element in spec.elements. Minimal valid shape: { "root": "main", "elements": { "main": { "type": "Card", "props": { "title": "Hello" }, "children": [] } }, "state": {} }.
 - Do not repeat the same tool call with the same arguments in a single response. Do not call createJsonArtifact more than once for a single user turn. Use the first result you already have.
 - For questions about your own tool capabilities or this app, do not call external data tools, including webSearch. Call searchCommandCatalog first for user-language command discovery, learnCommand for one command's schema/policy/examples, executeCommand for mounted read-only commands, and commitCommand only when a mutation has explicit approval. Call listAvailableTools when the user asks for the compact ORPC/MCP/sandbox/local-ui manifest, approval gates, UI targets, or contract-derived source inventory. Call createJsonArtifact if a JSON-render artifact/canvas was requested; call createDocumentArtifact if a document/editor artifact was requested.
-- The command catalog is CLI-first and context-efficient: search, learn, then execute/commit. ORPC business commands are currently metadata-only unless a live adapter explicitly marks them mounted and executable.
+- The command catalog is CLI-first and context-efficient: search, learn, then execute/commit. A standalone fixture-backed read-only booking host command may be mounted for local testing; other ORPC business commands remain metadata-only unless a live adapter explicitly marks them mounted and executable.
 - Embed the fetched data directly in /state paths so components can reference it.
 - Use Card components to group related information.
 - NEVER nest a Card inside another Card. If you need sub-sections inside a Card, use Stack, Separator, Heading, or Accordion instead.
@@ -81,10 +82,12 @@ ${explorerCatalog.prompt({
   ],
 })}`;
 
-export function createAgent(context: DocumentToolContext = {}) {
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext };
+
+export function createAgent(context: AgentRuntimeContext = {}) {
   const documentTools = createDocumentTools(context);
   const toolManifestTools = createToolManifestTools();
-  const commandCatalogTools = createCommandCatalogTools({ sessionId: context.sessionId });
+  const commandCatalogTools = createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext });
   return new ToolLoopAgent({
     model: gateway(MODEL_ID),
     instructions: AGENT_INSTRUCTIONS,
