@@ -25,6 +25,8 @@
     language?: string;
     content?: string;
     preferredView?: PreferredDocumentView;
+    targetOrigin?: string;
+    allowedOrigin?: string;
     onDocumentEvent?: (event: OdysseusDocumentEvent) => void;
   }
 </script>
@@ -39,6 +41,8 @@
     language = "markdown",
     content = "# Odysseus document editor\n\nUse the language selector to switch Markdown, HTML, JSON, code, CSV, or other render modes.",
     preferredView = "auto",
+    targetOrigin,
+    allowedOrigin,
     onDocumentEvent,
   }: OdysseusDocumentFrameProps = $props();
 
@@ -49,19 +53,54 @@
 
   const payload = $derived({ documentId, title, language, content, preferredView });
   const openSignature = $derived(JSON.stringify(payload));
+  // The bundled Odysseus host is same-origin for safety. Host adapters may pass
+  // explicit origins only when their iframe host enforces the matching allowlist.
+  const messageTargetOrigin = $derived(targetOrigin ?? (typeof window !== "undefined" ? window.location.origin : "*"));
+  const messageAllowedOrigin = $derived(allowedOrigin ?? (messageTargetOrigin === "*" ? (typeof window !== "undefined" ? window.location.origin : "") : messageTargetOrigin));
+
+  function createThemePayload(): Record<string, string> {
+    const styles = getComputedStyle(document.documentElement);
+    const read = (name: string) => styles.getPropertyValue(name).trim();
+    return {
+      theme: document.documentElement.dataset.theme ?? "gunmetal-light",
+      colorScheme: document.documentElement.dataset.colorScheme ?? styles.colorScheme ?? "light",
+      background: read("--background"),
+      foreground: read("--foreground"),
+      card: read("--card"),
+      border: read("--border"),
+      muted: read("--muted"),
+      mutedForeground: read("--muted-foreground"),
+      accent: read("--accent"),
+      appPanel: read("--app-panel-bg"),
+      appControl: read("--app-control-bg"),
+    };
+  }
+
+  function postTheme(): void {
+    if (!frame?.contentWindow) return;
+    frame.contentWindow.postMessage(
+      {
+        type: "sonik:odysseus-document:theme",
+        source: "sonik-agent-ui-parent",
+        payload: createThemePayload(),
+      },
+      messageTargetOrigin,
+    );
+  }
 
   function postOpen(): void {
     if (!frame?.contentWindow) return;
     if (status !== "ready" && status !== "opened") return;
     if (openSignature === lastOpenSignature) return;
     lastOpenSignature = openSignature;
+    postTheme();
     frame.contentWindow.postMessage(
       {
         type: "sonik:odysseus-document:open",
         source: "sonik-agent-ui-parent",
         payload,
       },
-      window.location.origin,
+      messageTargetOrigin,
     );
   }
 
@@ -71,7 +110,7 @@
 
   onMount(() => {
     function handleMessage(event: MessageEvent): void {
-      if (event.origin !== window.location.origin) return;
+      if (messageAllowedOrigin && event.origin !== messageAllowedOrigin) return;
       if (event.source !== frame?.contentWindow) return;
       const message = event.data as { source?: string; type?: string; payload?: { message?: string; document?: OdysseusDocumentSnapshot } & Partial<OdysseusDocumentSnapshot> };
       if (message?.source !== "sonik-odysseus-document-host") return;
@@ -83,9 +122,11 @@
 
       if (type === "ready") {
         status = "ready";
+        postTheme();
         postOpen();
       } else if (type === "opened") {
         status = "opened";
+        postTheme();
         errorMessage = null;
       } else if (type === "error") {
         status = "error";
@@ -93,8 +134,16 @@
       }
     }
 
+    function handleThemeChange(): void {
+      postTheme();
+    }
+
     window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
+    window.addEventListener("sonik-agent-ui:theme-change", handleThemeChange);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      window.removeEventListener("sonik-agent-ui:theme-change", handleThemeChange);
+    };
   });
 
   function coerceDocumentSnapshot(value: unknown): OdysseusDocumentSnapshot | undefined {
@@ -126,6 +175,7 @@
     {src}
     title="Odysseus document editor"
     onload={() => {
+      postTheme();
       if (status === "ready" || status === "opened") postOpen();
     }}
   ></iframe>
@@ -138,7 +188,7 @@
     min-height: 0;
     overflow: hidden;
     border-radius: 0.625rem;
-    background: #111318;
+    background: var(--background);
   }
 
   iframe {
@@ -146,7 +196,7 @@
     width: 100%;
     height: 100%;
     border: 0;
-    background: #111318;
+    background: var(--background);
   }
 
   .odysseus-document-frame__status {
@@ -155,14 +205,14 @@
     z-index: 1;
     display: grid;
     place-items: center;
-    background: color-mix(in oklab, #111318 86%, transparent);
-    color: #d6e7ef;
+    background: color-mix(in oklab, var(--background) 86%, transparent);
+    color: var(--foreground);
     font-size: 0.875rem;
     pointer-events: none;
   }
 
   .odysseus-document-frame__status--error {
-    color: #ff7a92;
+    color: var(--destructive);
   }
 
   .odysseus-document-frame[data-status="opened"] .odysseus-document-frame__status {

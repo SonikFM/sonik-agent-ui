@@ -89,6 +89,7 @@
   let lastPromotionKey = $state<string | null>(null);
   let lastDocumentPromotionKey = $state<string | null>(null);
   let sessions = $state<WorkspaceSessionSummary[]>([]);
+  let archivedSessionCount = $state(0);
   let activeSessionId = $state<string | null>(null);
   let sessionRailBusy = $state(false);
   let sessionRailError = $state<string | null>(null);
@@ -406,9 +407,35 @@
       const response = await fetch("/api/sessions");
       if (!response.ok) throw new Error(await response.text());
       sessions = (await response.json()) as WorkspaceSessionSummary[];
+      void loadArchivedSessionCount();
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
     }
+  }
+
+  async function loadArchivedSessionCount(): Promise<void> {
+    try {
+      const response = await fetch("/api/sessions?archived=true");
+      if (!response.ok) throw new Error(await response.text());
+      archivedSessionCount = ((await response.json()) as WorkspaceSessionSummary[]).length;
+    } catch (error) {
+      logSessionTelemetry("session.archive_count.error", {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  function logSessionTelemetry(event: string, input: { sessionId?: string | null; ok?: boolean; error?: string; reason?: string; mode?: string } = {}): void {
+    logArtifactTelemetry({
+      source: "client",
+      event,
+      sessionId: input.sessionId ?? activeSessionId ?? undefined,
+      ok: input.ok ?? true,
+      error: input.error,
+      reason: input.reason,
+      mode: input.mode,
+    });
   }
 
   async function createSession({ force = false }: { force?: boolean } = {}): Promise<void> {
@@ -430,8 +457,10 @@
       const session = (await response.json()) as WorkspaceSessionSummary;
       await loadSessions();
       await switchSession(session.id, { force: true });
+      logSessionTelemetry("session.create.success", { sessionId: session.id, mode: session.mode });
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
+      logSessionTelemetry("session.create.error", { ok: false, error: sessionRailError });
     } finally {
       sessionRailBusy = false;
     }
@@ -454,8 +483,10 @@
       activeSessionId = detail.session.id;
       sessions = upsertSessionSummary(sessions, detail.session);
       hydrateWorkspaceSession(detail);
+      logSessionTelemetry("session.switch.success", { sessionId: detail.session.id, mode: detail.session.mode });
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
+      logSessionTelemetry("session.switch.error", { sessionId, ok: false, error: sessionRailError });
     } finally {
       sessionRailBusy = false;
     }
@@ -482,8 +513,10 @@
           await createSession({ force: true });
         }
       }
+      logSessionTelemetry("session.archive.success", { sessionId, reason: "hidden_from_active_recents" });
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
+      logSessionTelemetry("session.archive.error", { sessionId, ok: false, error: sessionRailError });
     } finally {
       sessionRailBusy = false;
     }
@@ -513,8 +546,10 @@
           await createSession({ force: true });
         }
       }
+      logSessionTelemetry("session.delete.success", { sessionId });
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
+      logSessionTelemetry("session.delete.error", { sessionId, ok: false, error: sessionRailError });
     } finally {
       sessionRailBusy = false;
     }
@@ -532,8 +567,10 @@
       if (!response.ok) throw new Error(await response.text());
       const session = (await response.json()) as WorkspaceSessionSummary;
       sessions = upsertSessionSummary(sessions, session);
+      logSessionTelemetry("session.rename.success", { sessionId: session.id });
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
+      logSessionTelemetry("session.rename.error", { sessionId, ok: false, error: sessionRailError });
     }
   }
 
@@ -839,6 +876,7 @@
       {sessions}
       {currentSession}
       {activeSessionId}
+      archivedCount={archivedSessionCount}
       busy={sessionRailBusy || isStreaming}
       error={sessionRailError}
       onCreate={() => void createSession()}

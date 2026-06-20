@@ -37,7 +37,8 @@
     height: 100vh;
     min-height: 0;
     overflow: hidden;
-    background: var(--background);
+    background: var(--app-shell-bg, var(--background));
+    color: var(--foreground);
   }
 
   .workspace-root[data-has-rail="true"] {
@@ -50,7 +51,7 @@
     min-height: 0;
     overflow: hidden;
     border-right: 1px solid var(--border);
-    background: #f7f3ea;
+    background: var(--app-rail-bg, var(--card));
   }
 
   .workspace-grid {
@@ -66,7 +67,7 @@
     min-height: 0;
     overflow: hidden;
     border: 1px solid var(--border);
-    background: #fbfaf7;
+    background: var(--app-panel-bg, var(--card));
   }
 
   .workspace-pane--chat {

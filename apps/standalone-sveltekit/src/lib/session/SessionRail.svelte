@@ -14,6 +14,7 @@
     sessions: WorkspaceSessionSummary[];
     currentSession: WorkspaceSessionSummary | null;
     activeSessionId: string | null;
+    archivedCount?: number;
     busy?: boolean;
     error?: string | null;
     onCreate: () => void;
@@ -26,6 +27,7 @@
     sessions,
     currentSession,
     activeSessionId,
+    archivedCount = 0,
     busy = false,
     error = null,
     onCreate,
@@ -162,6 +164,9 @@
     <footer>
       <span>Current chat</span>
       <strong>{displaySessionName(currentSession)}</strong>
+      {#if archivedCount > 0}
+        <small>{archivedCount} archived</small>
+      {/if}
     </footer>
   {/if}
 
@@ -194,7 +199,7 @@
     flex-direction: column;
     gap: 0.7rem;
     padding: 0.7rem;
-    color: #332f2a;
+    color: var(--foreground);
   }
 
   .session-rail-header {
@@ -212,7 +217,7 @@
 
   .session-rail-eyebrow {
     margin: 0 0 0.12rem;
-    color: #8a8174;
+    color: var(--muted-foreground);
     font-size: 0.66rem;
     font-weight: 800;
     letter-spacing: 0.1em;
@@ -220,10 +225,10 @@
   }
 
   .new-chat-button {
-    border: 1px solid #ded6ca;
+    border: 1px solid var(--border);
     border-radius: 999px;
-    background: #fffdf8;
-    color: #332f2a;
+    background: var(--app-control-bg, var(--card));
+    color: var(--foreground);
     cursor: pointer;
     font: inherit;
     padding: 0.42rem 0.7rem;
@@ -236,8 +241,8 @@
   }
 
   .new-chat-button:hover {
-    border-color: #c9bbaa;
-    background: #f8f2e9;
+    border-color: color-mix(in oklab, var(--border) 78%, var(--foreground));
+    background: var(--app-control-hover-bg, var(--accent));
   }
 
   .new-chat-button:disabled,
@@ -250,11 +255,11 @@
 
   .session-rail-error {
     margin: 0;
-    border: 1px solid color-mix(in srgb, #ef4444 55%, #ded6ca);
+    border: 1px solid color-mix(in oklab, var(--destructive) 55%, var(--border));
     border-radius: 0.75rem;
     padding: 0.6rem;
-    background: #fff7f7;
-    color: #b42318;
+    background: color-mix(in oklab, var(--destructive) 10%, var(--card));
+    color: var(--destructive);
     font-size: 0.75rem;
   }
 
@@ -276,12 +281,12 @@
   }
 
   .session-rail-list article:hover {
-    background: #f3ede3;
+    background: var(--app-control-hover-bg, var(--accent));
   }
 
   .session-rail-list article.active-session {
-    background: #fffdf8;
-    box-shadow: inset 0 0 0 1px #ded6ca;
+    background: var(--app-control-bg, var(--card));
+    box-shadow: inset 0 0 0 1px var(--border);
   }
 
   .session-select {
@@ -315,7 +320,7 @@
     border: 0;
     border-radius: 999px;
     background: transparent;
-    color: #8a8174;
+    color: var(--muted-foreground);
     cursor: pointer;
     font: inherit;
     font-size: 1.05rem;
@@ -325,21 +330,21 @@
 
   .session-actions-button:hover,
   .session-actions-button:focus-visible {
-    background: #eee8dd;
-    color: #332f2a;
+    background: var(--accent);
+    color: var(--foreground);
     opacity: 1;
   }
 
   .session-select small,
   footer,
   .session-empty {
-    color: #8a8174;
+    color: var(--muted-foreground);
     font-size: 0.7rem;
   }
 
   .session-empty {
     margin: 0;
-    border: 1px dashed #d8d0c4;
+    border: 1px dashed var(--border);
     border-radius: 0.85rem;
     padding: 0.8rem;
   }
@@ -347,15 +352,20 @@
   footer {
     display: grid;
     gap: 0.2rem;
-    border-top: 1px solid #ded6ca;
+    border-top: 1px solid var(--border);
     padding-top: 0.75rem;
   }
 
   footer strong {
     overflow: hidden;
-    color: #332f2a;
+    color: var(--foreground);
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  footer small {
+    color: var(--muted-foreground);
+    font-size: 0.68rem;
   }
 
   .session-context-menu {
@@ -364,18 +374,18 @@
     display: grid;
     min-width: 12rem;
     gap: 0.18rem;
-    border: 1px solid #d8d0c4;
+    border: 1px solid var(--border);
     border-radius: 0.85rem;
     padding: 0.32rem;
-    background: #fffdf8;
-    box-shadow: 0 18px 50px rgb(45 38 28 / 18%);
+    background: var(--app-control-bg, var(--card));
+    box-shadow: var(--app-shadow-soft, 0 18px 50px color-mix(in oklab, var(--foreground) 18%, transparent));
   }
 
   .session-context-menu p {
     overflow: hidden;
     margin: 0;
     padding: 0.45rem 0.55rem 0.3rem;
-    color: #8a8174;
+    color: var(--muted-foreground);
     font-size: 0.7rem;
     font-weight: 800;
     text-overflow: ellipsis;
@@ -386,7 +396,7 @@
     border: 0;
     border-radius: 0.58rem;
     background: transparent;
-    color: #332f2a;
+    color: var(--foreground);
     cursor: pointer;
     font: inherit;
     padding: 0.48rem 0.55rem;
@@ -394,10 +404,10 @@
   }
 
   .session-context-menu button:hover {
-    background: #f3ede3;
+    background: var(--app-control-hover-bg, var(--accent));
   }
 
   .session-context-menu .danger-action {
-    color: #b42318;
+    color: var(--destructive);
   }
 </style>

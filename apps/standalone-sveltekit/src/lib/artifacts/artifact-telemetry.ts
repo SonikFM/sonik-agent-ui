@@ -6,6 +6,7 @@ export interface ArtifactTelemetryEvent {
   source: ArtifactTelemetrySource;
   event: string;
   requestId?: string;
+  sessionId?: string;
   artifactId?: string;
   artifactVersion?: number;
   documentId?: string;

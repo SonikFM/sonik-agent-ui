@@ -61,17 +61,17 @@
   }
 </script>
 
-<Conversation.Root class="bg-[#fbfaf7]">
-  <header class="border-b border-[#e5ded3] bg-[#fbfaf7]/95 px-8 py-4 flex items-center justify-between flex-shrink-0">
+<Conversation.Root class="bg-background text-foreground">
+  <header class="border-b border-border bg-card/95 px-8 py-4 flex items-center justify-between flex-shrink-0">
     <div class="flex items-center gap-3">
-      <h1 class="text-lg font-semibold text-[#2d2923]">{title}</h1>
+      <h1 class="text-lg font-semibold text-foreground">{title}</h1>
     </div>
     <div class="flex items-center gap-2">
       {@render actions?.()}
       {#if messages.length > 0}
         <button
           onclick={clear}
-          class="px-3 py-1.5 rounded-full text-sm text-[#746b60] hover:text-[#2d2923] hover:bg-[#eee8dd] transition-colors">
+          class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
           Start Over
         </button>
       {/if}
@@ -96,7 +96,7 @@
             {#each suggestions as suggestion (suggestion.label)}
               <button
                 onclick={() => submit(suggestion.prompt)}
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#ded6ca] bg-[#fffdf8] text-sm text-[#746b60] hover:text-[#2d2923] hover:bg-[#f4eee5] transition-colors">
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
                 {suggestion.label}
               </button>
             {/each}

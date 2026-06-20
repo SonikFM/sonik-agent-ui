@@ -32,15 +32,15 @@
   }
 </script>
 
-<div class="px-6 pb-6 pt-3 flex-shrink-0 bg-[#fbfaf7] relative">
+<div class="px-6 pb-6 pt-3 flex-shrink-0 bg-background relative">
   <div class="max-w-3xl mx-auto relative">
-    <PromptInput.Root {status} onSubmit={handleSubmit} class="rounded-3xl border border-[#ded6ca] bg-[#fffdf8] shadow-[0_8px_30px_rgb(45_38_28_/_6%)]">
+    <PromptInput.Root {status} onSubmit={handleSubmit} class="rounded-3xl border border-border bg-card shadow-[var(--app-shadow-soft)]">
       <PromptInput.Body>
         <PromptInput.Textarea
           bind:value
           {placeholder}
           rows={3}
-          class="min-h-[76px] pr-16 text-sm placeholder:text-[#8a8174]"
+          class="min-h-[76px] pr-16 text-sm text-foreground placeholder:text-muted-foreground"
         />
       </PromptInput.Body>
       <PromptInput.Toolbar class="justify-end border-t-0 px-3 pb-2 pt-0">
