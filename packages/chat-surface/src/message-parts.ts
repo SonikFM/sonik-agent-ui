@@ -23,6 +23,16 @@ export interface ChatSegmentsResult {
   specInserted: boolean;
 }
 
+
+export function snapshotDataParts(value: DataPart[] | null | undefined): DataPart[] {
+  if (!Array.isArray(value)) return [];
+  try {
+    return structuredClone(value) as DataPart[];
+  } catch {
+    return JSON.parse(JSON.stringify(value)) as DataPart[];
+  }
+}
+
 export function getSpec(parts: DataPart[]): Spec | null {
   return buildSpecFromParts(parts);
 }

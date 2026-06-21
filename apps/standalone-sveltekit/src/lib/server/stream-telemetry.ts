@@ -4,6 +4,7 @@ export interface GenerateStreamTelemetryContext {
   requestId: string;
   traceId?: string;
   traceparent?: string;
+  runId?: string;
   sessionId?: string;
   messageId?: string;
   documentId?: string;
@@ -35,6 +36,7 @@ export function instrumentGenerateStream<T>(
       requestId: context.requestId,
       traceId: context.traceId,
       traceparent: context.traceparent,
+      runId: context.runId,
       sessionId: context.sessionId,
       messageId: context.messageId,
       documentId: context.documentId,

@@ -6,6 +6,7 @@ export interface ArtifactTelemetryEvent {
   source: ArtifactTelemetrySource;
   event: string;
   requestId?: string;
+  runId?: string;
   sessionId?: string;
   artifactId?: string;
   artifactVersion?: number;
@@ -28,7 +29,7 @@ export interface ArtifactTelemetryEvent {
 const PREFIX = "[sonik-agent-ui]";
 
 export function logArtifactTelemetry(event: ArtifactTelemetryEvent): void {
-  const payload = sanitizeTelemetryEvent({ ...event, at: new Date().toISOString() });
+  const payload = sanitizeTelemetryEvent({ runId: resolveBrowserTelemetryRunId(), ...event, at: new Date().toISOString() });
   const line = `${PREFIX} ${JSON.stringify(payload)}`;
 
   if (payload.ok === false || payload.error) {
@@ -45,6 +46,16 @@ export function summarizeSpec(spec: Spec): Pick<ArtifactTelemetryEvent, "root" |
     root: spec.root,
     elementCount: Object.keys(spec.elements).length,
   };
+}
+
+function resolveBrowserTelemetryRunId(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const value = new URLSearchParams(window.location.search).get("smokeRunId");
+    return value && /^[A-Za-z0-9_.:-]{6,160}$/.test(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function postBrowserTelemetry(event: ArtifactTelemetryEvent): void {

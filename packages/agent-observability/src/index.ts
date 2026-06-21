@@ -24,6 +24,44 @@ export interface AgentUiPageContextSnapshot {
   at?: string;
 }
 
+export interface AgentUiPageAssertions {
+  schemaVersion: "sonik.agent_ui.assertions.v1";
+  hasActiveSession: boolean;
+  isStreaming: boolean;
+  canSubmit: boolean;
+  submitDisabledReason?: string;
+  hasActiveArtifact: boolean;
+  hasActiveDocument: boolean;
+  messageCount: number;
+  visibleErrorCount: number;
+  lastPersistStatus?: "idle" | "eligible" | "in_flight" | "success" | "error";
+}
+
+export interface AgentUiSemanticActionResult<TState = AgentUiPageAssertions> {
+  ok: boolean;
+  state: TState;
+  message?: string;
+  disabledReason?: string;
+}
+
+/**
+ * Runtime-safe page-control surface for host adapters and local smoke tests.
+ * The contract intentionally exposes snapshot reads and semantic actions only;
+ * it must not leak live Svelte state objects or raw DOM-control details.
+ */
+export interface AgentUiPageControl {
+  schemaVersion: "sonik.agent_ui.page_control.v1";
+  getPageContext: () => AgentUiPageContextSnapshot;
+  getAssertions: () => AgentUiPageAssertions;
+  actions: {
+    submitPrompt: (input: { prompt?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    stop: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    clearChat: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    clearArtifact: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    openWorkspaceDocument: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+  };
+}
+
 export interface AgentTelemetryErrorPayload {
   name?: string;
   message: string;

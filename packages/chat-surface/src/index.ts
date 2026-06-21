@@ -8,6 +8,6 @@ export type { AgentConversationProps, AgentSuggestion } from "./components/Agent
 export type { AgentChatMessage, AgentMessageProps } from "./components/AgentMessage.svelte";
 export type { ToolCallBlockProps } from "./components/ToolCallBlock.svelte";
 export type { ChatSegment, ChatSegmentsResult, ToolInfo } from "./message-parts.js";
-export { getSegments, getSpec, getText, hasSpec } from "./message-parts.js";
+export { getSegments, getSpec, getText, hasSpec, snapshotDataParts } from "./message-parts.js";
 export { renderChatText, parseInline, parseTable } from "./chat-text.js";
 export type { ChatTextBlock, InlineToken } from "./chat-text.js";

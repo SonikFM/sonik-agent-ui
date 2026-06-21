@@ -12,6 +12,7 @@ import { logArtifactTelemetry } from "$lib/artifacts/artifact-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
 import { createTelemetryCorrelation, sanitizePageContext } from "@sonik-agent-ui/agent-observability";
 import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
+import { createDevSmokeStream, readDevSmokeRunId, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
 import { summarizeWorkspaceContext, syncActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord } from "$lib/server/workspace-store";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
@@ -132,6 +133,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const traceparent = correlation.traceparent;
   const workspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
   const telemetrySessionId = activeDocument?.session_id ?? workspaceSessionId;
+  const smokeRunId = readDevSmokeRunId(request);
   const pageContext = resolveAgentPageContext(body?.pageContext ?? body?.workspace?.pageContext, { activeDocument });
   const telemetryPageContext = sanitizePageContext(body?.pageContext ?? body?.workspace?.pageContext);
   const pageContextSource = resolvePageContextSource(body, activeDocument);
@@ -154,6 +156,7 @@ export const POST: RequestHandler = async ({ request }) => {
     requestId,
     traceId,
     traceparent,
+    runId: smokeRunId,
     sessionId: telemetrySessionId,
     messageId: lastMessage?.id,
     documentId: activeDocument?.id,
@@ -177,6 +180,7 @@ export const POST: RequestHandler = async ({ request }) => {
     requestId,
     traceId,
     traceparent,
+    runId: smokeRunId,
     sessionId: telemetrySessionId,
     messageId: lastMessage?.id,
     elementCount: commandIndexSummary.split("\n- ").length - 1,
@@ -188,6 +192,24 @@ export const POST: RequestHandler = async ({ request }) => {
     pageContext: telemetryPageContext,
     ok: true,
   }).catch(() => undefined);
+  if (shouldUseDevSmokeStream(request)) {
+    const smokeInput = {
+      requestId,
+      traceId,
+      traceparent,
+      runId: smokeRunId,
+      sessionId: telemetrySessionId,
+      messageId: lastMessage?.id,
+      startedAt,
+    };
+    await writeDevSmokeStreamTelemetry(smokeInput);
+    const response = createUIMessageStreamResponse({
+      stream: createDevSmokeStream(smokeInput),
+    });
+    for (const [key, value] of Object.entries(correlationHeaders)) response.headers.set(key, value);
+    return response;
+  }
+
   const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext });
 
   try {
@@ -200,6 +222,7 @@ export const POST: RequestHandler = async ({ request }) => {
           requestId,
           traceId,
           traceparent,
+          runId: smokeRunId,
           sessionId: telemetrySessionId,
           messageId: lastMessage?.id,
           documentId: activeDocument?.id,
@@ -212,6 +235,7 @@ export const POST: RequestHandler = async ({ request }) => {
           requestId,
           traceId,
           traceparent,
+          runId: smokeRunId,
           sessionId: telemetrySessionId,
           messageId: lastMessage?.id,
           documentId: activeDocument?.id,
@@ -228,6 +252,7 @@ export const POST: RequestHandler = async ({ request }) => {
           requestId,
           traceId,
           traceparent,
+          runId: smokeRunId,
           sessionId: telemetrySessionId,
           messageId: lastMessage?.id,
           durationMs: Date.now() - startedAt,
@@ -249,6 +274,7 @@ export const POST: RequestHandler = async ({ request }) => {
       requestId,
       traceId,
       traceparent,
+      runId: smokeRunId,
       sessionId: telemetrySessionId,
       messageId: lastMessage?.id,
       durationMs: Date.now() - startedAt,

@@ -5,6 +5,7 @@ const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.sv
 const rootSource = await readFile("packages/workspace-core/src/components/WorkspaceRoot.svelte", "utf8");
 const generateRoute = await readFile("apps/standalone-sveltekit/src/routes/api/generate/+server.ts", "utf8");
 const streamTelemetrySource = await readFile("apps/standalone-sveltekit/src/lib/server/stream-telemetry.ts", "utf8");
+const devSmokeStreamSource = await readFile("apps/standalone-sveltekit/src/lib/server/dev-smoke-stream.ts", "utf8");
 const commandCatalogToolsSource = await readFile("apps/standalone-sveltekit/src/lib/tools/command-catalog.ts", "utf8");
 const hostCommandRuntimeSource = await readFile("apps/standalone-sveltekit/src/lib/server/host-command-runtime.ts", "utf8");
 const sessionRailSource = await readFile("apps/standalone-sveltekit/src/lib/session/SessionRail.svelte", "utf8");
@@ -20,6 +21,8 @@ const workspaceHostSource = await readFile("apps/standalone-sveltekit/static/wor
 const agentMessageSource = await readFile("packages/chat-surface/src/components/AgentMessage.svelte", "utf8");
 const chatTextSource = await readFile("packages/chat-surface/src/components/ChatText.svelte", "utf8");
 const chatTextParserSource = await readFile("packages/chat-surface/src/chat-text.ts", "utf8");
+const chatSurfaceIndexSource = await readFile("packages/chat-surface/src/index.ts", "utf8");
+const chatMessagePartsSource = await readFile("packages/chat-surface/src/message-parts.ts", "utf8");
 const canvasViewportSource = await readFile("packages/workspace-core/src/components/CanvasViewport.svelte", "utf8");
 const themeRuntimeSource = await readFile("apps/standalone-sveltekit/src/lib/theme/theme-runtime.ts", "utf8");
 const themePickerSource = await readFile("apps/standalone-sveltekit/src/lib/theme/ThemePicker.svelte", "utf8");
@@ -140,6 +143,9 @@ assert.equal(agentMessageSource.includes("chat-bubble"), false, "chat message di
 assert.equal(agentMessageSource.includes("MessagePrimitive"), false, "chat message display should not use Daisy chat primitives for flat Claude-style rows");
 assert.equal(agentMessageSource.includes("<ChatText"), true, "chat messages should render text through the safe rich-text renderer");
 assert.equal(agentMessageSource.includes("white-space: pre-wrap"), true, "user-authored chat text should preserve multiline prompt fidelity");
+assert.equal(agentMessageSource.includes("function snapshotDataParts"), false, "chat messages should import the shared data-part snapshot helper instead of duplicating clone logic");
+assert.equal(chatMessagePartsSource.includes("export function snapshotDataParts"), true, "chat surface should own a reusable data-part snapshot helper");
+assert.equal(chatSurfaceIndexSource.includes("snapshotDataParts"), true, "chat surface should export data-part snapshot helper for app-shell promotion/persistence paths");
 assert.equal(chatTextParserSource.includes("parseTable"), true, "chat text renderer should present markdown tables instead of leaving raw pipes in chat");
 assert.equal(chatTextSource.includes("{@html"), false, "chat text renderer should avoid HTML injection and render structured Svelte elements");
 assert.equal(canvasViewportSource.includes("documentTitle"), true, "artifact canvas should accept document title metadata for document-only mode");
@@ -148,7 +154,14 @@ assert.equal(generateRoute.includes("instrumentGenerateStream"), true, "generate
 assert.equal(streamTelemetrySource.includes("api.generate.stream_finished"), true, "generate stream helper should log normal stream completion");
 assert.equal(streamTelemetrySource.includes("api.generate.stream_failed"), true, "generate stream helper should log stream failures before surfacing them");
 assert.equal(streamTelemetrySource.includes("api.generate.stream_cancelled"), true, "generate stream helper should log stream cancellation for manual stop/debugging");
+assert.equal(streamTelemetrySource.includes("runId: context.runId"), true, "generate stream helper should keep smoke/test run correlation on terminal stream events");
 assert.equal(streamTelemetrySource.includes(".catch(() => undefined)"), true, "generate stream helper telemetry should be best-effort and non-throwing");
+assert.equal(generateRoute.includes("devSmokeMockStream"), false, "generate route should not expose deterministic smoke mode as a general request-body command");
+assert.equal(generateRoute.includes("shouldUseDevSmokeStream(request)"), true, "generate route should gate deterministic smoke mode from request headers only");
+assert.equal(devSmokeStreamSource.includes("DEV_SMOKE_STREAM_HEADER"), true, "dev smoke stream should live in a named server adapter instead of inline route logic");
+assert.equal(devSmokeStreamSource.includes("api.generate.dev_smoke_stream"), true, "dev smoke stream should emit explicit telemetry proving the mock path was used");
+assert.equal(generateRoute.includes("await writeDevSmokeStreamTelemetry(smokeInput)"), true, "generate route should write deterministic smoke telemetry before returning the smoke stream so the gate is not race-prone");
+assert.equal(devSmokeStreamSource.includes("runId"), true, "dev smoke stream should carry run correlation into stream telemetry");
 assert.equal(layoutSource.includes('window.addEventListener("error", handleError)'), true, "layout should capture browser runtime errors into telemetry");
 assert.equal(layoutSource.includes('window.addEventListener("unhandledrejection", handleUnhandledRejection)'), true, "layout should capture browser unhandled promise rejections into telemetry");
 assert.equal(layoutSource.includes("client.runtime.error"), true, "client runtime errors should have a stable telemetry event name");
@@ -167,7 +180,9 @@ const pageContextRouteSource = await readFile("apps/standalone-sveltekit/src/rou
 const observabilityPackageSource = await readFile("packages/agent-observability/src/index.ts", "utf8");
 const evidenceServerSource = await readFile("scripts/agent-ui-dev-evidence-server.mjs", "utf8");
 const smokeHarnessSource = await readFile("scripts/agent-ui-smoke.mjs", "utf8");
+const packageSource = await readFile("package.json", "utf8");
 assert.equal(observabilityPackageSource.includes("AGENT_UI_TELEMETRY_SCHEMA_VERSION"), true, "shared observability core should publish a stable telemetry schema version");
+assert.equal(observabilityPackageSource.includes("Runtime-safe page-control surface"), true, "page-control contract should document that it is a runtime-safe host seam, not an unbounded dev-only global");
 assert.equal(observabilityPackageSource.includes("sanitizeTelemetryValue"), true, "shared observability core should provide redaction before logs become machine evidence");
 assert.equal(agentTelemetrySource.includes("sanitizeTelemetryEvent"), true, "server telemetry writer should use shared observability sanitization");
 assert.equal(telemetryRouteSource.includes('record.source === "' + "ody" + 'sseus-host"'), false, "telemetry API should not keep legacy copied-editor branding as a first-class source name");
@@ -180,6 +195,16 @@ assert.equal(generateRoute.includes("traceparent"), true, "generate route should
 assert.equal(pageSource.includes("chat.stream.lifecycle"), true, "client should log streaming lifecycle transitions for browser-side crash triage");
 assert.equal(pageSource.includes("session.messages.persist_eligible"), true, "client should log when streamed messages become eligible for persistence");
 assert.equal(pageSource.includes("__SONIK_AGENT_UI_PAGE_CONTEXT__"), true, "client should expose page context to local browser smoke tests");
+assert.equal(pageSource.includes("__sonikAgentUI"), true, "client should expose the canonical Sonik Agent UI page-control contract");
+assert.equal(pageSource.includes("getPageContext: snapshotPageContext"), true, "page-control contract should expose snapshot-only page context");
+assert.equal(pageSource.includes("getAssertions: snapshotAssertions"), true, "page-control contract should expose snapshot-only assertions");
+assert.equal(pageSource.includes("$state.snapshot"), true, "page-control snapshots should avoid exposing live Svelte state proxies");
+assert.equal(pageSource.includes("submitPrompt"), true, "page-control contract should expose a semantic submit action backed by existing handlers");
+assert.equal(pageSource.includes("function getSubmitDisabledReason"), true, "page-control submit and manual submit should share one disabled-reason gate");
+assert.equal(pageSource.includes("createDevSmokeHeaders"), true, "dev smoke mode should be transported as headers from the local smoke URL");
+assert.equal(pageSource.includes("devSmokeMockStream"), false, "page should not put smoke-only mode flags into the application request body");
+assert.equal(pageSource.includes("openWorkspaceDocument"), true, "page-control contract should expose document host action without DOM scraping");
+assert.equal(pageSource.includes("lastPersistStatus"), true, "page assertions should track post-stream persistence state for crash regression gates");
 assert.equal(pageContextRouteSource.includes("client.page_context.updated"), true, "dev page context endpoint should persist a telemetry breadcrumb");
 assert.equal(pageContextRouteSource.includes("Dev page context is disabled"), true, "dev page context endpoint should be gated outside local/dev observability mode");
 assert.equal(pageSource.includes("if (!dev) return"), true, "client page context posting should be disabled outside SvelteKit dev mode");
@@ -190,5 +215,14 @@ assert.equal(evidenceServerSource.includes("AGENT_UI_EVIDENCE_ALLOW_LAN"), true,
 assert.equal(evidenceServerSource.includes("/stream"), true, "local evidence server should expose an SSE tail for future live log streaming");
 assert.equal(smokeHarnessSource.includes('page.on("crash"'), true, "smoke harness should explicitly catch browser page crashes");
 assert.equal(smokeHarnessSource.includes("x-sonik-request-id"), true, "smoke harness should verify generate correlation headers");
+assert.equal(smokeHarnessSource.includes("window.__sonikAgentUI"), true, "smoke harness should require canonical page-control state/actions instead of DOM synthesis");
+assert.equal(smokeHarnessSource.includes("api.generate.stream_finished"), true, "smoke harness should require server stream completion telemetry");
+assert.equal(smokeHarnessSource.includes("api.generate.dev_smoke_stream"), true, "smoke harness should prove deterministic smoke mode was actually used");
+assert.equal(smokeHarnessSource.includes("serverDevSmokeStream"), true, "smoke harness should classify deterministic smoke telemetry separately from stream finish");
+assert.equal(smokeHarnessSource.includes("requestIds"), true, "smoke harness should correlate stream telemetry to same-run generate response ids");
+assert.equal(smokeHarnessSource.includes("AGENT_UI_SMOKE_ALLOW_INCONCLUSIVE"), true, "smoke harness should fail inconclusive infrastructure results unless explicitly opted out");
+assert.equal(smokeHarnessSource.includes("session.messages.persist_success"), true, "smoke harness should require client message persistence telemetry after streaming");
+assert.equal(smokeHarnessSource.includes("AGENT_UI_SMOKE_START_SERVER"), true, "smoke harness should be batteries-included and able to start local dev dependencies");
+assert.equal(packageSource.includes("smoke:agent-ui:real-model"), true, "package scripts should expose an explicit real-model smoke lane separate from deterministic crash gating");
 
 console.log("app-shell-session-rail tests passed");

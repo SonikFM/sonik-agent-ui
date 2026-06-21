@@ -6,7 +6,7 @@
   import { DefaultChatTransport } from "ai";
   import type { DataPart, Spec } from "@json-render/svelte";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
-  import { AgentConversation, getSpec, getText, type AgentChatMessage } from "@sonik-agent-ui/chat-surface";
+  import { AgentConversation, getSpec, getText, snapshotDataParts, type AgentChatMessage } from "@sonik-agent-ui/chat-surface";
   import { upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { promoteJsonRenderArtifact } from "$lib/artifacts/json-render-promotion";
@@ -24,7 +24,7 @@
     type ArtifactStatus,
   } from "$lib/artifacts/artifact-observability";
   import { CanvasViewport, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent } from "@sonik-agent-ui/workspace-core";
-  import type { AgentUiPageContextSnapshot } from "@sonik-agent-ui/agent-observability";
+  import type { AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult } from "@sonik-agent-ui/agent-observability";
   import { registry } from "$lib/render/registry";
 
   interface ActiveDocumentSnapshot {
@@ -103,12 +103,17 @@
   let lastPersistedDocumentSignature = "";
   let lastConversationTelemetrySignature = "";
   let lastPageContextSignature = "";
+  let lastPersistStatus = $state<AgentUiPageAssertions["lastPersistStatus"]>("idle");
 
   const conversation = new Chat({
     transport: new DefaultChatTransport({
       api: "/api/generate",
-      prepareSendMessagesRequest({ messages, id, trigger, messageId, body }) {
+      prepareSendMessagesRequest({ messages, id, trigger, messageId, body, headers }) {
         return {
+          headers: {
+            ...headers,
+            ...createDevSmokeHeaders(),
+          },
           body: {
             ...body,
             id,
@@ -142,13 +147,26 @@
   const documentFramePreferredView = $derived(documentPreferredView);
   const documentFrameSubtitle = $derived(`${documentFrameLanguage} · v${documentSeed?.version_count ?? 1}`);
   const artifactOpen = $derived(Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen));
+  const pageAssertions = $derived<AgentUiPageAssertions>({
+    schemaVersion: "sonik.agent_ui.assertions.v1",
+    hasActiveSession: Boolean(activeSessionId),
+    isStreaming,
+    canSubmit: !getSubmitDisabledReason(input),
+    submitDisabledReason: getSubmitDisabledReason(input),
+    hasActiveArtifact: Boolean(activeArtifact),
+    hasActiveDocument: Boolean(activeDocument || documentEditorOpen),
+    messageCount: conversation.messages.length,
+    visibleErrorCount: sessionRailError || conversation.error ? 1 : 0,
+    lastPersistStatus,
+  });
   const latestJsonRenderSpec = $derived.by<{ id: string; spec: Spec; sourceUserMessageId: string; userPrompt: string; title?: string; forcePromote?: boolean } | null>(() => {
     for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
       const message = conversation.messages[index];
       if (!message || message.role !== "assistant") continue;
 
       const sourcePrompt = findNearestUserPrompt(index);
-      const artifactToolCandidate = findJsonArtifactToolCandidate(message.id, message.parts as unknown[]);
+      const parts = snapshotDataParts(message.parts as DataPart[]);
+      const artifactToolCandidate = findJsonArtifactToolCandidate(message.id, parts as unknown[]);
       if (artifactToolCandidate) {
         return {
           id: artifactToolCandidate.id,
@@ -160,7 +178,7 @@
         };
       }
 
-      const spec = getSpec(message.parts as DataPart[]);
+      const spec = getSpec(parts);
       if (!spec) continue;
 
       return {
@@ -177,7 +195,7 @@
     for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
       const message = conversation.messages[index];
       if (!message || message.role !== "assistant") continue;
-      const candidate = findDocumentArtifactToolCandidate(message.id, message.parts as unknown[]);
+      const candidate = findDocumentArtifactToolCandidate(message.id, snapshotDataParts(message.parts as DataPart[]) as unknown[]);
       if (!candidate) continue;
       return {
         id: candidate.id,
@@ -295,7 +313,7 @@
     for (let index = beforeIndex - 1; index >= 0; index -= 1) {
       const message = conversation.messages[index];
       if (!message || message.role !== "user") continue;
-      return { id: message.id, text: getText(message.parts as DataPart[]) };
+      return { id: message.id, text: getText(snapshotDataParts(message.parts as DataPart[])) };
     }
 
     return { id: "", text: "" };
@@ -307,7 +325,7 @@
     const messageIndex = conversation.messages.findIndex((candidate) => candidate.id === message.id);
     if (messageIndex === -1) return true;
 
-    if (findJsonArtifactToolCandidate(message.id, message.parts as unknown[])) {
+    if (findJsonArtifactToolCandidate(message.id, snapshotDataParts(message.parts as DataPart[]) as unknown[])) {
       return false;
     }
 
@@ -413,6 +431,26 @@
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
   }
 
+
+  function getSubmitDisabledReason(message: string): AgentUiPageAssertions["submitDisabledReason"] {
+    if (isStreaming) return "streaming";
+    if (sessionRailBusy) return "session_loading";
+    if (!activeSessionId) return "missing_session";
+    if (!message.trim()) return "empty_prompt";
+    return undefined;
+  }
+
+  function createDevSmokeHeaders(): Record<string, string> {
+    if (!dev || typeof window === "undefined") return {};
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("smokeMockStream") !== "1") return {};
+    const smokeRunId = searchParams.get("smokeRunId") ?? "agent-ui-smoke-local";
+    return {
+      "x-sonik-agent-ui-smoke-stream": "true",
+      "x-sonik-agent-ui-smoke-run-id": smokeRunId,
+    };
+  }
+
   function createPageContextSnapshot(): AgentUiPageContextSnapshot {
     return {
       route: "/",
@@ -427,7 +465,7 @@
       artifactType: activeDocument?.language ?? (activeArtifact ? "json-render" : null),
       conversationStatus: conversation.status,
       messageCount: conversation.messages.length,
-      visibleActions: ["theme-picker", "workspace-docs", "start-over"],
+      visibleActions: ["theme-picker", "workspace-docs", "start-over", "submitPrompt", "stop", "clearChat", "clearArtifact", "openWorkspaceDocument"],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
       commandFamilies: documentEditorOpen ? ["local-ui", "document", "artifact"] : activeArtifact ? ["local-ui", "artifact"] : ["local-ui", "discovery"],
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
@@ -461,10 +499,68 @@
     });
   }
 
+  function snapshotPageContext(): AgentUiPageContextSnapshot {
+    return $state.snapshot(createPageContextSnapshot()) as AgentUiPageContextSnapshot;
+  }
+
+  function snapshotAssertions(): AgentUiPageAssertions {
+    return $state.snapshot(pageAssertions) as AgentUiPageAssertions;
+  }
+
+  function semanticActionResult(ok: boolean, message?: string, disabledReason?: string): AgentUiSemanticActionResult {
+    return {
+      ok,
+      state: snapshotAssertions(),
+      message,
+      disabledReason,
+    };
+  }
+
+  /** Runtime-safe host/page automation seam: snapshot reads + semantic actions only. */
+  function installAgentPageControl(): void {
+    const targetWindow = window as Window & {
+      __sonikAgentUI?: AgentUiPageControl;
+      __SONIK_AGENT_UI_PAGE_CONTEXT__?: () => AgentUiPageContextSnapshot;
+    };
+    targetWindow.__sonikAgentUI = {
+      schemaVersion: "sonik.agent_ui.page_control.v1",
+      getPageContext: snapshotPageContext,
+      getAssertions: snapshotAssertions,
+      actions: {
+        submitPrompt: ({ prompt }) => {
+          const message = typeof prompt === "string" ? prompt : "";
+          const disabledReason = getSubmitDisabledReason(message);
+          if (disabledReason) return semanticActionResult(false, `Prompt cannot be submitted: ${disabledReason}.`, disabledReason);
+          handleSubmit(message);
+          return semanticActionResult(true, "Prompt submitted.");
+        },
+        stop: () => {
+          handleStop();
+          return semanticActionResult(true, "Streaming stop requested.");
+        },
+        clearChat: () => {
+          handleClear();
+          return semanticActionResult(true, "Chat cleared.");
+        },
+        clearArtifact: () => {
+          handleClearArtifact();
+          return semanticActionResult(true, "Artifact cleared.");
+        },
+        openWorkspaceDocument: () => {
+          openDocumentEditor();
+          return semanticActionResult(true, "Workspace document opened.");
+        },
+      },
+    };
+    targetWindow.__SONIK_AGENT_UI_PAGE_CONTEXT__ = snapshotPageContext;
+  }
+
   function syncDevPageContext(reason: string): void {
     if (typeof window === "undefined") return;
+    installAgentPageControl();
     if (!dev) return;
-    const pageContext = createPageContextSnapshot();
+    const pageContext = snapshotPageContext();
+    const assertions = snapshotAssertions();
     const signature = JSON.stringify({
       reason,
       route: pageContext.route,
@@ -475,14 +571,14 @@
       activeDocumentId: pageContext.activeDocumentId,
       conversationStatus: pageContext.conversationStatus,
       messageCount: pageContext.messageCount,
+      assertions,
     });
-    (window as Window & { __SONIK_AGENT_UI_PAGE_CONTEXT__?: () => AgentUiPageContextSnapshot }).__SONIK_AGENT_UI_PAGE_CONTEXT__ = () => pageContext;
     if (signature === lastPageContextSignature) return;
     lastPageContextSignature = signature;
     void fetch("/api/dev/page-context", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ reason, pageContext }),
+      body: JSON.stringify({ reason, pageContext, assertions }),
       keepalive: true,
     }).catch(() => undefined);
   }
@@ -749,14 +845,19 @@
     if (!sessionId) return;
     if (messagePersistInFlight) return;
     const messagesToPersist = conversation.messages.filter((message) => !persistedMessageIds.has(message.id));
-    if (messagesToPersist.length === 0) return;
+    if (messagesToPersist.length === 0) {
+      lastPersistStatus = "idle";
+      return;
+    }
 
+    lastPersistStatus = "eligible";
     logSessionTelemetry("session.messages.persist_eligible", { sessionId, reason: `${messagesToPersist.length} message(s)` });
     messagePersistInFlight = true;
+    lastPersistStatus = "in_flight";
     logSessionTelemetry("session.messages.persist_start", { sessionId, reason: `${messagesToPersist.length} message(s)` });
     try {
       for (const message of messagesToPersist) {
-        const parts = message.parts as DataPart[];
+        const parts = snapshotDataParts(message.parts as DataPart[]);
         const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}/messages`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -769,6 +870,7 @@
         });
         if (!response.ok) {
           sessionRailError = await response.text();
+          lastPersistStatus = "error";
           logSessionTelemetry("session.messages.persist_error", {
             sessionId,
             ok: false,
@@ -780,9 +882,11 @@
         persistedMessageIds.add(message.id);
       }
       await loadSessions();
+      lastPersistStatus = "success";
       logSessionTelemetry("session.messages.persist_success", { sessionId, reason: `${messagesToPersist.length} message(s)` });
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
+      lastPersistStatus = "error";
       logSessionTelemetry("session.messages.persist_error", {
         sessionId,
         ok: false,
@@ -881,7 +985,7 @@
   }
 
   function normalizePersistedParts(message: WorkspaceMessageSnapshot): DataPart[] {
-    if (Array.isArray(message.parts) && message.parts.length > 0) return message.parts;
+    if (Array.isArray(message.parts) && message.parts.length > 0) return snapshotDataParts(message.parts as DataPart[]);
     if (!message.content) return [];
     return [{ type: "text", text: message.content }] as DataPart[];
   }
@@ -940,7 +1044,7 @@
 
   function handleSubmit(message: string) {
     const trimmed = message.trim();
-    if (!trimmed || isStreaming) return;
+    if (getSubmitDisabledReason(trimmed)) return;
 
     if (hasExplicitArtifactIntent(trimmed) || (activeArtifact && hasActiveArtifactUpdateIntent(trimmed))) {
       pendingArtifactIntent = trimmed;
@@ -958,6 +1062,7 @@
   function handleClear() {
     conversation.messages = [];
     persistedMessageIds.clear();
+    lastPersistStatus = "idle";
     input = "";
     activeArtifact = null;
     activeArtifactStatus = null;

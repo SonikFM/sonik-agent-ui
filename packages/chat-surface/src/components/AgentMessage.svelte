@@ -19,7 +19,7 @@
 </script>
 
 <script lang="ts">
-  import { getSegments, getSpec, getText, hasSpec } from "../message-parts.js";
+  import { getSegments, getSpec, getText, hasSpec, snapshotDataParts } from "../message-parts.js";
   import ChatText from "./ChatText.svelte";
   import ToolCallBlock from "./ToolCallBlock.svelte";
 
@@ -32,7 +32,7 @@
     shouldRenderArtifact,
   }: AgentMessageProps = $props();
 
-  const parts = $derived(message.parts as DataPart[]);
+  const parts = $derived(snapshotDataParts(message.parts));
   const spec = $derived(getSpec(parts));
   const text = $derived(getText(parts));
   const messageHasSpec = $derived(hasSpec(parts));
@@ -41,6 +41,7 @@
   const specInserted = $derived(segmentResult.specInserted);
   const from = $derived(message.role === "user" ? "user" : message.role === "tool" ? "tool" : "assistant");
   const canRenderArtifact = $derived(shouldRenderArtifact?.(message) ?? true);
+
 </script>
 
 <div class="agent-message" data-role={from}>

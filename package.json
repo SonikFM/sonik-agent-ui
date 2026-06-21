@@ -13,11 +13,16 @@
     "check:commands:sonik-booking": "node --experimental-strip-types scripts/generate-sonik-booking-command-fixture.mjs --check",
     "check:commands": "pnpm check:commands:sonik-booking",
     "dev:evidence": "node scripts/agent-ui-dev-evidence-server.mjs",
-    "smoke:agent-ui": "node scripts/agent-ui-smoke.mjs"
+    "smoke:agent-ui": "node scripts/agent-ui-smoke.mjs",
+    "smoke:agent-ui:crash": "node scripts/agent-ui-smoke.mjs",
+    "smoke:agent-ui:real-model": "AGENT_UI_SMOKE_REAL_MODEL=true node scripts/agent-ui-smoke.mjs"
   },
   "packageManager": "pnpm@11.1.3",
   "engines": {
     "node": ">=24",
     "pnpm": ">=11"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
   }
 }
