@@ -7,6 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const documentPath = resolve(root, "tests/fixtures/sonik-booking/booking-openapi.fixture.json");
 const configPath = resolve(root, "tests/fixtures/sonik-booking/generator.config.json");
 const outputPath = resolve(root, "tests/fixtures/generated/sonik-booking-command-artifacts.generated.json");
+const checkMode = process.argv.includes("--check");
 
 const document = JSON.parse(await readFile(documentPath, "utf8"));
 const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -30,6 +31,27 @@ const output = {
   projections: artifacts.projections,
 };
 
-await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`);
-console.log(`Wrote ${outputPath}`);
+const serializedOutput = `${JSON.stringify(output, null, 2)}\n`;
+
+if (checkMode) {
+  let existingOutput = "";
+  try {
+    existingOutput = await readFile(outputPath, "utf8");
+  } catch (error) {
+    console.error(`Generated command artifact is missing: ${outputPath}`);
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+
+  if (existingOutput !== serializedOutput) {
+    console.error(`Generated command artifact is stale: ${outputPath}`);
+    console.error("Run pnpm generate:commands:sonik-booking and commit the updated artifact.");
+    process.exit(1);
+  }
+
+  console.log(`Checked ${outputPath}`);
+} else {
+  await writeFile(outputPath, serializedOutput);
+  console.log(`Wrote ${outputPath}`);
+}
 console.log(JSON.stringify(output.summary));

@@ -19,7 +19,13 @@ The checked OpenAPI fixture intentionally keeps operation metadata only. Request
 Run:
 
 ```bash
-node --experimental-strip-types scripts/generate-sonik-booking-command-fixture.mjs
+pnpm generate:commands:sonik-booking
+```
+
+Check for CI/drift without writing:
+
+```bash
+pnpm check:commands:sonik-booking
 ```
 
 Output:
@@ -47,3 +53,35 @@ The fixture is discovery/projection only:
 ## Test coverage
 
 `tests/unit/sonik-booking-command-fixture.test.mjs` regenerates the fixture and deep-compares it to the checked artifact. It also verifies operation parity, host family provenance, public/authenticated security posture, schema-free indexes, descriptor learning, shadow execution denial, and CLI/MCP projection metadata.
+
+
+## CI/CD deterministic gate
+
+Use this fixture as the first ORPC/OpenAPI command drift gate:
+
+```bash
+pnpm check:commands:sonik-booking
+pnpm test
+pnpm check-types
+pnpm build
+```
+
+For a live Sonik service pipeline, run service-side OpenAPI generation first, then regenerate/check command artifacts in this repo or host package:
+
+```bash
+# sonik-booking-service
+bun run generate:openapi
+bun run check:openapi
+
+# sonik-agent-ui / host integration
+pnpm generate:commands:sonik-booking
+pnpm check:commands:sonik-booking
+```
+
+The intended ORPC gate remains:
+
+```text
+ORPC contracts -> OpenAPI document -> command generator -> CommandCatalog/FamilyRegistry/projections -> host runtime adapter mount
+```
+
+A PR that changes ORPC/OpenAPI behavior should include the generated command artifact diff. CI should fail when `pnpm check:commands:sonik-booking` detects drift.
