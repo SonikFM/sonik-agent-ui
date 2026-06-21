@@ -93,7 +93,6 @@
   let documentPreferredView = $state<PreferredDocumentView>("auto");
   let artifactEvents = $state<ArtifactObservationEvent[]>([]);
   let observationIndex = $state(0);
-  let lastPromotionKey = $state<string | null>(null);
   let lastDocumentPromotionKey = $state<string | null>(null);
   let sessions = $state<WorkspaceSessionSummary[]>([]);
   let archivedSessionCount = $state(0);
@@ -102,6 +101,7 @@
   let sessionRailError = $state<string | null>(null);
   let persistedMessageIds = new SvelteSet<string>();
   let reportedToolErrorKeys = new SvelteSet<string>();
+  let processedJsonRenderPromotionKeys = new SvelteSet<string>();
   let messagePersistInFlight = false;
   let pendingDocumentSnapshot: ActiveDocumentSnapshot | null = null;
   let documentPersistPromise: Promise<void> | null = null;
@@ -307,6 +307,15 @@
       return;
     }
 
+    const promotionKey = [
+      latestJsonRenderSpec.id,
+      result.signature,
+      result.decision.reason,
+    ].join("::");
+
+    if (processedJsonRenderPromotionKeys.has(promotionKey)) return;
+    processedJsonRenderPromotionKeys.add(promotionKey);
+
     let promotedSnapshot: (ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }) | null = null;
     if (result.promoted && result.artifact) {
       promotedSnapshot = artifactWarehouse.commitJsonRenderArtifact({
@@ -319,17 +328,6 @@
     const eventResult = promotedSnapshot
       ? { ...result, artifact: promotedSnapshot.artifact }
       : result;
-
-    const promotionKey = [
-      latestJsonRenderSpec.id,
-      eventResult.artifact?.id ?? "no-artifact",
-      result.signature,
-      eventResult.artifact?.version ?? "no-version",
-      result.decision.reason,
-    ].join("::");
-
-    if (promotionKey === lastPromotionKey) return;
-    lastPromotionKey = promotionKey;
 
     observationIndex += 1;
     const event = createArtifactObservationEvent({
@@ -1012,7 +1010,7 @@
     lastActivityTelemetrySignature = "";
     artifactEvents = [];
     observationIndex = 0;
-    lastPromotionKey = null;
+    processedJsonRenderPromotionKeys.clear();
     lastDocumentPromotionKey = null;
     pendingDocumentSnapshot = null;
     lastPersistedDocumentSignature = detail.activeDocument ? createDocumentSnapshotSignature(detail.activeDocument) : "";
@@ -1252,7 +1250,7 @@
     lastActivityTelemetrySignature = "";
     artifactEvents = [];
     observationIndex = 0;
-    lastPromotionKey = null;
+    processedJsonRenderPromotionKeys.clear();
     lastDocumentPromotionKey = null;
     documentEditorOpen = false;
     activeDocument = null;
@@ -1273,7 +1271,6 @@
     streamStartedAt = null;
     lastActivityTelemetrySignature = "";
     artifactEvents = [];
-    lastPromotionKey = null;
   }
 
   function openDocumentEditor(): void {

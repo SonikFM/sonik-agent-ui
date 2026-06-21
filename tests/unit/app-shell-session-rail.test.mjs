@@ -280,6 +280,13 @@ assert.equal(pageSource.includes("createInMemoryArtifactWarehouse"), true, "stan
 assert.equal(pageSource.includes("handleArtifactVersionChange"), true, "standalone page should expose a version switch handler for the canvas");
 assert.equal(pageSource.includes("artifactWarehouse.commitJsonRenderArtifact"), true, "JSON artifact promotion and manual edits should commit through the warehouse");
 assert.equal(pageSource.includes("artifactWarehouse.getActiveJsonRenderArtifact"), true, "session hydration should restore the active in-memory artifact pointer");
+assert.equal(pageSource.includes("processedJsonRenderPromotionKeys"), true, "assistant artifact specs should be processed once so manual edits cannot re-promote stale tool output");
+assert.equal(pageSource.includes("processedJsonRenderPromotionKeys.has(promotionKey)"), true, "JSON artifact promotion should guard before committing to the warehouse");
+assert.equal(
+  /function handleClearArtifact\(\)[\s\S]*?processedJsonRenderPromotionKeys\.clear\(\)/.test(pageSource),
+  false,
+  "clearing only the artifact must not make retained assistant specs eligible for replay",
+);
 assert.equal(canvasToolbarSource.includes("artifactVersions"), true, "canvas toolbar should accept artifact versions for manual testing");
 assert.equal(canvasToolbarSource.includes("Artifact version selector"), true, "canvas toolbar should render an accessible version selector");
 assert.equal(canvasViewportSource.includes("onArtifactVersionChange"), true, "canvas viewport should pass version selection back to the host app");
