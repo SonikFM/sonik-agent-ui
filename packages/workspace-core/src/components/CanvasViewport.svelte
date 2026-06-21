@@ -16,6 +16,9 @@
     documentAvailable?: boolean;
     documentTitle?: string | null;
     documentSubtitle?: string | null;
+    artifactVersions?: Array<{ version: number; label?: string }>;
+    activeArtifactVersion?: number | null;
+    onArtifactVersionChange?: (version: number) => void;
   }
 </script>
 
@@ -35,6 +38,9 @@
     documentAvailable = false,
     documentTitle = null,
     documentSubtitle = null,
+    artifactVersions = [],
+    activeArtifactVersion = null,
+    onArtifactVersionChange,
   }: CanvasViewportProps = $props();
 
   let panel = $state<CanvasPanel>("canvas");
@@ -97,6 +103,9 @@
     {hasArtifact}
     {documentAvailable}
     {isFullscreen}
+    {artifactVersions}
+    {activeArtifactVersion}
+    {onArtifactVersionChange}
     onPanelChange={(nextPanel) => (panel = nextPanel)}
     onToggleFullscreen={() => (isFullscreen = !isFullscreen)}
     {onClear}

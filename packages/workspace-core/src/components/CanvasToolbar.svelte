@@ -11,6 +11,9 @@
     isFullscreen?: boolean;
     onPanelChange?: (panel: CanvasPanel) => void;
     onToggleFullscreen?: () => void;
+    artifactVersions?: Array<{ version: number; label?: string }>;
+    activeArtifactVersion?: number | null;
+    onArtifactVersionChange?: (version: number) => void;
     onClear?: () => void;
   }
 </script>
@@ -26,6 +29,9 @@
     isFullscreen = false,
     onPanelChange,
     onToggleFullscreen,
+    artifactVersions = [],
+    activeArtifactVersion = null,
+    onArtifactVersionChange,
     onClear,
   }: CanvasToolbarProps = $props();
 
@@ -58,6 +64,20 @@
   </div>
 
   <div class="canvas-toolbar__actions">
+    {#if artifactVersions.length > 1}
+      <label class="canvas-toolbar__version" aria-label="Artifact version selector">
+        <span>Version</span>
+        <select
+          value={activeArtifactVersion ?? artifactVersions.at(-1)?.version}
+          onchange={(event) => onArtifactVersionChange?.(Number(event.currentTarget.value))}
+        >
+          {#each artifactVersions as version (version.version)}
+            <option value={version.version}>{version.label ?? `v${version.version}`}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
+
     <div class="canvas-toolbar__panel-tabs" aria-label="Artifact view mode">
       {#each panelButtons as item (item.id)}
         <button
@@ -155,6 +175,24 @@
     flex-shrink: 0;
     align-items: center;
     gap: 0.25rem;
+  }
+
+  .canvas-toolbar__version {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .canvas-toolbar__version select {
+    border: 1px solid var(--sonik-border-color);
+    border-radius: 0.5rem;
+    background: var(--background);
+    padding: 0.35rem 0.55rem;
+    color: var(--foreground);
+    font: inherit;
   }
 
   .canvas-toolbar__panel-tabs {

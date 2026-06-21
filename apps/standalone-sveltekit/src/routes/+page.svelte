@@ -13,6 +13,7 @@
   import { findDocumentArtifactToolCandidate, findJsonArtifactToolCandidate, type PreferredDocumentView } from "$lib/artifacts/tool-artifact-extraction";
   import { hasActiveArtifactUpdateIntent, hasExplicitArtifactIntent } from "$lib/artifacts/artifact-promotion";
   import { logArtifactTelemetry, summarizeSpec } from "$lib/artifacts/artifact-telemetry";
+  import { createInMemoryArtifactWarehouse, type ArtifactWarehouseSnapshot, type ArtifactWarehouseVersion } from "$lib/artifacts/artifact-warehouse";
   import ArtifactInspector from "$lib/artifacts/ArtifactInspector.svelte";
   import SessionRail from "$lib/session/SessionRail.svelte";
   import ThemePicker from "$lib/theme/ThemePicker.svelte";
@@ -80,8 +81,11 @@
   // =============================================================================
 
   let input = $state("");
+  const artifactWarehouse = createInMemoryArtifactWarehouse();
+
   let activeArtifact = $state<JsonRenderArtifact | null>(null);
   let activeArtifactStatus = $state<ArtifactStatus | null>(null);
+  let activeArtifactVersions = $state<ArtifactWarehouseVersion<Spec>[]>([]);
   let pendingArtifactIntent = $state<string | null>(null);
   let documentEditorOpen = $state(false);
   let activeDocument = $state<ActiveDocumentSnapshot | null>(null);
@@ -143,6 +147,13 @@
   const activeArtifactRawSpec = $derived(
     activeArtifact ? JSON.stringify(activeArtifact.content, null, 2) : "",
   );
+  const activeArtifactVersionOptions = $derived(
+    activeArtifactVersions.map((version) => ({
+      version: version.version,
+      label: `v${version.version}${version.source === "user-edit" ? " · edited" : ""}`,
+    })),
+  );
+  const activeArtifactVersionNumber = $derived(activeArtifact?.version ?? null);
   const initialWorkspaceDocumentContent = "# Workspace Document\n\nThis is the isolated workspace document editor running as a document island. Use the language selector to switch Markdown, HTML, JSON, CSV, code, and preview modes.";
   const documentFrameTitle = $derived(documentSeed?.title ?? "Workspace Document");
   const documentFrameLanguage = $derived(documentSeed?.language ?? "markdown");
@@ -296,10 +307,24 @@
       return;
     }
 
+    let promotedSnapshot: (ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }) | null = null;
+    if (result.promoted && result.artifact) {
+      promotedSnapshot = artifactWarehouse.commitJsonRenderArtifact({
+        sessionId: activeSessionId,
+        artifact: result.artifact,
+        source: "agent",
+      });
+    }
+
+    const eventResult = promotedSnapshot
+      ? { ...result, artifact: promotedSnapshot.artifact }
+      : result;
+
     const promotionKey = [
       latestJsonRenderSpec.id,
-      result.artifact?.id ?? "no-artifact",
+      eventResult.artifact?.id ?? "no-artifact",
       result.signature,
+      eventResult.artifact?.version ?? "no-version",
       result.decision.reason,
     ].join("::");
 
@@ -308,7 +333,7 @@
 
     observationIndex += 1;
     const event = createArtifactObservationEvent({
-      result,
+      result: eventResult,
       sourceMessageId: latestJsonRenderSpec.id,
       sourceUserMessageId: latestJsonRenderSpec.sourceUserMessageId,
       userPrompt: latestJsonRenderSpec.userPrompt,
@@ -327,9 +352,9 @@
       ok: true,
     });
 
-    if (result.promoted && result.artifact) {
-      activeArtifact = result.artifact;
-      activeArtifactStatus = createArtifactStatus(result.artifact, event);
+    if (promotedSnapshot) {
+      applyArtifactWarehouseSnapshot(promotedSnapshot);
+      activeArtifactStatus = createArtifactStatus(promotedSnapshot.artifact, event);
       pendingArtifactIntent = null;
     }
   });
@@ -407,21 +432,26 @@
       spec: parsed,
     });
 
-    activeArtifact = upsert.artifact;
+    const snapshot = artifactWarehouse.commitJsonRenderArtifact({
+      sessionId: activeSessionId,
+      artifact: upsert.artifact,
+      source: "user-edit",
+    });
+    applyArtifactWarehouseSnapshot(snapshot);
     if (activeArtifactStatus) {
       activeArtifactStatus = {
         ...activeArtifactStatus,
-        artifactVersion: upsert.artifact.version,
-        updatedAt: upsert.artifact.updatedAt,
+        artifactVersion: snapshot.artifact.version,
+        updatedAt: snapshot.artifact.updatedAt,
       };
     }
 
     observationIndex += 1;
     artifactEvents = appendArtifactObservationEvent(artifactEvents, {
-      id: `manual-json-editor::artifact_updated::${observationIndex}::${upsert.artifact.id}`,
+      id: `manual-json-editor::artifact_updated::${observationIndex}::${snapshot.artifact.id}`,
       type: "artifact_updated",
-      artifactId: upsert.artifact.id,
-      artifactVersion: upsert.artifact.version,
+      artifactId: snapshot.artifact.id,
+      artifactVersion: snapshot.artifact.version,
       promotionReason: "active_artifact_update",
       sourceMessageId: "manual-json-editor",
       sourceUserMessageId: "manual-json-editor",
@@ -432,14 +462,54 @@
     logArtifactTelemetry({
       source: "client",
       event: "artifact.editor.apply",
-      artifactId: upsert.artifact.id,
-      artifactVersion: upsert.artifact.version,
+      artifactId: snapshot.artifact.id,
+      artifactVersion: snapshot.artifact.version,
       reason: "active_artifact_update",
-      ...summarizeSpec(upsert.artifact.content),
+      ...summarizeSpec(snapshot.artifact.content),
       ok: true,
     });
 
     return null;
+  }
+
+  function applyArtifactWarehouseSnapshot(snapshot: ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }): void {
+    activeArtifact = snapshot.artifact;
+    activeArtifactVersions = snapshot.versions;
+  }
+
+  function handleArtifactVersionChange(version: number): void {
+    if (!activeArtifact) return;
+    const snapshot = artifactWarehouse.selectJsonRenderArtifactVersion({
+      sessionId: activeSessionId,
+      artifactId: activeArtifact.id,
+      version,
+    });
+    if (!snapshot) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "artifact.version.select_error",
+        artifactId: activeArtifact.id,
+        artifactVersion: version,
+        ok: false,
+        error: "version not found",
+      });
+      return;
+    }
+    applyArtifactWarehouseSnapshot(snapshot);
+    if (activeArtifactStatus) {
+      activeArtifactStatus = {
+        ...activeArtifactStatus,
+        artifactVersion: snapshot.artifact.version,
+        updatedAt: snapshot.artifact.updatedAt,
+      };
+    }
+    logArtifactTelemetry({
+      source: "client",
+      event: "artifact.version.selected",
+      artifactId: snapshot.artifact.id,
+      artifactVersion: snapshot.artifact.version,
+      ok: true,
+    });
   }
 
   function isSpec(value: unknown): value is Spec {
@@ -862,6 +932,7 @@
       await flushPendingDocumentPersistence();
       const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
       if (!response.ok) throw new Error(await response.text());
+      artifactWarehouse.deleteSession(sessionId);
       await loadSessions();
       if (activeSessionId === sessionId) {
         const nextSession = sessions.find((entry) => entry.id !== sessionId);
@@ -927,8 +998,15 @@
     documentSeed = detail.activeDocument;
     documentPreferredView = detail.activeDocument ? inferPreferredDocumentView(detail.activeDocument.language) : "auto";
     documentEditorOpen = Boolean(detail.activeDocument);
-    activeArtifact = null;
-    activeArtifactStatus = null;
+    const restoredArtifact = artifactWarehouse.getActiveJsonRenderArtifact(detail.session.id);
+    if (restoredArtifact) {
+      applyArtifactWarehouseSnapshot(restoredArtifact);
+      activeArtifactStatus = null;
+    } else {
+      activeArtifact = null;
+      activeArtifactStatus = null;
+      activeArtifactVersions = [];
+    }
     pendingArtifactIntent = null;
     streamStartedAt = null;
     lastActivityTelemetrySignature = "";
@@ -1165,8 +1243,10 @@
     reportedToolErrorKeys.clear();
     lastPersistStatus = "idle";
     input = "";
+    artifactWarehouse.clearActiveArtifact(activeSessionId);
     activeArtifact = null;
     activeArtifactStatus = null;
+    activeArtifactVersions = [];
     pendingArtifactIntent = null;
     streamStartedAt = null;
     lastActivityTelemetrySignature = "";
@@ -1185,8 +1265,10 @@
   }
 
   function handleClearArtifact() {
+    artifactWarehouse.clearActiveArtifact(activeSessionId);
     activeArtifact = null;
     activeArtifactStatus = null;
+    activeArtifactVersions = [];
     pendingArtifactIntent = null;
     streamStartedAt = null;
     lastActivityTelemetrySignature = "";
@@ -1285,6 +1367,9 @@
       rawSpec={activeArtifactRawSpec}
       onClear={handleClearArtifact}
       onApplyRawSpec={handleApplyRawSpec}
+      artifactVersions={activeArtifactVersionOptions}
+      activeArtifactVersion={activeArtifactVersionNumber}
+      onArtifactVersionChange={handleArtifactVersionChange}
       documentAvailable={documentEditorOpen}
       documentTitle={documentFrameTitle}
       documentSubtitle={documentFrameSubtitle}

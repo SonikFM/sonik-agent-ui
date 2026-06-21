@@ -270,4 +270,19 @@ assert.equal(agentSource.includes("DATA BINDING FOR INLINE SPEC FENCES AND NON-T
 assert.equal(agentSource.includes("For inline JSON-render responses outside createJsonArtifact"), true, "agent instructions should keep generic $state data guidance outside strict createJsonArtifact input");
 assert.equal(artifactToolSource.includes("Intentional contract mirror"), true, "artifact tool should document catalog-to-tool schema coupling as an intentional contract");
 
+const artifactWarehouseSource = await readFile("apps/standalone-sveltekit/src/lib/artifacts/artifact-warehouse.ts", "utf8");
+const canvasToolbarSource = await readFile("packages/workspace-core/src/components/CanvasToolbar.svelte", "utf8");
+assert.equal(artifactWarehouseSource.includes("class InMemoryArtifactWarehouse"), true, "artifact warehouse v0 should expose an in-memory adapter seam");
+assert.equal(artifactWarehouseSource.includes("currentVersionId"), true, "artifact warehouse records should track selected current version ids");
+assert.equal(artifactWarehouseSource.includes("activeBySession"), true, "artifact warehouse should track the active artifact pointer by session");
+assert.equal(artifactWarehouseSource.includes("selectJsonRenderArtifactVersion"), true, "artifact warehouse should support deterministic version selection");
+assert.equal(pageSource.includes("createInMemoryArtifactWarehouse"), true, "standalone page should use the artifact warehouse instead of only latest local artifact state");
+assert.equal(pageSource.includes("handleArtifactVersionChange"), true, "standalone page should expose a version switch handler for the canvas");
+assert.equal(pageSource.includes("artifactWarehouse.commitJsonRenderArtifact"), true, "JSON artifact promotion and manual edits should commit through the warehouse");
+assert.equal(pageSource.includes("artifactWarehouse.getActiveJsonRenderArtifact"), true, "session hydration should restore the active in-memory artifact pointer");
+assert.equal(canvasToolbarSource.includes("artifactVersions"), true, "canvas toolbar should accept artifact versions for manual testing");
+assert.equal(canvasToolbarSource.includes("Artifact version selector"), true, "canvas toolbar should render an accessible version selector");
+assert.equal(canvasViewportSource.includes("onArtifactVersionChange"), true, "canvas viewport should pass version selection back to the host app");
+assert.equal(packageSource.includes("artifact-warehouse.test.mjs"), true, "default tests should include the artifact warehouse regression test");
+
 console.log("app-shell-session-rail tests passed");
