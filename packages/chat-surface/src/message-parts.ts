@@ -11,6 +11,7 @@ export interface ToolInfo {
   toolName: string;
   state: string;
   output?: unknown;
+  errorText?: string;
 }
 
 export type ChatSegment =
@@ -65,6 +66,7 @@ export function getSegments(parts: DataPart[]): ChatSegmentsResult {
         toolCallId?: string;
         state?: string;
         output?: unknown;
+        errorText?: string;
       };
       const last = segments[segments.length - 1];
       const toolInfo: ToolInfo = {
@@ -72,6 +74,7 @@ export function getSegments(parts: DataPart[]): ChatSegmentsResult {
         toolName: toolPart.type.replace(/^tool-/, ""),
         state: toolPart.state || "",
         output: toolPart.output,
+        errorText: toolPart.errorText,
       };
       if (last?.kind === "tools") {
         last.tools.push(toolInfo);

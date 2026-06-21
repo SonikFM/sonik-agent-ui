@@ -2,6 +2,7 @@ import { tool } from "ai";
 import type { Spec } from "@json-render/core";
 import { z } from "zod";
 import { logArtifactTelemetry, summarizeSpec } from "../artifacts/artifact-telemetry";
+import { normalizeJsonArtifactSpec } from "../artifacts/json-artifact-spec";
 
 const uiElementSchema = z.object({
   type: z.string().describe("Component type from the json-render catalog, e.g. Card, Stack, Text, Metric, Table."),
@@ -17,9 +18,6 @@ const specSchema = z.object({
   root: z.string().describe("Element key for the root node."),
   elements: z.record(z.string(), uiElementSchema).describe("Flat json-render element map keyed by element id. Must include the root key."),
   state: z.record(z.string(), z.unknown()).optional().describe("Initial state object used by $state bindings."),
-}).refine((spec) => spec.root in spec.elements, {
-  message: "spec.elements must include the root element key",
-  path: ["elements"],
 });
 
 /**
@@ -37,19 +35,22 @@ export const createJsonArtifact = tool({
     spec: specSchema.describe("Complete json-render flat spec to render in the artifact canvas."),
   }),
   execute: async ({ title, spec }) => {
-    const typedSpec = spec as Spec;
+    const normalized = normalizeJsonArtifactSpec(spec, title);
     logArtifactTelemetry({
       source: "server",
-      event: "tool.createJsonArtifact",
+      event: normalized.recovered ? "tool.createJsonArtifact.recovered_invalid_spec" : "tool.createJsonArtifact",
       title,
-      ...summarizeSpec(typedSpec),
+      reason: normalized.reason,
+      ...summarizeSpec(normalized.spec),
       ok: true,
     });
 
     return {
       kind: "json-render-artifact" as const,
       title,
-      spec: typedSpec,
+      spec: normalized.spec,
+      recovered: normalized.recovered,
+      recoveryReason: normalized.reason,
       createdAt: new Date().toISOString(),
     };
   },

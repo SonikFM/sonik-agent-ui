@@ -97,6 +97,7 @@
   let sessionRailBusy = $state(false);
   let sessionRailError = $state<string | null>(null);
   let persistedMessageIds = new SvelteSet<string>();
+  let reportedToolErrorKeys = new SvelteSet<string>();
   let messagePersistInFlight = false;
   let pendingDocumentSnapshot: ActiveDocumentSnapshot | null = null;
   let documentPersistPromise: Promise<void> | null = null;
@@ -247,6 +248,26 @@
       messageId: latestDocumentArtifact.id,
       ok: true,
     });
+  });
+
+  $effect(() => {
+    for (const message of conversation.messages) {
+      if (!message || message.role !== "assistant") continue;
+      for (const part of snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string; errorText?: string }>) {
+        if (!part.type?.startsWith("tool-") || part.state !== "output-error") continue;
+        const key = `${message.id}:${part.toolCallId ?? part.type}`;
+        if (reportedToolErrorKeys.has(key)) continue;
+        reportedToolErrorKeys.add(key);
+        logArtifactTelemetry({
+          source: "client",
+          event: "chat.tool.output_error",
+          messageId: message.id,
+          reason: part.type.replace(/^tool-/, ""),
+          error: part.errorText,
+          ok: false,
+        });
+      }
+    }
   });
 
   $effect(() => {
@@ -1062,6 +1083,7 @@
   function handleClear() {
     conversation.messages = [];
     persistedMessageIds.clear();
+    reportedToolErrorKeys.clear();
     lastPersistStatus = "idle";
     input = "";
     activeArtifact = null;
