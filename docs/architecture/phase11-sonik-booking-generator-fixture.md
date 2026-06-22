@@ -30,7 +30,8 @@ pnpm check:commands:sonik-booking
 
 Output:
 
-- `tests/fixtures/generated/sonik-booking-command-artifacts.generated.json`
+- `tests/fixtures/generated/sonik-booking-command-artifacts.generated.json` — deterministic fixture/gate copy
+- `apps/standalone-sveltekit/src/lib/server/generated/sonik-booking-command-artifacts.generated.json` — runtime copy consumed by the standalone app host adapter
 
 The generated artifact includes:
 
@@ -45,14 +46,17 @@ The generated artifact includes:
 The fixture is discovery/projection only:
 
 - all generated booking commands use `source: "openapi"`
-- all generated booking commands use `runtimeStatus: "shadow"`
+- all generated booking commands keep descriptor `runtimeStatus: "shadow"`
+- source service posture is preserved separately as `metadata.sourceRuntimeStatus`, `metadata.sourceRuntimeAdapter`, and `metadata.sourceMounted`
 - reads are searchable/learnable but non-executable until a host runtime adapter mounts them
 - writes/destructive commands are approval/commit-gated and still non-executable while shadowed
 - Sonik-specific family names and CLI/MCP names live in host config, not generator core
 
 ## Test coverage
 
-`tests/unit/sonik-booking-command-fixture.test.mjs` regenerates the fixture and deep-compares it to the checked artifact. It also verifies operation parity, host family provenance, public/authenticated security posture, schema-free indexes, descriptor learning, shadow execution denial, and CLI/MCP projection metadata.
+`tests/unit/sonik-booking-command-fixture.test.mjs` regenerates the fixture and deep-compares it to the checked artifact. It also verifies operation parity, host family provenance, public/authenticated security posture, preserved mounted/shadow source posture, schema-free indexes, descriptor learning, shadow execution denial, and CLI/MCP projection metadata.
+
+`tests/unit/tool-contracts.test.mjs` verifies the app host-runtime seam: generated mounted read descriptors can be composed into the host catalog, unavailable runtime configuration returns a typed `runtime_unavailable` receipt, and a configured fetch-backed booking runtime executes `booking.ping` through `executeHostCatalogCommand` without changing the generated descriptor.
 
 
 ## CI/CD deterministic gate
@@ -81,7 +85,18 @@ pnpm check:commands:sonik-booking
 The intended ORPC gate remains:
 
 ```text
-ORPC contracts -> OpenAPI document -> command generator -> CommandCatalog/FamilyRegistry/projections -> host runtime adapter mount
+ORPC contracts -> OpenAPI document -> command generator -> CommandCatalog/FamilyRegistry/projections -> app runtime copy -> host runtime adapter mount
 ```
 
 A PR that changes ORPC/OpenAPI behavior should include the generated command artifact diff. CI should fail when `pnpm check:commands:sonik-booking` detects drift.
+
+## Runtime mount seam v0
+
+The standalone app mounts only a small safe read subset from the generated catalog:
+
+- `booking.ping`
+- `booking.list.contexts`
+- `booking.list.organizer.templates`
+- `booking.get.organizer.template`
+
+The runtime adapter is transport-driven from generated OpenAPI method/path metadata and is enabled by `SONIK_BOOKING_API_BASE_URL` / `BOOKING_SERVICE_BASE_URL`. If no base URL is configured, command execution returns a typed unavailable receipt instead of fixture data. The v0 live seam also uses explicit per-command input policies for the mounted read subset so unknown parameters, invalid `kind` values, and unsafe path/query values are rejected before outbound fetch. Writes and destructive commands remain descriptor-only until an explicit trusted commit adapter is added.

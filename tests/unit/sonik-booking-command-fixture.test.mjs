@@ -59,6 +59,11 @@ for (const id of [
 assert.equal(commands.every((command) => command.source === "openapi"), true, "booking fixture commands remain OpenAPI metadata, not local UI tools");
 assert.equal(commands.every((command) => command.transport.runtimeStatus === "shadow"), true, "booking fixture commands are non-executable until host runtime mounting");
 assert.equal(commands.every((command) => command.metadata.generated === true && command.metadata.sourceAdapter === "openapi" && typeof command.metadata.sourceOperationId === "string"), true, "every command records generated provenance");
+const sourcePostureCounts = commands.reduce((counts, command) => {
+  counts[command.metadata.sourceRuntimeStatus] = (counts[command.metadata.sourceRuntimeStatus] ?? 0) + 1;
+  return counts;
+}, {});
+assert.deepEqual(sourcePostureCounts, { mounted: 50, shadow: 21 }, "generated commands preserve source service mounted/shadow posture separately from executable runtime status");
 assert.equal(commands.some((command) => command.familyId === "booking-media"), true, "host config can inject product families outside core");
 assert.equal(registry.families.every((family) => family.source === "host"), true, "Sonik booking families are host-provided");
 
@@ -67,6 +72,10 @@ const createBooking = command("booking.create.booking");
 const deleteMedia = command("booking.delete.media.asset");
 const listTemplates = command("booking.list.organizer.templates");
 assert.equal(ping.auth.required, false, "public OpenAPI security remains public");
+assert.equal(ping.metadata.sourceRuntimeStatus, "mounted");
+assert.equal(ping.metadata.sourceRuntimeAdapter, "mounted");
+assert.equal(ping.metadata.sourceMounted, true);
+assert.equal(command("booking.search.customers").metadata.sourceRuntimeStatus, "shadow", "future customer contracts remain marked as source shadow");
 assert.equal(listTemplates.auth.required, false, "public template endpoints remain public");
 assert.equal(createBooking.auth.required, true, "Better Auth session operations require auth");
 assert.equal(createBooking.auth.orgScoped, true, "authenticated booking operations remain org-scoped");

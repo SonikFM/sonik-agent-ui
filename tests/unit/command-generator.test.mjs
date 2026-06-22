@@ -34,6 +34,8 @@ const document = {
         description: "List venue records for the active organization.",
         tags: ["venue"],
         responses: { 200: { description: "Venues" } },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted",
       },
       post: {
         operationId: "venue.locations.create",
@@ -122,6 +124,10 @@ assert.equal(list.auth.orgScoped, true);
 assert.deepEqual(list.metadata.accessibility, { label: "List venues", description: "List venue records", actionLabel: "List venues" });
 assert.equal(list.metadata.generated, true);
 assert.equal(list.metadata.sourceAdapter, "openapi");
+assert.equal(list.metadata.sourceRuntimeStatus, "mounted");
+assert.equal(list.metadata.sourceRuntimeAdapter, "mounted");
+assert.equal(list.metadata.sourceMounted, true);
+assert.equal(list.transport.runtimeStatus, "shadow", "source mounted metadata does not make generated descriptors executable");
 assert.equal(list.metadata.familyId, "venue");
 assert.equal(list.metadata.loadPolicy.mode, "surface-eager");
 assert.deepEqual(list.contextHints.requiredScopes, ["venue:read"]);
@@ -163,6 +169,7 @@ assert.equal(postList.approval, "required", "HTTP POST remains approval-gated ev
 assert.equal(postList.policy.readOnly, false, "HTTP POST generated commands are not read-only");
 assert.equal(postList.source, "openapi", "OpenAPI generator ignores local-ui source shortcuts");
 assert.equal(mountedLooking.transport.runtimeStatus, "shadow", "OpenAPI generator refuses mounted runtime status shortcuts");
+assert.equal(mountedLooking.metadata.sourceRuntimeStatus, "unknown", "x-command-runtime-status does not masquerade as source runtime posture");
 assert.equal(executeCatalogCommand(safetyOutput.catalog, "venue.locations.mounted", {}, { source: "agent-ui", requestId: "safety-mounted" }).ok, false, "generated OpenAPI command cannot execute without a runtime adapter even when source/status inputs request shortcuts");
 
 const startupIndex = createStartupCommandIndex(output.catalog, { registry: output.registry, limit: 10 });
@@ -267,6 +274,7 @@ assert.deepEqual(createCliProjection.invocation.cli, { command: "host-agent comm
 const listMcpProjection = output.projections.mcp.commands.find((command) => command.commandId === "venue.locations.list");
 assert.equal(listMcpProjection.invocation.mcp.toolName, "fixture_command_execute");
 assert.equal(listMcpProjection.provenance.sourceAdapter, "openapi");
+assert.equal(output.projections.cli.commands.find((entry) => entry.commandId === "venue.locations.list").provenance.sourceRuntimeStatus, "mounted");
 
 const cliDescriptor = createCliDescriptorSourceManifest({
   provider: "cli-source-fixture",

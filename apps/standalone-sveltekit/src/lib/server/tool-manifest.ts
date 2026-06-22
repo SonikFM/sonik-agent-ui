@@ -31,6 +31,7 @@ export type StandaloneToolManifestInput = {
   includeHostRuntime?: boolean;
   hostSession?: HostSessionEnvelope | null;
   hostSessionMode?: "anonymous" | "standalone-demo" | "amplify-embedded";
+  bookingServiceBaseUrl?: string | null;
 };
 
 export function createStandaloneAvailableToolManifest(input: StandaloneToolManifestInput = {}): ToolManifest {

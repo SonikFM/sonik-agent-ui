@@ -32,6 +32,7 @@
     "PUBLIC_AGENT_UI_ALLOWED_HOST_ORIGINS": "https://*.workers.dev,https://*.sonik.fm",
     "AI_GATEWAY_MODEL": "deepseek/deepseek-v4-flash",
     "RATE_LIMIT_PER_MINUTE": "10",
-    "RATE_LIMIT_PER_DAY": "100"
+    "RATE_LIMIT_PER_DAY": "100",
+    "SONIK_BOOKING_API_BASE_URL": "https://sonik-booking-app.liam-trampota.workers.dev"
   }
 }

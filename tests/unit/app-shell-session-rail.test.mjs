@@ -101,7 +101,7 @@ assert.equal(generateRoute.includes("workspace.sessionId"), true, "generate rout
 assert.equal(generateRoute.includes("activeDocument?.session_id ?? workspaceSessionId"), true, "generate telemetry should prefer active document session and fall back to shell session");
 assert.equal(generateRoute.includes("includeHostRuntime: true"), true, "generate route should opt into host-composed command indexes without changing the neutral default helper");
 assert.equal(generateRoute.includes('hostSessionMode: "standalone-demo"'), true, "generate route should opt into fixture host auth explicitly instead of relying on hidden trusted defaults");
-assert.equal(generateRoute.includes("createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext })"), true, "agent tools should receive active workspace session id and page context");
+assert.equal(generateRoute.includes("createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl })"), true, "agent tools should receive active workspace session id, page context, and configured booking runtime base URL");
 assert.equal(generateRoute.includes("CURRENT HOST/PAGE CONTEXT:"), true, "generate route should inject host page context as first-class model context, not only telemetry/tool metadata");
 assert.equal(generateRoute.includes("If the user asks where they are"), true, "generate route should instruct page-location questions to answer from the donated page context");
 assert.equal(generateRoute.includes("visibleActions: routeStringArray(record.visibleActions"), true, "generate route should preserve host-visible action labels in the page context summary");

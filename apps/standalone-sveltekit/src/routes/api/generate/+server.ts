@@ -1,3 +1,4 @@
+import { env } from "$env/dynamic/private";
 import { createAgent } from "$lib/agent";
 import { minuteRateLimit, dailyRateLimit } from "$lib/rate-limit";
 import {
@@ -160,6 +161,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const pageContext = resolveAgentPageContext(body?.pageContext ?? body?.workspace?.pageContext, { activeDocument });
   const telemetryPageContext = sanitizePageContext(body?.pageContext ?? body?.workspace?.pageContext);
   const pageContextSource = resolvePageContextSource(body, activeDocument);
+  const bookingServiceBaseUrl = env.SONIK_BOOKING_API_BASE_URL ?? env.BOOKING_SERVICE_BASE_URL ?? null;
   const startedAt = Date.now();
 
   if (!uiMessages || !Array.isArray(uiMessages) || uiMessages.length === 0) {
@@ -192,7 +194,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const modelMessages = await convertToModelMessages(uiMessages);
   const contextSummary = summarizeWorkspaceContext({ activeDocument });
-  const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSessionMode: "standalone-demo", sessionId: telemetrySessionId, pageContext });
+  const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSessionMode: "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl });
   const pageContextSummary = createCurrentPageContextSummary(pageContext);
   const systemContext = [contextSummary, pageContextSummary, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
@@ -234,7 +236,7 @@ export const POST: RequestHandler = async ({ request }) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext });
+  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

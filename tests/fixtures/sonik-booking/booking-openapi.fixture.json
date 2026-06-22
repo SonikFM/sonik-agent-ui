@@ -19,7 +19,9 @@
         "parameters": [],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/ping responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/contexts": {
@@ -40,7 +42,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/contexts responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListContexts",
@@ -63,7 +67,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/contexts responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/event-shadows/contexts": {
@@ -84,7 +90,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/event-shadows/contexts responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/contexts/{contextId}": {
@@ -109,7 +117,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/contexts/{contextId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "patch": {
         "operationId": "bookingUpdateContext",
@@ -135,7 +145,9 @@
         },
         "responses": {
           "x-fixture-ref": "PATCH /api/v1/booking/contexts/{contextId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/contexts/{contextId}/schedule-rules": {
@@ -163,7 +175,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/contexts/{contextId}/schedule-rules responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListScheduleRules",
@@ -186,7 +200,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/contexts/{contextId}/schedule-rules responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId}": {
@@ -219,7 +235,9 @@
         },
         "responses": {
           "x-fixture-ref": "PATCH /api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "delete": {
         "operationId": "bookingDeleteScheduleRule",
@@ -247,7 +265,9 @@
         ],
         "responses": {
           "x-fixture-ref": "DELETE /api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/contexts/{contextId}/availability": {
@@ -302,7 +322,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/contexts/{contextId}/availability responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings": {
@@ -323,7 +345,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/bookings responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListBookings",
@@ -366,7 +390,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/bookings responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings/{bookingId}": {
@@ -391,7 +417,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/bookings/{bookingId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings/{bookingId}/cancel": {
@@ -416,7 +444,9 @@
         ],
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/cancel responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings/{bookingId}/confirm": {
@@ -441,7 +471,9 @@
         ],
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/confirm responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings/{bookingId}/reschedule": {
@@ -469,7 +501,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/reschedule responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings/{bookingId}/party": {
@@ -494,7 +528,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/bookings/{bookingId}/party responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "post": {
         "operationId": "bookingAddPartyMember",
@@ -520,7 +556,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/party responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings/{bookingId}/party/{partyMemberId}": {
@@ -550,7 +588,9 @@
         ],
         "responses": {
           "x-fixture-ref": "DELETE /api/v1/booking/bookings/{bookingId}/party/{partyMemberId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings/{bookingId}/resources": {
@@ -575,7 +615,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/bookings/{bookingId}/resources responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "post": {
         "operationId": "bookingAssignResource",
@@ -601,7 +643,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/resources responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/bookings/{bookingId}/resources/{assignmentId}": {
@@ -631,7 +675,9 @@
         ],
         "responses": {
           "x-fixture-ref": "DELETE /api/v1/booking/bookings/{bookingId}/resources/{assignmentId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/customers": {
@@ -666,7 +712,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/customers responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       },
       "post": {
         "operationId": "bookingCreateCustomer",
@@ -685,7 +733,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/customers responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/customers/{customerId}": {
@@ -710,7 +760,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/customers/{customerId} responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       },
       "patch": {
         "operationId": "bookingUpdateCustomer",
@@ -736,7 +788,9 @@
         },
         "responses": {
           "x-fixture-ref": "PATCH /api/v1/booking/customers/{customerId} responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/house-accounts": {
@@ -758,7 +812,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/house-accounts responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/house-accounts/{accountId}": {
@@ -783,7 +839,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/house-accounts/{accountId} responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/house-accounts/{accountId}/entries": {
@@ -838,7 +896,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/house-accounts/{accountId}/entries responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       },
       "post": {
         "operationId": "bookingAddHouseAccountEntry",
@@ -864,7 +924,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/house-accounts/{accountId}/entries responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/house-accounts/{accountId}/statement": {
@@ -899,7 +961,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/house-accounts/{accountId}/statement responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/customers/{customerId}/profile": {
@@ -924,7 +988,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/customers/{customerId}/profile responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       },
       "patch": {
         "operationId": "bookingUpdateCustomerProfile",
@@ -950,7 +1016,9 @@
         },
         "responses": {
           "x-fixture-ref": "PATCH /api/v1/booking/customers/{customerId}/profile responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/customers/{customerId}/insights": {
@@ -975,7 +1043,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/customers/{customerId}/insights responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/resources/types": {
@@ -996,7 +1066,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/resources/types responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListResourceTypes",
@@ -1019,7 +1091,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/resources/types responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/resources/units": {
@@ -1040,7 +1114,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/resources/units responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListResourceUnits",
@@ -1078,7 +1154,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/resources/units responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/resources/blocks": {
@@ -1099,7 +1177,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/resources/blocks responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListResourceBlocks",
@@ -1132,7 +1212,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/resources/blocks responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/resources/combinations": {
@@ -1153,7 +1235,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/resources/combinations responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListResourceCombinations",
@@ -1176,7 +1260,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/resources/combinations responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/waitlist": {
@@ -1197,7 +1283,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/waitlist responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       },
       "get": {
         "operationId": "bookingListWaitlistEntries",
@@ -1225,7 +1313,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/waitlist responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/waitlist/{entryId}": {
@@ -1250,7 +1340,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/waitlist/{entryId} responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       },
       "delete": {
         "operationId": "bookingDeleteWaitlistEntry",
@@ -1273,7 +1365,9 @@
         ],
         "responses": {
           "x-fixture-ref": "DELETE /api/v1/booking/waitlist/{entryId} responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/waitlist/{entryId}/offer": {
@@ -1301,7 +1395,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/waitlist/{entryId}/offer responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/waitlist/{entryId}/claim": {
@@ -1329,7 +1425,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/waitlist/{entryId}/claim responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/waitlist/{entryId}/expire": {
@@ -1354,7 +1452,9 @@
         ],
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/waitlist/{entryId}/expire responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/policies": {
@@ -1375,7 +1475,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/policies responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListPolicies",
@@ -1418,7 +1520,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/policies responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/policies/{policyId}": {
@@ -1446,7 +1550,9 @@
         },
         "responses": {
           "x-fixture-ref": "PATCH /api/v1/booking/policies/{policyId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/rate-plans": {
@@ -1467,7 +1573,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/rate-plans responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "get": {
         "operationId": "bookingListRatePlans",
@@ -1505,7 +1613,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/rate-plans responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/rate-plans/{ratePlanId}": {
@@ -1533,7 +1643,9 @@
         },
         "responses": {
           "x-fixture-ref": "PATCH /api/v1/booking/rate-plans/{ratePlanId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/holds": {
@@ -1554,7 +1666,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/holds responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/holds/{holdId}": {
@@ -1579,7 +1693,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/holds/{holdId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/holds/{holdId}/commit": {
@@ -1607,7 +1723,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/commit responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/holds/{holdId}/release": {
@@ -1635,7 +1753,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/release responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/holds/{holdId}/extend": {
@@ -1663,7 +1783,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/extend responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/quotes": {
@@ -1684,7 +1806,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/quotes responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/quotes/{quoteId}": {
@@ -1709,7 +1833,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/quotes/{quoteId} responses"
-        }
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
       }
     },
     "/api/v1/booking/templates": {
@@ -1724,7 +1850,9 @@
         "parameters": [],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/templates responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/templates/{slug}": {
@@ -1745,7 +1873,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/templates/{slug} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/templates/{slug}/dry-run": {
@@ -1771,7 +1901,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/templates/{slug}/dry-run responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/templates/{slug}/browser-handoff": {
@@ -1797,7 +1929,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/templates/{slug}/browser-handoff responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/media/assets": {
@@ -1822,7 +1956,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/media/assets responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "post": {
         "operationId": "bookingUploadMediaAsset",
@@ -1841,7 +1977,9 @@
         },
         "responses": {
           "x-fixture-ref": "POST /api/v1/booking/media/assets responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     },
     "/api/v1/booking/media/assets/{assetId}": {
@@ -1871,7 +2009,9 @@
         ],
         "responses": {
           "x-fixture-ref": "GET /api/v1/booking/media/assets/{assetId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       },
       "delete": {
         "operationId": "bookingDeleteMediaAsset",
@@ -1894,7 +2034,9 @@
         ],
         "responses": {
           "x-fixture-ref": "DELETE /api/v1/booking/media/assets/{assetId} responses"
-        }
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
       }
     }
   },

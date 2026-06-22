@@ -36,6 +36,10 @@ import {
   createStandaloneCommandIndexSummary,
 } from "../../apps/standalone-sveltekit/src/lib/server/tool-manifest.ts";
 import {
+  GENERATED_BOOKING_LIST_CONTEXTS_COMMAND_ID,
+  GENERATED_BOOKING_PING_COMMAND_ID,
+  GENERATED_BOOKING_TEMPLATE_COMMAND_ID,
+  GENERATED_BOOKING_RUNTIME_PROVIDER,
   STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID,
   STANDALONE_DEMO_BOOKING_WRITE_COMMAND_ID,
   STANDALONE_HOST_RUNTIME_PROVIDER,
@@ -774,7 +778,8 @@ const anonymousHostRuntimeBundle = createStandaloneHostCommandRuntimeBundle({
   pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
 }, "2026-06-20T00:00:00.000Z");
 assert.equal(anonymousHostRuntimeBundle.catalog.commands.some((command) => command.id === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID), false, "anonymous host runtime bundle should not compose host-scoped booking commands");
-assert.equal(anonymousHostRuntimeBundle.runtimeAdapters.length, 0, "anonymous host runtime bundle should not mount host runtime adapters");
+assert.equal(anonymousHostRuntimeBundle.runtimeAdapters.some((adapter) => adapter.bindings.some((binding) => binding.commandId === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID)), false, "anonymous host runtime bundle should not mount scoped demo booking adapters");
+assert.equal(anonymousHostRuntimeBundle.catalog.commands.some((command) => command.id === GENERATED_BOOKING_PING_COMMAND_ID), true, "anonymous host runtime bundle may expose public generated booking health commands");
 assert.equal(createStandaloneHostCommandIndex({
   sessionId: "s-anon",
   pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
@@ -794,6 +799,78 @@ assert.equal(createStandaloneHostCommandRuntimeBundle({
   scopes: ["booking:read"],
   pageContext: { surface: "booking-console", commandFamilies: ["booking"] },
 }, "2026-06-20T00:00:00.000Z").catalog.commands.some((command) => command.id === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID), true, "server-resolved Amplify-style org/scopes should enable host booking command composition");
+
+const generatedNoBaseBundle = createStandaloneHostCommandRuntimeBundle({
+  sessionId: "s-generated-no-base",
+  hostSessionMode: "standalone-demo",
+  pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
+}, "2026-06-20T00:00:00.000Z");
+assert.equal(generatedNoBaseBundle.catalog.commands.some((command) => command.id === GENERATED_BOOKING_PING_COMMAND_ID && command.metadata.mountedFromGeneratedDescriptor === true), true, "generated mounted booking read descriptors should compose through the host adapter seam");
+const generatedNoBaseReceipt = await executeHostCatalogCommand({
+  catalog: generatedNoBaseBundle.catalog,
+  commandId: GENERATED_BOOKING_PING_COMMAND_ID,
+  commandInput: {},
+  runtimeAdapters: generatedNoBaseBundle.runtimeAdapters,
+  execution: { ...generatedNoBaseBundle.executionContext, requestId: "req_generated_no_base" },
+});
+assert.equal(generatedNoBaseReceipt.ok, false, "generated booking read commands need configured runtime transport before execution");
+assert.equal(generatedNoBaseReceipt.policy.reasons.includes("runtime_unavailable"), true);
+const generatedLiveBundle = createStandaloneHostCommandRuntimeBundle({
+  sessionId: "s-generated-live",
+  hostSessionMode: "standalone-demo",
+  bookingServiceBaseUrl: "https://booking.test/root/",
+  fetcher: async (url, init) => new Response(JSON.stringify({ service: "sonik-booking-service", ok: true, url: String(url), requestId: init?.headers?.["x-sonik-request-id"] }), { status: 200, headers: { "content-type": "application/json" } }),
+  pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
+}, "2026-06-20T00:00:00.000Z");
+const generatedLiveReceipt = await executeHostCatalogCommand({
+  catalog: generatedLiveBundle.catalog,
+  commandId: GENERATED_BOOKING_PING_COMMAND_ID,
+  commandInput: {},
+  runtimeAdapters: generatedLiveBundle.runtimeAdapters,
+  execution: { ...generatedLiveBundle.executionContext, requestId: "req_generated_live" },
+});
+assert.equal(generatedLiveReceipt.ok, true, "configured generated booking read command should execute through the runtime adapter");
+assert.equal(generatedLiveReceipt.trace.provider, GENERATED_BOOKING_RUNTIME_PROVIDER);
+assert.equal(generatedLiveReceipt.summary.body.service, "sonik-booking-service");
+assert.equal(generatedLiveReceipt.summary.path, "/api/v1/booking/ping");
+assert.equal(generatedLiveReceipt.summary.url, "/root/api/v1/booking/ping", "live booking receipts should not expose the configured origin");
+const generatedUnknownInputReceipt = await executeHostCatalogCommand({
+  catalog: generatedLiveBundle.catalog,
+  commandId: GENERATED_BOOKING_PING_COMMAND_ID,
+  commandInput: { unexpected: "value" },
+  runtimeAdapters: generatedLiveBundle.runtimeAdapters,
+  execution: { ...generatedLiveBundle.executionContext, requestId: "req_generated_unknown_input" },
+});
+assert.equal(generatedUnknownInputReceipt.ok, false, "generated booking runtime should reject unknown parameters before outbound fetch");
+assert.equal(generatedUnknownInputReceipt.policy.reasons.includes("host_runtime_error"), true);
+assert.match(generatedUnknownInputReceipt.summary.error, /Unsupported generated booking parameter/);
+const generatedContextsReceipt = await executeHostCatalogCommand({
+  catalog: generatedLiveBundle.catalog,
+  commandId: GENERATED_BOOKING_LIST_CONTEXTS_COMMAND_ID,
+  commandInput: { kind: "event" },
+  runtimeAdapters: generatedLiveBundle.runtimeAdapters,
+  execution: { ...generatedLiveBundle.executionContext, requestId: "req_generated_contexts" },
+});
+assert.equal(generatedContextsReceipt.ok, true, "generated booking runtime should allow declared query parameters");
+assert.equal(generatedContextsReceipt.summary.url, "/root/api/v1/booking/contexts?kind=event");
+const generatedInvalidContextReceipt = await executeHostCatalogCommand({
+  catalog: generatedLiveBundle.catalog,
+  commandId: GENERATED_BOOKING_LIST_CONTEXTS_COMMAND_ID,
+  commandInput: { kind: "venue" },
+  runtimeAdapters: generatedLiveBundle.runtimeAdapters,
+  execution: { ...generatedLiveBundle.executionContext, requestId: "req_generated_contexts_invalid" },
+});
+assert.equal(generatedInvalidContextReceipt.ok, false, "generated booking runtime should reject undeclared enum-like query values");
+assert.match(generatedInvalidContextReceipt.summary.error, /Unsupported generated booking query value/);
+const generatedTemplateReceipt = await executeHostCatalogCommand({
+  catalog: generatedLiveBundle.catalog,
+  commandId: GENERATED_BOOKING_TEMPLATE_COMMAND_ID,
+  commandInput: { slug: "event_starter-1" },
+  runtimeAdapters: generatedLiveBundle.runtimeAdapters,
+  execution: { ...generatedLiveBundle.executionContext, requestId: "req_generated_template" },
+});
+assert.equal(generatedTemplateReceipt.ok, true, "generated booking runtime should allow declared path parameters");
+assert.equal(generatedTemplateReceipt.summary.url, "/root/api/v1/booking/templates/event_starter-1");
 
 const hostRuntimeBundle = createStandaloneHostCommandRuntimeBundle({
   sessionId: "s-host-runtime",
@@ -837,7 +914,8 @@ const writeScopedHostRuntimeBundle = createStandaloneHostCommandRuntimeBundle({
   pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
 }, "2026-06-20T00:00:00.000Z");
 assert.equal(writeScopedHostRuntimeBundle.catalog.commands.some((command) => command.id === STANDALONE_DEMO_BOOKING_WRITE_COMMAND_ID), true, "write-scoped host session can discover write-only booking command metadata");
-assert.deepEqual(writeScopedHostRuntimeBundle.runtimeAdapters.flatMap((adapter) => adapter.bindings.map((binding) => binding.commandId)), [STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID], "runtime mounting should select only bindings that correspond to visible catalog commands");
+assert.equal(writeScopedHostRuntimeBundle.runtimeAdapters.flatMap((adapter) => adapter.bindings.map((binding) => binding.commandId)).includes(STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID), true, "runtime mounting should select visible scoped demo read bindings");
+assert.equal(writeScopedHostRuntimeBundle.runtimeAdapters.some((adapter) => adapter.provider === GENERATED_BOOKING_RUNTIME_PROVIDER), true, "runtime mounting should also select generated booking read bindings from generated descriptors");
 const writeOnlyHostRuntimeIndex = createStandaloneHostCommandIndex({
   sessionId: "s-host-runtime-write-only",
   hostSessionMode: "standalone-demo",
@@ -852,7 +930,7 @@ const writeOnlyHostRuntimeBundle = createStandaloneHostCommandRuntimeBundle({
   pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
 }, "2026-06-20T00:00:00.000Z");
 assert.equal(writeOnlyHostRuntimeBundle.catalog.commands.some((command) => command.id === STANDALONE_DEMO_BOOKING_WRITE_COMMAND_ID), true, "write-only host sessions should compose write-only booking command metadata");
-assert.equal(writeOnlyHostRuntimeBundle.runtimeAdapters.length, 0, "write-only host sessions should not mount unrelated read runtime bindings");
+assert.equal(writeOnlyHostRuntimeBundle.runtimeAdapters.some((adapter) => adapter.bindings.some((binding) => binding.commandId === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID)), false, "write-only host sessions should not mount unrelated scoped demo read runtime bindings");
 const injectedHostReadCommand = {
   ...bookingHostReadCommand,
   id: "injected.demo.read",

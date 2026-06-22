@@ -141,6 +141,8 @@ export type CommandProjectionEntry = {
     transportProcedure?: string;
     method?: string;
     path?: string;
+    sourceRuntimeStatus?: "mounted" | "shadow" | "unknown";
+    sourceRuntimeAdapter?: string;
   };
 };
 
@@ -226,6 +228,8 @@ function createGeneratorToolManifestFromOpenApi(document: OpenApiDocumentLike, c
       const accessibility = resolveAccessibility(operation, override, commandId);
       const capabilities = resolveCapabilities(operation, override, config, familyId);
       const runtimeStatus = normalizeGeneratedRuntimeStatus(override.runtimeStatus ?? operation["x-command-runtime-status"] ?? config.defaultRuntimeStatus ?? "shadow");
+      const sourceRuntimeStatus = normalizeSourceRuntimeStatus(operation["x-sonik-status"]);
+      const sourceRuntimeAdapter = stringValue(operation["x-sonik-adapter"]);
       const uiTargets = override.uiTargets ?? config.defaultUiTargets ?? defaultTargetsForEffect(effect);
       const title = override.title ?? operation.summary ?? humanizeCommandId(commandId);
       const description = override.description ?? operation.description ?? title;
@@ -256,6 +260,9 @@ function createGeneratorToolManifestFromOpenApi(document: OpenApiDocumentLike, c
           commandShape: override.shape,
           projection: override.projection,
           sourceOperationId: operationId,
+          sourceRuntimeStatus,
+          sourceRuntimeAdapter,
+          sourceMounted: sourceRuntimeStatus === "mounted" && sourceRuntimeAdapter === "mounted",
         },
       });
     }
@@ -348,6 +355,8 @@ function projectCommand(command: CommandDescriptor, config: CommandGeneratorConf
       transportProcedure: command.transport.procedure,
       method: command.transport.method,
       path: command.transport.path,
+      sourceRuntimeStatus: sourceRuntimeStatusFromMetadata(command.metadata.sourceRuntimeStatus),
+      sourceRuntimeAdapter: stringValue(command.metadata.sourceRuntimeAdapter),
     },
   };
 }
@@ -452,6 +461,15 @@ function inferSafeOpenApiEffect(commandId: string, method: string): ToolEffect {
 
 function normalizeGeneratedRuntimeStatus(value: unknown): GeneratedRuntimeStatus {
   return value === "shadow" || value === "unknown" ? value : "shadow";
+}
+
+function normalizeSourceRuntimeStatus(value: unknown): "mounted" | "shadow" | "unknown" {
+  return value === "mounted" || value === "shadow" ? value : "unknown";
+}
+
+function sourceRuntimeStatusFromMetadata(value: unknown): "mounted" | "shadow" | "unknown" | undefined {
+  const normalized = normalizeSourceRuntimeStatus(value);
+  return normalized === "unknown" ? undefined : normalized;
 }
 
 function normalizeGeneratedOpenApiSource(source: CommandGeneratorConfig["toolSource"]): ToolSource {

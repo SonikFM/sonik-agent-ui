@@ -89,12 +89,12 @@ ${explorerCatalog.prompt({
   ],
 })}`;
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext };
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; bookingServiceBaseUrl?: string | null };
 
 export function createAgent(context: AgentRuntimeContext = {}) {
   const documentTools = createDocumentTools(context);
   const toolManifestTools = createToolManifestTools();
-  const commandCatalogTools = createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext });
+  const commandCatalogTools = createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, bookingServiceBaseUrl: context.bookingServiceBaseUrl });
   return new ToolLoopAgent({
     model: gateway(MODEL_ID),
     instructions: AGENT_INSTRUCTIONS,
