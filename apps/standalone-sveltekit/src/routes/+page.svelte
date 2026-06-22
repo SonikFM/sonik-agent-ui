@@ -26,6 +26,12 @@
   } from "$lib/artifacts/artifact-observability";
   import { CanvasViewport, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent } from "@sonik-agent-ui/workspace-core";
   import type { AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult } from "@sonik-agent-ui/agent-observability";
+  import {
+    isAgentHostPageContextMessage,
+    mergeAgentHostPageContext,
+    sanitizeAgentHostPageContext,
+    type AgentHostPageContext,
+  } from "@sonik-agent-ui/agent-embed";
   import { registry } from "$lib/render/registry";
 
   interface ActiveDocumentSnapshot {
@@ -109,6 +115,7 @@
   let lastConversationTelemetrySignature = "";
   let lastPageContextSignature = "";
   let lastActivityTelemetrySignature = "";
+  let hostPageContext = $state<AgentHostPageContext | null>(null);
   let streamStartedAt = $state<number | null>(null);
   let activityClock = $state(Date.now());
   let lastPersistStatus = $state<AgentUiPageAssertions["lastPersistStatus"]>("idle");
@@ -601,8 +608,56 @@
     };
   }
 
+  function getAllowedAgentHostOrigins(): Set<string> {
+    const origins = new Set<string>();
+    if (typeof window === "undefined") return origins;
+    origins.add(window.location.origin);
+    if (dev) {
+      const configuredOrigin = new URLSearchParams(window.location.search).get("agentUiHostOrigin");
+      if (configuredOrigin) {
+        try {
+          origins.add(new URL(configuredOrigin).origin);
+        } catch (error) {
+          logArtifactTelemetry({ source: "client", event: "host.page_context.origin_ignored", reason: "invalid_configured_origin", error: error instanceof Error ? error.message : String(error), ok: false });
+        }
+      }
+    }
+    return origins;
+  }
+
+  function handleAgentHostMessage(event: MessageEvent): void {
+    const allowedOrigins = getAllowedAgentHostOrigins();
+    if (!allowedOrigins.has(event.origin)) {
+      logArtifactTelemetry({ source: "client", event: "host.page_context.message_ignored", reason: "origin_not_allowed", route: event.origin, ok: false });
+      return;
+    }
+    if (!isAgentHostPageContextMessage(event.data)) {
+      if (event.data && typeof event.data === "object" && "source" in event.data) {
+        logArtifactTelemetry({ source: "client", event: "host.page_context.message_ignored", reason: "invalid_shape", ok: false });
+      }
+      return;
+    }
+    const nextContext = sanitizeAgentHostPageContext(event.data.payload);
+    if (!nextContext) {
+      logArtifactTelemetry({ source: "client", event: "host.page_context.message_ignored", reason: "empty_context", ok: false });
+      return;
+    }
+    hostPageContext = nextContext;
+    logArtifactTelemetry({
+      source: "client",
+      event: "host.page_context.updated",
+      route: nextContext.route,
+      surface: nextContext.surface,
+      commandFamilies: nextContext.commandFamilies,
+      skillFamilies: nextContext.skillFamilies,
+      pageContext: nextContext,
+      ok: true,
+    });
+    syncDevPageContext("host_page_context_updated");
+  }
+
   function createPageContextSnapshot(): AgentUiPageContextSnapshot {
-    return {
+    const localContext: AgentUiPageContextSnapshot = {
       route: "/",
       surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
       pageType: "standalone-agent-workspace",
@@ -621,6 +676,7 @@
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
       at: new Date().toISOString(),
     };
+    return mergeAgentHostPageContext(localContext, hostPageContext) as AgentUiPageContextSnapshot;
   }
 
   function recordConversationLifecycle(reason: string): void {
@@ -737,8 +793,12 @@
     const activityTimer = window.setInterval(() => {
       if (isStreaming) activityClock = Date.now();
     }, 1_000);
+    window.addEventListener("message", handleAgentHostMessage);
     void initializeSessions();
-    return () => window.clearInterval(activityTimer);
+    return () => {
+      window.clearInterval(activityTimer);
+      window.removeEventListener("message", handleAgentHostMessage);
+    };
   });
 
   $effect(() => {

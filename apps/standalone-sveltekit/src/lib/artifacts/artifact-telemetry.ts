@@ -16,6 +16,11 @@ export interface ArtifactTelemetryEvent {
   root?: string;
   elementCount?: number;
   totalMatches?: number;
+  surface?: string;
+  route?: string;
+  commandFamilies?: string[];
+  skillFamilies?: string[];
+  pageContext?: unknown;
   runtimeStatus?: string;
   reason?: string;
   mode?: string;

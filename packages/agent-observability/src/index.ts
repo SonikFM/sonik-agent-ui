@@ -11,6 +11,7 @@ export interface AgentUiPageContextSnapshot {
   theme?: string;
   mode?: string;
   activeSessionId?: string | null;
+  activeEntity?: { type: string; id: string; label?: string };
   activeArtifactId?: string | null;
   activeDocumentId?: string | null;
   artifactType?: string | null;
@@ -234,6 +235,7 @@ export function sanitizePageContext(value: unknown): AgentUiPageContextSnapshot 
     theme: cleanOptionalString(record.theme),
     mode: cleanOptionalString(record.mode),
     activeSessionId: cleanNullableString(record.activeSessionId),
+    activeEntity: sanitizeActiveEntity(record.activeEntity),
     activeArtifactId: cleanNullableString(record.activeArtifactId),
     activeDocumentId: cleanNullableString(record.activeDocumentId),
     artifactType: cleanNullableString(record.artifactType),
@@ -286,6 +288,16 @@ export function readableError(value: unknown): AgentTelemetryErrorPayload {
     };
   }
   return { message: redactTelemetryString(typeof value === "string" ? value : safeStringify(value)) };
+}
+
+function sanitizeActiveEntity(value: unknown): AgentUiPageContextSnapshot["activeEntity"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const type = cleanOptionalString(record.type);
+  const id = cleanOptionalString(record.id);
+  const label = cleanOptionalString(record.label);
+  if (!type || !id) return undefined;
+  return { type, id, ...(label ? { label } : {}) };
 }
 
 function sanitizeTelemetryStringList(value: unknown): string[] | undefined {

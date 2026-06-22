@@ -401,7 +401,7 @@ export type AgentPageContext = {
   route?: string;
   surface?: string;
   pageType?: string;
-  activeEntity?: { type: string; id: string };
+  activeEntity?: { type: string; id: string; label?: string };
   activeArtifactId?: string;
   activeDocumentId?: string;
   artifactType?: string;

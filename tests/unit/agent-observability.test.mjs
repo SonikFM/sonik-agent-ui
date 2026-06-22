@@ -47,11 +47,13 @@ const sampleBearer = `Bearer ${["super", "secret", "value", "123456789"].join("-
     route: "/campaigns/new",
     surface: "wizard",
     activeSessionId: "sess-1",
+    activeEntity: { type: "campaign", id: "cmp_1", label: "Launch Campaign" },
     activeArtifactId: null,
     messageCount: 2,
     commandFamilies: ["booking", "campaign", "", "booking"],
   });
   assert.equal(context?.surface, "wizard");
+  assert.equal(context?.activeEntity?.label, "Launch Campaign");
   assert.equal(context?.activeArtifactId, null);
   assert.deepEqual(context?.commandFamilies, ["booking", "campaign", "booking"]);
 }

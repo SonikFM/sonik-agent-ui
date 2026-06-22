@@ -56,7 +56,8 @@ function resolveActiveEntity(value: unknown): AgentPageContext["activeEntity"] |
   const record = value as Record<string, unknown>;
   const type = optionalRouteString(record.type, "workspace.pageContext.activeEntity.type", PAGE_CONTEXT_FIELD_MAX_CHARS);
   const id = optionalRouteString(record.id, "workspace.pageContext.activeEntity.id", PAGE_CONTEXT_FIELD_MAX_CHARS);
-  return type && id ? { type, id } : undefined;
+  const label = optionalRouteString(record.label, "workspace.pageContext.activeEntity.label", PAGE_CONTEXT_FIELD_MAX_CHARS);
+  return type && id ? { type, id, ...(label ? { label } : {}) } : undefined;
 }
 
 function routeStringArray(value: unknown, field: string): string[] | undefined {
