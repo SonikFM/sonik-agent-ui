@@ -23,6 +23,7 @@
     "typecheck": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
+    "@sonik-agent-ui/agent-embed": "workspace:*",
     "@sonik-agent-ui/artifact-model": "workspace:*"
   },
   "devDependencies": {

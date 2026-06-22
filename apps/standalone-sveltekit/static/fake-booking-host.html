@@ -6,26 +6,44 @@
     <title>Fake Booking Host · Sonik Agent UI Embed</title>
     <style>
       :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      body { margin: 0; background: #f6f2e8; color: #171717; }
-      .shell { display: grid; grid-template-columns: minmax(18rem, 23rem) 1fr; min-height: 100vh; }
+      body { margin: 0; min-height: 100vh; background: #f6f2e8; color: #171717; }
+      .host-shell { display: grid; min-height: 100vh; grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr); }
       aside { border-right: 1px solid rgba(0,0,0,.12); padding: 1rem; background: #fbf8ef; }
-      main { min-height: 100vh; }
-      iframe { width: 100%; height: 100vh; border: 0; display: block; background: white; }
+      main { min-height: 100vh; padding: clamp(1.25rem, 4vw, 4rem); }
+      iframe { width: 100%; height: 100%; border: 0; display: block; background: white; }
       .eyebrow { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: #6a5d48; font-weight: 800; }
       .card { border: 1px solid rgba(0,0,0,.12); border-radius: 1rem; padding: 1rem; background: white; box-shadow: 0 10px 30px rgba(0,0,0,.06); margin-top: 1rem; }
       code { background: #f1eadc; border-radius: .4rem; padding: .1rem .3rem; }
-      button { border: 1px solid rgba(0,0,0,.18); border-radius: .75rem; padding: .7rem .9rem; background: #222; color: white; font-weight: 700; cursor: pointer; }
+      button { border: 1px solid rgba(0,0,0,.18); border-radius: .75rem; padding: .7rem .9rem; background: #222; color: white; font-weight: 800; cursor: pointer; }
+      button.secondary { background: white; color: #222; }
       dl { display: grid; gap: .6rem; }
       dt { color: #6a5d48; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
       dd { margin: 0; font-weight: 700; }
+      .host-actions { position: fixed; right: 1rem; bottom: 1rem; z-index: 40; display: flex; flex-wrap: wrap; gap: .55rem; justify-content: flex-end; }
+      .embed-window { position: fixed; z-index: 35; display: none; overflow: hidden; border: 1px solid rgba(0,0,0,.16); background: white; box-shadow: 0 24px 80px rgba(0,0,0,.22); }
+      .embed-window[data-open="true"] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+      .embed-window[data-mode="chat"] { right: 1rem; bottom: 5rem; width: min(31rem, calc(100vw - 2rem)); height: min(44rem, calc(100vh - 7rem)); border-radius: 1.25rem; }
+      .embed-window[data-mode="canvas"] { inset: 1rem; border-radius: 1rem; }
+      .embed-chrome { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid rgba(0,0,0,.12); padding: .7rem .8rem; background: #fbf8ef; }
+      .embed-title { display: grid; gap: .12rem; min-width: 0; }
+      .embed-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .embed-title span { color: #6a5d48; font-size: .75rem; }
+      .embed-close { border: 1px solid rgba(0,0,0,.14); background: white; color: #222; padding: .45rem .65rem; }
+      .host-placeholder { max-width: 42rem; }
+      .host-placeholder h2 { margin-top: 0; font-size: clamp(2rem, 5vw, 4rem); letter-spacing: -.05em; }
+      @media (max-width: 860px) {
+        .host-shell { grid-template-columns: 1fr; }
+        aside { border-right: 0; border-bottom: 1px solid rgba(0,0,0,.12); }
+        .embed-window[data-mode="canvas"] { inset: .5rem; }
+      }
     </style>
   </head>
   <body>
-    <div class="shell">
+    <div class="host-shell">
       <aside>
         <div class="eyebrow">Fake host harness</div>
         <h1>Booking detail host</h1>
-        <p>This page embeds the standalone Agent UI through an iframe and donates sanitized booking page context over postMessage.</p>
+        <p>This page embeds the standalone Agent UI through launcher-controlled iframe modes and donates sanitized booking page context over postMessage.</p>
         <div class="card">
           <dl>
             <div><dt>Surface</dt><dd>booking-console</dd></div>
@@ -37,20 +55,41 @@
         </div>
       </aside>
       <main>
-        <iframe id="agent-frame" title="Sonik Agent UI embedded workspace"></iframe>
+        <section class="host-placeholder">
+          <div class="eyebrow">Host application</div>
+          <h2>Booking detail workspace</h2>
+          <p>The host page remains primary. Use the floating controls to open a compact chat pane or a full canvas workspace without permanently surrendering the page to the embedded Agent UI.</p>
+          <p><strong>Chat</strong> opens a narrow assistant window. <strong>Canvas</strong> opens the richer artifact/document workspace as a near-fullscreen modal.</p>
+        </section>
       </main>
     </div>
+
+    <div class="host-actions" aria-label="Agent UI launchers">
+      <button id="open-chat" type="button">Chat</button>
+      <button id="open-canvas" type="button" class="secondary">Canvas</button>
+    </div>
+
+    <section id="embed-window" class="embed-window" data-open="false" data-mode="chat" aria-label="Embedded Sonik Agent UI">
+      <div class="embed-chrome">
+        <div class="embed-title">
+          <strong id="embed-title">Sonik Agent UI</strong>
+          <span id="embed-subtitle">Embedded chat</span>
+        </div>
+        <button id="close-embed" type="button" class="embed-close">Close</button>
+      </div>
+      <iframe id="agent-frame" title="Sonik Agent UI embedded workspace"></iframe>
+    </section>
+
     <script type="module">
       const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
       const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
       const url = new URL(window.location.href);
       const iframe = document.getElementById("agent-frame");
-      const frameParams = new URLSearchParams();
-      frameParams.set("agentUiHostOrigin", window.location.origin);
-      frameParams.set("theme", url.searchParams.get("theme") ?? "system");
-      if (url.searchParams.get("smokeMockStream") !== "0") frameParams.set("smokeMockStream", url.searchParams.get("smokeMockStream") ?? "1");
-      frameParams.set("smokeRunId", url.searchParams.get("smokeRunId") ?? `fake-booking-host-${Date.now()}`);
-      iframe.src = `/?${frameParams.toString()}`;
+      const embedWindow = document.getElementById("embed-window");
+      const embedTitle = document.getElementById("embed-title");
+      const embedSubtitle = document.getElementById("embed-subtitle");
+      const smokeRunId = url.searchParams.get("smokeRunId") ?? `fake-booking-host-${Date.now()}`;
+      let activeMode = null;
 
       const payload = {
         route: "/booking/bookings/booking_123",
@@ -64,6 +103,17 @@
         at: new Date().toISOString(),
       };
 
+      function frameUrlFor(mode) {
+        const frameParams = new URLSearchParams();
+        frameParams.set("agentUiHostOrigin", window.location.origin);
+        frameParams.set("theme", url.searchParams.get("theme") ?? "system");
+        frameParams.set("embedMode", mode);
+        frameParams.set("rail", mode === "chat" ? "hidden" : "collapsed");
+        if (url.searchParams.get("smokeMockStream") !== "0") frameParams.set("smokeMockStream", url.searchParams.get("smokeMockStream") ?? "1");
+        frameParams.set("smokeRunId", smokeRunId);
+        return `/?${frameParams.toString()}`;
+      }
+
       function postContext() {
         iframe.contentWindow?.postMessage({
           source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
@@ -73,8 +123,37 @@
         }, window.location.origin);
       }
 
-      iframe.addEventListener("load", () => setTimeout(postContext, 250));
+      function scheduleContextPosts() {
+        // The iframe's app listener is installed after hydration, so the host sends
+        // a small bounded burst instead of relying on one load-time postMessage.
+        [250, 900, 1800].forEach((delay) => setTimeout(postContext, delay));
+      }
+
+      function openEmbed(mode) {
+        activeMode = mode === "canvas" ? "canvas" : "chat";
+        document.body.dataset.agentUiOpen = activeMode;
+        embedWindow.dataset.open = "true";
+        embedWindow.dataset.mode = activeMode;
+        embedTitle.textContent = activeMode === "canvas" ? "Sonik Canvas" : "Sonik Chat";
+        embedSubtitle.textContent = activeMode === "canvas" ? "Full workspace modal" : "Compact chat pane";
+        const nextSrc = frameUrlFor(activeMode);
+        if (iframe.getAttribute("src") !== nextSrc) iframe.src = nextSrc;
+        else postContext();
+      }
+
+      function closeEmbed() {
+        embedWindow.dataset.open = "false";
+        delete document.body.dataset.agentUiOpen;
+      }
+
+      iframe.addEventListener("load", scheduleContextPosts);
+      document.getElementById("open-chat").addEventListener("click", () => openEmbed("chat"));
+      document.getElementById("open-canvas").addEventListener("click", () => openEmbed("canvas"));
+      document.getElementById("close-embed").addEventListener("click", closeEmbed);
       document.getElementById("resend").addEventListener("click", postContext);
+
+      const autoOpen = url.searchParams.get("autoOpen");
+      if (autoOpen === "chat" || autoOpen === "canvas") openEmbed(autoOpen);
     </script>
   </body>
 </html>

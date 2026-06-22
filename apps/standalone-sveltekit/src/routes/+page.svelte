@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { dev } from "$app/environment";
+  import type { PageData } from "./$types";
   import { SvelteSet } from "svelte/reactivity";
   import { Chat } from "@ai-sdk/svelte";
   import { DefaultChatTransport } from "ai";
@@ -24,13 +25,16 @@
     type ArtifactObservationEvent,
     type ArtifactStatus,
   } from "$lib/artifacts/artifact-observability";
-  import { CanvasViewport, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent } from "@sonik-agent-ui/workspace-core";
+  import { CanvasViewport, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
   import type { AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult } from "@sonik-agent-ui/agent-observability";
   import {
     isAgentHostPageContextMessage,
     mergeAgentHostPageContext,
+    normalizeAgentEmbedIntent,
     sanitizeAgentHostPageContext,
     type AgentHostPageContext,
+    type AgentEmbedMode,
+    type AgentEmbedRailMode,
   } from "@sonik-agent-ui/agent-embed";
   import { registry } from "$lib/render/registry";
 
@@ -86,6 +90,12 @@
   // Chat Setup
   // =============================================================================
 
+  let { data }: { data: PageData } = $props();
+
+  function getInitialEmbedIntent() {
+    return data.embedIntent;
+  }
+
   let input = $state("");
   const artifactWarehouse = createInMemoryArtifactWarehouse();
 
@@ -116,6 +126,8 @@
   let lastPageContextSignature = "";
   let lastActivityTelemetrySignature = "";
   let hostPageContext = $state<AgentHostPageContext | null>(null);
+  let embedMode = $state<AgentEmbedMode>(getInitialEmbedIntent().mode);
+  let embedRailMode = $state<AgentEmbedRailMode>(getInitialEmbedIntent().railMode);
   let streamStartedAt = $state<number | null>(null);
   let activityClock = $state(Date.now());
   let lastPersistStatus = $state<AgentUiPageAssertions["lastPersistStatus"]>("idle");
@@ -168,7 +180,15 @@
   const documentFrameId = $derived(documentSeed?.id);
   const documentFramePreferredView = $derived(documentPreferredView);
   const documentFrameSubtitle = $derived(`${documentFrameLanguage} · v${documentSeed?.version_count ?? 1}`);
-  const artifactOpen = $derived(Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen));
+  const workspaceLayoutMode = $derived<WorkspaceLayoutMode>(embedMode);
+  const workspaceRailMode = $derived<WorkspaceRailMode>(embedRailMode);
+  const artifactOpen = $derived(
+    embedMode === "chat"
+      ? false
+      : embedMode === "canvas"
+        ? true
+        : Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen),
+  );
   const agentActivity = $derived<AgentActivityStatus | null>(createAgentActivityStatus());
   const pageAssertions = $derived<AgentUiPageAssertions>({
     schemaVersion: "sonik.agent_ui.assertions.v1",
@@ -789,7 +809,20 @@
     }).catch(() => undefined);
   }
 
+  function applyEmbedUrlOptions(): void {
+    const params = new URLSearchParams(window.location.search);
+    const nextIntent = normalizeAgentEmbedIntent({
+      embedMode: params.get("embedMode"),
+      agentUiMode: params.get("agentUiMode"),
+      railMode: params.get("railMode"),
+      rail: params.get("rail"),
+    });
+    embedMode = nextIntent.mode;
+    embedRailMode = nextIntent.railMode;
+  }
+
   onMount(() => {
+    applyEmbedUrlOptions();
     const activityTimer = window.setInterval(() => {
       if (isStreaming) activityClock = Date.now();
     }, 1_000);
@@ -1368,7 +1401,7 @@
   }
 </script>
 
-<WorkspaceRoot title="Sonik Chat" {artifactOpen}>
+<WorkspaceRoot title="Sonik Chat" {artifactOpen} layoutMode={workspaceLayoutMode} railMode={workspaceRailMode}>
   {#snippet rail()}
     <SessionRail
       {sessions}
@@ -1377,6 +1410,7 @@
       archivedCount={archivedSessionCount}
       busy={sessionRailBusy || isStreaming}
       error={sessionRailError}
+      collapsed={workspaceRailMode === "collapsed"}
       onCreate={() => void createSession()}
       onSwitch={(sessionId) => void switchSession(sessionId)}
       onArchive={(sessionId) => void archiveSession(sessionId)}

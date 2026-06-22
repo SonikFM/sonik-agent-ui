@@ -12,10 +12,15 @@ Use `@sonik-agent-ui/agent-embed` for the shared semantic contract:
 - `mergeAgentHostPageContext(local, host, trusted?)` — overlays local app state, host page context, and trusted server context.
 - `SONIK_AGENT_UI_HOST_MESSAGE_SOURCE` / `SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE` — stable postMessage envelope constants.
 - `isAgentHostPageContextMessage(value)` — runtime guard for iframe transport messages.
+- `AgentEmbedMode` — host launcher mode: `workspace`, `chat`, or `canvas`.
+- `AgentEmbedRailMode` — session rail intent: `expanded`, `collapsed`, or `hidden`.
+- `normalizeAgentEmbedIntent(input)` — centralizes launcher-mode and rail-mode defaults so iframe hosts and native shells do not duplicate mode parsing.
 
 ## Iframe/postMessage transport
 
 The current standalone reference host uses iframe/postMessage first because it isolates CSS/runtime concerns and keeps the Agent UI easy to embed before native shell integration.
+
+Production v0 is **same-origin by default**. Cross-origin browser embedding needs a server-owned allowlist/adapter before it should be treated as supported; browser-donated page context is never an auth, org, scope, token, or credential channel.
 
 ```ts
 import {
@@ -46,6 +51,30 @@ iframe.contentWindow?.postMessage(
 ```
 
 See `apps/standalone-sveltekit/static/fake-booking-host.html` for the local smoke harness.
+
+## Launcher modes
+
+The embed should not force a full workspace iframe onto every host page. Hosts should launch one of three modes:
+
+| Mode | Intended UX | Recommended rail |
+| --- | --- | --- |
+| `chat` | Compact assistant pane/drawer for contextual Q&A. | `hidden` |
+| `canvas` | Near-fullscreen workspace modal for live artifacts/documents. | `collapsed` |
+| `workspace` | Standalone/full app shell. | `expanded` |
+
+Iframe hosts pass this as URL state while continuing to donate page context over postMessage:
+
+```ts
+const params = new URLSearchParams({
+  agentUiHostOrigin: window.location.origin,
+  embedMode: "chat",
+  rail: "hidden",
+});
+
+iframe.src = `/agent-ui?${params.toString()}`;
+```
+
+Native hosts should use `normalizeAgentEmbedIntent` with the same semantic values in their shell adapter rather than coupling to iframe-specific query strings.
 
 ## Native Svelte API sketch
 

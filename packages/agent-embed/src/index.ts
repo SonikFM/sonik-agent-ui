@@ -5,6 +5,21 @@ import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 export const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
 
+export type AgentEmbedMode = "workspace" | "chat" | "canvas";
+export type AgentEmbedRailMode = "expanded" | "collapsed" | "hidden";
+
+export type AgentEmbedIntent = {
+  mode: AgentEmbedMode;
+  railMode: AgentEmbedRailMode;
+};
+
+export type AgentEmbedIntentInput = {
+  embedMode?: unknown;
+  agentUiMode?: unknown;
+  rail?: unknown;
+  railMode?: unknown;
+};
+
 export type AgentHostActiveEntity = {
   type: string;
   id: string;
@@ -65,6 +80,14 @@ export function isAgentHostPageContextMessage(value: unknown): value is AgentHos
   return true;
 }
 
+export function normalizeAgentEmbedIntent(input: AgentEmbedIntentInput = {}): AgentEmbedIntent {
+  const mode = cleanEmbedMode(input.embedMode) ?? cleanEmbedMode(input.agentUiMode) ?? "workspace";
+  return {
+    mode,
+    railMode: cleanEmbedRailMode(input.railMode) ?? cleanEmbedRailMode(input.rail) ?? defaultRailModeForEmbedMode(mode),
+  };
+}
+
 export function sanitizeAgentHostPageContext(value: unknown): AgentHostPageContext | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -76,6 +99,20 @@ export function sanitizeAgentHostPageContext(value: unknown): AgentHostPageConte
     ...(activeEntity ? { activeEntity } : {}),
   };
   return Object.keys(context).length > 0 ? context : undefined;
+}
+
+function cleanEmbedMode(value: unknown): AgentEmbedMode | undefined {
+  return value === "chat" || value === "canvas" || value === "workspace" ? value : undefined;
+}
+
+function cleanEmbedRailMode(value: unknown): AgentEmbedRailMode | undefined {
+  return value === "expanded" || value === "collapsed" || value === "hidden" ? value : undefined;
+}
+
+function defaultRailModeForEmbedMode(mode: AgentEmbedMode): AgentEmbedRailMode {
+  if (mode === "chat") return "hidden";
+  if (mode === "canvas") return "collapsed";
+  return "expanded";
 }
 
 export function mergeAgentHostPageContext(

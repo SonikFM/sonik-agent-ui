@@ -308,6 +308,9 @@ importers:
 
   packages/workspace-core:
     dependencies:
+      '@sonik-agent-ui/agent-embed':
+        specifier: workspace:*
+        version: link:../agent-embed
       '@sonik-agent-ui/artifact-model':
         specifier: workspace:*
         version: link:../artifact-model

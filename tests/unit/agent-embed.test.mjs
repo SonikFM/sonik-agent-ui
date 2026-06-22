@@ -4,6 +4,7 @@ import {
   SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
   isAgentHostPageContextMessage,
   mergeAgentHostPageContext,
+  normalizeAgentEmbedIntent,
   sanitizeAgentHostPageContext,
 } from "../../packages/agent-embed/src/index.ts";
 
@@ -51,5 +52,26 @@ const redacted = sanitizeAgentHostPageContext({
   activeEntity: { type: "booking", id: "booking_123", label: "leaked vck_TESTREDACTME123456789" },
 });
 assert.equal(redacted?.activeEntity?.label?.includes("vck_"), false, "active entity display labels should be redacted");
+
+assert.deepEqual(
+  normalizeAgentEmbedIntent({ embedMode: "chat" }),
+  { mode: "chat", railMode: "hidden" },
+  "chat embed mode should default to hidden rail",
+);
+assert.deepEqual(
+  normalizeAgentEmbedIntent({ embedMode: "canvas" }),
+  { mode: "canvas", railMode: "collapsed" },
+  "canvas embed mode should default to collapsed rail",
+);
+assert.deepEqual(
+  normalizeAgentEmbedIntent({ agentUiMode: "workspace", rail: "expanded" }),
+  { mode: "workspace", railMode: "expanded" },
+  "workspace embed mode should accept explicit rail intent",
+);
+assert.deepEqual(
+  normalizeAgentEmbedIntent({ embedMode: "bad", railMode: "bad" }),
+  { mode: "workspace", railMode: "expanded" },
+  "invalid embed intent should normalize to safe standalone defaults",
+);
 
 console.log("agent-embed tests passed");

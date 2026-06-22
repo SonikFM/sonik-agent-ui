@@ -157,8 +157,10 @@ try {
     }
   });
 
-  const hostUrl = `${baseUrl}/fake-booking-host.html?smokeMockStream=1&smokeRunId=${encodeURIComponent(runId)}`;
+  const hostUrl = `${baseUrl}/fake-booking-host.html?autoOpen=chat&smokeMockStream=1&smokeRunId=${encodeURIComponent(runId)}`;
   await page.goto(hostUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  const initialEmbedMode = await page.evaluate(() => document.body.dataset.agentUiOpen);
+  if (initialEmbedMode !== "chat") throw new Error(`fake host did not auto-open chat embed mode: ${initialEmbedMode}`);
   const frameElement = await page.waitForSelector("iframe#agent-frame", { timeout: 15_000 });
   const frame = await frameElement.contentFrame();
   if (!frame) throw new Error("agent iframe frame was not available");
@@ -176,7 +178,6 @@ try {
   evidence.pageContext = await frame.evaluate(() => window.__sonikAgentUI.getPageContext());
   evidence.assertions = await frame.evaluate(() => window.__sonikAgentUI.getAssertions());
   classifyTelemetry(await readTelemetryEvents());
-  await browser.close();
 
   if (evidence.errors.length) await finish("FAIL", "Browser errors observed during embed smoke.");
   if (evidence.pageContext?.surface !== "booking-console") await finish("FAIL", "Iframe page context did not reflect host booking surface.");
@@ -188,6 +189,17 @@ try {
   if (commandEvent?.pageContext?.activeEntity?.label !== "Summer Jazz Night") await finish("FAIL", "Command-index telemetry did not include active entity label.");
   if (!commandEvent?.commandFamilies?.includes("booking")) await finish("FAIL", "Command-index telemetry did not include booking command family.");
   if (evidence.telemetry.runtimeErrors.length > 0) await finish("FAIL", "Client runtime error telemetry observed during embed smoke.");
+  await page.click("#open-canvas");
+  const canvasEmbedMode = await page.evaluate(() => document.body.dataset.agentUiOpen);
+  if (canvasEmbedMode !== "canvas") await finish("FAIL", "Fake host canvas launcher did not switch to canvas mode.");
+  const canvasFrameElement = await page.waitForSelector("iframe#agent-frame", { timeout: 15_000 });
+  const canvasFrame = await canvasFrameElement.contentFrame();
+  if (!canvasFrame) await finish("FAIL", "Agent iframe was not available after canvas launcher switch.");
+  await canvasFrame.waitForFunction(() => {
+    const root = document.querySelector(".workspace-root");
+    return root?.getAttribute("data-layout-mode") === "canvas" && root?.getAttribute("data-rail-mode") === "collapsed";
+  }, undefined, { timeout: 20_000 });
+  await browser.close();
   await finish("PASS", "Iframe embed accepted host page context, sent it to generate, and emitted correlated command-index telemetry.");
 } catch (error) {
   await browser?.close().catch(() => undefined);

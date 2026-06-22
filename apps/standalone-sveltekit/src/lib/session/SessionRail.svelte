@@ -17,6 +17,7 @@
     archivedCount?: number;
     busy?: boolean;
     error?: string | null;
+    collapsed?: boolean;
     onCreate: () => void;
     onSwitch: (sessionId: string) => void;
     onArchive: (sessionId: string) => void;
@@ -30,6 +31,7 @@
     archivedCount = 0,
     busy = false,
     error = null,
+    collapsed = false,
     onCreate,
     onSwitch,
     onArchive,
@@ -117,13 +119,17 @@
   }
 </script>
 
-<div class="session-rail-shell" onclick={() => closeContextMenu()} role="presentation">
+<div class="session-rail-shell" class:session-rail-shell--collapsed={collapsed} onclick={() => closeContextMenu()} role="presentation">
   <div class="session-rail-header">
-    <div>
-      <p class="session-rail-eyebrow">Recents</p>
-      <h2>Chats</h2>
-    </div>
-    <button type="button" class="new-chat-button" onclick={onCreate} disabled={busy}>+ New chat</button>
+    {#if !collapsed}
+      <div>
+        <p class="session-rail-eyebrow">Recents</p>
+        <h2>Chats</h2>
+      </div>
+    {/if}
+    <button type="button" class="new-chat-button" class:new-chat-button--collapsed={collapsed} onclick={onCreate} disabled={busy} aria-label="New chat">
+      {collapsed ? "+" : "+ New chat"}
+    </button>
   </div>
 
   {#if error}
@@ -139,13 +145,17 @@
           onclick={() => onSwitch(session.id)}
           disabled={busy || session.id === activeSessionId}
           title={`${displaySessionName(session)} · ${sessionKind(session)}`}
+          aria-label={collapsed ? `${displaySessionName(session)} · ${sessionKind(session)}` : undefined}
         >
-          <span>{displaySessionName(session)}</span>
-          <small>{formatSessionTime(session.last_message_at ?? session.updated_at)}</small>
+          <span>{collapsed ? displaySessionName(session).slice(0, 1).toUpperCase() : displaySessionName(session)}</span>
+          {#if !collapsed}
+            <small>{formatSessionTime(session.last_message_at ?? session.updated_at)}</small>
+          {/if}
         </button>
         <button
           type="button"
           class="session-actions-button"
+          class:session-actions-button--collapsed={collapsed}
           aria-haspopup="menu"
           aria-expanded={contextMenu?.sessionId === session.id}
           aria-label={`Actions for ${displaySessionName(session)}`}
@@ -160,7 +170,7 @@
     {/each}
   </div>
 
-  {#if currentSession}
+  {#if currentSession && !collapsed}
     <footer>
       <span>Current chat</span>
       <strong>{displaySessionName(currentSession)}</strong>
@@ -202,11 +212,22 @@
     color: var(--foreground);
   }
 
+  .session-rail-shell--collapsed {
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.55rem;
+  }
+
   .session-rail-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
+  }
+
+  .session-rail-shell--collapsed .session-rail-header {
+    justify-content: center;
+    width: 100%;
   }
 
   .session-rail-header h2 {
@@ -238,6 +259,14 @@
       background 0.15s ease,
       border-color 0.15s ease,
       color 0.15s ease;
+  }
+
+  .new-chat-button--collapsed {
+    display: inline-grid;
+    width: 2.35rem;
+    height: 2.35rem;
+    place-items: center;
+    padding: 0;
   }
 
   .new-chat-button:hover {
@@ -273,11 +302,27 @@
     padding-right: 0.1rem;
   }
 
+  .session-rail-shell--collapsed .session-rail-list {
+    align-items: center;
+    width: 100%;
+    padding-right: 0;
+  }
+
   .session-rail-list article {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     border-radius: 0.6rem;
+  }
+
+  .session-rail-shell--collapsed .session-rail-list article {
+    grid-template-columns: 1fr;
+    width: 100%;
+    border-radius: 0.9rem;
+  }
+
+  .session-rail-shell--collapsed .session-rail-list article:focus-within {
+    background: var(--app-control-hover-bg, var(--accent));
   }
 
   .session-rail-list article:hover {
@@ -304,6 +349,17 @@
     text-align: left;
   }
 
+  .session-rail-shell--collapsed .session-select {
+    display: inline-grid;
+    width: 2.35rem;
+    height: 2.35rem;
+    grid-template-columns: 1fr;
+    justify-content: center;
+    padding: 0;
+    border-radius: 999px;
+    text-align: center;
+  }
+
   .session-select span {
     overflow: hidden;
     font-size: 0.83rem;
@@ -311,6 +367,11 @@
     line-height: 1.2;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .session-rail-shell--collapsed .session-select span {
+    max-width: none;
+    text-align: center;
   }
 
   .session-actions-button {
@@ -326,6 +387,13 @@
     font-size: 1.05rem;
     line-height: 1;
     opacity: 0.75;
+  }
+
+  .session-actions-button--collapsed {
+    width: 2.35rem;
+    height: 1.6rem;
+    margin: -0.25rem auto 0.18rem;
+    font-size: 0.95rem;
   }
 
   .session-actions-button:hover,

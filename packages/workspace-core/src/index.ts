@@ -25,6 +25,7 @@ export { default as ArtifactFrame } from "./components/ArtifactFrame.svelte";
 export { default as CanvasToolbar } from "./components/CanvasToolbar.svelte";
 export { default as CanvasViewport } from "./components/CanvasViewport.svelte";
 export { default as WorkspaceRoot } from "./components/WorkspaceRoot.svelte";
+export type { WorkspaceLayoutMode, WorkspaceRailMode } from "./components/WorkspaceRoot.svelte";
 export type { CanvasPanel, CanvasToolbarProps } from "./components/CanvasToolbar.svelte";
 export type { CanvasViewportProps } from "./components/CanvasViewport.svelte";
 
