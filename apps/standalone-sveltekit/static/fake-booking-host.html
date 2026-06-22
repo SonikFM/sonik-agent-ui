@@ -290,20 +290,11 @@
     <iframe id="agent-frame" title="Sonik Agent UI embedded workspace"></iframe>
 
     <script type="module">
-      const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
-      const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
-      const url = new URL(window.location.href);
-      const iframe = document.getElementById("agent-frame");
-      const chatSlot = document.getElementById("chat-frame-slot");
-      const canvasSlot = document.getElementById("canvas-frame-slot");
-      const sidecar = document.getElementById("agent-sidecar");
-      const canvasWindow = document.getElementById("canvas-window");
-      const resizeHandle = document.getElementById("sidecar-resize");
-      const smokeRunId = url.searchParams.get("smokeRunId") ?? `fake-booking-host-${Date.now()}`;
-      let activeMode = null;
-      let resizeFrame = 0;
+      import { mountSonikAgentUI } from "/vendor/sonik-agent-ui/agent-embed.js";
 
-      const payload = {
+      const url = new URL(window.location.href);
+      const smokeRunId = url.searchParams.get("smokeRunId") ?? `fake-booking-host-${Date.now()}`;
+      const pageContext = {
         route: "/booking/bookings/booking_123",
         surface: "booking-console",
         pageType: "event-booking-detail",
@@ -312,112 +303,33 @@
         commandFamilies: ["booking", "event"],
         skillFamilies: ["booking-ops"],
         visibleActions: ["viewBooking", "listResources", "assignResource"],
-        at: new Date().toISOString(),
       };
 
-      function frameUrlFor(mode) {
-        const frameParams = new URLSearchParams();
-        frameParams.set("agentUiHostOrigin", window.location.origin);
-        frameParams.set("theme", url.searchParams.get("theme") ?? "system");
-        frameParams.set("embedMode", mode);
-        frameParams.set("rail", mode === "chat" ? "hidden" : "collapsed");
-        if (url.searchParams.get("smokeMockStream") !== "0") frameParams.set("smokeMockStream", url.searchParams.get("smokeMockStream") ?? "1");
-        frameParams.set("smokeRunId", smokeRunId);
-        return `/?${frameParams.toString()}`;
-      }
-
-      function postContext() {
-        iframe.contentWindow?.postMessage({
-          source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
-          type: SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
-          payload: { ...payload, at: new Date().toISOString() },
-          sentAt: new Date().toISOString(),
-        }, window.location.origin);
-      }
-
-      function scheduleContextPosts() {
-        [250, 900, 1800].forEach((delay) => setTimeout(postContext, delay));
-      }
-
-      function mountFrame(slot) {
-        if (iframe.parentElement !== slot) slot.appendChild(iframe);
-      }
-
-      function setFrameMode(mode) {
-        const nextSrc = frameUrlFor(mode);
-        if (iframe.getAttribute("src") !== nextSrc) iframe.src = nextSrc;
-        else postContext();
-      }
-
-      function openEmbed(mode) {
-        activeMode = mode === "canvas" ? "canvas" : "chat";
-        document.body.dataset.agentUiOpen = activeMode;
-        sidecar.dataset.open = activeMode === "chat" ? "true" : "false";
-        canvasWindow.dataset.open = activeMode === "canvas" ? "true" : "false";
-        mountFrame(activeMode === "canvas" ? canvasSlot : chatSlot);
-        setFrameMode(activeMode);
-      }
-
-      function closeChat() {
-        if (activeMode !== "chat") return;
-        activeMode = null;
-        sidecar.dataset.open = "false";
-        delete document.body.dataset.agentUiOpen;
-      }
-
-      function closeCanvas() {
-        if (activeMode !== "canvas") return;
-        activeMode = null;
-        canvasWindow.dataset.open = "false";
-        delete document.body.dataset.agentUiOpen;
-      }
-
-      function setChatWidth(width) {
-        const clamped = Math.max(360, Math.min(760, width));
-        document.documentElement.style.setProperty("--agent-chat-width", `${clamped}px`);
-        resizeHandle.setAttribute("aria-valuenow", String(Math.round(clamped)));
-      }
-
-      function startResize(event) {
-        if (activeMode !== "chat") return;
-        event.preventDefault();
-        resizeHandle.setPointerCapture?.(event.pointerId);
-        document.body.dataset.agentUiResizing = "true";
-        const move = (moveEvent) => {
-          cancelAnimationFrame(resizeFrame);
-          resizeFrame = requestAnimationFrame(() => setChatWidth(window.innerWidth - moveEvent.clientX));
-        };
-        const end = () => {
-          cancelAnimationFrame(resizeFrame);
-          delete document.body.dataset.agentUiResizing;
-          window.removeEventListener("pointermove", move);
-          window.removeEventListener("pointerup", end);
-          window.removeEventListener("pointercancel", end);
-        };
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", end, { once: true });
-        window.addEventListener("pointercancel", end, { once: true });
-      }
-
-      iframe.addEventListener("load", scheduleContextPosts);
-      document.getElementById("open-chat").addEventListener("click", () => openEmbed("chat"));
-      document.getElementById("open-canvas").addEventListener("click", () => openEmbed("canvas"));
-      document.getElementById("expand-canvas").addEventListener("click", () => openEmbed("canvas"));
-      document.getElementById("dock-chat").addEventListener("click", () => openEmbed("chat"));
-      document.getElementById("close-chat").addEventListener("click", closeChat);
-      document.getElementById("close-canvas").addEventListener("click", closeCanvas);
-      document.getElementById("resend").addEventListener("click", postContext);
-      resizeHandle.addEventListener("pointerdown", startResize);
-      resizeHandle.addEventListener("keydown", (event) => {
-        if (activeMode !== "chat") return;
-        const current = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--agent-chat-width")) || 520;
-        if (event.key === "ArrowLeft") setChatWidth(current + 24);
-        if (event.key === "ArrowRight") setChatWidth(current - 24);
+      const agentUi = mountSonikAgentUI({
+        agentUrl: "/",
+        hostOrigin: window.location.origin,
+        theme: () => url.searchParams.get("theme") ?? "system",
+        smokeMockStream: url.searchParams.get("smokeMockStream") !== "0" ? (url.searchParams.get("smokeMockStream") ?? "1") : null,
+        smokeRunId,
+        initialMode: ["chat", "canvas"].includes(url.searchParams.get("autoOpen") ?? "") ? url.searchParams.get("autoOpen") : null,
+        getPageContext: () => ({ ...pageContext, at: new Date().toISOString() }),
+        elements: {
+          iframe: "#agent-frame",
+          chatSlot: "#chat-frame-slot",
+          canvasSlot: "#canvas-frame-slot",
+          sidecar: "#agent-sidecar",
+          canvasWindow: "#canvas-window",
+          resizeHandle: "#sidecar-resize",
+          openChat: "#open-chat",
+          openCanvas: "#open-canvas",
+          expandCanvas: "#expand-canvas",
+          dockChat: "#dock-chat",
+          closeChat: "#close-chat",
+          closeCanvas: "#close-canvas",
+        },
       });
 
-      const autoOpen = url.searchParams.get("autoOpen");
-      if (autoOpen === "chat" || autoOpen === "canvas") openEmbed(autoOpen);
-      else mountFrame(chatSlot);
+      document.getElementById("resend").addEventListener("click", () => void agentUi.postContext());
     </script>
   </body>
 </html>

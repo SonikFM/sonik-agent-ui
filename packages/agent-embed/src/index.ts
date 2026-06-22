@@ -44,6 +44,57 @@ export type AgentHostPageContextMessage = {
 };
 
 export type AgentHostContextProvider = () => AgentHostPageContext | Promise<AgentHostPageContext>;
+export type AgentEmbedThemeProvider = string | (() => string | undefined);
+
+export type AgentEmbedElementRef<T extends HTMLElement = HTMLElement> = T | string | null | undefined;
+
+export type AgentEmbedElementRefs = {
+  iframe: AgentEmbedElementRef<HTMLIFrameElement>;
+  chatSlot: AgentEmbedElementRef<HTMLElement>;
+  canvasSlot?: AgentEmbedElementRef<HTMLElement>;
+  sidecar?: AgentEmbedElementRef<HTMLElement>;
+  canvasWindow?: AgentEmbedElementRef<HTMLElement>;
+  resizeHandle?: AgentEmbedElementRef<HTMLElement>;
+  openChat?: AgentEmbedElementRef<HTMLElement>;
+  openCanvas?: AgentEmbedElementRef<HTMLElement>;
+  expandCanvas?: AgentEmbedElementRef<HTMLElement>;
+  dockChat?: AgentEmbedElementRef<HTMLElement>;
+  closeChat?: AgentEmbedElementRef<HTMLElement>;
+  closeCanvas?: AgentEmbedElementRef<HTMLElement>;
+};
+
+export type AgentEmbedMountOptions = {
+  agentUrl: string | URL;
+  elements: AgentEmbedElementRefs;
+  getPageContext: AgentHostContextProvider;
+  hostOrigin?: string;
+  theme?: AgentEmbedThemeProvider;
+  smokeMockStream?: string | boolean | null;
+  smokeRunId?: string | null;
+  initialMode?: AgentEmbedMode | null;
+  contextPostDelaysMs?: readonly number[];
+  minChatWidth?: number;
+  maxChatWidth?: number;
+  bodyDatasetKey?: string;
+  onModeChange?: (mode: AgentEmbedMode | null) => void;
+  onError?: (error: unknown) => void;
+  window?: Window;
+  document?: Document;
+};
+
+export type AgentEmbedUpdateOptions = Partial<Pick<AgentEmbedMountOptions, "getPageContext" | "theme" | "smokeMockStream" | "smokeRunId">>;
+
+export type AgentEmbedController = {
+  iframe: HTMLIFrameElement;
+  open: (mode: AgentEmbedMode) => void;
+  close: (mode?: "chat" | "canvas" | "all") => void;
+  postContext: () => Promise<void>;
+  scheduleContextPosts: () => void;
+  update: (options: AgentEmbedUpdateOptions) => void;
+  destroy: () => void;
+  getMode: () => AgentEmbedMode | null;
+  setChatWidth: (width: number) => void;
+};
 
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
@@ -85,6 +136,36 @@ export function normalizeAgentEmbedIntent(input: AgentEmbedIntentInput = {}): Ag
   return {
     mode,
     railMode: cleanEmbedRailMode(input.railMode) ?? cleanEmbedRailMode(input.rail) ?? defaultRailModeForEmbedMode(mode),
+  };
+}
+
+export function createAgentEmbedUrl(input: {
+  agentUrl: string | URL;
+  mode: AgentEmbedMode;
+  hostOrigin?: string;
+  theme?: string;
+  smokeMockStream?: string | boolean | null;
+  smokeRunId?: string | null;
+}): string {
+  const url = new URL(String(input.agentUrl), input.hostOrigin ?? globalThis.location?.origin ?? "http://localhost");
+  const intent = normalizeAgentEmbedIntent({ embedMode: input.mode });
+  if (input.hostOrigin) url.searchParams.set("agentUiHostOrigin", input.hostOrigin);
+  if (input.theme) url.searchParams.set("theme", input.theme);
+  url.searchParams.set("embedMode", intent.mode);
+  url.searchParams.set("rail", intent.railMode);
+  if (input.smokeMockStream !== null && input.smokeMockStream !== undefined && input.smokeMockStream !== false) {
+    url.searchParams.set("smokeMockStream", input.smokeMockStream === true ? "1" : String(input.smokeMockStream));
+  }
+  if (input.smokeRunId) url.searchParams.set("smokeRunId", input.smokeRunId);
+  return url.toString();
+}
+
+export function createAgentHostPageContextMessage(payload: AgentHostPageContext): AgentHostPageContextMessage {
+  return {
+    source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
+    type: SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
+    payload,
+    sentAt: new Date().toISOString(),
   };
 }
 
@@ -130,6 +211,172 @@ export function mergeAgentHostPageContext(
   };
 }
 
+export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedController {
+  const ownerWindow = options.window ?? globalThis.window;
+  const ownerDocument = options.document ?? ownerWindow?.document;
+  if (!ownerWindow || !ownerDocument) throw new Error("mountSonikAgentUI requires a browser Window/Document.");
+
+  let getPageContext = options.getPageContext;
+  let theme = options.theme;
+  let smokeMockStream = options.smokeMockStream;
+  let smokeRunId = options.smokeRunId;
+  let activeMode: AgentEmbedMode | null = null;
+  let resizeFrame = 0;
+  const disposers: Array<() => void> = [];
+  const contextPostTimeouts: number[] = [];
+  const delays = options.contextPostDelaysMs ?? [250, 900, 1800];
+  const bodyDatasetKey = options.bodyDatasetKey ?? "agentUiOpen";
+
+  const iframe = requiredElement<HTMLIFrameElement>(ownerDocument, options.elements.iframe, "iframe");
+  const chatSlot = requiredElement(ownerDocument, options.elements.chatSlot, "chatSlot");
+  const canvasSlot = optionalElement(ownerDocument, options.elements.canvasSlot);
+  const sidecar = optionalElement(ownerDocument, options.elements.sidecar);
+  const canvasWindow = optionalElement(ownerDocument, options.elements.canvasWindow);
+  const resizeHandle = optionalElement(ownerDocument, options.elements.resizeHandle);
+
+  const postContext = async () => {
+    try {
+      const payload = sanitizeAgentHostPageContext(await getPageContext()) ?? {};
+      iframe.contentWindow?.postMessage(createAgentHostPageContextMessage(payload), resolveAgentTargetOrigin(iframe, options.agentUrl, ownerWindow));
+    } catch (error) {
+      options.onError?.(error);
+    }
+  };
+
+  const scheduleContextPosts = () => {
+    for (const delay of delays) contextPostTimeouts.push(ownerWindow.setTimeout(() => void postContext(), delay));
+  };
+
+  const mountFrame = (slot: HTMLElement) => {
+    if (iframe.parentElement !== slot) slot.appendChild(iframe);
+  };
+
+  const setFrameMode = (mode: AgentEmbedMode) => {
+    const nextSrc = createAgentEmbedUrl({
+      agentUrl: options.agentUrl,
+      mode,
+      hostOrigin: options.hostOrigin ?? ownerWindow.location.origin,
+      theme: resolveTheme(theme),
+      smokeMockStream,
+      smokeRunId,
+    });
+    if (iframe.getAttribute("src") !== nextSrc) iframe.src = nextSrc;
+    else void postContext();
+  };
+
+  const setOpenState = (mode: AgentEmbedMode | null) => {
+    activeMode = mode;
+    if (mode) ownerDocument.body.dataset[bodyDatasetKey] = mode;
+    else delete ownerDocument.body.dataset[bodyDatasetKey];
+    if (sidecar) sidecar.dataset.open = mode === "chat" ? "true" : "false";
+    if (canvasWindow) canvasWindow.dataset.open = mode === "canvas" ? "true" : "false";
+    options.onModeChange?.(mode);
+  };
+
+  const open = (mode: AgentEmbedMode) => {
+    const nextMode = mode === "canvas" ? "canvas" : mode === "workspace" ? "canvas" : "chat";
+    setOpenState(nextMode);
+    mountFrame(nextMode === "canvas" && canvasSlot ? canvasSlot : chatSlot);
+    setFrameMode(nextMode);
+  };
+
+  const close = (mode: "chat" | "canvas" | "all" = "all") => {
+    if (mode !== "all" && activeMode !== mode) return;
+    setOpenState(null);
+  };
+
+  const setChatWidth = (width: number) => {
+    const min = options.minChatWidth ?? 360;
+    const max = options.maxChatWidth ?? 760;
+    const clamped = Math.max(min, Math.min(max, width));
+    ownerDocument.documentElement.style.setProperty("--agent-chat-width", `${clamped}px`);
+    resizeHandle?.setAttribute("aria-valuenow", String(Math.round(clamped)));
+  };
+
+  const startResize = (event: PointerEvent) => {
+    if (activeMode !== "chat") return;
+    event.preventDefault();
+    resizeHandle?.setPointerCapture?.(event.pointerId);
+    ownerDocument.body.dataset.agentUiResizing = "true";
+    const move = (moveEvent: PointerEvent) => {
+      ownerWindow.cancelAnimationFrame(resizeFrame);
+      resizeFrame = ownerWindow.requestAnimationFrame(() => setChatWidth(ownerWindow.innerWidth - moveEvent.clientX));
+    };
+    const end = () => {
+      ownerWindow.cancelAnimationFrame(resizeFrame);
+      delete ownerDocument.body.dataset.agentUiResizing;
+      ownerWindow.removeEventListener("pointermove", move);
+      ownerWindow.removeEventListener("pointerup", end);
+      ownerWindow.removeEventListener("pointercancel", end);
+    };
+    ownerWindow.addEventListener("pointermove", move);
+    ownerWindow.addEventListener("pointerup", end, { once: true });
+    ownerWindow.addEventListener("pointercancel", end, { once: true });
+  };
+
+  const update = (next: AgentEmbedUpdateOptions) => {
+    if (next.getPageContext) getPageContext = next.getPageContext;
+    if ("theme" in next) theme = next.theme;
+    if ("smokeMockStream" in next) smokeMockStream = next.smokeMockStream;
+    if ("smokeRunId" in next) smokeRunId = next.smokeRunId;
+    if (activeMode) setFrameMode(activeMode);
+  };
+
+  const addClick = (ref: AgentEmbedElementRef, handler: () => void) => {
+    const element = optionalElement(ownerDocument, ref);
+    if (!element) return;
+    element.addEventListener("click", handler);
+    disposers.push(() => element.removeEventListener("click", handler));
+  };
+
+  const onLoad = () => scheduleContextPosts();
+  iframe.addEventListener("load", onLoad);
+  disposers.push(() => iframe.removeEventListener("load", onLoad));
+
+  addClick(options.elements.openChat, () => open("chat"));
+  addClick(options.elements.openCanvas, () => open("canvas"));
+  addClick(options.elements.expandCanvas, () => open("canvas"));
+  addClick(options.elements.dockChat, () => open("chat"));
+  addClick(options.elements.closeChat, () => close("chat"));
+  addClick(options.elements.closeCanvas, () => close("canvas"));
+
+  if (resizeHandle) {
+    resizeHandle.addEventListener("pointerdown", startResize);
+    const onKeydown = (event: KeyboardEvent) => {
+      if (activeMode !== "chat") return;
+      const current = parseFloat(ownerWindow.getComputedStyle(ownerDocument.documentElement).getPropertyValue("--agent-chat-width")) || 520;
+      if (event.key === "ArrowLeft") setChatWidth(current + 24);
+      if (event.key === "ArrowRight") setChatWidth(current - 24);
+    };
+    resizeHandle.addEventListener("keydown", onKeydown);
+    disposers.push(() => {
+      resizeHandle.removeEventListener("pointerdown", startResize);
+      resizeHandle.removeEventListener("keydown", onKeydown);
+    });
+  }
+
+  const destroy = () => {
+    for (const timeoutId of contextPostTimeouts.splice(0)) ownerWindow.clearTimeout(timeoutId);
+    for (const dispose of disposers.splice(0)) dispose();
+    close("all");
+  };
+
+  if (options.initialMode === "chat" || options.initialMode === "canvas" || options.initialMode === "workspace") open(options.initialMode);
+  else mountFrame(chatSlot);
+
+  return {
+    iframe,
+    open,
+    close,
+    postContext,
+    scheduleContextPosts,
+    update,
+    destroy,
+    getMode: () => activeMode,
+    setChatWidth,
+  };
+}
+
 function sanitizeTrustedHostContext(value: AgentTrustedHostContext | null | undefined): Partial<AgentTrustedHostContext> {
   if (!value) return {};
   const trusted: Partial<AgentTrustedHostContext> = {};
@@ -160,4 +407,26 @@ function cleanText(value: unknown): string | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed.slice(0, MAX_SAFE_TEXT_LENGTH).replace(SECRET_VALUE_PATTERN, "[REDACTED]");
+}
+
+function resolveTheme(theme: AgentEmbedThemeProvider | undefined): string | undefined {
+  if (typeof theme === "function") return cleanText(theme());
+  return cleanText(theme);
+}
+
+function resolveAgentTargetOrigin(iframe: HTMLIFrameElement, agentUrl: string | URL, ownerWindow: Window): string {
+  const frameSrc = iframe.getAttribute("src");
+  return new URL(frameSrc || String(agentUrl), ownerWindow.location.href).origin;
+}
+
+function requiredElement<T extends HTMLElement>(document: Document, ref: AgentEmbedElementRef<T>, name: string): T {
+  const element = optionalElement<T>(document, ref);
+  if (!element) throw new Error(`mountSonikAgentUI missing required element: ${name}`);
+  return element;
+}
+
+function optionalElement<T extends HTMLElement>(document: Document, ref: AgentEmbedElementRef<T>): T | null {
+  if (!ref) return null;
+  if (typeof ref !== "string") return ref;
+  return document.querySelector<T>(ref);
 }

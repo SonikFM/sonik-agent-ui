@@ -214,6 +214,9 @@ assert.equal(agentEmbedSource.includes("export type AgentTrustedHostContext"), t
 assert.equal(agentEmbedSource.includes('export type AgentEmbedMode = "workspace" | "chat" | "canvas"'), true, "agent embed package should export stable launcher modes for host SDKs");
 assert.equal(agentEmbedSource.includes('export type AgentEmbedRailMode = "expanded" | "collapsed" | "hidden"'), true, "agent embed package should export stable rail modes for host SDKs");
 assert.equal(agentEmbedSource.includes("normalizeAgentEmbedIntent"), true, "agent embed package should centralize embed-intent normalization for host SDKs and app routes");
+assert.equal(agentEmbedSource.includes("mountSonikAgentUI"), true, "agent embed package should export a one-call browser mount helper for host SDKs");
+assert.equal(agentEmbedSource.includes("createAgentEmbedUrl"), true, "agent embed package should export deterministic iframe URL construction for host SDKs");
+assert.equal(agentEmbedSource.includes("createAgentHostPageContextMessage"), true, "agent embed package should export canonical host page-context message construction");
 assert.equal(rootSource.includes("import type { AgentEmbedMode, AgentEmbedRailMode } from \"@sonik-agent-ui/agent-embed\""), true, "workspace-core should alias embed modes from the shared agent-embed contract instead of redefining mode unions");
 assert.equal(agentEmbedSource.includes("mergeAgentHostPageContext"), true, "agent embed package should expose local/host/trusted merge helper");
 assert.equal(agentEmbedSource.includes("SONIK_AGENT_UI_HOST_MESSAGE_SOURCE"), true, "agent embed package should publish stable postMessage source constant");
@@ -239,10 +242,10 @@ assert.equal(fakeBookingHostSource.includes("fake booking host") || fakeBookingH
 assert.equal(fakeBookingHostSource.includes("postMessage"), true, "static fake host should donate page context through postMessage");
 assert.equal(fakeBookingHostSource.includes("booking-console"), true, "static fake host should donate booking surface context");
 assert.equal(fakeBookingHostSource.includes("Summer Jazz Night"), true, "static fake host should donate active entity label");
-assert.equal(fakeBookingHostSource.includes("openEmbed(\"chat\")"), true, "static fake host should expose a compact chat launcher");
-assert.equal(fakeBookingHostSource.includes("openEmbed(\"canvas\")"), true, "static fake host should expose a canvas workspace launcher");
-assert.equal(fakeBookingHostSource.includes('frameParams.set("embedMode", mode)'), true, "static fake host should pass the requested embed mode into the iframe");
-assert.equal(fakeBookingHostSource.includes('frameParams.set("rail", mode === "chat" ? "hidden" : "collapsed")'), true, "static fake host should pass rail display intent into the iframe");
+assert.equal(fakeBookingHostSource.includes("mountSonikAgentUI"), true, "static fake host should consume the one-call SDK mount helper instead of handwritten iframe glue");
+assert.equal(fakeBookingHostSource.includes("openChat: \"#open-chat\""), true, "static fake host should expose a compact chat launcher through the SDK element map");
+assert.equal(fakeBookingHostSource.includes("openCanvas: \"#open-canvas\""), true, "static fake host should expose a canvas workspace launcher through the SDK element map");
+assert.equal(fakeBookingHostSource.includes("agentUrl: \"/\""), true, "static fake host should pass the agent URL through the SDK mount helper");
 assert.equal(packageSource.includes("@sonik-agent-ui/agent-embed build"), true, "root build/test scripts should build the agent embed package before the app");
 assert.equal(agentEmbedDocsSource.includes("Native Svelte API sketch"), true, "embedding docs should include a native Svelte API sketch using the same semantics");
 assert.equal(agentEmbedDocsSource.includes("Booking context adapter example"), true, "embedding docs should include a booking context adapter example");

@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import {
   SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
   SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
+  createAgentEmbedUrl,
+  createAgentHostPageContextMessage,
   isAgentHostPageContextMessage,
   mergeAgentHostPageContext,
   normalizeAgentEmbedIntent,
+  mountSonikAgentUI,
   sanitizeAgentHostPageContext,
 } from "../../packages/agent-embed/src/index.ts";
 
@@ -73,5 +76,144 @@ assert.deepEqual(
   { mode: "workspace", railMode: "expanded" },
   "invalid embed intent should normalize to safe standalone defaults",
 );
+
+const chatUrl = createAgentEmbedUrl({
+  agentUrl: "https://agent.sonik.local/workspace",
+  hostOrigin: "https://booking.sonik.local",
+  mode: "chat",
+  theme: "lemonade",
+  smokeMockStream: "1",
+  smokeRunId: "run-123",
+});
+assert.equal(chatUrl, "https://agent.sonik.local/workspace?agentUiHostOrigin=https%3A%2F%2Fbooking.sonik.local&theme=lemonade&embedMode=chat&rail=hidden&smokeMockStream=1&smokeRunId=run-123", "chat URL should encode host origin, mode, rail, theme, and smoke parameters deterministically");
+
+const contextMessage = createAgentHostPageContextMessage({ surface: "booking-console" });
+assert.equal(contextMessage.source, SONIK_AGENT_UI_HOST_MESSAGE_SOURCE, "message builder should use canonical source");
+assert.equal(contextMessage.type, SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE, "message builder should use canonical type");
+assert.equal(contextMessage.payload.surface, "booking-console", "message builder should carry page context payload");
+
+class FakeElement {
+  constructor(id = "") {
+    this.id = id;
+    this.dataset = {};
+    this.listeners = new Map();
+    this.parentElement = null;
+    this.children = [];
+    this.style = { values: {}, setProperty: (key, value) => { this.style.values[key] = value; } };
+    this.attributes = new Map();
+  }
+  addEventListener(type, handler) { this.listeners.set(type, handler); }
+  removeEventListener(type) { this.listeners.delete(type); }
+  appendChild(child) { child.parentElement = this; this.children.push(child); return child; }
+  setAttribute(key, value) { this.attributes.set(key, value); }
+  getAttribute(key) { return this.attributes.get(key) ?? null; }
+  dispatch(type, event = {}) { this.listeners.get(type)?.(event); }
+}
+
+class FakeIframe extends FakeElement {
+  set src(value) { this._src = value; this.setAttribute("src", value); }
+  get src() { return this._src; }
+  contentWindow = { messages: [], postMessage: (message, targetOrigin) => this.contentWindow.messages.push({ message, targetOrigin }) };
+}
+
+const fakeIframe = new FakeIframe("agent-frame");
+const fakeChatSlot = new FakeElement("chat-slot");
+const fakeCanvasSlot = new FakeElement("canvas-slot");
+const fakeSidecar = new FakeElement("sidecar");
+const fakeCanvas = new FakeElement("canvas");
+const fakeDocumentElement = new FakeElement("html");
+const fakeBody = new FakeElement("body");
+const fakeWindow = {
+  location: { origin: "https://booking.sonik.local" },
+  document: null,
+  innerWidth: 1280,
+  setTimeout: (fn) => { fn(); return 1; },
+  clearTimeout: () => undefined,
+  requestAnimationFrame: (fn) => { fn(); return 1; },
+  cancelAnimationFrame: () => undefined,
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+  getComputedStyle: () => ({ getPropertyValue: () => "520" }),
+};
+const fakeDocument = {
+  body: fakeBody,
+  documentElement: fakeDocumentElement,
+  querySelector: (selector) => ({
+    "#agent-frame": fakeIframe,
+    "#chat-slot": fakeChatSlot,
+    "#canvas-slot": fakeCanvasSlot,
+    "#sidecar": fakeSidecar,
+    "#canvas": fakeCanvas,
+  })[selector] ?? null,
+};
+fakeWindow.document = fakeDocument;
+
+const controller = mountSonikAgentUI({
+  agentUrl: "https://agent.sonik.local/",
+  hostOrigin: "https://booking.sonik.local",
+  theme: "lemonade",
+  smokeMockStream: "1",
+  smokeRunId: "mount-test",
+  getPageContext: () => ({ surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } }),
+  elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas" },
+  window: fakeWindow,
+  document: fakeDocument,
+});
+assert.equal(fakeIframe.parentElement, fakeChatSlot, "mount should park iframe in chat slot before a mode opens");
+controller.open("chat");
+assert.equal(controller.getMode(), "chat", "controller should track chat mode");
+assert.equal(fakeBody.dataset.agentUiOpen, "chat", "controller should expose host body open mode");
+assert.equal(fakeSidecar.dataset.open, "true", "controller should open sidecar dataset state");
+assert.match(fakeIframe.src, /embedMode=chat/, "controller should set iframe src for chat mode");
+await controller.postContext();
+assert.equal("organizationId" in fakeIframe.contentWindow.messages.at(-1).message.payload, false, "browser postMessage payload should not carry trusted organization fields");
+assert.equal("scopes" in fakeIframe.contentWindow.messages.at(-1).message.payload, false, "browser postMessage payload should not carry trusted scopes");
+assert.equal(fakeIframe.contentWindow.messages.at(-1).targetOrigin, "https://agent.sonik.local", "cross-origin embeds should post page context to the agent iframe origin, not the host origin");
+controller.open("canvas");
+assert.equal(fakeIframe.parentElement, fakeCanvasSlot, "controller should move iframe into canvas slot");
+assert.equal(fakeCanvas.dataset.open, "true", "controller should open canvas dataset state");
+controller.close();
+assert.equal(controller.getMode(), null, "controller close should clear active mode");
+assert.equal(fakeBody.dataset.agentUiOpen, undefined, "controller close should clear host body mode");
+controller.destroy();
+
+const queuedTimers = [];
+const clearedTimers = [];
+const timerWindow = {
+  ...fakeWindow,
+  setTimeout: (fn, delay) => { const id = queuedTimers.length + 100; queuedTimers.push({ id, fn, delay }); return id; },
+  clearTimeout: (id) => clearedTimers.push(id),
+};
+const timerIframe = new FakeIframe("timer-frame");
+const timerChatSlot = new FakeElement("timer-chat");
+const timerCanvasSlot = new FakeElement("timer-canvas");
+const timerBody = new FakeElement("timer-body");
+const timerDocumentElement = new FakeElement("timer-html");
+const timerDocument = {
+  body: timerBody,
+  documentElement: timerDocumentElement,
+  querySelector: (selector) => ({
+    "#timer-frame": timerIframe,
+    "#timer-chat": timerChatSlot,
+    "#timer-canvas": timerCanvasSlot,
+  })[selector] ?? null,
+};
+timerWindow.document = timerDocument;
+const timerController = mountSonikAgentUI({
+  agentUrl: "https://agent.sonik.local/",
+  hostOrigin: "https://booking.sonik.local",
+  initialMode: "workspace",
+  getPageContext: () => ({ surface: "booking-console" }),
+  elements: { iframe: "#timer-frame", chatSlot: "#timer-chat", canvasSlot: "#timer-canvas" },
+  window: timerWindow,
+  document: timerDocument,
+});
+assert.equal(timerController.getMode(), "canvas", "initialMode workspace should open the canvas/workspace view consistently with open('workspace')");
+assert.equal(timerIframe.parentElement, timerCanvasSlot, "initialMode workspace should mount iframe into the canvas slot");
+timerIframe.dispatch("load");
+assert.deepEqual(queuedTimers.map((timer) => timer.delay), [250, 900, 1800], "iframe load should queue bounded context-post timers");
+timerController.destroy();
+assert.deepEqual(clearedTimers, queuedTimers.map((timer) => timer.id), "destroy should clear queued context-post timers");
+assert.equal(timerController.getMode(), null, "destroy should close active mode");
 
 console.log("agent-embed tests passed");

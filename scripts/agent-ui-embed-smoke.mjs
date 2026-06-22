@@ -213,6 +213,10 @@ try {
   const initialEmbedMode = await page.evaluate(() => document.body.dataset.agentUiOpen);
   if (initialEmbedMode !== "chat") throw new Error(`fake host did not auto-open chat embed mode: ${initialEmbedMode}`);
   await page.waitForSelector("#agent-sidecar[data-open=\"true\"]", { timeout: 15_000 });
+  await page.waitForFunction(() => {
+    const rect = document.querySelector("#agent-sidecar")?.getBoundingClientRect();
+    return Boolean(rect && rect.width >= 320 && rect.right <= window.innerWidth + 1);
+  }, undefined, { timeout: 15_000 });
   evidence.layout.chat = await captureEmbedLayout(page);
   if (evidence.layout.chat.sidecarDisplay === "none") throw new Error("chat sidecar is not displayed");
   if (evidence.layout.chat.iframeParentId !== "chat-frame-slot") throw new Error(`chat iframe was not mounted in chat slot: ${evidence.layout.chat.iframeParentId}`);
