@@ -281,8 +281,29 @@
         return response.json();
       }
 
+      function hasInlineDocumentSnapshot(doc) {
+        if (!doc?.documentId) return false;
+        return typeof doc.content === 'string'
+          || typeof doc.current_content === 'string'
+          || typeof doc.title === 'string'
+          || typeof doc.language === 'string';
+      }
+
       async function resolveDocument(payload) {
         const doc = normalizePayload(payload);
+        if (hasInlineDocumentSnapshot(doc)) {
+          return toDocumentRecord({
+            id: doc.documentId,
+            session_id: doc.session_id,
+            title: doc.title,
+            language: doc.language,
+            current_content: doc.current_content ?? doc.content,
+            version_count: doc.version_count ?? doc.version ?? 1,
+            created_at: doc.created_at,
+            updated_at: doc.updated_at
+          });
+        }
+
         if (doc.documentId) {
           return fetchJson(`/api/document/${encodeURIComponent(doc.documentId)}`);
         }

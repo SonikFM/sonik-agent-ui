@@ -52,6 +52,31 @@ assert.equal(store.listDocumentVersions(document.id).length, 2);
 assert.equal(store.getSession(session.id)?.active_document_id, document.id);
 assert.equal(store.getSession(session.id)?.mode, "document");
 
+const statelessPatch = store.patchDocument("workspace-doc-from-browser-snapshot", {
+  session_id: session.id,
+  title: "Browser Snapshot",
+  content: "<h1>Loaded from parent payload</h1>",
+  language: "html",
+});
+assert.equal(statelessPatch?.id, "workspace-doc-from-browser-snapshot", "document PATCH should upsert a missing browser-owned snapshot by id");
+assert.equal(statelessPatch?.current_content, "<h1>Loaded from parent payload</h1>");
+assert.equal(store.getDocument("workspace-doc-from-browser-snapshot")?.language, "html");
+
+const syncedMissing = store.syncActiveDocumentSnapshot({
+  id: "workspace-doc-synced-active",
+  session_id: session.id,
+  title: "Synced Active",
+  language: "markdown",
+  current_content: "# Active document",
+  version_count: 3,
+  is_active: true,
+  archived: false,
+  created_at: "2026-06-22T00:00:00.000Z",
+  updated_at: "2026-06-22T00:00:01.000Z",
+});
+assert.equal(syncedMissing.id, "workspace-doc-synced-active", "active document sync should persist missing snapshots for later server-side tool reads");
+assert.equal(store.getDocument("workspace-doc-synced-active")?.current_content, "# Active document");
+
 const artifact = store.createArtifact({
   session_id: session.id,
   kind: "json-render",

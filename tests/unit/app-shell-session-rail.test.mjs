@@ -150,6 +150,9 @@ assert.equal(workspaceHostSource.includes("if (event.origin !== allowedParentOri
 assert.equal(workspaceHostSource.includes("document_host.theme_applied"), true, "workspace document host should apply and log theme bridge events");
 assert.equal(workspaceHostSource.includes("'--bg': payload.background"), true, "workspace document host should bridge canonical app theme vars into workspace native vars");
 assert.equal(workspaceHostSource.includes("'--panel': panel"), true, "workspace document host should bridge panel colors into workspace native vars");
+assert.equal(workspaceHostSource.includes("function hasInlineDocumentSnapshot"), true, "workspace document host should detect parent-provided document snapshots");
+assert.equal(workspaceHostSource.includes("if (hasInlineDocumentSnapshot(doc))"), true, "tool-created documents should open from parent payload before server refetch");
+assert.equal(workspaceHostSource.includes("current_content: doc.current_content ?? doc.content"), true, "inline document open should preserve generated content without requiring a same-isolate GET");
 assert.equal(agentMessageSource.includes("chat-bubble"), false, "chat message display should not use Daisy chat-bubble wrappers that add bubble tails");
 assert.equal(agentMessageSource.includes("MessagePrimitive"), false, "chat message display should not use Daisy chat primitives for flat Claude-style rows");
 assert.equal(agentMessageSource.includes("<ChatText"), true, "chat messages should render text through the safe rich-text renderer");

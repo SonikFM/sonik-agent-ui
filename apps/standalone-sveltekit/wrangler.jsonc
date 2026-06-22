@@ -10,6 +10,24 @@
     "binding": "ASSETS",
     "directory": ".svelte-kit/cloudflare"
   },
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "destinations": []
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "destinations": []
+    }
+  },
+  "tail_consumers": [
+    {
+      "service": "sonik-dev-observability-pipe-b"
+    }
+  ],
   "vars": {
     "PUBLIC_AGENT_UI_ALLOWED_HOST_ORIGINS": "https://*.workers.dev,https://*.sonik.fm",
     "AI_GATEWAY_MODEL": "deepseek/deepseek-v4-flash",

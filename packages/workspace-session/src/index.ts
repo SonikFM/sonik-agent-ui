@@ -448,7 +448,27 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
 
   patchDocument(id: string, input: { content?: string; title?: string; language?: string; session_id?: string | null }): WorkspaceDocumentRecord | null {
     const existing = this.#documents.get(id);
-    if (!existing) return null;
+    if (!existing) {
+      const session = this.ensureSession(input.session_id);
+      const timestamp = this.#now();
+      const content = input.content ?? "";
+      const document: WorkspaceDocumentRecord = {
+        id,
+        session_id: session.id,
+        title: input.title?.trim() || "Untitled",
+        language: normalizeLanguage(input.language, content),
+        current_content: content,
+        version_count: 1,
+        is_active: true,
+        archived: false,
+        created_at: timestamp,
+        updated_at: timestamp,
+      };
+      this.#documents.set(id, document);
+      this.#appendDocumentVersion(document, "user", "Synced missing active editor snapshot");
+      this.patchSession(session.id, { active_document_id: id, mode: "document" });
+      return clone(document);
+    }
     const nextSessionId = input.session_id === "" ? null : input.session_id;
     const updated = this.updateDocument(id, { content: input.content, title: input.title, language: input.language, summary: "Patched document" });
     const current = updated ? this.#documents.get(id)! : existing;
@@ -494,7 +514,26 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
 
   syncActiveDocumentSnapshot(snapshot: WorkspaceDocumentRecord): WorkspaceDocumentRecord {
     const stored = this.#documents.get(snapshot.id);
-    if (!stored) return clone(snapshot);
+    if (!stored) {
+      const session = this.ensureSession(snapshot.session_id);
+      const timestamp = this.#now();
+      const synced: WorkspaceDocumentRecord = {
+        ...snapshot,
+        session_id: session.id,
+        title: snapshot.title?.trim() || "Untitled",
+        language: normalizeLanguage(snapshot.language, snapshot.current_content),
+        current_content: snapshot.current_content ?? "",
+        version_count: Math.max(1, Number(snapshot.version_count) || 1),
+        is_active: true,
+        archived: false,
+        created_at: snapshot.created_at ?? timestamp,
+        updated_at: snapshot.updated_at ?? timestamp,
+      };
+      this.#documents.set(synced.id, synced);
+      this.#appendDocumentVersion(synced, "user", "Synced active editor snapshot");
+      this.patchSession(session.id, { active_document_id: synced.id, mode: "document" });
+      return clone(synced);
+    }
     if (stored.current_content !== snapshot.current_content || stored.title !== snapshot.title || stored.language !== snapshot.language) {
       return this.updateDocument(snapshot.id, {
         title: snapshot.title,
