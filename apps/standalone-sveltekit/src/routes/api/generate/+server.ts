@@ -37,10 +37,12 @@ function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: Wo
     route: optionalRouteString(record.route, "workspace.pageContext.route", PAGE_CONTEXT_FIELD_MAX_CHARS),
     surface: optionalRouteString(record.surface, "workspace.pageContext.surface", PAGE_CONTEXT_FIELD_MAX_CHARS),
     pageType: optionalRouteString(record.pageType, "workspace.pageContext.pageType", PAGE_CONTEXT_FIELD_MAX_CHARS),
+    title: optionalRouteString(record.title, "workspace.pageContext.title", PAGE_CONTEXT_FIELD_MAX_CHARS),
     activeEntity,
     activeArtifactId: optionalRouteString(record.activeArtifactId, "workspace.pageContext.activeArtifactId", PAGE_CONTEXT_FIELD_MAX_CHARS),
     activeDocumentId: optionalRouteString(record.activeDocumentId, "workspace.pageContext.activeDocumentId", PAGE_CONTEXT_FIELD_MAX_CHARS),
     artifactType: optionalRouteString(record.artifactType, "workspace.pageContext.artifactType", PAGE_CONTEXT_FIELD_MAX_CHARS),
+    visibleActions: routeStringArray(record.visibleActions, "workspace.pageContext.visibleActions"),
     skillFamilies: routeStringArray(record.skillFamilies, "workspace.pageContext.skillFamilies"),
     commandFamilies: routeStringArray(record.commandFamilies, "workspace.pageContext.commandFamilies"),
   };
@@ -71,13 +73,32 @@ function hasPageContext(context: AgentPageContext): boolean {
     context.route ||
     context.surface ||
     context.pageType ||
+    context.title ||
     context.activeEntity ||
     context.activeArtifactId ||
     context.activeDocumentId ||
     context.artifactType ||
+    (context.visibleActions && context.visibleActions.length > 0) ||
     (context.skillFamilies && context.skillFamilies.length > 0) ||
     (context.commandFamilies && context.commandFamilies.length > 0)
   );
+}
+
+function createCurrentPageContextSummary(context: AgentPageContext | undefined): string {
+  if (!context) return "";
+  const lines = ["CURRENT HOST/PAGE CONTEXT:"];
+  if (context.title) lines.push(`- title: ${context.title}`);
+  if (context.route) lines.push(`- route: ${context.route}`);
+  if (context.surface) lines.push(`- surface: ${context.surface}`);
+  if (context.pageType) lines.push(`- pageType: ${context.pageType}`);
+  if (context.activeEntity) {
+    lines.push(`- activeEntity: ${context.activeEntity.type} ${context.activeEntity.label ?? context.activeEntity.id} (${context.activeEntity.id})`);
+  }
+  if (context.commandFamilies?.length) lines.push(`- commandFamilies: ${context.commandFamilies.join(", ")}`);
+  if (context.skillFamilies?.length) lines.push(`- skillFamilies: ${context.skillFamilies.join(", ")}`);
+  if (context.visibleActions?.length) lines.push(`- visibleActions: ${context.visibleActions.join(", ")}`);
+  lines.push("If the user asks where they are, what page this is, or what context is attached, answer directly from this block. Do not create an artifact or dashboard unless the user explicitly asks for one.");
+  return lines.join("\n");
 }
 
 function resolvePageContextSource(body: Record<string, unknown>, activeDocument: WorkspaceDocumentRecord | null): string {
@@ -172,7 +193,8 @@ export const POST: RequestHandler = async ({ request }) => {
   const modelMessages = await convertToModelMessages(uiMessages);
   const contextSummary = summarizeWorkspaceContext({ activeDocument });
   const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSessionMode: "standalone-demo", sessionId: telemetrySessionId, pageContext });
-  const systemContext = [contextSummary, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
+  const pageContextSummary = createCurrentPageContextSummary(pageContext);
+  const systemContext = [contextSummary, pageContextSummary, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;

@@ -13,6 +13,7 @@ const evidenceBaseUrl = process.env.AGENT_UI_EVIDENCE_URL ?? `http://127.0.0.1:$
 const telemetryLogPath = process.env.SONIK_AGENT_UI_TELEMETRY_LOG ?? path.join(repoRoot, ".omx", "logs", "agent-ui-telemetry.jsonl");
 const evidencePath = path.join(repoRoot, ".omx", "logs", `${runId}.json`);
 const startServer = process.env.AGENT_UI_SMOKE_START_SERVER !== "false";
+const useMockStream = process.env.AGENT_UI_EMBED_SMOKE_REAL_MODEL !== "true";
 const startedAtMs = Date.now();
 const children = [];
 const evidence = {
@@ -30,6 +31,7 @@ const evidence = {
   assertions: null,
   telemetry: { commandIndexContext: [], hostContextUpdated: [], ignoredHostMessages: [], runtimeErrors: [] },
   layout: { chat: null, canvas: null },
+  assistantText: "",
 };
 const watchdog = setTimeout(() => void finish("FAIL", "Embed smoke timed out."), Number(process.env.AGENT_UI_EMBED_SMOKE_TIMEOUT_MS ?? 120_000));
 
@@ -208,7 +210,7 @@ try {
     }
   });
 
-  const hostUrl = `${baseUrl}/fake-booking-host.html?autoOpen=chat&smokeMockStream=1&smokeRunId=${encodeURIComponent(runId)}`;
+  const hostUrl = `${baseUrl}/fake-booking-host.html?autoOpen=chat&smokeMockStream=${useMockStream ? "1" : "0"}&smokeRunId=${encodeURIComponent(runId)}`;
   await page.goto(hostUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
   const initialEmbedMode = await page.evaluate(() => document.body.dataset.agentUiOpen);
   if (initialEmbedMode !== "chat") throw new Error(`fake host did not auto-open chat embed mode: ${initialEmbedMode}`);
@@ -237,8 +239,9 @@ try {
   const submit = await frame.evaluate(async () => window.__sonikAgentUI.actions.submitPrompt({ prompt: "Using the current page context, summarize where I am in one sentence." }));
   if (!submit?.ok) throw new Error(`semantic submit failed: ${JSON.stringify(submit)}`);
   await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === true, undefined, { timeout: 10_000 });
-  await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === false && window.__sonikAgentUI.getAssertions().messageCount >= 2, undefined, { timeout: 45_000 });
+  await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === false && window.__sonikAgentUI.getAssertions().messageCount >= 2, undefined, { timeout: useMockStream ? 45_000 : 90_000 });
   await sleep(1500);
+  evidence.assistantText = await frame.evaluate(() => document.body.innerText).catch(() => "");
   await frame.waitForFunction(() => window.__sonikAgentUI?.getPageContext?.().surface === "booking-console", undefined, { timeout: 10_000 });
   evidence.pageContext = await frame.evaluate(() => window.__sonikAgentUI.getPageContext());
   evidence.assertions = await frame.evaluate(() => window.__sonikAgentUI.getAssertions());
@@ -254,6 +257,9 @@ try {
   if (commandEvent?.surface !== "booking-console") await finish("FAIL", "Command-index telemetry did not include booking surface.");
   if (commandEvent?.pageContext?.activeEntity?.label !== "Summer Jazz Night") await finish("FAIL", "Command-index telemetry did not include active entity label.");
   if (!commandEvent?.commandFamilies?.includes("booking")) await finish("FAIL", "Command-index telemetry did not include booking command family.");
+  if (!useMockStream && !/Summer Jazz Night|booking-console|booking detail|event-booking-detail|booking_123/i.test(evidence.assistantText)) {
+    await finish("FAIL", "Real-model embedded page-context answer did not mention the donated booking page context.");
+  }
   if (evidence.telemetry.runtimeErrors.length > 0) await finish("FAIL", "Client runtime error telemetry observed during embed smoke.");
   await page.focus("#agent-fab-main");
   await page.waitForFunction(() => {

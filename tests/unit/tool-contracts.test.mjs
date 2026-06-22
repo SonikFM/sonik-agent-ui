@@ -350,14 +350,18 @@ const pageContext = createCommandIndexContextFromPageContext({
   route: "/campaigns/new",
   surface: "campaign-wizard",
   pageType: "wizard",
+  title: "Launch Campaign Wizard",
   activeEntity: { type: "campaign", id: "cmp_1", label: "Launch Campaign" },
   activeArtifactId: "artifact_1",
   activeDocumentId: "doc_1",
+  visibleActions: ["preview", "publish"],
   skillFamilies: ["campaign-authoring"],
   commandFamilies: ["campaign"],
 }, { authenticated: true, organizationId: "org1", scopes: ["campaign:send"] });
 assert.equal(pageContext.activeEntity?.type, "campaign", "page context bridge should preserve active entity type");
 assert.equal(pageContext.activeEntity?.label, "Launch Campaign", "page context bridge should preserve active entity display label");
+assert.equal(pageContext.title, "Launch Campaign Wizard", "page context bridge should preserve safe page title for model-readable context");
+assert.deepEqual(pageContext.visibleActions, ["preview", "publish"], "page context bridge should preserve safe visible action labels");
 assert.equal(pageContext.authenticated, true, "page context bridge should carry trusted auth state");
 assert.equal(pageContext.organizationId, "org1", "page context bridge should carry trusted org state");
 

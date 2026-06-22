@@ -401,10 +401,12 @@ export type AgentPageContext = {
   route?: string;
   surface?: string;
   pageType?: string;
+  title?: string;
   activeEntity?: { type: string; id: string; label?: string };
   activeArtifactId?: string;
   activeDocumentId?: string;
   artifactType?: string;
+  visibleActions?: string[];
   skillFamilies?: string[];
   commandFamilies?: string[];
 };

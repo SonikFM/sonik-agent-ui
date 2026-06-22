@@ -101,6 +101,9 @@ assert.equal(generateRoute.includes("activeDocument?.session_id ?? workspaceSess
 assert.equal(generateRoute.includes("includeHostRuntime: true"), true, "generate route should opt into host-composed command indexes without changing the neutral default helper");
 assert.equal(generateRoute.includes('hostSessionMode: "standalone-demo"'), true, "generate route should opt into fixture host auth explicitly instead of relying on hidden trusted defaults");
 assert.equal(generateRoute.includes("createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext })"), true, "agent tools should receive active workspace session id and page context");
+assert.equal(generateRoute.includes("CURRENT HOST/PAGE CONTEXT:"), true, "generate route should inject host page context as first-class model context, not only telemetry/tool metadata");
+assert.equal(generateRoute.includes("If the user asks where they are"), true, "generate route should instruct page-location questions to answer from the donated page context");
+assert.equal(generateRoute.includes("visibleActions: routeStringArray(record.visibleActions"), true, "generate route should preserve host-visible action labels in the page context summary");
 assert.equal(commandCatalogToolsSource.includes("executeHostCatalogCommand"), true, "command catalog tools should execute through the host runtime adapter seam");
 assert.equal(commandCatalogToolsSource.includes("createStandaloneHostCommandRuntimeBundle"), true, "command catalog tools should compose host catalog/runtime adapters for standalone smoke testing");
 assert.equal(commandCatalogToolsSource.includes('hostSessionMode: "standalone-demo"'), true, "command catalog tools should use the explicit standalone demo host-session adapter for local smoke testing");
@@ -295,6 +298,7 @@ assert.equal(smokeHarnessSource.includes("AGENT_UI_SMOKE_ALLOW_INCONCLUSIVE"), t
 assert.equal(smokeHarnessSource.includes("session.messages.persist_success"), true, "smoke harness should require client message persistence telemetry after streaming");
 assert.equal(smokeHarnessSource.includes("AGENT_UI_SMOKE_START_SERVER"), true, "smoke harness should be batteries-included and able to start local dev dependencies");
 assert.equal(packageSource.includes("smoke:agent-ui:real-model"), true, "package scripts should expose an explicit real-model smoke lane separate from deterministic crash gating");
+assert.equal(packageSource.includes("smoke:agent-ui:embed:real-model"), true, "package scripts should expose a real-model embedded page-context smoke lane");
 
 const artifactToolSource = await readFile("apps/standalone-sveltekit/src/lib/tools/artifact.ts", "utf8");
 const jsonArtifactSpecSource = await readFile("apps/standalone-sveltekit/src/lib/artifacts/json-artifact-spec.ts", "utf8");

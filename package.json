@@ -16,7 +16,8 @@
     "smoke:agent-ui": "node scripts/agent-ui-smoke.mjs",
     "smoke:agent-ui:crash": "node scripts/agent-ui-smoke.mjs",
     "smoke:agent-ui:real-model": "AGENT_UI_SMOKE_REAL_MODEL=true node scripts/agent-ui-smoke.mjs",
-    "smoke:agent-ui:embed": "node scripts/agent-ui-embed-smoke.mjs"
+    "smoke:agent-ui:embed": "node scripts/agent-ui-embed-smoke.mjs",
+    "smoke:agent-ui:embed:real-model": "AGENT_UI_EMBED_SMOKE_REAL_MODEL=true node scripts/agent-ui-embed-smoke.mjs"
   },
   "packageManager": "pnpm@11.1.3",
   "engines": {
