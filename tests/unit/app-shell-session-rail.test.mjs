@@ -84,6 +84,7 @@ assert.equal(sessionDetailRoute.includes("activeDocument"), true, "session detai
 assert.equal(sessionDetailRoute.includes("listWorkspaceTelemetryEvents(session.id).slice(-50)"), true, "session detail route should expose bounded telemetry for debugging");
 assert.equal(sessionDetailRoute.includes("export async function PATCH"), true, "session detail route should support renaming chats");
 assert.equal(sessionDetailRoute.includes("patchWorkspaceSession(session.id, { name })"), true, "session rename route should patch only the validated session name");
+assert.equal(sessionDetailRoute.includes("ensureWorkspaceSession(params.id)"), true, "session rename should upsert missing ephemeral sessions across stateless Worker isolates");
 assert.equal(sessionDetailRoute.includes("export function DELETE"), true, "session detail route should support deleting local chats");
 assert.equal(sessionDetailRoute.includes("deleteWorkspaceSession(session.id)"), true, "session delete route should use the persistence seam");
 assert.equal(sessionDetailRoute.includes('persistence: "ephemeral-v0"'), true, "session detail route should make v0 JSON artifact ephemerality explicit");
@@ -307,6 +308,8 @@ assert.equal(smokeHarnessSource.includes("session.messages.persist_success"), tr
 assert.equal(smokeHarnessSource.includes("AGENT_UI_SMOKE_START_SERVER"), true, "smoke harness should be batteries-included and able to start local dev dependencies");
 assert.equal(packageSource.includes("smoke:agent-ui:real-model"), true, "package scripts should expose an explicit real-model smoke lane separate from deterministic crash gating");
 assert.equal(packageSource.includes("smoke:agent-ui:embed:real-model"), true, "package scripts should expose a real-model embedded page-context smoke lane");
+assert.equal(agentTelemetrySource.includes("appendTelemetryJsonl"), true, "agent telemetry should isolate JSONL persistence behind a best-effort helper");
+assert.equal(agentTelemetrySource.includes("Cloudflare Workers do not provide a durable local filesystem"), true, "hosted telemetry should not crash when local JSONL persistence is unavailable");
 
 const artifactToolSource = await readFile("apps/standalone-sveltekit/src/lib/tools/artifact.ts", "utf8");
 const jsonArtifactSpecSource = await readFile("apps/standalone-sveltekit/src/lib/artifacts/json-artifact-spec.ts", "utf8");

@@ -1,6 +1,7 @@
 import { error, json } from "@sveltejs/kit";
 import {
   deleteWorkspaceSession,
+  ensureWorkspaceSession,
   getWorkspaceDocument,
   getWorkspaceSession,
   listWorkspaceDocuments,
@@ -31,8 +32,7 @@ export function GET({ params }) {
 }
 
 export async function PATCH({ params, request }) {
-  const session = getWorkspaceSession(params.id);
-  if (!session) error(404, "Session not found");
+  const session = getWorkspaceSession(params.id) ?? ensureWorkspaceSession(params.id);
 
   let body: Record<string, unknown>;
   try {

@@ -14,8 +14,7 @@ export type { AgentTelemetryEvent, AgentTelemetrySource } from "@sonik-agent-ui/
 export async function writeAgentTelemetry(event: AgentTelemetryEvent): Promise<void> {
   const payload = sanitizeAgentTelemetry(event);
   const logPath = resolveTelemetryLogPath();
-  await mkdir(path.dirname(logPath), { recursive: true });
-  await appendFile(logPath, `${JSON.stringify(payload)}\n`, "utf8");
+  await appendTelemetryJsonl(logPath, payload);
   try {
     recordWorkspaceTelemetryEvent({
       session_id: payload.sessionId ?? null,
@@ -28,6 +27,17 @@ export async function writeAgentTelemetry(event: AgentTelemetryEvent): Promise<v
     });
   } catch {
     // Intentional fail-safe: workspace telemetry is only a bounded mirror; JSONL above remains the source of evidence.
+  }
+}
+
+async function appendTelemetryJsonl(logPath: string, payload: AgentTelemetryEvent): Promise<void> {
+  try {
+    await mkdir(path.dirname(logPath), { recursive: true });
+    await appendFile(logPath, `${JSON.stringify(payload)}\n`, "utf8");
+  } catch {
+    // Cloudflare Workers do not provide a durable local filesystem. Hosted
+    // telemetry must remain non-blocking; Tail Workers / Workers Logs are the
+    // deploy-time evidence path, while local dev keeps JSONL when fs exists.
   }
 }
 
