@@ -153,12 +153,15 @@ assert.equal(workspaceHostSource.includes("'--panel': panel"), true, "workspace 
 assert.equal(agentMessageSource.includes("chat-bubble"), false, "chat message display should not use Daisy chat-bubble wrappers that add bubble tails");
 assert.equal(agentMessageSource.includes("MessagePrimitive"), false, "chat message display should not use Daisy chat primitives for flat Claude-style rows");
 assert.equal(agentMessageSource.includes("<ChatText"), true, "chat messages should render text through the safe rich-text renderer");
+assert.equal(agentMessageSource.includes("streaming={isLast && isStreaming}"), true, "assistant messages should pass streaming state into chat text rendering");
 assert.equal(agentMessageSource.includes("white-space: pre-wrap"), true, "user-authored chat text should preserve multiline prompt fidelity");
 assert.equal(agentMessageSource.includes("function snapshotDataParts"), false, "chat messages should import the shared data-part snapshot helper instead of duplicating clone logic");
 assert.equal(chatMessagePartsSource.includes("export function snapshotDataParts"), true, "chat surface should own a reusable data-part snapshot helper");
 assert.equal(chatSurfaceIndexSource.includes("snapshotDataParts"), true, "chat surface should export data-part snapshot helper for app-shell promotion/persistence paths");
 assert.equal(chatTextParserSource.includes("parseTable"), true, "chat text renderer should present markdown tables instead of leaving raw pipes in chat");
 assert.equal(chatTextSource.includes("{@html"), false, "chat text renderer should avoid HTML injection and render structured Svelte elements");
+assert.equal(chatTextSource.includes("streaming ? [] : renderChatText(text)"), true, "chat text should avoid reparsing markdown/table blocks on every streaming delta");
+assert.equal(chatTextSource.includes("chat-text__streaming"), true, "streaming assistant text should render as cheap escaped pre-wrapped text until the stream completes");
 assert.equal(canvasViewportSource.includes("documentTitle"), true, "artifact canvas should accept document title metadata for document-only mode");
 assert.equal(canvasViewportSource.includes("Document editor active"), true, "artifact canvas should expose a document-aware subtitle when no JSON artifact is promoted");
 assert.equal(generateRoute.includes("instrumentGenerateStream"), true, "generate route should wrap the AI stream with completion/failure telemetry");
@@ -168,6 +171,8 @@ assert.equal(streamTelemetrySource.includes("api.generate.stream_cancelled"), tr
 
 assert.equal(pageSource.includes("chat.activity.status"), true, "client should expose sanitized activity status telemetry without raw reasoning");
 assert.equal(pageSource.includes("Waiting for model response"), true, "chat UI should show a sanitized wait status for long silent model spans");
+assert.equal(pageSource.includes("client.performance.long_task"), true, "dev browser long tasks should emit telemetry for page-unresponsive triage");
+assert.equal(pageSource.includes("browser_main_thread_blocked"), true, "long-task telemetry should classify main-thread stalls without raw browser internals");
 assert.equal(pageSource.includes("formatToolActivityDetail"), true, "tool activity details should be human labels instead of raw tool slugs");
 assert.equal(pageSource.includes("detail: activity.detail,"), false, "activity telemetry signature should not emit every second during long waits");
 assert.equal(pageSource.includes("activity={agentActivity}"), true, "top-level app should pass activity status into the chat surface");

@@ -62,7 +62,7 @@
       {#each segments as seg, i (`${seg.kind}-${i}`)}
         {#if seg.kind === "text"}
           <div class="agent-message__assistant-text">
-            <ChatText text={seg.text} />
+            <ChatText text={seg.text} streaming={isLast && isStreaming} />
           </div>
         {:else if seg.kind === "spec"}
           {#if spec && canRenderArtifact}

@@ -24,6 +24,7 @@ export interface ArtifactTelemetryEvent {
   runtimeStatus?: string;
   reason?: string;
   mode?: string;
+  durationMs?: number;
   messageId?: string;
   toolCallId?: string;
   ok?: boolean;

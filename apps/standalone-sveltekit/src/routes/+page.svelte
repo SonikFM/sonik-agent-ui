@@ -821,14 +821,45 @@
     embedRailMode = nextIntent.railMode;
   }
 
+  function installDevLongTaskTelemetry(): (() => void) | undefined {
+    if (!dev || typeof window === "undefined" || typeof PerformanceObserver === "undefined") return undefined;
+    let lastReportedAt = 0;
+    let observer: PerformanceObserver;
+    try {
+      observer = new PerformanceObserver((list) => {
+        const now = Date.now();
+        if (now - lastReportedAt < 5_000) return;
+        const longest = list.getEntries().reduce((max, entry) => Math.max(max, entry.duration), 0);
+        if (longest < 250) return;
+        lastReportedAt = now;
+        logArtifactTelemetry({
+          source: "client",
+          event: "client.performance.long_task",
+          sessionId: activeSessionId ?? undefined,
+          durationMs: Math.round(longest),
+          runtimeStatus: conversation.status,
+          pageContext: snapshotPageContext(),
+          ok: false,
+          reason: "browser_main_thread_blocked",
+        });
+      });
+      observer.observe({ entryTypes: ["longtask"] });
+    } catch {
+      return undefined;
+    }
+    return () => observer.disconnect();
+  }
+
   onMount(() => {
     applyEmbedUrlOptions();
+    const stopLongTaskTelemetry = installDevLongTaskTelemetry();
     const activityTimer = window.setInterval(() => {
       if (isStreaming) activityClock = Date.now();
     }, 1_000);
     window.addEventListener("message", handleAgentHostMessage);
     void initializeSessions();
     return () => {
+      stopLongTaskTelemetry?.();
       window.clearInterval(activityTimer);
       window.removeEventListener("message", handleAgentHostMessage);
     };

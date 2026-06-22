@@ -4,15 +4,16 @@
   export interface ChatTextProps {
     text: string;
     compact?: boolean;
+    streaming?: boolean;
   }
 </script>
 
 <script lang="ts">
-  let { text, compact = false }: ChatTextProps = $props();
+  let { text, compact = false, streaming = false }: ChatTextProps = $props();
 
   import { renderChatText } from "../chat-text.js";
 
-  const blocks = $derived(renderChatText(text));
+  const blocks = $derived(streaming ? [] : renderChatText(text));
 </script>
 
 {#snippet renderInline(tokens: InlineToken[])}
@@ -32,54 +33,58 @@
 {/snippet}
 
 <div class="chat-text" class:chat-text--compact={compact}>
-  {#each blocks as block, index (`${block.kind}-${index}`)}
-    {#if block.kind === "paragraph"}
-      <p>{@render renderInline(block.tokens)}</p>
-    {:else if block.kind === "heading" && block.level === 1}
-      <h1>{@render renderInline(block.tokens)}</h1>
-    {:else if block.kind === "heading" && block.level === 2}
-      <h2>{@render renderInline(block.tokens)}</h2>
-    {:else if block.kind === "heading" && block.level === 3}
-      <h3>{@render renderInline(block.tokens)}</h3>
-    {:else if block.kind === "heading"}
-      <h4>{@render renderInline(block.tokens)}</h4>
-    {:else if block.kind === "list" && block.ordered}
-      <ol>
-        {#each block.items as item, itemIndex (itemIndex)}
-          <li>{@render renderInline(item)}</li>
-        {/each}
-      </ol>
-    {:else if block.kind === "list"}
-      <ul>
-        {#each block.items as item, itemIndex (itemIndex)}
-          <li>{@render renderInline(item)}</li>
-        {/each}
-      </ul>
-    {:else if block.kind === "code"}
-      <pre><code data-language={block.language}>{block.text}</code></pre>
-    {:else if block.kind === "table"}
-      <div class="chat-text__table-scroll">
-        <table>
-          <thead>
-            <tr>
-              {#each block.headers as header, headerIndex (headerIndex)}
-                <th>{@render renderInline(header)}</th>
-              {/each}
-            </tr>
-          </thead>
-          <tbody>
-            {#each block.rows as row, rowIndex (rowIndex)}
+  {#if streaming}
+    <p class="chat-text__streaming">{text}</p>
+  {:else}
+    {#each blocks as block, index (`${block.kind}-${index}`)}
+      {#if block.kind === "paragraph"}
+        <p>{@render renderInline(block.tokens)}</p>
+      {:else if block.kind === "heading" && block.level === 1}
+        <h1>{@render renderInline(block.tokens)}</h1>
+      {:else if block.kind === "heading" && block.level === 2}
+        <h2>{@render renderInline(block.tokens)}</h2>
+      {:else if block.kind === "heading" && block.level === 3}
+        <h3>{@render renderInline(block.tokens)}</h3>
+      {:else if block.kind === "heading"}
+        <h4>{@render renderInline(block.tokens)}</h4>
+      {:else if block.kind === "list" && block.ordered}
+        <ol>
+          {#each block.items as item, itemIndex (itemIndex)}
+            <li>{@render renderInline(item)}</li>
+          {/each}
+        </ol>
+      {:else if block.kind === "list"}
+        <ul>
+          {#each block.items as item, itemIndex (itemIndex)}
+            <li>{@render renderInline(item)}</li>
+          {/each}
+        </ul>
+      {:else if block.kind === "code"}
+        <pre><code data-language={block.language}>{block.text}</code></pre>
+      {:else if block.kind === "table"}
+        <div class="chat-text__table-scroll">
+          <table>
+            <thead>
               <tr>
-                {#each block.headers as _header, cellIndex (cellIndex)}
-                  <td>{@render renderInline(row[cellIndex] ?? [])}</td>
+                {#each block.headers as header, headerIndex (headerIndex)}
+                  <th>{@render renderInline(header)}</th>
                 {/each}
               </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
-  {/each}
+            </thead>
+            <tbody>
+              {#each block.rows as row, rowIndex (rowIndex)}
+                <tr>
+                  {#each block.headers as _header, cellIndex (cellIndex)}
+                    <td>{@render renderInline(row[cellIndex] ?? [])}</td>
+                  {/each}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    {/each}
+  {/if}
 </div>
 
 <style>
@@ -93,6 +98,10 @@
   .chat-text--compact {
     font-size: 0.875rem;
     line-height: 1.55;
+  }
+
+  .chat-text__streaming {
+    white-space: pre-wrap;
   }
 
   .chat-text :global(> * + *) {
