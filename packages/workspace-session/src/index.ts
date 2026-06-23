@@ -388,6 +388,372 @@ export function createMemoryWorkspaceRuntime(input: {
   };
 }
 
+export class CloudWorkspacePersistenceError extends Error {
+  readonly code: "missing-request-context" | "command-policy-denied" | "unsupported-operation";
+
+  constructor(code: CloudWorkspacePersistenceError["code"], message: string) {
+    super(message);
+    this.name = "CloudWorkspacePersistenceError";
+    this.code = code;
+  }
+}
+
+export function createCloudWorkspacePersistenceAdapter(authorized: AuthorizedWorkspaceRuntime): AsyncWorkspacePersistenceAdapter {
+  return new CloudWorkspacePersistence(authorized);
+}
+
+export function createCloudWorkspaceRuntime(authorized: AuthorizedWorkspaceRuntime): CloudWorkspaceRuntime {
+  return {
+    kind: "cloud",
+    authorized,
+    persistence: createCloudWorkspacePersistenceAdapter(authorized),
+  };
+}
+
+type CloudWorkspaceSessionRow = {
+  id: string;
+  name: string;
+  mode: WorkspaceMode;
+  archived: boolean;
+  is_important: boolean;
+  folder: string | null;
+  message_count: number;
+  active_document_id: string | null;
+  active_artifact_id: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+  last_accessed: string | Date;
+  last_message_at: string | Date | null;
+};
+
+type CloudWorkspaceMessageRow<TParts = unknown> = {
+  id: string;
+  session_id: string;
+  role: WorkspaceMessageRecord<TParts>["role"];
+  content: string;
+  parts: TParts | null;
+  created_at: string | Date;
+};
+
+class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
+  readonly #authorized: AuthorizedWorkspaceRuntime;
+
+  constructor(authorized: AuthorizedWorkspaceRuntime) {
+    this.#authorized = authorized;
+  }
+
+  createSession(input: { id?: string; name?: string | null; mode?: WorkspaceMode; folder?: string | null } = {}): Promise<WorkspaceSessionRecord> {
+    return this.#withContext(async (tx) => {
+      const id = input.id?.trim() || this.#nextId("workspace-session");
+      const existing = await this.#selectSession(tx, id);
+      if (existing) return existing;
+      const { rows } = await tx.query<CloudWorkspaceSessionRow>(
+          `insert into sonik_agent_ui.agent_workspace_sessions
+          (organization_id, user_id, id, host_session_id, name, mode, folder)
+         values ($1, $2, $3, $4, $5, $6, $7)
+         returning id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at`,
+        [
+          this.#authorized.organizationId,
+          this.#authorized.userId,
+          id,
+          this.#authorized.hostSession.sessionId ?? null,
+          normalizeWorkspaceSessionName(input.name),
+          input.mode ?? "chat",
+          input.folder ?? null,
+        ],
+      );
+      const row = rows[0];
+      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud session insert returned no row.");
+      return mapCloudSessionRow(row);
+    });
+  }
+
+  ensureSession(sessionId?: string | null): Promise<WorkspaceSessionRecord> {
+    return this.#withContext(async (tx) => this.#ensureSession(tx, sessionId));
+  }
+
+  getSession(id: string): Promise<WorkspaceSessionRecord | null> {
+    return this.#withContext((tx) => this.#selectSession(tx, id));
+  }
+
+  listSessions({ archived = false }: { archived?: boolean } = {}): Promise<WorkspaceSessionRecord[]> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceSessionRow>(
+        `select id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at
+         from sonik_agent_ui.agent_workspace_sessions
+         where organization_id = $1 and user_id = $2 and archived = $3
+         order by last_accessed desc`,
+        [this.#authorized.organizationId, this.#authorized.userId, archived],
+      );
+      return rows.map(mapCloudSessionRow);
+    });
+  }
+
+  patchSession(id: string, input: Partial<Pick<WorkspaceSessionRecord, "name" | "mode" | "folder" | "active_document_id" | "active_artifact_id" | "is_important">>): Promise<WorkspaceSessionRecord | null> {
+    return this.#withContext(async (tx) => {
+      const existing = await this.#selectSession(tx, id);
+      if (!existing) return null;
+      const next = { ...existing, ...input };
+      const { rows } = await tx.query<CloudWorkspaceSessionRow>(
+        `update sonik_agent_ui.agent_workspace_sessions
+         set name = $4, mode = $5, folder = $6, active_document_id = $7, active_artifact_id = $8, is_important = $9, updated_at = now(), last_accessed = now()
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, next.name, next.mode, next.folder, next.active_document_id, next.active_artifact_id, next.is_important],
+      );
+      return rows[0] ? mapCloudSessionRow(rows[0]) : null;
+    });
+  }
+
+  archiveSession(id: string, archived = true): Promise<WorkspaceSessionRecord | null> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceSessionRow>(
+        `update sonik_agent_ui.agent_workspace_sessions
+         set archived = $4, updated_at = now(), last_accessed = now()
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, archived],
+      );
+      return rows[0] ? mapCloudSessionRow(rows[0]) : null;
+    });
+  }
+
+  deleteSession(id: string): Promise<boolean> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<{ id: string }>(
+        `delete from sonik_agent_ui.agent_workspace_sessions
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id`,
+        [this.#authorized.organizationId, this.#authorized.userId, id],
+      );
+      return rows.length > 0;
+    });
+  }
+
+  appendMessage<TParts = unknown>(input: { session_id?: string | null; id?: string; role: WorkspaceMessageRecord<TParts>["role"]; content?: string | null; parts?: TParts | null }): Promise<WorkspaceMessageRecord<TParts>> {
+    return this.#withContext(async (tx) => {
+      const session = await this.#ensureSession(tx, input.session_id);
+      const id = input.id?.trim() || this.#nextId("workspace-message");
+      const { rows } = await tx.query<CloudWorkspaceMessageRow<TParts>>(
+        `insert into sonik_agent_ui.agent_workspace_messages
+          (organization_id, user_id, id, session_id, role, content, parts)
+         values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+         returning id, session_id, role, content, parts, created_at`,
+        [
+          this.#authorized.organizationId,
+          this.#authorized.userId,
+          id,
+          session.id,
+          input.role,
+          input.content ?? "",
+          input.parts === undefined || input.parts === null ? null : JSON.stringify(input.parts),
+        ],
+      );
+      const row = rows[0];
+      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud message insert returned no row.");
+      await tx.query(
+        `update sonik_agent_ui.agent_workspace_sessions
+         set message_count = message_count + 1, last_message_at = $4, updated_at = now(), last_accessed = now()
+         where organization_id = $1 and user_id = $2 and id = $3`,
+        [this.#authorized.organizationId, this.#authorized.userId, session.id, row.created_at],
+      );
+      return mapCloudMessageRow(row);
+    });
+  }
+
+  listMessages<TParts = unknown>(sessionId: string): Promise<WorkspaceMessageRecord<TParts>[]> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceMessageRow<TParts>>(
+        `select id, session_id, role, content, parts, created_at
+         from sonik_agent_ui.agent_workspace_messages
+         where organization_id = $1 and user_id = $2 and session_id = $3
+         order by created_at asc`,
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId],
+      );
+      return rows.map(mapCloudMessageRow<TParts>);
+    });
+  }
+
+  createDocument(): Promise<WorkspaceDocumentRecord> {
+    return unsupportedCloudWorkspaceOperation("createDocument");
+  }
+  getDocument(): Promise<WorkspaceDocumentRecord | null> {
+    return unsupportedCloudWorkspaceOperation("getDocument");
+  }
+  listDocuments(): Promise<WorkspaceDocumentRecord[]> {
+    return unsupportedCloudWorkspaceOperation("listDocuments");
+  }
+  listDocumentLibrary(): Promise<DocumentLibraryResult> {
+    return unsupportedCloudWorkspaceOperation("listDocumentLibrary");
+  }
+  updateDocument(): Promise<WorkspaceDocumentRecord | null> {
+    return unsupportedCloudWorkspaceOperation("updateDocument");
+  }
+  patchDocument(): Promise<WorkspaceDocumentRecord | null> {
+    return unsupportedCloudWorkspaceOperation("patchDocument");
+  }
+  archiveDocument(): Promise<WorkspaceDocumentRecord | null> {
+    return unsupportedCloudWorkspaceOperation("archiveDocument");
+  }
+  deleteDocument(): Promise<boolean> {
+    return unsupportedCloudWorkspaceOperation("deleteDocument");
+  }
+  listDocumentVersions(): Promise<WorkspaceDocumentVersionRecord[]> {
+    return unsupportedCloudWorkspaceOperation("listDocumentVersions");
+  }
+  getDocumentVersion(): Promise<WorkspaceDocumentVersionRecord | null> {
+    return unsupportedCloudWorkspaceOperation("getDocumentVersion");
+  }
+  restoreDocumentVersion(): Promise<WorkspaceDocumentRecord | null> {
+    return unsupportedCloudWorkspaceOperation("restoreDocumentVersion");
+  }
+  syncActiveDocumentSnapshot(): Promise<WorkspaceDocumentRecord> {
+    return unsupportedCloudWorkspaceOperation("syncActiveDocumentSnapshot");
+  }
+  createArtifact<TContent = unknown>(): Promise<WorkspaceArtifactRecord<TContent>> {
+    return unsupportedCloudWorkspaceOperation("createArtifact");
+  }
+  getArtifact<TContent = unknown>(): Promise<WorkspaceArtifactRecord<TContent> | null> {
+    return unsupportedCloudWorkspaceOperation("getArtifact");
+  }
+  updateArtifact<TContent = unknown>(): Promise<WorkspaceArtifactRecord<TContent> | null> {
+    return unsupportedCloudWorkspaceOperation("updateArtifact");
+  }
+  listArtifactVersions<TContent = unknown>(): Promise<WorkspaceArtifactVersionRecord<TContent>[]> {
+    return unsupportedCloudWorkspaceOperation("listArtifactVersions");
+  }
+  recordToolCall<TInput = unknown, TOutput = unknown>(): Promise<WorkspaceToolCallRecord<TInput, TOutput>> {
+    return unsupportedCloudWorkspaceOperation("recordToolCall");
+  }
+  listToolCalls(): Promise<WorkspaceToolCallRecord[]> {
+    return unsupportedCloudWorkspaceOperation("listToolCalls");
+  }
+  recordLayoutSnapshot<TLayout = unknown>(): Promise<WorkspaceLayoutSnapshotRecord<TLayout>> {
+    return unsupportedCloudWorkspaceOperation("recordLayoutSnapshot");
+  }
+  listLayoutSnapshots<TLayout = unknown>(): Promise<WorkspaceLayoutSnapshotRecord<TLayout>[]> {
+    return unsupportedCloudWorkspaceOperation("listLayoutSnapshots");
+  }
+  recordTelemetryEvent<TPayload = unknown>(): Promise<WorkspaceTelemetryEventRecord<TPayload>> {
+    return unsupportedCloudWorkspaceOperation("recordTelemetryEvent");
+  }
+  listTelemetryEvents(): Promise<WorkspaceTelemetryEventRecord[]> {
+    return unsupportedCloudWorkspaceOperation("listTelemetryEvents");
+  }
+
+  async #withContext<T>(fn: (tx: WorkspaceSqlTransaction) => Promise<T>): Promise<T> {
+    this.#assertAuthorized();
+    return this.#authorized.db.transaction(async (tx) => {
+      await tx.query("select sonik_agent_ui.set_request_context($1, $2)", [
+        this.#authorized.organizationId,
+        this.#authorized.userId,
+      ]);
+      return fn(tx);
+    });
+  }
+
+  async #ensureSession(tx: WorkspaceSqlTransaction, sessionId?: string | null): Promise<WorkspaceSessionRecord> {
+    if (sessionId) {
+      const existing = await this.#selectSession(tx, sessionId);
+      if (existing) return existing;
+      return this.#insertSession(tx, { id: sessionId, name: "workspace document session", mode: "document" });
+    }
+    return this.#insertSession(tx, { id: this.#nextId("workspace-session"), name: DEFAULT_WORKSPACE_SESSION_NAME, mode: "chat" });
+  }
+
+  async #insertSession(tx: WorkspaceSqlTransaction, input: { id: string; name: string; mode: WorkspaceMode; folder?: string | null }): Promise<WorkspaceSessionRecord> {
+    const { rows } = await tx.query<CloudWorkspaceSessionRow>(
+      `insert into sonik_agent_ui.agent_workspace_sessions
+        (organization_id, user_id, id, host_session_id, name, mode, folder)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       returning id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at`,
+      [
+        this.#authorized.organizationId,
+        this.#authorized.userId,
+        input.id,
+        this.#authorized.hostSession.sessionId ?? null,
+        normalizeWorkspaceSessionName(input.name),
+        input.mode,
+        input.folder ?? null,
+      ],
+    );
+    const row = rows[0];
+    if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud session insert returned no row.");
+    return mapCloudSessionRow(row);
+  }
+
+  async #selectSession(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceSessionRecord | null> {
+    const { rows } = await tx.query<CloudWorkspaceSessionRow>(
+      `select id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at
+       from sonik_agent_ui.agent_workspace_sessions
+       where organization_id = $1 and user_id = $2 and id = $3`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
+    );
+    return rows[0] ? mapCloudSessionRow(rows[0]) : null;
+  }
+
+  #assertAuthorized(): void {
+    if (!this.#authorized.organizationId?.trim() || !this.#authorized.userId?.trim()) {
+      throw new CloudWorkspacePersistenceError(
+        "missing-request-context",
+        "Cloud workspace persistence requires trusted organizationId and userId.",
+      );
+    }
+    if (!this.#authorized.commandPolicy.allowed) {
+      throw new CloudWorkspacePersistenceError(
+        "command-policy-denied",
+        `Cloud workspace persistence denied by command policy ${this.#authorized.commandPolicy.commandId}: ${this.#authorized.commandPolicy.reasonCode}`,
+      );
+    }
+  }
+
+  #nextId(prefix: string): string {
+    return `${prefix}-${globalThis.crypto.randomUUID()}`;
+  }
+}
+
+function unsupportedCloudWorkspaceOperation(method: string): Promise<never> {
+  return Promise.reject(
+    new CloudWorkspacePersistenceError(
+      "unsupported-operation",
+      `Cloud workspace persistence v0 supports sessions and messages only; ${method} is scheduled for a later slice.`,
+    ),
+  );
+}
+
+function mapCloudSessionRow(row: CloudWorkspaceSessionRow): WorkspaceSessionRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    mode: row.mode,
+    archived: Boolean(row.archived),
+    is_important: Boolean(row.is_important),
+    folder: row.folder ?? null,
+    message_count: Number(row.message_count ?? 0),
+    active_document_id: row.active_document_id ?? null,
+    active_artifact_id: row.active_artifact_id ?? null,
+    created_at: toIsoTimestamp(row.created_at),
+    updated_at: toIsoTimestamp(row.updated_at),
+    last_accessed: toIsoTimestamp(row.last_accessed),
+    last_message_at: row.last_message_at ? toIsoTimestamp(row.last_message_at) : null,
+  };
+}
+
+function mapCloudMessageRow<TParts = unknown>(row: CloudWorkspaceMessageRow<TParts>): WorkspaceMessageRecord<TParts> {
+  return {
+    id: row.id,
+    session_id: row.session_id,
+    role: row.role,
+    content: row.content ?? "",
+    parts: row.parts ?? null,
+    created_at: toIsoTimestamp(row.created_at),
+  };
+}
+
+function toIsoTimestamp(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
 export interface InMemoryWorkspacePersistenceOptions {
   maxTelemetryEvents?: number;
   maxTelemetryPayloadChars?: number;
