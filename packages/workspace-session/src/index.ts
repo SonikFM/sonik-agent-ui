@@ -435,6 +435,60 @@ type CloudWorkspaceMessageRow<TParts = unknown> = {
   created_at: string | Date;
 };
 
+type CloudWorkspaceDocumentRow = {
+  id: string;
+  session_id: string | null;
+  title: string;
+  language: string;
+  current_content: string;
+  version_count: number;
+  is_active: boolean;
+  archived: boolean;
+  created_at: string | Date;
+  updated_at: string | Date;
+};
+
+type CloudWorkspaceDocumentLibraryRow = CloudWorkspaceDocumentRow & {
+  session_name: string | null;
+  preview: string;
+};
+
+type CloudWorkspaceDocumentLanguageCountRow = {
+  language: string;
+  count: number;
+};
+
+type CloudWorkspaceDocumentVersionRow = {
+  id: string;
+  document_id: string;
+  version_number: number;
+  content: string;
+  summary: string | null;
+  source: WorkspaceDocumentVersionSource;
+  created_at: string | Date;
+};
+
+type CloudWorkspaceArtifactRow<TContent = unknown> = {
+  id: string;
+  session_id: string | null;
+  kind: WorkspaceArtifactKind;
+  title: string;
+  content: TContent;
+  version: number;
+  created_at: string | Date;
+  updated_at: string | Date;
+};
+
+type CloudWorkspaceArtifactVersionRow<TContent = unknown> = {
+  id: string;
+  artifact_id: string;
+  version_number: number;
+  content: TContent;
+  summary: string | null;
+  source: WorkspaceDocumentVersionSource;
+  created_at: string | Date;
+};
+
 class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   readonly #authorized: AuthorizedWorkspaceRuntime;
 
@@ -574,53 +628,340 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     });
   }
 
-  createDocument(): Promise<WorkspaceDocumentRecord> {
-    return unsupportedCloudWorkspaceOperation("createDocument");
+  createDocument(input: { session_id?: string | null; title?: string | null; content?: string | null; language?: string | null; source?: WorkspaceDocumentVersionSource; summary?: string | null }): Promise<WorkspaceDocumentRecord> {
+    return this.#withContext(async (tx) => {
+      const session = await this.#ensureSession(tx, input.session_id);
+      const content = input.content ?? "";
+      const document = await this.#insertDocument(tx, {
+        id: this.#nextId("workspace-doc"),
+        sessionId: session.id,
+        title: input.title?.trim() || "Untitled",
+        language: normalizeLanguage(input.language, content),
+        content,
+      });
+      await this.#insertDocumentVersion(tx, document, input.source ?? "user", input.summary ?? "Initial version");
+      await this.#updateSessionActivePointers(tx, session.id, { activeDocumentId: document.id, mode: "document" });
+      return document;
+    });
   }
-  getDocument(): Promise<WorkspaceDocumentRecord | null> {
-    return unsupportedCloudWorkspaceOperation("getDocument");
+
+  getDocument(id: string): Promise<WorkspaceDocumentRecord | null> {
+    return this.#withContext((tx) => this.#selectDocument(tx, id));
   }
-  listDocuments(): Promise<WorkspaceDocumentRecord[]> {
-    return unsupportedCloudWorkspaceOperation("listDocuments");
+
+  listDocuments(sessionId: string): Promise<WorkspaceDocumentRecord[]> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+        `select id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at
+         from sonik_agent_ui.agent_workspace_documents
+         where organization_id = $1 and user_id = $2 and session_id = $3 and is_active = true and archived = false
+         order by updated_at desc`,
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId],
+      );
+      return rows.map(mapCloudDocumentRow);
+    });
   }
-  listDocumentLibrary(): Promise<DocumentLibraryResult> {
-    return unsupportedCloudWorkspaceOperation("listDocumentLibrary");
+
+  listDocumentLibrary(input: { search?: string | null; language?: string | null; sort?: string | null; offset?: number; limit?: number; archived?: boolean } = {}): Promise<DocumentLibraryResult> {
+    return this.#withContext(async (tx) => {
+      const archived = Boolean(input.archived);
+      const language = input.language?.trim().toLowerCase() || null;
+      const search = input.search?.trim() || null;
+      const offset = Math.max(0, input.offset ?? 0);
+      const limit = Math.min(50, Math.max(1, input.limit ?? 20));
+      const orderBy = resolveDocumentLibraryOrderBy(input.sort);
+      const filterSql = `documents.organization_id = $1 and documents.user_id = $2 and documents.is_active = true and documents.archived = $3
+         and ($4::text is null or lower(documents.language) = $4)
+         and ($5::text is null or documents.title ilike '%' || $5 || '%' or documents.current_content ilike '%' || $5 || '%')`;
+      const filterParams = [this.#authorized.organizationId, this.#authorized.userId, archived, language, search];
+      const { rows } = await tx.query<CloudWorkspaceDocumentLibraryRow>(
+        `select documents.id, documents.session_id, documents.title, documents.language, left(documents.current_content, 500) as current_content, documents.version_count, documents.is_active, documents.archived, documents.created_at, documents.updated_at, sessions.name as session_name, left(documents.current_content, 500) as preview
+         from sonik_agent_ui.agent_workspace_documents documents
+         left join sonik_agent_ui.agent_workspace_sessions sessions
+           on sessions.organization_id = documents.organization_id and sessions.user_id = documents.user_id and sessions.id = documents.session_id
+         where ${filterSql}
+         order by ${orderBy}
+         limit $6 offset $7`,
+        [...filterParams, limit, offset],
+      );
+      const [{ total = 0 } = { total: 0 }] = (await tx.query<{ total: number }>(
+        `select count(*)::int as total
+         from sonik_agent_ui.agent_workspace_documents documents
+         where ${filterSql}`,
+        filterParams,
+      )).rows;
+      const languageRows = (await tx.query<CloudWorkspaceDocumentLanguageCountRow>(
+        `select documents.language, count(*)::int as count
+         from sonik_agent_ui.agent_workspace_documents documents
+         where ${filterSql}
+         group by documents.language`,
+        filterParams,
+      )).rows;
+      const [{ session_count = 0 } = { session_count: 0 }] = (await tx.query<{ session_count: number }>(
+        `select count(distinct documents.session_id)::int as session_count
+         from sonik_agent_ui.agent_workspace_documents documents
+         where ${filterSql}`,
+        filterParams,
+      )).rows;
+      const languages: Record<string, number> = {};
+      for (const row of languageRows) languages[row.language || "text"] = Number(row.count ?? 0);
+      return {
+        documents: rows.map((row) => ({ ...mapCloudDocumentRow(row), session_name: row.session_name ?? null, preview: row.preview ?? row.current_content.slice(0, 500) })),
+        total: Number(total ?? 0),
+        languages,
+        session_count: Number(session_count ?? 0),
+      };
+    });
   }
-  updateDocument(): Promise<WorkspaceDocumentRecord | null> {
-    return unsupportedCloudWorkspaceOperation("updateDocument");
+
+  updateDocument(id: string, input: { content?: string; title?: string; language?: string; source?: WorkspaceDocumentVersionSource; summary?: string | null }): Promise<WorkspaceDocumentRecord | null> {
+    return this.#withContext(async (tx) => {
+      const existing = await this.#selectDocumentForUpdate(tx, id);
+      if (!existing) return null;
+      const contentChanged = input.content !== undefined && input.content !== existing.current_content;
+      const titleChanged = input.title !== undefined && input.title !== existing.title;
+      const languageChanged = input.language !== undefined && input.language !== existing.language;
+      const shouldVersion = contentChanged || titleChanged || languageChanged;
+      if (!shouldVersion) return existing;
+      const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+        `update sonik_agent_ui.agent_workspace_documents
+         set title = $4, language = $5, current_content = $6, version_count = version_count + 1, updated_at = now()
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at`,
+        [
+          this.#authorized.organizationId,
+          this.#authorized.userId,
+          id,
+          input.title ?? existing.title,
+          input.language ?? existing.language,
+          input.content ?? existing.current_content,
+        ],
+      );
+      const updated = rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+      if (!updated) return null;
+      await this.#insertDocumentVersion(tx, updated, input.source ?? "user", input.summary ?? "Updated document");
+      if (updated.session_id) await this.#updateSessionActivePointers(tx, updated.session_id, { activeDocumentId: updated.id, mode: "document" });
+      return updated;
+    });
   }
-  patchDocument(): Promise<WorkspaceDocumentRecord | null> {
-    return unsupportedCloudWorkspaceOperation("patchDocument");
+
+  patchDocument(id: string, input: { content?: string; title?: string; language?: string; session_id?: string | null }): Promise<WorkspaceDocumentRecord | null> {
+    return this.#withContext(async (tx) => {
+      const existing = await this.#selectDocumentForUpdate(tx, id);
+      if (!existing) {
+        const session = await this.#ensureSession(tx, input.session_id);
+        const content = input.content ?? "";
+        const document = await this.#insertDocument(tx, {
+          id,
+          sessionId: session.id,
+          title: input.title?.trim() || "Untitled",
+          language: normalizeLanguage(input.language, content),
+          content,
+        });
+        await this.#insertDocumentVersion(tx, document, "user", "Synced missing active editor snapshot");
+        await this.#updateSessionActivePointers(tx, session.id, { activeDocumentId: document.id, mode: "document" });
+        return document;
+      }
+
+      const contentChanged = input.content !== undefined && input.content !== existing.current_content;
+      const titleChanged = input.title !== undefined && input.title !== existing.title;
+      const languageChanged = input.language !== undefined && input.language !== existing.language;
+      const nextSessionId = input.session_id === "" ? null : input.session_id;
+      const sessionChanged = nextSessionId !== undefined && nextSessionId !== existing.session_id;
+      if (nextSessionId) await this.#ensureSession(tx, nextSessionId);
+      const shouldVersion = contentChanged || titleChanged || languageChanged || sessionChanged;
+      if (!shouldVersion) return existing;
+      const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+        `update sonik_agent_ui.agent_workspace_documents
+         set session_id = $4, title = $5, language = $6, current_content = $7, version_count = version_count + 1, updated_at = now()
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at`,
+        [
+          this.#authorized.organizationId,
+          this.#authorized.userId,
+          id,
+          sessionChanged ? nextSessionId : existing.session_id,
+          input.title ?? existing.title,
+          input.language ?? existing.language,
+          input.content ?? existing.current_content,
+        ],
+      );
+      const updated = rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+      if (!updated) return null;
+      await this.#insertDocumentVersion(tx, updated, "user", "Patched document");
+      if (sessionChanged && existing.session_id && existing.session_id !== updated.session_id) await this.#clearSessionActiveDocumentPointer(tx, existing.session_id, id);
+      if (updated.session_id) await this.#updateSessionActivePointers(tx, updated.session_id, { activeDocumentId: updated.id, mode: "document" });
+      return updated;
+    });
   }
-  archiveDocument(): Promise<WorkspaceDocumentRecord | null> {
-    return unsupportedCloudWorkspaceOperation("archiveDocument");
+
+  archiveDocument(id: string, archived = true): Promise<WorkspaceDocumentRecord | null> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+        `update sonik_agent_ui.agent_workspace_documents
+         set archived = $4, updated_at = now()
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, archived],
+      );
+      return rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+    });
   }
-  deleteDocument(): Promise<boolean> {
-    return unsupportedCloudWorkspaceOperation("deleteDocument");
+
+  deleteDocument(id: string): Promise<boolean> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<{ id: string }>(
+        `delete from sonik_agent_ui.agent_workspace_documents
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id`,
+        [this.#authorized.organizationId, this.#authorized.userId, id],
+      );
+      return rows.length > 0;
+    });
   }
-  listDocumentVersions(): Promise<WorkspaceDocumentVersionRecord[]> {
-    return unsupportedCloudWorkspaceOperation("listDocumentVersions");
+
+  listDocumentVersions(documentId: string): Promise<WorkspaceDocumentVersionRecord[]> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceDocumentVersionRow>(
+        `select id, document_id, version_number, content, summary, source, created_at
+         from sonik_agent_ui.agent_workspace_document_versions
+         where organization_id = $1 and user_id = $2 and document_id = $3
+         order by version_number desc`,
+        [this.#authorized.organizationId, this.#authorized.userId, documentId],
+      );
+      return rows.map(mapCloudDocumentVersionRow);
+    });
   }
-  getDocumentVersion(): Promise<WorkspaceDocumentVersionRecord | null> {
-    return unsupportedCloudWorkspaceOperation("getDocumentVersion");
+
+  getDocumentVersion(documentId: string, versionNumber: number): Promise<WorkspaceDocumentVersionRecord | null> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceDocumentVersionRow>(
+        `select id, document_id, version_number, content, summary, source, created_at
+         from sonik_agent_ui.agent_workspace_document_versions
+         where organization_id = $1 and user_id = $2 and document_id = $3 and version_number = $4`,
+        [this.#authorized.organizationId, this.#authorized.userId, documentId, versionNumber],
+      );
+      return rows[0] ? mapCloudDocumentVersionRow(rows[0]) : null;
+    });
   }
-  restoreDocumentVersion(): Promise<WorkspaceDocumentRecord | null> {
-    return unsupportedCloudWorkspaceOperation("restoreDocumentVersion");
+
+  restoreDocumentVersion(documentId: string, versionNumber: number): Promise<WorkspaceDocumentRecord | null> {
+    return this.#withContext(async (tx) => {
+      const version = await this.#selectDocumentVersion(tx, documentId, versionNumber);
+      if (!version) return null;
+      const existing = await this.#selectDocumentForUpdate(tx, documentId);
+      if (!existing) return null;
+      const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+        `update sonik_agent_ui.agent_workspace_documents
+         set current_content = $4, version_count = version_count + 1, updated_at = now()
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, documentId, version.content],
+      );
+      const restored = rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+      if (!restored) return null;
+      await this.#insertDocumentVersion(tx, restored, "user", `Restored version ${versionNumber}`);
+      if (restored.session_id) await this.#updateSessionActivePointers(tx, restored.session_id, { activeDocumentId: restored.id, mode: "document" });
+      return restored;
+    });
   }
-  syncActiveDocumentSnapshot(): Promise<WorkspaceDocumentRecord> {
-    return unsupportedCloudWorkspaceOperation("syncActiveDocumentSnapshot");
+
+  syncActiveDocumentSnapshot(snapshot: WorkspaceDocumentRecord): Promise<WorkspaceDocumentRecord> {
+    return this.#withContext(async (tx) => {
+      const existing = await this.#selectDocumentForUpdate(tx, snapshot.id);
+      if (!existing) {
+        const session = await this.#ensureSession(tx, snapshot.session_id);
+        const document = await this.#insertDocument(tx, {
+          id: snapshot.id,
+          sessionId: session.id,
+          title: snapshot.title?.trim() || "Untitled",
+          language: normalizeLanguage(snapshot.language, snapshot.current_content),
+          content: snapshot.current_content ?? "",
+        });
+        await this.#insertDocumentVersion(tx, document, "user", "Synced active editor snapshot");
+        await this.#updateSessionActivePointers(tx, session.id, { activeDocumentId: document.id, mode: "document" });
+        return document;
+      }
+      if (existing.current_content !== snapshot.current_content || existing.title !== snapshot.title || existing.language !== snapshot.language) {
+        const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+          `update sonik_agent_ui.agent_workspace_documents
+           set title = $4, language = $5, current_content = $6, version_count = version_count + 1, updated_at = now()
+           where organization_id = $1 and user_id = $2 and id = $3
+           returning id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at`,
+          [this.#authorized.organizationId, this.#authorized.userId, snapshot.id, snapshot.title, snapshot.language, snapshot.current_content],
+        );
+        const updated = rows[0] ? mapCloudDocumentRow(rows[0]) : existing;
+        await this.#insertDocumentVersion(tx, updated, "user", "Synced active editor snapshot before agent turn");
+        if (updated.session_id) await this.#updateSessionActivePointers(tx, updated.session_id, { activeDocumentId: updated.id, mode: "document" });
+        return updated;
+      }
+      return existing;
+    });
   }
-  createArtifact<TContent = unknown>(): Promise<WorkspaceArtifactRecord<TContent>> {
-    return unsupportedCloudWorkspaceOperation("createArtifact");
+
+  createArtifact<TContent = unknown>(input: { session_id?: string | null; id?: string; kind: WorkspaceArtifactKind; title: string; content: TContent; source?: WorkspaceDocumentVersionSource; summary?: string | null }): Promise<WorkspaceArtifactRecord<TContent>> {
+    return this.#withContext(async (tx) => {
+      const session = await this.#ensureSession(tx, input.session_id);
+      const id = input.id?.trim() || this.#nextId("workspace-artifact");
+      const { rows } = await tx.query<CloudWorkspaceArtifactRow<TContent>>(
+        `insert into sonik_agent_ui.agent_workspace_artifacts
+          (organization_id, user_id, id, session_id, kind, title, content)
+         values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+         returning id, session_id, kind, title, content, version, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, session.id, input.kind, input.title, JSON.stringify(input.content)],
+      );
+      const artifact = rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
+      if (!artifact) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud artifact insert returned no row.");
+      await this.#insertArtifactVersion(tx, artifact, input.source ?? "ai", input.summary ?? "Initial artifact version");
+      await this.#updateSessionActivePointers(tx, session.id, { activeArtifactId: artifact.id, mode: artifact.kind === "document" ? "document" : "artifact" });
+      return artifact;
+    });
   }
-  getArtifact<TContent = unknown>(): Promise<WorkspaceArtifactRecord<TContent> | null> {
-    return unsupportedCloudWorkspaceOperation("getArtifact");
+
+  getArtifact<TContent = unknown>(id: string): Promise<WorkspaceArtifactRecord<TContent> | null> {
+    return this.#withContext((tx) => this.#selectArtifact<TContent>(tx, id));
   }
-  updateArtifact<TContent = unknown>(): Promise<WorkspaceArtifactRecord<TContent> | null> {
-    return unsupportedCloudWorkspaceOperation("updateArtifact");
+
+  updateArtifact<TContent = unknown>(id: string, input: { title?: string; content?: TContent; source?: WorkspaceDocumentVersionSource; summary?: string | null }): Promise<WorkspaceArtifactRecord<TContent> | null> {
+    return this.#withContext(async (tx) => {
+      const existing = await this.#selectArtifactForUpdate<TContent>(tx, id);
+      if (!existing) return null;
+      const contentChanged = input.content !== undefined && JSON.stringify(input.content) !== JSON.stringify(existing.content);
+      const titleChanged = input.title !== undefined && input.title !== existing.title;
+      const shouldVersion = contentChanged || titleChanged;
+      if (!shouldVersion) return existing;
+      const { rows } = await tx.query<CloudWorkspaceArtifactRow<TContent>>(
+        `update sonik_agent_ui.agent_workspace_artifacts
+         set title = $4, content = $5::jsonb, version = version + 1, updated_at = now()
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id, session_id, kind, title, content, version, created_at, updated_at`,
+        [
+          this.#authorized.organizationId,
+          this.#authorized.userId,
+          id,
+          input.title ?? existing.title,
+          JSON.stringify(input.content === undefined ? existing.content : input.content),
+        ],
+      );
+      const updated = rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
+      if (!updated) return null;
+      await this.#insertArtifactVersion(tx, updated, input.source ?? "ai", input.summary ?? "Updated artifact");
+      if (updated.session_id) await this.#updateSessionActivePointers(tx, updated.session_id, { activeArtifactId: updated.id, mode: updated.kind === "document" ? "document" : "artifact" });
+      return updated;
+    });
   }
-  listArtifactVersions<TContent = unknown>(): Promise<WorkspaceArtifactVersionRecord<TContent>[]> {
-    return unsupportedCloudWorkspaceOperation("listArtifactVersions");
+
+  listArtifactVersions<TContent = unknown>(artifactId: string): Promise<WorkspaceArtifactVersionRecord<TContent>[]> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceArtifactVersionRow<TContent>>(
+        `select id, artifact_id, version_number, content, summary, source, created_at
+         from sonik_agent_ui.agent_workspace_artifact_versions
+         where organization_id = $1 and user_id = $2 and artifact_id = $3
+         order by version_number desc`,
+        [this.#authorized.organizationId, this.#authorized.userId, artifactId],
+      );
+      return rows.map(mapCloudArtifactVersionRow<TContent>);
+    });
   }
   recordToolCall<TInput = unknown, TOutput = unknown>(): Promise<WorkspaceToolCallRecord<TInput, TOutput>> {
     return unsupportedCloudWorkspaceOperation("recordToolCall");
@@ -692,6 +1033,124 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     return rows[0] ? mapCloudSessionRow(rows[0]) : null;
   }
 
+  async #updateSessionActivePointers(tx: WorkspaceSqlTransaction, sessionId: string, input: { activeDocumentId?: string | null; activeArtifactId?: string | null; mode?: WorkspaceMode }): Promise<void> {
+    await tx.query(
+      `update sonik_agent_ui.agent_workspace_sessions
+       set active_document_id = case when $4 then $5 else active_document_id end, active_artifact_id = case when $6 then $7 else active_artifact_id end, mode = coalesce($8, mode), updated_at = now(), last_accessed = now()
+       where organization_id = $1 and user_id = $2 and id = $3`,
+      [
+        this.#authorized.organizationId,
+        this.#authorized.userId,
+        sessionId,
+        input.activeDocumentId !== undefined,
+        input.activeDocumentId ?? null,
+        input.activeArtifactId !== undefined,
+        input.activeArtifactId ?? null,
+        input.mode ?? null,
+      ],
+    );
+  }
+
+  async #clearSessionActiveDocumentPointer(tx: WorkspaceSqlTransaction, sessionId: string, documentId: string): Promise<void> {
+    await tx.query(
+      `update sonik_agent_ui.agent_workspace_sessions
+       set active_document_id = null, updated_at = now(), last_accessed = now()
+       where organization_id = $1 and user_id = $2 and id = $3 and active_document_id = $4`,
+      [this.#authorized.organizationId, this.#authorized.userId, sessionId, documentId],
+    );
+  }
+
+  async #insertDocument(tx: WorkspaceSqlTransaction, input: { id: string; sessionId: string | null; title: string; language: string; content: string }): Promise<WorkspaceDocumentRecord> {
+    const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+      `insert into sonik_agent_ui.agent_workspace_documents
+        (organization_id, user_id, id, session_id, title, language, current_content)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       returning id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at`,
+      [this.#authorized.organizationId, this.#authorized.userId, input.id, input.sessionId, input.title, input.language, input.content],
+    );
+    const row = rows[0];
+    if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud document insert returned no row.");
+    return mapCloudDocumentRow(row);
+  }
+
+  async #selectDocument(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceDocumentRecord | null> {
+    const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+      `select id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at
+       from sonik_agent_ui.agent_workspace_documents
+       where organization_id = $1 and user_id = $2 and id = $3`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
+    );
+    return rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+  }
+
+  async #selectDocumentForUpdate(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceDocumentRecord | null> {
+    const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
+      `select id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at
+       from sonik_agent_ui.agent_workspace_documents
+       where organization_id = $1 and user_id = $2 and id = $3
+       for update`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
+    );
+    return rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+  }
+
+  async #insertDocumentVersion(tx: WorkspaceSqlTransaction, document: WorkspaceDocumentRecord, source: WorkspaceDocumentVersionSource, summary: string | null): Promise<WorkspaceDocumentVersionRecord> {
+    const { rows } = await tx.query<CloudWorkspaceDocumentVersionRow>(
+      `insert into sonik_agent_ui.agent_workspace_document_versions
+        (organization_id, user_id, id, document_id, version_number, content, summary, source)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       returning id, document_id, version_number, content, summary, source, created_at`,
+      [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-doc-version"), document.id, document.version_count, document.current_content, summary, source],
+    );
+    const row = rows[0];
+    if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud document version insert returned no row.");
+    return mapCloudDocumentVersionRow(row);
+  }
+
+  async #selectDocumentVersion(tx: WorkspaceSqlTransaction, documentId: string, versionNumber: number): Promise<WorkspaceDocumentVersionRecord | null> {
+    const { rows } = await tx.query<CloudWorkspaceDocumentVersionRow>(
+      `select id, document_id, version_number, content, summary, source, created_at
+       from sonik_agent_ui.agent_workspace_document_versions
+       where organization_id = $1 and user_id = $2 and document_id = $3 and version_number = $4`,
+      [this.#authorized.organizationId, this.#authorized.userId, documentId, versionNumber],
+    );
+    return rows[0] ? mapCloudDocumentVersionRow(rows[0]) : null;
+  }
+
+  async #selectArtifact<TContent = unknown>(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceArtifactRecord<TContent> | null> {
+    const { rows } = await tx.query<CloudWorkspaceArtifactRow<TContent>>(
+      `select id, session_id, kind, title, content, version, created_at, updated_at
+       from sonik_agent_ui.agent_workspace_artifacts
+       where organization_id = $1 and user_id = $2 and id = $3`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
+    );
+    return rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
+  }
+
+  async #selectArtifactForUpdate<TContent = unknown>(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceArtifactRecord<TContent> | null> {
+    const { rows } = await tx.query<CloudWorkspaceArtifactRow<TContent>>(
+      `select id, session_id, kind, title, content, version, created_at, updated_at
+       from sonik_agent_ui.agent_workspace_artifacts
+       where organization_id = $1 and user_id = $2 and id = $3
+       for update`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
+    );
+    return rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
+  }
+
+  async #insertArtifactVersion<TContent>(tx: WorkspaceSqlTransaction, artifact: WorkspaceArtifactRecord<TContent>, source: WorkspaceDocumentVersionSource, summary: string | null): Promise<WorkspaceArtifactVersionRecord<TContent>> {
+    const { rows } = await tx.query<CloudWorkspaceArtifactVersionRow<TContent>>(
+      `insert into sonik_agent_ui.agent_workspace_artifact_versions
+        (organization_id, user_id, id, artifact_id, version_number, content, summary, source)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+       returning id, artifact_id, version_number, content, summary, source, created_at`,
+      [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-artifact-version"), artifact.id, artifact.version, JSON.stringify(artifact.content), summary, source],
+    );
+    const row = rows[0];
+    if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud artifact version insert returned no row.");
+    return mapCloudArtifactVersionRow<TContent>(row);
+  }
+
   #assertAuthorized(): void {
     if (!this.#authorized.organizationId?.trim() || !this.#authorized.userId?.trim()) {
       throw new CloudWorkspacePersistenceError(
@@ -716,7 +1175,7 @@ function unsupportedCloudWorkspaceOperation(method: string): Promise<never> {
   return Promise.reject(
     new CloudWorkspacePersistenceError(
       "unsupported-operation",
-      `Cloud workspace persistence v0 supports sessions and messages only; ${method} is scheduled for a later slice.`,
+      `Cloud workspace persistence v0 supports sessions, messages, documents, and artifacts; ${method} is scheduled for a later slice.`,
     ),
   );
 }
@@ -748,6 +1207,65 @@ function mapCloudMessageRow<TParts = unknown>(row: CloudWorkspaceMessageRow<TPar
     parts: row.parts ?? null,
     created_at: toIsoTimestamp(row.created_at),
   };
+}
+
+function mapCloudDocumentRow(row: CloudWorkspaceDocumentRow): WorkspaceDocumentRecord {
+  return {
+    id: row.id,
+    session_id: row.session_id ?? null,
+    title: row.title,
+    language: row.language,
+    current_content: row.current_content ?? "",
+    version_count: Number(row.version_count ?? 1),
+    is_active: Boolean(row.is_active),
+    archived: Boolean(row.archived),
+    created_at: toIsoTimestamp(row.created_at),
+    updated_at: toIsoTimestamp(row.updated_at),
+  };
+}
+
+function mapCloudDocumentVersionRow(row: CloudWorkspaceDocumentVersionRow): WorkspaceDocumentVersionRecord {
+  return {
+    id: row.id,
+    document_id: row.document_id,
+    version_number: Number(row.version_number),
+    content: row.content ?? "",
+    summary: row.summary ?? null,
+    source: row.source,
+    created_at: toIsoTimestamp(row.created_at),
+  };
+}
+
+function mapCloudArtifactRow<TContent = unknown>(row: CloudWorkspaceArtifactRow<TContent>): WorkspaceArtifactRecord<TContent> {
+  return {
+    id: row.id,
+    session_id: row.session_id ?? null,
+    kind: row.kind,
+    title: row.title,
+    content: row.content,
+    version: Number(row.version ?? 1),
+    created_at: toIsoTimestamp(row.created_at),
+    updated_at: toIsoTimestamp(row.updated_at),
+  };
+}
+
+function mapCloudArtifactVersionRow<TContent = unknown>(row: CloudWorkspaceArtifactVersionRow<TContent>): WorkspaceArtifactVersionRecord<TContent> {
+  return {
+    id: row.id,
+    artifact_id: row.artifact_id,
+    version_number: Number(row.version_number),
+    content: row.content,
+    summary: row.summary ?? null,
+    source: row.source,
+    created_at: toIsoTimestamp(row.created_at),
+  };
+}
+
+function resolveDocumentLibraryOrderBy(sort?: string | null): string {
+  if (sort === "oldest") return "documents.created_at asc";
+  if (sort === "alpha") return "documents.title asc";
+  if (sort === "edits") return "documents.version_count desc, documents.updated_at desc";
+  return "documents.updated_at desc";
 }
 
 function toIsoTimestamp(value: string | Date): string {

@@ -35,6 +35,10 @@ function createFakeWorkspaceTables() {
   return {
     sessions: new Map(),
     messages: new Map(),
+    documents: new Map(),
+    documentVersions: new Map(),
+    artifacts: new Map(),
+    artifactVersions: new Map(),
     sequence: 0,
   };
 }
@@ -194,6 +198,204 @@ class FakeRlsWorkspaceSqlTransaction {
       return { rows };
     }
 
+    if (normalized.startsWith("update sonik_agent_ui.agent_workspace_sessions set active_document_id = null")) {
+      const [organization_id, user_id, id, document_id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.sessions.get(this.scopedKey(id));
+      if (row?.active_document_id === document_id) Object.assign(row, { active_document_id: null, updated_at: this.now(), last_accessed: this.now() });
+      return { rows: [] };
+    }
+
+    if (normalized.startsWith("update sonik_agent_ui.agent_workspace_sessions set active_document_id = case when $4")) {
+      const [organization_id, user_id, id, has_active_document_id, active_document_id, has_active_artifact_id, active_artifact_id, mode] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.sessions.get(this.scopedKey(id));
+      if (row) Object.assign(row, {
+        active_document_id: has_active_document_id ? active_document_id : row.active_document_id,
+        active_artifact_id: has_active_artifact_id ? active_artifact_id : row.active_artifact_id,
+        mode: mode ?? row.mode,
+        updated_at: this.now(),
+        last_accessed: this.now(),
+      });
+      return { rows: [] };
+    }
+
+    if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_documents")) {
+      const [organization_id, user_id, id, session_id, title, language, current_content] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      if (session_id && !this.tables.sessions.has(this.scopedKey(session_id))) throw new Error("document session FK missing");
+      const now = this.now();
+      const row = { id, organization_id, user_id, session_id, title, language, current_content, version_count: 1, is_active: true, archived: false, created_at: now, updated_at: now };
+      this.tables.documents.set(this.scopedKey(id), row);
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("select id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at from sonik_agent_ui.agent_workspace_documents") && normalized.includes("where organization_id = $1 and user_id = $2 and id = $3")) {
+      const [organization_id, user_id, id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.documents.get(this.scopedKey(id));
+      return { rows: row ? [clone(row)] : [] };
+    }
+
+    if (normalized.startsWith("select id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at from sonik_agent_ui.agent_workspace_documents") && normalized.includes("session_id = $3")) {
+      const [organization_id, user_id, session_id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const rows = [...this.tables.documents.values()]
+        .filter((row) => row.organization_id === this.context.organizationId && row.user_id === this.context.userId && row.session_id === session_id && row.is_active && !row.archived)
+        .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))
+        .map(clone);
+      return { rows };
+    }
+
+    if (normalized.startsWith("select documents.id, documents.session_id")) {
+      const [organization_id, user_id, archived, language, search, limit, offset] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const rows = this.filteredDocuments({ archived, language, search })
+        .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))
+        .slice(offset, offset + limit)
+        .map((row) => {
+          const preview = row.current_content.slice(0, 500);
+          return { ...clone(row), current_content: preview, preview, session_name: row.session_id ? (this.tables.sessions.get(this.scopedKey(row.session_id))?.name ?? null) : null };
+        });
+      return { rows };
+    }
+
+    if (normalized.startsWith("select count(*)::int as total")) {
+      const [organization_id, user_id, archived, language, search] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      return { rows: [{ total: this.filteredDocuments({ archived, language, search }).length }] };
+    }
+
+    if (normalized.startsWith("select documents.language, count(*)::int as count")) {
+      const [organization_id, user_id, archived, language, search] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const counts = new Map();
+      for (const row of this.filteredDocuments({ archived, language, search })) counts.set(row.language, (counts.get(row.language) ?? 0) + 1);
+      return { rows: [...counts.entries()].map(([language, count]) => ({ language, count })) };
+    }
+
+    if (normalized.startsWith("select count(distinct documents.session_id)::int as session_count")) {
+      const [organization_id, user_id, archived, language, search] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const sessionIds = new Set(this.filteredDocuments({ archived, language, search }).map((row) => row.session_id).filter(Boolean));
+      return { rows: [{ session_count: sessionIds.size }] };
+    }
+
+    if (normalized.startsWith("update sonik_agent_ui.agent_workspace_documents set title = $4")) {
+      const [organization_id, user_id, id, title, language, current_content] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.documents.get(this.scopedKey(id));
+      if (!row) return { rows: [] };
+      Object.assign(row, { title, language, current_content, version_count: row.version_count + 1, updated_at: this.now() });
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("update sonik_agent_ui.agent_workspace_documents set session_id = $4")) {
+      const [organization_id, user_id, id, session_id, title, language, current_content] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.documents.get(this.scopedKey(id));
+      if (!row) return { rows: [] };
+      Object.assign(row, { session_id, title, language, current_content, version_count: row.version_count + 1, updated_at: this.now() });
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("update sonik_agent_ui.agent_workspace_documents set archived = $4")) {
+      const [organization_id, user_id, id, archived] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.documents.get(this.scopedKey(id));
+      if (!row) return { rows: [] };
+      Object.assign(row, { archived, updated_at: this.now() });
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("update sonik_agent_ui.agent_workspace_documents set current_content = $4")) {
+      const [organization_id, user_id, id, current_content] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.documents.get(this.scopedKey(id));
+      if (!row) return { rows: [] };
+      Object.assign(row, { current_content, version_count: row.version_count + 1, updated_at: this.now() });
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("delete from sonik_agent_ui.agent_workspace_documents")) {
+      const [organization_id, user_id, id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const deleted = this.tables.documents.delete(this.scopedKey(id));
+      this.tables.documentVersions.delete(this.scopedKey(id));
+      return { rows: deleted ? [{ id }] : [] };
+    }
+
+    if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_document_versions")) {
+      const [organization_id, user_id, id, document_id, version_number, content, summary, source] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      if (!this.tables.documents.has(this.scopedKey(document_id))) throw new Error("document version FK missing");
+      const row = { id, organization_id, user_id, document_id, version_number, content, summary, source, created_at: this.now() };
+      const key = this.scopedKey(document_id);
+      this.tables.documentVersions.set(key, [...(this.tables.documentVersions.get(key) ?? []), row]);
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("select id, document_id, version_number, content, summary, source, created_at from sonik_agent_ui.agent_workspace_document_versions") && normalized.includes("and version_number = $4")) {
+      const [organization_id, user_id, document_id, version_number] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = (this.tables.documentVersions.get(this.scopedKey(document_id)) ?? []).find((entry) => entry.version_number === version_number);
+      return { rows: row ? [clone(row)] : [] };
+    }
+
+    if (normalized.startsWith("select id, document_id, version_number, content, summary, source, created_at from sonik_agent_ui.agent_workspace_document_versions")) {
+      const [organization_id, user_id, document_id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const rows = [...(this.tables.documentVersions.get(this.scopedKey(document_id)) ?? [])]
+        .sort((a, b) => b.version_number - a.version_number)
+        .map(clone);
+      return { rows };
+    }
+
+    if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_artifacts")) {
+      const [organization_id, user_id, id, session_id, kind, title, content] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      if (session_id && !this.tables.sessions.has(this.scopedKey(session_id))) throw new Error("artifact session FK missing");
+      const now = this.now();
+      const row = { id, organization_id, user_id, session_id, kind, title, content: parseJsonParam(content), version: 1, created_at: now, updated_at: now };
+      this.tables.artifacts.set(this.scopedKey(id), row);
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("select id, session_id, kind, title, content, version, created_at, updated_at from sonik_agent_ui.agent_workspace_artifacts")) {
+      const [organization_id, user_id, id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.artifacts.get(this.scopedKey(id));
+      return { rows: row ? [clone(row)] : [] };
+    }
+
+    if (normalized.startsWith("update sonik_agent_ui.agent_workspace_artifacts set title = $4")) {
+      const [organization_id, user_id, id, title, content] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const row = this.tables.artifacts.get(this.scopedKey(id));
+      if (!row) return { rows: [] };
+      Object.assign(row, { title, content: parseJsonParam(content), version: row.version + 1, updated_at: this.now() });
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_artifact_versions")) {
+      const [organization_id, user_id, id, artifact_id, version_number, content, summary, source] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      if (!this.tables.artifacts.has(this.scopedKey(artifact_id))) throw new Error("artifact version FK missing");
+      const row = { id, organization_id, user_id, artifact_id, version_number, content: parseJsonParam(content), summary, source, created_at: this.now() };
+      const key = this.scopedKey(artifact_id);
+      this.tables.artifactVersions.set(key, [...(this.tables.artifactVersions.get(key) ?? []), row]);
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("select id, artifact_id, version_number, content, summary, source, created_at from sonik_agent_ui.agent_workspace_artifact_versions")) {
+      const [organization_id, user_id, artifact_id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const rows = [...(this.tables.artifactVersions.get(this.scopedKey(artifact_id)) ?? [])]
+        .sort((a, b) => b.version_number - a.version_number)
+        .map(clone);
+      return { rows };
+    }
+
     throw new Error(`Unhandled fake SQL: ${normalized}`);
   }
 
@@ -206,6 +408,17 @@ class FakeRlsWorkspaceSqlTransaction {
     assert.equal(userId, this.context.userId, "query user must match request context");
   }
 
+  filteredDocuments({ archived, language, search }) {
+    const needle = typeof search === "string" ? search.toLowerCase() : null;
+    return [...this.tables.documents.values()].filter((row) => {
+      if (row.organization_id !== this.context.organizationId || row.user_id !== this.context.userId || !row.is_active || row.archived !== Boolean(archived)) return false;
+      if (language && row.language.toLowerCase() !== language) return false;
+      if (needle && !`${row.title}
+${row.current_content}`.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+  }
+
   now() {
     this.tables.sequence += 1;
     return new Date(Date.UTC(2026, 0, 1, 0, 0, this.tables.sequence)).toISOString();
@@ -214,6 +427,10 @@ class FakeRlsWorkspaceSqlTransaction {
 
 function clone(value) {
   return structuredClone(value);
+}
+
+function parseJsonParam(value) {
+  return typeof value === "string" ? JSON.parse(value) : value;
 }
 
 await runWorkspaceCloudSqlAdapterTests();
@@ -243,6 +460,78 @@ async function runWorkspaceCloudSqlAdapterTests() {
   assert.equal((await adapterB.getSession(session.id))?.message_count, 1, "Org B may create same logical id in its own scoped tenant row");
   assert.equal((await adapterA.listMessages(session.id)).map((row) => row.id).join(","), "msg-1");
   assert.equal((await adapterB.listMessages(session.id)).map((row) => row.id).join(","), "msg-b");
+
+  const document = await adapterA.createDocument({ session_id: session.id, title: "RLS Doc", content: "alpha", language: "markdown", source: "ai" });
+  assert.equal(document.session_id, session.id);
+  assert.equal(document.version_count, 1);
+  assert.equal((await adapterA.getSession(session.id))?.active_document_id, document.id, "document creation should set active document pointer");
+  assert.equal(await adapterB.getDocument(document.id), null, "Org B must not read Org A documents by guessed id");
+  assert.equal((await adapterA.listDocuments(session.id)).length, 1);
+  assert.equal((await adapterB.listDocuments(session.id)).length, 0, "Org B must not list Org A documents by guessed session id");
+  assert.equal((await adapterA.listDocumentVersions(document.id)).length, 1);
+  const updatedDocument = await adapterA.updateDocument(document.id, { content: "beta", summary: "change to beta", source: "user" });
+  assert.equal(updatedDocument?.version_count, 2);
+  const renamedDocument = await adapterA.updateDocument(document.id, { title: "RLS Doc Renamed", summary: "rename only", source: "user" });
+  assert.equal(renamedDocument?.version_count, 3, "metadata-only document updates should still create a version");
+  const secondSession = await adapterA.createSession({ id: "session-doc-target", name: "Doc Target", mode: "chat" });
+  const rehomedDocument = await adapterA.patchDocument(document.id, { session_id: secondSession.id });
+  assert.equal(rehomedDocument?.version_count, 4, "document rehome should create a version");
+  assert.equal((await adapterA.getSession(session.id))?.active_document_id, null, "document rehome should clear stale old-session active pointer");
+  assert.equal((await adapterA.getSession(secondSession.id))?.active_document_id, document.id, "document rehome should set new-session active pointer");
+  assert.equal((await adapterA.listDocumentVersions(document.id)).map((row) => row.version_number).join(","), "4,3,2,1");
+  assert.equal((await adapterB.listDocumentVersions(document.id)).length, 0, "Org B must not read Org A document versions by guessed id");
+  const restoredDocument = await adapterA.restoreDocumentVersion(document.id, 1);
+  assert.equal(restoredDocument?.current_content, "alpha");
+  assert.equal(restoredDocument?.version_count, 5);
+  const syncedDocument = await adapterA.syncActiveDocumentSnapshot({ ...restoredDocument, current_content: "gamma" });
+  assert.equal(syncedDocument.version_count, 6);
+  const library = await adapterA.listDocumentLibrary({ search: "rls", limit: 1, offset: 0 });
+  assert.equal(library.total, 1);
+  assert.equal(library.documents[0]?.preview.length <= 500, true);
+  assert.equal(
+    executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("left(documents.current_content, 500)") && query.sql.includes("limit $6 offset $7"))),
+    true,
+    "document library must use SQL-side bounded preview and pagination",
+  );
+
+  const artifact = await adapterA.createArtifact({ session_id: session.id, id: "artifact-rls", kind: "json-render", title: "RLS Artifact", content: { root: "main", elements: { main: { type: "Text", props: { content: "alpha" }, children: [] } }, state: {} }, source: "ai" });
+  assert.equal(artifact.version, 1);
+  assert.equal((await adapterA.getSession(session.id))?.active_artifact_id, artifact.id, "artifact creation should set active artifact pointer");
+  assert.equal(await adapterB.getArtifact(artifact.id), null, "Org B must not read Org A artifacts by guessed id");
+  assert.equal((await adapterA.listArtifactVersions(artifact.id)).length, 1);
+  const updatedArtifact = await adapterA.updateArtifact(artifact.id, { content: { root: "main", elements: { main: { type: "Text", props: { content: "beta" }, children: [] } }, state: {} }, summary: "change artifact" });
+  assert.equal(updatedArtifact?.version, 2);
+  const renamedArtifact = await adapterA.updateArtifact(artifact.id, { title: "RLS Artifact Renamed", summary: "rename artifact" });
+  assert.equal(renamedArtifact?.version, 3, "metadata-only artifact updates should still create a version");
+  assert.equal((await adapterA.listArtifactVersions(artifact.id)).map((row) => row.version_number).join(","), "3,2,1");
+  assert.equal((await adapterB.listArtifactVersions(artifact.id)).length, 0, "Org B must not read Org A artifact versions by guessed id");
+
+  assert.equal(
+    executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("version_count = version_count + 1"))),
+    true,
+    "document updates must increment versions atomically in SQL",
+  );
+  assert.equal(
+    executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("version = version + 1"))),
+    true,
+    "artifact updates must increment versions atomically in SQL",
+  );
+  assert.equal(
+    executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("from sonik_agent_ui.agent_workspace_documents") && query.sql.includes("for update"))),
+    true,
+    "document mutations must lock the current row before merging omitted fields",
+  );
+  assert.equal(
+    executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("from sonik_agent_ui.agent_workspace_artifacts") && query.sql.includes("for update"))),
+    true,
+    "artifact mutations must lock the current row before merging omitted fields",
+  );
+  assert.equal(
+    executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("active_document_id = case when $4 then $5 else active_document_id end"))),
+    true,
+    "session active pointer updates must leave omitted pointer fields unchanged in SQL",
+  );
+
 
   const patched = await adapterA.patchSession(session.id, { is_important: true, folder: "Pinned" });
   assert.equal(patched?.is_important, true);
