@@ -11,7 +11,7 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "route", "surface", "pageType", "title", "theme", "mode", "activeSessionId",
   "activeArtifactId", "activeDocumentId", "artifactType", "conversationStatus", "messageCount",
   "visibleActions", "visibleWarnings", "visibleErrors", "commandFamilies", "skillFamilies", "activeEntity",
-  "authenticated", "organizationId", "scopes", "hostSession", "at",
+  "authenticated", "organizationId", "scopes", "hostSession", "signatureVersion", "issuedAt", "expiresAt", "signature", "at",
 ]);
 const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
 
@@ -292,6 +292,19 @@ function sanitizeTrustedHostSession(value) {
     metadata: undefined,
   };
 }
+function sanitizeSignedHostContextFields(value) {
+  const signed = {};
+  const signatureVersion = cleanText(value.signatureVersion);
+  const issuedAt = cleanText(value.issuedAt);
+  const expiresAt = cleanText(value.expiresAt);
+  const signature = cleanText(value.signature);
+  if (signatureVersion) signed.signatureVersion = signatureVersion;
+  if (issuedAt) signed.issuedAt = issuedAt;
+  if (expiresAt) signed.expiresAt = expiresAt;
+  if (signature) signed.signature = signature;
+  return signed;
+}
+
 function sanitizeAgentHostActiveEntity(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const type = cleanText(value.type);

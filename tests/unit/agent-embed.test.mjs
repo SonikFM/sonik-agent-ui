@@ -77,6 +77,28 @@ assert.equal(trustedSession?.authenticated, true, "trusted host authentication f
 assert.equal(trustedSession?.hostSession?.source, "amplify-embedded", "known host session source should survive sanitization");
 assert.equal(trustedSession?.hostSession?.metadata, undefined, "host session metadata must be dropped at the embed boundary");
 
+
+const signedTrustedSession = sanitizeAgentHostPageContext({
+  authenticated: true,
+  organizationId: "org_signed",
+  scopes: ["workspace:read"],
+  signatureVersion: "sonik.agent_ui.host_context.hmac.v1",
+  issuedAt: "2026-06-24T22:00:00.000Z",
+  expiresAt: "2026-06-24T22:10:00.000Z",
+  signature: "abc123_signature",
+  hostSession: {
+    source: "amplify-embedded",
+    userId: "user_signed",
+    organizationId: "org_signed",
+    authenticated: true,
+    scopes: ["workspace:read"],
+  },
+});
+assert.equal(signedTrustedSession?.signatureVersion, "sonik.agent_ui.host_context.hmac.v1", "signed host-context signature version must survive the embed sanitizer");
+assert.equal(signedTrustedSession?.signature, "abc123_signature", "signed host-context signature must survive postMessage donation");
+assert.equal(signedTrustedSession?.issuedAt, "2026-06-24T22:00:00.000Z", "signed host-context issuedAt must survive postMessage donation");
+assert.equal(signedTrustedSession?.expiresAt, "2026-06-24T22:10:00.000Z", "signed host-context expiresAt must survive postMessage donation");
+
 assert.deepEqual(
   normalizeAgentEmbedIntent({ embedMode: "chat" }),
   { mode: "chat", railMode: "hidden" },
@@ -182,7 +204,7 @@ const controller = mountSonikAgentUI({
   theme: "lemonade",
   smokeMockStream: "1",
   smokeRunId: "mount-test",
-  getPageContext: () => ({ surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } }),
+  getPageContext: () => ({ surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], signatureVersion: "sonik.agent_ui.host_context.hmac.v1", issuedAt: "2026-06-24T22:00:00.000Z", expiresAt: "2026-06-24T22:10:00.000Z", signature: "abc123_signature", activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } }),
   elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas" },
   window: fakeWindow,
   document: fakeDocument,
@@ -201,6 +223,7 @@ assert.match(fakeIframe.src, /embedMode=chat/, "controller should set iframe src
 await controller.postContext();
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.organizationId, "forged-org", "browser postMessage payload should carry sanitized host-asserted organization context");
 assert.deepEqual(fakeIframe.contentWindow.messages.at(-1).message.payload.scopes, ["admin:*"], "browser postMessage payload should carry sanitized host-asserted scopes");
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.signature, "abc123_signature", "browser postMessage payload should preserve signed host-context fields for the cloud runtime header");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).targetOrigin, "https://agent.sonik.local", "cross-origin embeds should post page context to the agent iframe origin, not the host origin");
 fakeWindow.__sonikAgentHost.openCanvas();
 assert.equal(fakeIframe.parentElement, fakeCanvasSlot, "host controller should move iframe into canvas slot");

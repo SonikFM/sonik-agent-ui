@@ -35,7 +35,14 @@ export type AgentTrustedHostContext = Pick<PlatformAdapterContext, "authenticate
   hostSession?: HostSessionEnvelope | null;
 };
 
-export type AgentHostMergedPageContext = AgentHostPageContext & Partial<AgentTrustedHostContext>;
+export type AgentSignedHostContextFields = {
+  signatureVersion?: string | null;
+  issuedAt?: string | null;
+  expiresAt?: string | null;
+  signature?: string | null;
+};
+
+export type AgentHostMergedPageContext = AgentHostPageContext & Partial<AgentTrustedHostContext> & AgentSignedHostContextFields;
 
 export type AgentHostPageContextMessage = {
   source: typeof SONIK_AGENT_UI_HOST_MESSAGE_SOURCE;
@@ -130,6 +137,10 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "organizationId",
   "scopes",
   "hostSession",
+  "signatureVersion",
+  "issuedAt",
+  "expiresAt",
+  "signature",
   "at",
 ]);
 const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
@@ -242,10 +253,12 @@ export function sanitizeAgentHostPageContext(value: unknown): AgentHostMergedPag
   const base = sanitizePageContext(allowedRecord) as AgentHostPageContext | undefined;
   const activeEntity = sanitizeAgentHostActiveEntity(record.activeEntity);
   const trusted = sanitizeTrustedHostContext(record as AgentTrustedHostContext);
+  const signedFields = sanitizeSignedHostContextFields(record);
   const context: AgentHostMergedPageContext = {
     ...(base ?? {}),
     ...(activeEntity ? { activeEntity } : {}),
     ...trusted,
+    ...signedFields,
   };
   return Object.keys(context).length > 0 ? context : undefined;
 }
@@ -524,6 +537,20 @@ function sanitizeTrustedHostContext(value: AgentTrustedHostContext | null | unde
     };
   }
   return trusted;
+}
+
+
+function sanitizeSignedHostContextFields(value: Record<string, unknown>): AgentSignedHostContextFields {
+  const signed: AgentSignedHostContextFields = {};
+  const signatureVersion = cleanText(value.signatureVersion);
+  const issuedAt = cleanText(value.issuedAt);
+  const expiresAt = cleanText(value.expiresAt);
+  const signature = cleanText(value.signature);
+  if (signatureVersion) signed.signatureVersion = signatureVersion;
+  if (issuedAt) signed.issuedAt = issuedAt;
+  if (expiresAt) signed.expiresAt = expiresAt;
+  if (signature) signed.signature = signature;
+  return signed;
 }
 
 function sanitizeAgentHostActiveEntity(value: unknown): AgentHostActiveEntity | undefined {

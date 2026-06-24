@@ -747,6 +747,10 @@
         authenticated,
         organizationId,
         scopes: hostPageContext?.scopes ?? hostSession.scopes ?? [],
+        signatureVersion: hostPageContext?.signatureVersion ?? null,
+        issuedAt: hostPageContext?.issuedAt ?? null,
+        expiresAt: hostPageContext?.expiresAt ?? null,
+        signature: hostPageContext?.signature ?? null,
         hostSession: {
           ...hostSession,
           authenticated,
