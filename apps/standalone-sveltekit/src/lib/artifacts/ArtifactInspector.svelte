@@ -61,7 +61,7 @@
   <details class="mt-3 rounded-md border border-border bg-background/70 p-2">
     <summary class="cursor-pointer font-medium text-foreground">View raw JSON-render spec</summary>
     <div class="mt-2 flex items-center justify-between gap-2">
-      <p class="text-muted-foreground">This is the in-memory artifact payload; it is not saved to a database yet.</p>
+      <p class="text-muted-foreground">This is the active JSON-render artifact payload. In cloud mode it is synced through the workspace persistence adapter.</p>
       <button
         type="button"
         class="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"

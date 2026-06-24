@@ -68,6 +68,27 @@
     last_message_at: string | null;
   }
 
+  interface WorkspaceArtifactSnapshot {
+    id: string;
+    session_id: string | null;
+    kind: "json-render" | "document";
+    title: string;
+    content: Spec;
+    version: number;
+    created_at: string;
+    updated_at: string;
+  }
+
+  interface WorkspaceArtifactVersionSnapshot {
+    id: string;
+    artifact_id: string;
+    version_number: number;
+    content: Spec;
+    summary: string | null;
+    source: "user" | "ai" | "system";
+    created_at: string;
+  }
+
   interface WorkspaceMessageSnapshot {
     id: string;
     session_id: string;
@@ -83,8 +104,11 @@
     messages: WorkspaceMessageSnapshot[];
     telemetry?: unknown[];
     artifactState?: {
-      persistence: "ephemeral-v0";
+      persistence: "cloud-or-memory-v1";
       activeArtifactId: string | null;
+      activeArtifact: WorkspaceArtifactSnapshot | null;
+      activeArtifactVersions: WorkspaceArtifactVersionSnapshot[];
+      latestLayout?: unknown | null;
       note: string;
     };
   }
@@ -388,6 +412,7 @@
 
     if (promotedSnapshot) {
       applyArtifactWarehouseSnapshot(promotedSnapshot);
+      persistJsonRenderArtifactSnapshot(promotedSnapshot, "agent");
       activeArtifactStatus = createArtifactStatus(promotedSnapshot.artifact, event);
       pendingArtifactIntent = null;
     }
@@ -472,6 +497,7 @@
       source: "user-edit",
     });
     applyArtifactWarehouseSnapshot(snapshot);
+    persistJsonRenderArtifactSnapshot(snapshot, "user-edit");
     if (activeArtifactStatus) {
       activeArtifactStatus = {
         ...activeArtifactStatus,
@@ -509,6 +535,41 @@
   function applyArtifactWarehouseSnapshot(snapshot: ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }): void {
     activeArtifact = snapshot.artifact;
     activeArtifactVersions = snapshot.versions;
+  }
+
+  function persistJsonRenderArtifactSnapshot(snapshot: ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }, source: "agent" | "user-edit" | "system" = "agent"): void {
+    const sessionId = activeSessionId ?? snapshot.record.sessionId;
+    if (!sessionId) return;
+    void workspaceFetch("/api/artifact", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: snapshot.artifact.id,
+        session_id: sessionId,
+        kind: "json-render",
+        title: snapshot.artifact.title,
+        content: snapshot.artifact.content,
+        source,
+        summary: source === "user-edit" ? "Manual JSON editor apply" : "Promoted JSON-render artifact",
+      }),
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      logArtifactTelemetry({
+        source: "client",
+        event: "artifact.persistence.success",
+        sessionId,
+        artifactId: snapshot.artifact.id,
+        artifactVersion: snapshot.artifact.version,
+        reason: source,
+        ok: true,
+      });
+    }).catch((error) => {
+      reportClientEffectError("artifact.persistence.error", error, {
+        sessionId,
+        root: snapshot.artifact.content.root,
+        elementCount: Object.keys(snapshot.artifact.content.elements ?? {}).length,
+      });
+    });
   }
 
   function handleArtifactVersionChange(version: number): void {
@@ -1299,7 +1360,7 @@
     documentSeed = detail.activeDocument;
     documentPreferredView = detail.activeDocument ? inferPreferredDocumentView(detail.activeDocument.language) : "auto";
     documentEditorOpen = Boolean(detail.activeDocument);
-    const restoredArtifact = artifactWarehouse.getActiveJsonRenderArtifact(detail.session.id);
+    const restoredArtifact = hydrateArtifactState(detail);
     if (restoredArtifact) {
       applyArtifactWarehouseSnapshot(restoredArtifact);
       activeArtifactStatus = null;
@@ -1317,6 +1378,33 @@
     lastDocumentPromotionKey = null;
     pendingDocumentSnapshot = null;
     lastPersistedDocumentSignature = detail.activeDocument ? createDocumentSnapshotSignature(detail.activeDocument) : "";
+  }
+
+  function hydrateArtifactState(detail: WorkspaceSessionDetail): (ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }) | null {
+    const activeArtifactRecord = detail.artifactState?.activeArtifact;
+    if (activeArtifactRecord?.kind === "json-render") {
+      return artifactWarehouse.hydrateJsonRenderArtifact({
+        sessionId: detail.session.id,
+        artifact: {
+          id: activeArtifactRecord.id,
+          kind: "json-render",
+          title: activeArtifactRecord.title,
+          version: activeArtifactRecord.version,
+          content: activeArtifactRecord.content,
+          createdAt: activeArtifactRecord.created_at,
+          updatedAt: activeArtifactRecord.updated_at,
+        },
+        versions: detail.artifactState?.activeArtifactVersions.map((version) => ({
+          versionId: version.id,
+          artifactId: version.artifact_id,
+          version: version.version_number,
+          payload: version.content,
+          source: version.source === "user" ? "user-edit" : version.source === "system" ? "system" : "agent",
+          createdAt: version.created_at,
+        })) ?? [],
+      });
+    }
+    return artifactWarehouse.getActiveJsonRenderArtifact(detail.session.id);
   }
 
   async function persistConversationMessages(): Promise<void> {

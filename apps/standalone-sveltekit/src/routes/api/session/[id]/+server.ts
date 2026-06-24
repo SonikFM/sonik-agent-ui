@@ -2,9 +2,12 @@ import { error, json } from "@sveltejs/kit";
 import {
   deleteRequestWorkspaceSession,
   ensureRequestWorkspaceSession,
+  getRequestWorkspaceArtifact,
   getRequestWorkspaceDocument,
   getRequestWorkspaceSession,
+  listRequestWorkspaceArtifactVersions,
   listRequestWorkspaceDocuments,
+  listRequestWorkspaceLayoutSnapshots,
   listRequestWorkspaceMessages,
   listRequestWorkspaceTelemetryEvents,
   patchRequestWorkspaceSession,
@@ -16,16 +19,29 @@ export const GET: RequestHandler = async (event) => {
   const session = await getRequestWorkspaceSession(event, event.params.id);
   if (!session) error(404, "Session not found");
 
+  const [documents, activeDocument, messages, telemetry, activeArtifact, layoutSnapshots] = await Promise.all([
+    listRequestWorkspaceDocuments(event, session.id),
+    session.active_document_id ? getRequestWorkspaceDocument(event, session.active_document_id) : Promise.resolve(null),
+    listRequestWorkspaceMessages(event, session.id),
+    listRequestWorkspaceTelemetryEvents(event, session.id),
+    session.active_artifact_id ? getRequestWorkspaceArtifact(event, session.active_artifact_id) : Promise.resolve(null),
+    listRequestWorkspaceLayoutSnapshots(event, session.id).catch(() => []),
+  ]);
+  const activeArtifactVersions = activeArtifact ? await listRequestWorkspaceArtifactVersions(event, activeArtifact.id) : [];
+
   return json({
     session,
-    documents: await listRequestWorkspaceDocuments(event, session.id),
-    activeDocument: session.active_document_id ? await getRequestWorkspaceDocument(event, session.active_document_id) : null,
-    messages: await listRequestWorkspaceMessages(event, session.id),
-    telemetry: (await listRequestWorkspaceTelemetryEvents(event, session.id)).slice(-50),
+    documents,
+    activeDocument,
+    messages,
+    telemetry: telemetry.slice(-50),
     artifactState: {
-      persistence: "cloud-or-memory-v0",
+      persistence: "cloud-or-memory-v1",
       activeArtifactId: session.active_artifact_id,
-      note: "JSON-render artifacts are restored by the artifact warehouse slice; document artifacts are persisted with workspace sessions.",
+      activeArtifact,
+      activeArtifactVersions,
+      latestLayout: layoutSnapshots[0] ?? null,
+      note: "JSON-render artifacts, versions, and active workspace pointers are restored through the workspace persistence adapter.",
     },
   });
 };

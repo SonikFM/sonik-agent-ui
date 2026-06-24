@@ -55,6 +55,8 @@ assert.equal(pageSource.includes("void loadArchivedSessionCount()"), true, "arch
 assert.equal(pageSource.includes("session.archive_count.error"), true, "archived count failures should be observable without breaking active sessions");
 assert.equal(pageSource.includes("session.archive.success"), true, "archiving a chat should be observable in telemetry");
 assert.equal(pageSource.includes("normalizePersistedParts"), true, "session switching should hydrate persisted message parts back into chat");
+assert.equal(pageSource.includes("hydrateArtifactState(detail)"), true, "session switching should hydrate active JSON-render artifacts from the session detail payload");
+assert.equal(pageSource.includes("persistJsonRenderArtifactSnapshot"), true, "promoted and edited JSON-render artifacts should persist through the workspace adapter API");
 assert.equal(pageSource.includes("archivedCount={archivedSessionCount}"), true, "rail should receive archived session count");
 assert.equal(pageSource.includes("<SessionRail"), true, "top-level app should delegate rail presentation to a bounded shell component");
 assert.equal(sessionRailSource.includes("onclick={() => onSwitch(session.id)}"), true, "session rail should expose session switching control");
@@ -82,15 +84,17 @@ assert.equal(pageSource.includes("scheduleDocumentPersistence(event.document)"),
 assert.equal(sessionDetailRoute.includes("getRequestWorkspaceSession(event, event.params.id)"), true, "session detail route should resolve one session by id");
 assert.equal(sessionDetailRoute.includes("listRequestWorkspaceMessages(event, session.id)"), true, "session detail route should return message history");
 assert.equal(sessionDetailRoute.includes("activeDocument"), true, "session detail route should hydrate the active document");
-assert.equal(sessionDetailRoute.includes("listRequestWorkspaceTelemetryEvents(event, session.id)).slice(-50)"), true, "session detail route should expose bounded telemetry for debugging");
+assert.equal(sessionDetailRoute.includes("telemetry: telemetry.slice(-50)"), true, "session detail route should expose bounded telemetry for debugging");
 assert.equal(sessionDetailRoute.includes("export const PATCH"), true, "session detail route should support renaming chats");
 assert.equal(sessionDetailRoute.includes("patchRequestWorkspaceSession(event, session.id, { name })"), true, "session rename route should patch only the validated session name");
 assert.equal(sessionDetailRoute.includes("ensureRequestWorkspaceSession(event, event.params.id)"), true, "session rename should upsert missing ephemeral sessions across stateless Worker isolates");
 assert.equal(sessionDetailRoute.includes("export const DELETE"), true, "session detail route should support deleting local chats");
 assert.equal(sessionDetailRoute.includes("deleteRequestWorkspaceSession(event, session.id)"), true, "session delete route should use the persistence seam");
-assert.equal(sessionDetailRoute.includes('persistence: "cloud-or-memory-v0"'), true, "session detail route should expose the active cloud-or-memory artifact persistence posture");
-assert.equal(sessionDetailRoute.includes("listWorkspaceToolCalls"), false, "session detail route should not advertise unhydrated tool-call state in v0");
-assert.equal(sessionDetailRoute.includes("listWorkspaceLayoutSnapshots"), false, "session detail route should not advertise unhydrated layout state in v0");
+assert.equal(sessionDetailRoute.includes('persistence: "cloud-or-memory-v1"'), true, "session detail route should expose the active cloud-or-memory artifact persistence posture");
+assert.equal(sessionDetailRoute.includes("getRequestWorkspaceArtifact(event, session.active_artifact_id)"), true, "session detail route should hydrate the active artifact through the workspace adapter");
+assert.equal(sessionDetailRoute.includes("listRequestWorkspaceArtifactVersions(event, activeArtifact.id)"), true, "session detail route should hydrate active artifact versions through the workspace adapter");
+assert.equal(sessionDetailRoute.includes("listRequestWorkspaceLayoutSnapshots(event, session.id)"), true, "session detail route should expose latest layout snapshot hydration in v1");
+assert.equal(sessionDetailRoute.includes("listWorkspaceToolCalls"), false, "session detail route should not advertise unhydrated tool-call state in v1");
 
 assert.equal(sessionMessagesRoute.includes("appendRequestWorkspaceMessage"), true, "message route should persist chat messages through workspace adapter");
 assert.equal(sessionMessagesRoute.includes("listRequestWorkspaceMessages(event, session.id)"), true, "message route should read chat messages through workspace adapter");
@@ -218,6 +222,7 @@ assert.equal(pageSource.includes("session.messages.persist_unhandled"), true, "p
 const agentTelemetrySource = await readFile("apps/standalone-sveltekit/src/lib/server/agent-telemetry.ts", "utf8");
 const telemetryRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/telemetry/+server.ts", "utf8");
 const pageContextRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/dev/page-context/+server.ts", "utf8");
+const artifactRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/artifact/+server.ts", "utf8");
 const sessionRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/session/+server.ts", "utf8");
 const sessionsRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/sessions/+server.ts", "utf8");
 const observabilityPackageSource = await readFile("packages/agent-observability/src/index.ts", "utf8");
@@ -254,7 +259,7 @@ assert.equal(pageSource.includes("requestHostPageContext"), true, "embedded app 
 assert.equal(pageSource.includes("host.page_context.requested"), true, "embedded app should emit telemetry when it requests page context from the host");
 assert.equal(pageSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "embedded app should use a stable page-context request message type");
 assert.equal(pageSource.includes("sessionBootstrapPromise"), true, "embedded session bootstrap should guard repeated host page-context messages while initialization is in flight");
-assert.equal(pageSource.includes("Cloud org/user authority is resolved server-side"), true, "browser page context should not be forwarded as trusted runtime authority headers");
+assert.equal(pageSource.includes("if (!authenticated || !organizationId || !userId || !hostSession) return {}"), true, "workspace authority headers should require an authenticated donated hostSession, not display-only page context");
 assert.equal(pageSource.includes("workspace.persistence.runtime"), true, "embedded app should log safe runtime persistence diagnostics from response headers");
 assert.equal(pageSource.includes("readWorkspaceResponseError"), true, "client workspace fetch failures should parse structured error envelopes before falling back to bounded text");
 assert.equal(pageSource.includes("isWorkspaceErrorEnvelope"), true, "client should guard structured workspace error envelopes before showing them in the session rail");
@@ -389,3 +394,7 @@ assert.equal(canvasViewportSource.includes("onArtifactVersionChange"), true, "ca
 assert.equal(packageSource.includes("artifact-warehouse.test.mjs"), true, "default tests should include the artifact warehouse regression test");
 
 console.log("app-shell-session-rail tests passed");
+
+assert.equal(artifactRouteSource.includes("getRequestWorkspaceArtifact"), true, "artifact API should upsert by checking for an existing persisted artifact first");
+assert.equal(artifactRouteSource.includes("createRequestWorkspaceArtifact"), true, "artifact API should create new persisted artifacts through the workspace adapter");
+assert.equal(artifactRouteSource.includes("updateRequestWorkspaceArtifact"), true, "artifact API should version edits through the workspace adapter");

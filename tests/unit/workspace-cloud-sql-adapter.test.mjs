@@ -39,6 +39,7 @@ function createFakeWorkspaceTables() {
     documentVersions: new Map(),
     artifacts: new Map(),
     artifactVersions: new Map(),
+    layouts: new Map(),
     sequence: 0,
   };
 }
@@ -396,6 +397,26 @@ class FakeRlsWorkspaceSqlTransaction {
       return { rows };
     }
 
+    if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_layout_snapshots")) {
+      const [organization_id, user_id, id, session_id, active_pane_id, active_artifact_id, layout, source] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      if (!this.tables.sessions.has(this.scopedKey(session_id))) throw new Error("layout session FK missing");
+      if (active_artifact_id && !this.tables.artifacts.has(this.scopedKey(active_artifact_id))) throw new Error("layout artifact FK missing");
+      const row = { id, organization_id, user_id, session_id, active_pane_id, active_artifact_id, layout: parseJsonParam(layout), source, created_at: this.now() };
+      const key = this.scopedKey(session_id);
+      this.tables.layouts.set(key, [...(this.tables.layouts.get(key) ?? []), row]);
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("select id, session_id, active_pane_id, active_artifact_id, layout, source, created_at from sonik_agent_ui.agent_workspace_layout_snapshots")) {
+      const [organization_id, user_id, session_id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const rows = [...(this.tables.layouts.get(this.scopedKey(session_id)) ?? [])]
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .map(clone);
+      return { rows };
+    }
+
     throw new Error(`Unhandled fake SQL: ${normalized}`);
   }
 
@@ -505,6 +526,11 @@ async function runWorkspaceCloudSqlAdapterTests() {
   assert.equal(renamedArtifact?.version, 3, "metadata-only artifact updates should still create a version");
   assert.equal((await adapterA.listArtifactVersions(artifact.id)).map((row) => row.version_number).join(","), "3,2,1");
   assert.equal((await adapterB.listArtifactVersions(artifact.id)).length, 0, "Org B must not read Org A artifact versions by guessed id");
+  const layout = await adapterA.recordLayoutSnapshot({ session_id: session.id, active_pane_id: "pane-artifact", active_artifact_id: artifact.id, layout: { split: "right", artifactId: artifact.id }, source: "user" });
+  assert.equal(layout.active_artifact_id, artifact.id);
+  assert.equal((await adapterA.listLayoutSnapshots(session.id)).length, 1, "Org A should restore layout snapshots by session");
+  assert.equal((await adapterB.listLayoutSnapshots(session.id)).length, 0, "Org B must not read Org A layout snapshots by guessed session id");
+  assert.equal((await adapterA.getSession(session.id))?.active_artifact_id, artifact.id, "layout snapshots should keep active artifact pointer current");
 
   assert.equal(
     executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("version_count = version_count + 1"))),

@@ -489,6 +489,16 @@ type CloudWorkspaceArtifactVersionRow<TContent = unknown> = {
   created_at: string | Date;
 };
 
+type CloudWorkspaceLayoutSnapshotRow<TLayout = unknown> = {
+  id: string;
+  session_id: string;
+  active_pane_id: string | null;
+  active_artifact_id: string | null;
+  layout: TLayout;
+  source: WorkspaceLayoutSnapshotRecord<TLayout>["source"];
+  created_at: string | Date;
+};
+
 class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   readonly #authorized: AuthorizedWorkspaceRuntime;
 
@@ -969,11 +979,37 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   listToolCalls(): Promise<WorkspaceToolCallRecord[]> {
     return unsupportedCloudWorkspaceOperation("listToolCalls");
   }
-  recordLayoutSnapshot<TLayout = unknown>(): Promise<WorkspaceLayoutSnapshotRecord<TLayout>> {
-    return unsupportedCloudWorkspaceOperation("recordLayoutSnapshot");
+  recordLayoutSnapshot<TLayout = unknown>(input: { session_id?: string | null; active_pane_id?: string | null; active_artifact_id?: string | null; layout: TLayout; source?: WorkspaceLayoutSnapshotRecord<TLayout>["source"] }): Promise<WorkspaceLayoutSnapshotRecord<TLayout>> {
+    return this.#withContext(async (tx) => {
+      const session = await this.#ensureSession(tx, input.session_id);
+      if (input.active_artifact_id) {
+        const artifact = await this.#selectArtifact(tx, input.active_artifact_id);
+        if (!artifact) throw new CloudWorkspacePersistenceError("missing-request-context", `Cannot record layout snapshot for missing artifact ${input.active_artifact_id}.`);
+      }
+      const { rows } = await tx.query<CloudWorkspaceLayoutSnapshotRow<TLayout>>(
+        `insert into sonik_agent_ui.agent_workspace_layout_snapshots
+          (organization_id, user_id, id, session_id, active_pane_id, active_artifact_id, layout, source)
+         values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+         returning id, session_id, active_pane_id, active_artifact_id, layout, source, created_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-layout"), session.id, input.active_pane_id ?? null, input.active_artifact_id ?? null, JSON.stringify(input.layout), input.source ?? "user"],
+      );
+      if (input.active_artifact_id) await this.#updateSessionActivePointers(tx, session.id, { activeArtifactId: input.active_artifact_id });
+      const row = rows[0];
+      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud layout snapshot insert returned no row.");
+      return mapCloudLayoutSnapshotRow<TLayout>(row);
+    });
   }
-  listLayoutSnapshots<TLayout = unknown>(): Promise<WorkspaceLayoutSnapshotRecord<TLayout>[]> {
-    return unsupportedCloudWorkspaceOperation("listLayoutSnapshots");
+  listLayoutSnapshots<TLayout = unknown>(sessionId: string): Promise<WorkspaceLayoutSnapshotRecord<TLayout>[]> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceLayoutSnapshotRow<TLayout>>(
+        `select id, session_id, active_pane_id, active_artifact_id, layout, source, created_at
+         from sonik_agent_ui.agent_workspace_layout_snapshots
+         where organization_id = $1 and user_id = $2 and session_id = $3
+         order by created_at desc`,
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId],
+      );
+      return rows.map(mapCloudLayoutSnapshotRow<TLayout>);
+    });
   }
   recordTelemetryEvent<TPayload = unknown>(): Promise<WorkspaceTelemetryEventRecord<TPayload>> {
     return unsupportedCloudWorkspaceOperation("recordTelemetryEvent");
@@ -1175,7 +1211,7 @@ function unsupportedCloudWorkspaceOperation(method: string): Promise<never> {
   return Promise.reject(
     new CloudWorkspacePersistenceError(
       "unsupported-operation",
-      `Cloud workspace persistence v0 supports sessions, messages, documents, and artifacts; ${method} is scheduled for a later slice.`,
+      `Cloud workspace persistence v0 supports sessions, messages, documents, artifacts, and layout snapshots; ${method} is scheduled for a later slice.`,
     ),
   );
 }
@@ -1256,6 +1292,18 @@ function mapCloudArtifactVersionRow<TContent = unknown>(row: CloudWorkspaceArtif
     version_number: Number(row.version_number),
     content: row.content,
     summary: row.summary ?? null,
+    source: row.source,
+    created_at: toIsoTimestamp(row.created_at),
+  };
+}
+
+function mapCloudLayoutSnapshotRow<TLayout = unknown>(row: CloudWorkspaceLayoutSnapshotRow<TLayout>): WorkspaceLayoutSnapshotRecord<TLayout> {
+  return {
+    id: row.id,
+    session_id: row.session_id,
+    active_pane_id: row.active_pane_id ?? null,
+    active_artifact_id: row.active_artifact_id ?? null,
+    layout: row.layout,
     source: row.source,
     created_at: toIsoTimestamp(row.created_at),
   };

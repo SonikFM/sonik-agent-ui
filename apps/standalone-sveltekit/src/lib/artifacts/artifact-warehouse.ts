@@ -43,6 +43,12 @@ export interface SelectArtifactVersionInput {
   now?: string;
 }
 
+export interface HydrateJsonRenderArtifactInput {
+  sessionId?: string | null;
+  artifact: JsonRenderArtifact;
+  versions: ArtifactWarehouseVersion<Spec>[];
+}
+
 const LOCAL_SESSION_ID = "local-session";
 
 function clone<TValue>(value: TValue): TValue {
@@ -145,6 +151,33 @@ export class InMemoryArtifactWarehouse {
       updatedAt: contentChanged || titleChanged ? now : existing.updatedAt,
     });
     this.#records.set(scopedKey, record);
+    this.#activeBySession.set(resolvedSessionId, scopedKey);
+    return this.#jsonSnapshot(record, currentVersion);
+  }
+
+  hydrateJsonRenderArtifact(input: HydrateJsonRenderArtifactInput): ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact } {
+    const resolvedSessionId = resolveSessionId(input.sessionId ?? input.artifact.id);
+    const sortedVersions = [...input.versions].sort((a, b) => a.version - b.version);
+    const currentVersion = sortedVersions.find((version) => version.version === input.artifact.version) ?? sortedVersions.at(-1) ?? {
+      versionId: createVersionId(input.artifact.id, input.artifact.version || 1),
+      artifactId: input.artifact.id,
+      version: input.artifact.version || 1,
+      payload: clone(input.artifact.content),
+      source: "system",
+      createdAt: input.artifact.updatedAt ?? input.artifact.createdAt ?? new Date().toISOString(),
+    } satisfies ArtifactWarehouseVersion<Spec>;
+    const record: ArtifactWarehouseRecord = Object.freeze({
+      artifactId: input.artifact.id,
+      sessionId: resolvedSessionId,
+      kind: "json-render",
+      title: input.artifact.title?.trim() || "JSON artifact",
+      currentVersionId: currentVersion.versionId,
+      createdAt: input.artifact.createdAt ?? currentVersion.createdAt,
+      updatedAt: input.artifact.updatedAt ?? currentVersion.createdAt,
+    });
+    const scopedKey = createScopedArtifactKey(resolvedSessionId, input.artifact.id);
+    this.#records.set(scopedKey, record);
+    this.#versions.set(scopedKey, sortedVersions.length > 0 ? sortedVersions.map((version) => Object.freeze(clone(version))) : [Object.freeze(clone(currentVersion))]);
     this.#activeBySession.set(resolvedSessionId, scopedKey);
     return this.#jsonSnapshot(record, currentVersion);
   }

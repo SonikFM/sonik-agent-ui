@@ -4,6 +4,7 @@ import type {
   DocumentLibraryResult,
   WorkspaceArtifactKind,
   WorkspaceArtifactRecord as BaseWorkspaceArtifactRecord,
+  WorkspaceArtifactVersionRecord,
   WorkspaceDocumentRecord,
   WorkspaceDocumentVersionRecord,
   WorkspaceLayoutSnapshotRecord,
@@ -99,8 +100,28 @@ export async function syncRequestActiveWorkspaceDocumentSnapshot(event: RequestW
   return getRequestWorkspacePersistence(event).syncActiveDocumentSnapshot(snapshot);
 }
 
-export async function createRequestWorkspaceArtifact(event: RequestWorkspaceEvent, input: { session_id?: string | null; id?: string; kind: WorkspaceArtifactKind; title: string; content: Spec | WorkspaceDocumentRecord }): Promise<WorkspaceArtifactRecord> {
+export async function createRequestWorkspaceArtifact(event: RequestWorkspaceEvent, input: { session_id?: string | null; id?: string; kind: WorkspaceArtifactKind; title: string; content: Spec | WorkspaceDocumentRecord; source?: WorkspaceDocumentVersionRecord["source"]; summary?: string | null }): Promise<WorkspaceArtifactRecord> {
   return getRequestWorkspacePersistence(event).createArtifact<Spec | WorkspaceDocumentRecord>(input);
+}
+
+export async function getRequestWorkspaceArtifact(event: RequestWorkspaceEvent, id: string): Promise<WorkspaceArtifactRecord | null> {
+  return getRequestWorkspacePersistence(event).getArtifact<Spec | WorkspaceDocumentRecord>(id);
+}
+
+export async function updateRequestWorkspaceArtifact(event: RequestWorkspaceEvent, id: string, input: { title?: string; content?: Spec | WorkspaceDocumentRecord; source?: WorkspaceDocumentVersionRecord["source"]; summary?: string | null }): Promise<WorkspaceArtifactRecord | null> {
+  return getRequestWorkspacePersistence(event).updateArtifact<Spec | WorkspaceDocumentRecord>(id, input);
+}
+
+export async function listRequestWorkspaceArtifactVersions(event: RequestWorkspaceEvent, artifactId: string): Promise<WorkspaceArtifactVersionRecord<Spec | WorkspaceDocumentRecord>[]> {
+  return getRequestWorkspacePersistence(event).listArtifactVersions<Spec | WorkspaceDocumentRecord>(artifactId);
+}
+
+export async function recordRequestWorkspaceLayoutSnapshot<TLayout = unknown>(event: RequestWorkspaceEvent, input: { session_id?: string | null; active_pane_id?: string | null; active_artifact_id?: string | null; layout: TLayout; source?: WorkspaceLayoutSnapshotRecord<TLayout>["source"] }): Promise<WorkspaceLayoutSnapshotRecord<TLayout>> {
+  return getRequestWorkspacePersistence(event).recordLayoutSnapshot<TLayout>(input);
+}
+
+export async function listRequestWorkspaceLayoutSnapshots<TLayout = unknown>(event: RequestWorkspaceEvent, sessionId: string): Promise<WorkspaceLayoutSnapshotRecord<TLayout>[]> {
+  return getRequestWorkspacePersistence(event).listLayoutSnapshots<TLayout>(sessionId);
 }
 
 export async function appendRequestWorkspaceMessage<TParts = unknown>(event: RequestWorkspaceEvent, input: { session_id?: string | null; id?: string; role: WorkspaceMessageRecord<TParts>["role"]; content?: string | null; parts?: TParts | null }): Promise<WorkspaceMessageRecord<TParts>> {
@@ -122,6 +143,7 @@ export async function listRequestWorkspaceTelemetryEvents(event: RequestWorkspac
 export type {
   DocumentLibraryResult,
   WorkspaceArtifactKind,
+  WorkspaceArtifactVersionRecord,
   WorkspaceDocumentRecord,
   WorkspaceDocumentVersionRecord,
   WorkspaceLayoutSnapshotRecord,
