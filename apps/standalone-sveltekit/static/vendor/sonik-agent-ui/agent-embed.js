@@ -61,6 +61,19 @@ export function mountSonikAgentUI(options) {
   const sidecar = optionalElement(ownerDocument, options.elements.sidecar);
   const canvasWindow = optionalElement(ownerDocument, options.elements.canvasWindow);
   const resizeHandle = optionalElement(ownerDocument, options.elements.resizeHandle);
+  const hostControllerKey = options.hostControllerKey === null ? null : options.hostControllerKey ?? "__sonikAgentHost";
+  annotateHostElement(iframe, "iframe");
+  annotateHostElement(chatSlot, "chat-slot");
+  annotateHostElement(canvasSlot, "canvas-slot");
+  annotateHostElement(sidecar, "sidecar");
+  annotateHostElement(canvasWindow, "canvas-window");
+  annotateHostElement(resizeHandle, "resize-handle");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.openChat), "open-chat");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.openCanvas), "open-canvas");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.expandCanvas), "expand-canvas");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.dockChat), "dock-chat");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.closeChat), "close-chat");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.closeCanvas), "close-canvas");
   const disposers = [];
   const contextPostTimeouts = [];
   const delays = options.contextPostDelaysMs ?? [250, 900, 1800, 3200, 5200, 8000];
@@ -211,10 +224,35 @@ export function mountSonikAgentUI(options) {
     close("all");
   };
 
+  const getMode = () => activeMode;
+  const hostController = {
+    schemaVersion: "sonik.agent_ui.host_controller.v1",
+    open,
+    close,
+    postContext,
+    scheduleContextPosts,
+    getMode,
+    setChatWidth,
+    openChat: () => open("chat"),
+    openCanvas: () => open("canvas"),
+    getState: () => ({ mode: activeMode, iframeSrc: iframe.getAttribute("src") }),
+  };
+  const controller = { iframe, open, close, postContext, scheduleContextPosts, update, destroy, getMode, setChatWidth };
+  if (hostControllerKey) {
+    ownerWindow[hostControllerKey] = hostController;
+    disposers.push(() => { if (ownerWindow[hostControllerKey] === hostController) delete ownerWindow[hostControllerKey]; });
+  }
+
   if (options.initialMode === "chat" || options.initialMode === "canvas" || options.initialMode === "workspace") open(options.initialMode);
   else mountFrame(chatSlot);
 
-  return { iframe, open, close, postContext, scheduleContextPosts, update, destroy, getMode: () => activeMode, setChatWidth };
+  return controller;
+}
+
+function annotateHostElement(element, control) {
+  if (!element) return;
+  element.dataset.sonikAgentUiControl = control;
+  if (!element.getAttribute("data-testid")) element.setAttribute("data-testid", `sonik-agent-ui-${control}`);
 }
 
 function sanitizeAgentHostPageContext(value) {

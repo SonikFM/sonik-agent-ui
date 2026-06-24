@@ -181,39 +181,33 @@ async function openAgentFrame(page) {
       await existing.waitForFunction(() => window.__sonikAgentUI?.getAssertions?.().hasActiveSession === true, undefined, { timeout: 60_000 });
       return existing;
     }
-    const clickResult = await page.evaluate(async () => {
-      const visible = (element) => {
+    const openResult = await page.evaluate(async () => {
+      const host = window.__sonikAgentHost;
+      if (host?.schemaVersion === "sonik.agent_ui.host_controller.v1" && typeof host.openChat === "function") {
+        host.openChat();
+        return { target: "host-controller-openChat", state: host.getState?.() ?? null };
+      }
+      const visibleEnough = (element) => {
         if (!element) return false;
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
-        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity || "1") > 0.05;
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
       };
       const fire = (element) => element?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-      const describe = (element) => element ? { tag: element.tagName, id: element.id, cls: String(element.className || "").slice(0, 160), aria: element.getAttribute("aria-label"), text: element.textContent?.trim().slice(0, 80), rect: (() => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; })() } : null;
-      let launcher = document.querySelector('[aria-label="Open Sonik agent launcher"]');
-      let chat = document.querySelector('[aria-label="Open Sonik chat sidecar"]');
-      if (visible(chat)) return { target: "chat", fired: fire(chat), chat: describe(chat), launcher: describe(launcher) };
-      if (visible(launcher)) {
+      const describe = (element) => element ? { tag: element.tagName, id: element.id, cls: String(element.className || "").slice(0, 160), aria: element.getAttribute("aria-label"), testId: element.getAttribute("data-testid"), control: element.getAttribute("data-sonik-agent-ui-control"), text: element.textContent?.trim().slice(0, 80), rect: (() => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; })() } : null;
+      let chat = document.querySelector('[data-testid="sonik-agent-ui-open-chat"], [data-sonik-agent-ui-control="open-chat"], [aria-label="Open Sonik chat sidecar"]');
+      if (visibleEnough(chat)) return { target: "open-chat-control", fired: fire(chat), chat: describe(chat) };
+      const launcher = document.querySelector('[data-testid="sonik-agent-ui-launcher"], [data-sonik-agent-ui-control="launcher"], [aria-label="Open Sonik agent launcher"]');
+      if (visibleEnough(launcher)) {
         const launcherFired = fire(launcher);
         await new Promise((resolve) => setTimeout(resolve, 450));
-        chat = document.querySelector('[aria-label="Open Sonik chat sidecar"]');
-        const chatRect = chat?.getBoundingClientRect();
-        if (chat && chatRect && chatRect.width > 0 && chatRect.height > 0) return { target: "launcher-then-chat", fired: Boolean(launcherFired && fire(chat)), chat: describe(chat), launcher: describe(launcher) };
-        return { target: "launcher", fired: launcherFired, chat: describe(chat), launcher: describe(launcher) };
+        chat = document.querySelector('[data-testid="sonik-agent-ui-open-chat"], [data-sonik-agent-ui-control="open-chat"], [aria-label="Open Sonik chat sidecar"]');
+        if (chat) return { target: "launcher-then-open-chat-control", fired: Boolean(launcherFired && fire(chat)), launcher: describe(launcher), chat: describe(chat) };
+        return { target: "launcher-only", fired: launcherFired, launcher: describe(launcher), chat: null };
       }
-      if (chat) return { target: "chat-hidden", fired: fire(chat), chat: describe(chat), launcher: describe(launcher) };
-      if (launcher) return { target: "launcher-hidden", fired: fire(launcher), chat: describe(chat), launcher: describe(launcher) };
-      return { target: "none", fired: false, chat: null, launcher: null };
+      return { target: "none", fired: false, hostControllerPresent: Boolean(host), chat: describe(chat), launcher: describe(launcher) };
     });
-    step("agent-open-attempt", { attempt, clickResult });
-    if (!clickResult?.fired || clickResult?.target === "none") {
-      const viewport = page.viewportSize() ?? { width: 1700, height: 1100 };
-      const fallbackX = Math.max(24, viewport.width - 126);
-      const fallbackY = Math.max(24, viewport.height - 44);
-      const bottomRightControls = await page.evaluate(() => [...document.elementsFromPoint(window.innerWidth - 126, window.innerHeight - 44)].slice(0, 8).map((element) => ({ tag: element.tagName, id: element.id, cls: String(element.className || "").slice(0, 180), aria: element.getAttribute("aria-label"), text: element.textContent?.trim().slice(0, 80) }))).catch(() => []);
-      await page.mouse.click(fallbackX, fallbackY).catch(() => undefined);
-      step("agent-open-coordinate-fallback", { attempt, x: fallbackX, y: fallbackY, bottomRightControls });
-    }
+    step("agent-open-attempt", { attempt, openResult });
     await sleep(1000);
     await page.waitForFunction((origin) => [...document.querySelectorAll("iframe")].some((frame) => frame.src.startsWith(origin)), agentOrigin, { timeout: 12_000 }).catch(() => undefined);
     const frame = page.frames().find((candidate) => candidate.url().startsWith(agentOrigin));

@@ -64,6 +64,13 @@ export type AgentEmbedElementRefs = {
   closeCanvas?: AgentEmbedElementRef<HTMLElement>;
 };
 
+export type AgentEmbedHostController = Pick<AgentEmbedController, "open" | "close" | "postContext" | "scheduleContextPosts" | "getMode" | "setChatWidth"> & {
+  schemaVersion: "sonik.agent_ui.host_controller.v1";
+  openChat: () => void;
+  openCanvas: () => void;
+  getState: () => { mode: AgentEmbedMode | null; iframeSrc: string | null };
+};
+
 export type AgentEmbedMountOptions = {
   agentUrl: string | URL;
   elements: AgentEmbedElementRefs;
@@ -77,6 +84,7 @@ export type AgentEmbedMountOptions = {
   minChatWidth?: number;
   maxChatWidth?: number;
   bodyDatasetKey?: string;
+  hostControllerKey?: string | null;
   onModeChange?: (mode: AgentEmbedMode | null) => void;
   onError?: (error: unknown) => void;
   window?: Window;
@@ -293,6 +301,21 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   const sidecar = optionalElement(ownerDocument, options.elements.sidecar);
   const canvasWindow = optionalElement(ownerDocument, options.elements.canvasWindow);
   const resizeHandle = optionalElement(ownerDocument, options.elements.resizeHandle);
+  const hostControllerKey = options.hostControllerKey === null ? null : options.hostControllerKey ?? "__sonikAgentHost";
+  const hostWindow = ownerWindow as Window & Record<string, unknown>;
+
+  annotateHostElement(iframe, "iframe");
+  annotateHostElement(chatSlot, "chat-slot");
+  annotateHostElement(canvasSlot, "canvas-slot");
+  annotateHostElement(sidecar, "sidecar");
+  annotateHostElement(canvasWindow, "canvas-window");
+  annotateHostElement(resizeHandle, "resize-handle");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.openChat), "open-chat");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.openCanvas), "open-canvas");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.expandCanvas), "expand-canvas");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.dockChat), "dock-chat");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.closeChat), "close-chat");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.closeCanvas), "close-canvas");
 
   const postContext = async () => {
     try {
@@ -433,10 +456,22 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
     close("all");
   };
 
-  if (options.initialMode === "chat" || options.initialMode === "canvas" || options.initialMode === "workspace") open(options.initialMode);
-  else mountFrame(chatSlot);
+  const getMode = () => activeMode;
 
-  return {
+  const hostController: AgentEmbedHostController = {
+    schemaVersion: "sonik.agent_ui.host_controller.v1",
+    open,
+    close,
+    postContext,
+    scheduleContextPosts,
+    getMode,
+    setChatWidth,
+    openChat: () => open("chat"),
+    openCanvas: () => open("canvas"),
+    getState: () => ({ mode: activeMode, iframeSrc: iframe.getAttribute("src") }),
+  };
+
+  const controller: AgentEmbedController = {
     iframe,
     open,
     close,
@@ -444,9 +479,27 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
     scheduleContextPosts,
     update,
     destroy,
-    getMode: () => activeMode,
+    getMode,
     setChatWidth,
   };
+
+  if (hostControllerKey) {
+    hostWindow[hostControllerKey] = hostController;
+    disposers.push(() => {
+      if (hostWindow[hostControllerKey] === hostController) delete hostWindow[hostControllerKey];
+    });
+  }
+
+  if (options.initialMode === "chat" || options.initialMode === "canvas" || options.initialMode === "workspace") open(options.initialMode);
+  else mountFrame(chatSlot);
+
+  return controller;
+}
+
+function annotateHostElement(element: HTMLElement | null | undefined, control: string): void {
+  if (!element) return;
+  element.dataset.sonikAgentUiControl = control;
+  if (!element.getAttribute("data-testid")) element.setAttribute("data-testid", `sonik-agent-ui-${control}`);
 }
 
 function sanitizeTrustedHostContext(value: AgentTrustedHostContext | null | undefined): Partial<AgentTrustedHostContext> {

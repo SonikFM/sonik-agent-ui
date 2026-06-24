@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
   SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
@@ -187,10 +188,13 @@ const controller = mountSonikAgentUI({
   document: fakeDocument,
 });
 assert.equal(fakeIframe.parentElement, fakeChatSlot, "mount should park iframe in chat slot before a mode opens");
+assert.equal(fakeWindow.__sonikAgentHost?.schemaVersion, "sonik.agent_ui.host_controller.v1", "mount should expose a stable host controller for embed automation and release gates");
+assert.equal(fakeIframe.dataset.sonikAgentUiControl, "iframe", "mount should annotate iframe with a stable Agent UI control attribute");
+assert.equal(fakeIframe.getAttribute("data-testid"), "sonik-agent-ui-iframe", "mount should annotate iframe with a stable test id");
 fakeIframe.dispatch("load");
 assert.equal(fakeIframe.contentWindow.messages.length, 0, "parked about:blank iframe must not receive host context before it is navigated to the agent origin");
-controller.open("chat");
-assert.equal(controller.getMode(), "chat", "controller should track chat mode");
+fakeWindow.__sonikAgentHost.openChat();
+assert.equal(controller.getMode(), "chat", "host controller should open and track chat mode");
 assert.equal(fakeBody.dataset.agentUiOpen, "chat", "controller should expose host body open mode");
 assert.equal(fakeSidecar.dataset.open, "true", "controller should open sidecar dataset state");
 assert.match(fakeIframe.src, /embedMode=chat/, "controller should set iframe src for chat mode");
@@ -198,13 +202,14 @@ await controller.postContext();
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.organizationId, "forged-org", "browser postMessage payload should carry sanitized host-asserted organization context");
 assert.deepEqual(fakeIframe.contentWindow.messages.at(-1).message.payload.scopes, ["admin:*"], "browser postMessage payload should carry sanitized host-asserted scopes");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).targetOrigin, "https://agent.sonik.local", "cross-origin embeds should post page context to the agent iframe origin, not the host origin");
-controller.open("canvas");
-assert.equal(fakeIframe.parentElement, fakeCanvasSlot, "controller should move iframe into canvas slot");
+fakeWindow.__sonikAgentHost.openCanvas();
+assert.equal(fakeIframe.parentElement, fakeCanvasSlot, "host controller should move iframe into canvas slot");
 assert.equal(fakeCanvas.dataset.open, "true", "controller should open canvas dataset state");
 controller.close();
 assert.equal(controller.getMode(), null, "controller close should clear active mode");
 assert.equal(fakeBody.dataset.agentUiOpen, undefined, "controller close should clear host body mode");
 controller.destroy();
+assert.equal(fakeWindow.__sonikAgentHost, undefined, "destroy should remove the host controller it installed");
 
 const queuedTimers = [];
 const clearedTimers = [];
@@ -244,5 +249,9 @@ assert.deepEqual(queuedTimers.map((timer) => timer.delay), [250, 900, 1800, 3200
 timerController.destroy();
 assert.deepEqual(clearedTimers, queuedTimers.map((timer) => timer.id), "destroy should clear queued context-post timers");
 assert.equal(timerController.getMode(), null, "destroy should close active mode");
+
+const amplifySmokeSource = await readFile("scripts/agent-ui-amplify-smoke.mjs", "utf8");
+assert.equal(amplifySmokeSource.includes("page.mouse.click"), false, "authenticated release gate should not use coordinate-click fallback to open embeds");
+assert.equal(amplifySmokeSource.includes("__sonikAgentHost"), true, "authenticated release gate should prefer the deterministic host controller when available");
 
 console.log("agent-embed tests passed");
