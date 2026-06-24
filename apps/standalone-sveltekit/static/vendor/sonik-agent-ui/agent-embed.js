@@ -292,19 +292,6 @@ function sanitizeTrustedHostSession(value) {
     metadata: undefined,
   };
 }
-function sanitizeSignedHostContextFields(value) {
-  const signed = {};
-  const signatureVersion = cleanText(value.signatureVersion);
-  const issuedAt = cleanText(value.issuedAt);
-  const expiresAt = cleanText(value.expiresAt);
-  const signature = cleanText(value.signature);
-  if (signatureVersion) signed.signatureVersion = signatureVersion;
-  if (issuedAt) signed.issuedAt = issuedAt;
-  if (expiresAt) signed.expiresAt = expiresAt;
-  if (signature) signed.signature = signature;
-  return signed;
-}
-
 function sanitizeAgentHostActiveEntity(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const type = cleanText(value.type);
