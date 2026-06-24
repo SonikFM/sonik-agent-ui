@@ -26,6 +26,7 @@ const chatTextSource = await readFile("packages/chat-surface/src/components/Chat
 const chatTextParserSource = await readFile("packages/chat-surface/src/chat-text.ts", "utf8");
 const chatSurfaceIndexSource = await readFile("packages/chat-surface/src/index.ts", "utf8");
 const chatMessagePartsSource = await readFile("packages/chat-surface/src/message-parts.ts", "utf8");
+const agentObservabilitySource = await readFile("packages/agent-observability/src/index.ts", "utf8");
 const canvasViewportSource = await readFile("packages/workspace-core/src/components/CanvasViewport.svelte", "utf8");
 const themeRuntimeSource = await readFile("apps/standalone-sveltekit/src/lib/theme/theme-runtime.ts", "utf8");
 const themePickerSource = await readFile("apps/standalone-sveltekit/src/lib/theme/ThemePicker.svelte", "utf8");
@@ -38,6 +39,7 @@ assert.equal(rootSource.includes('data-has-rail={railVisible}'), true, "Workspac
 assert.equal(rootSource.includes("layoutMode?: WorkspaceLayoutMode"), true, "WorkspaceRoot should expose an embeddable layout mode seam");
 assert.equal(rootSource.includes("railMode?: WorkspaceRailMode"), true, "WorkspaceRoot should expose an embeddable rail mode seam");
 assert.equal(rootSource.includes("--workspace-pane-split"), true, "WorkspaceRoot should expose a CSS-variable seam for future pane resizing");
+assert.equal(agentObservabilitySource.includes("createSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the fresh-session semantic action");
 
 assert.equal(pageSource.includes("let sessions = $state<WorkspaceSessionSummary[]>([])"), true, "app shell should keep a visible session list state");
 assert.equal(pageSource.includes("let archivedSessionCount = $state(0)"), true, "app shell should make archived chat behavior visible");
@@ -46,6 +48,9 @@ assert.equal(pageSource.includes("/api/sessions"), true, "app shell should load 
 assert.equal(pageSource.includes("/api/session/${encodeURIComponent(sessionId)}/messages"), true, "app shell should persist chat history by session");
 assert.equal(pageSource.includes("{#snippet rail()}"), true, "top-level app should provide the WorkspaceRoot rail slot");
 assert.equal(pageSource.includes("sessionId: activeSessionId"), true, "generate requests should carry active session id");
+assert.equal(pageSource.includes('"createSession", "submitPrompt"'), true, "page context should expose a semantic createSession action before submitPrompt");
+assert.equal(pageSource.includes("createSession: async () =>"), true, "page-control contract should expose a deterministic fresh-session semantic action for smoke tests");
+assert.equal(pageSource.includes("await createSession({ force: true })"), true, "fresh-session semantic action should route through the same session creation path as the app shell");
 assert.equal(pageSource.includes("function deriveChatTitle"), true, "app shell should derive deterministic first-message chat titles locally");
 assert.equal(pageSource.includes("maybeNameNewChat(trimmed)"), true, "app shell should name new chats before sending the first message");
 assert.equal(pageSource.includes('method: "PATCH"'), true, "app shell should call the session rename route");

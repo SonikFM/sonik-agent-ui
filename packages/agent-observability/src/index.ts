@@ -55,6 +55,7 @@ export interface AgentUiPageControl {
   getPageContext: () => AgentUiPageContextSnapshot;
   getAssertions: () => AgentUiPageAssertions;
   actions: {
+    createSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     submitPrompt: (input: { prompt?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     stop: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     clearChat: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;

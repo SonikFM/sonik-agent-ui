@@ -896,7 +896,7 @@
       artifactType: activeDocument?.language ?? (activeArtifact ? "json-render" : null),
       conversationStatus: conversation.status,
       messageCount: conversation.messages.length,
-      visibleActions: ["theme-picker", "workspace-docs", "start-over", "submitPrompt", "stop", "clearChat", "clearArtifact", "openWorkspaceDocument"],
+      visibleActions: ["theme-picker", "workspace-docs", "start-over", "createSession", "submitPrompt", "stop", "clearChat", "clearArtifact", "openWorkspaceDocument"],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
       commandFamilies: documentEditorOpen ? ["local-ui", "document", "artifact"] : activeArtifact ? ["local-ui", "artifact"] : ["local-ui", "discovery"],
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
@@ -959,6 +959,13 @@
       getPageContext: snapshotPageContext,
       getAssertions: snapshotAssertions,
       actions: {
+        createSession: async () => {
+          if (isStreaming) return semanticActionResult(false, "Stop the current stream before creating a new session.", "streaming");
+          await createSession({ force: true });
+          if (!activeSessionId) return semanticActionResult(false, sessionRailError || "Session was not created.", "session_unavailable");
+          if (sessionRailError) return semanticActionResult(false, sessionRailError, "session_error");
+          return semanticActionResult(true, "New session created.");
+        },
         submitPrompt: ({ prompt }) => {
           const message = typeof prompt === "string" ? prompt : "";
           const disabledReason = getSubmitDisabledReason(message);
