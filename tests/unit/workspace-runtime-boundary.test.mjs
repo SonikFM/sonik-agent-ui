@@ -10,6 +10,7 @@ import {
   AGENT_UI_HOST_CONTEXT_HEADER,
   WorkspaceRuntimeResolutionError,
   createRequestWorkspaceServices,
+  createSignedTrustedHostContextHeader,
   createWorkspaceRuntimeDiagnosticHeaders,
   encodeTrustedHostContextHeader,
   resolveWorkspacePersistencePolicy,
@@ -95,6 +96,39 @@ assert.throws(
   /requires authenticated host session context/,
   "unsigned browser host-context headers must not mount the cloud runtime by default",
 );
+
+assert.throws(
+  () => resolveWorkspaceRuntime({ event: { platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "cloud", SONIK_AGENT_UI_DATABASE_URL: "postgres://user:pass@example.neon.tech/db", SONIK_AGENT_UI_ALLOW_UNSIGNED_HOST_CONTEXT: "true" } }, request: new Request("https://agent.example/api/session", { headers: { [AGENT_UI_HOST_CONTEXT_HEADER]: hostContextHeader, "x-sonik-request-id": "request-forged" } }) } }),
+  /requires authenticated host session context/,
+  "cloud mode must ignore unsigned browser host-context headers even when a deployed env accidentally enables the dev fixture flag",
+);
+
+const signedHostContextHeader = createSignedTrustedHostContextHeader({
+  secret: "test-host-context-secret",
+  context: {
+    authenticated: true,
+    organizationId: "org-signed",
+    scopes: ["workspace:read", "workspace:write"],
+    hostSession: {
+      source: "amplify-embedded",
+      sessionId: "signed-host-session",
+      userId: "user-signed",
+      principalId: "principal-signed",
+      organizationId: "org-signed",
+      authenticated: true,
+      scopes: ["workspace:read", "workspace:write"],
+    },
+  },
+});
+const signedCloudRuntime = resolveWorkspaceRuntime({
+  event: {
+    platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "cloud", SONIK_AGENT_UI_DATABASE_URL: "postgres://user:pass@example.neon.tech/db", SONIK_AGENT_UI_HOST_CONTEXT_SECRET: "test-host-context-secret" } },
+    request: new Request("https://agent.example/api/session", { headers: { [AGENT_UI_HOST_CONTEXT_HEADER]: signedHostContextHeader, "x-sonik-request-id": "request-signed" } }),
+  },
+});
+assert.equal(signedCloudRuntime.kind, "cloud", "signed embedded host context should mount the cloud runtime");
+assert.equal(signedCloudRuntime.kind === "cloud" ? signedCloudRuntime.authorized.organizationId : null, "org-signed");
+assert.equal(signedCloudRuntime.kind === "cloud" ? signedCloudRuntime.authorized.userId : null, "user-signed");
 
 const cloudEvent = {
   platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "cloud", SONIK_AGENT_UI_DATABASE_URL: "postgres://user:pass@example.neon.tech/db" } },
@@ -197,6 +231,9 @@ for (const file of routeFiles) {
   assert.equal(isSingletonBacked, false, `cloud-enabled route ${file} must not use singleton-backed workspace persistence`);
 }
 assert.equal(singletonBackedRouteCount, localOnlySingletonRouteAllowlist.size, "local-only singleton route allowlist must match the current import graph exactly");
+
+const wranglerSource = await readFile("apps/standalone-sveltekit/wrangler.jsonc", "utf8");
+assert.equal(wranglerSource.includes("SONIK_AGENT_UI_ALLOW_UNSIGNED_HOST_CONTEXT"), false, "deployed Worker config must not enable unsigned browser host-context authority");
 
 const servicesSource = await readFile("apps/standalone-sveltekit/src/lib/server/workspace-services.ts", "utf8");
 assert.equal(servicesSource.includes("createCloudWorkspaceRuntime"), true, "cloud runtime should be mounted through the workspace-session adapter");

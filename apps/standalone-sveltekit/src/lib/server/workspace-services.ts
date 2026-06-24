@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   createAsyncWorkspacePersistenceAdapter,
   createCloudWorkspaceRuntime,
@@ -24,12 +25,19 @@ export type WorkspaceRuntimeRequest = {
 };
 
 export const AGENT_UI_HOST_CONTEXT_HEADER = "x-sonik-agent-ui-host-context";
+export const WORKSPACE_HOST_CONTEXT_SIGNATURE_VERSION = "sonik.agent_ui.host_context.hmac.v1";
+const WORKSPACE_HOST_CONTEXT_MAX_AGE_MS = 10 * 60 * 1000;
+const WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS = 60 * 1000;
 
 export type WorkspaceTrustedHostContext = {
   authenticated?: boolean;
   organizationId?: string | null;
   scopes?: string[];
   hostSession?: Partial<WorkspaceHostSessionSnapshot> | null;
+  signatureVersion?: string | null;
+  issuedAt?: string | null;
+  expiresAt?: string | null;
+  signature?: string | null;
 };
 
 export type RequestWorkspaceServices = {
@@ -219,6 +227,39 @@ export function encodeTrustedHostContextHeader(context: WorkspaceTrustedHostCont
   return btoa(unescape(encodeURIComponent(JSON.stringify(context)))).replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
+export function createSignedTrustedHostContextHeader(input: {
+  context: WorkspaceTrustedHostContext;
+  secret: string;
+  issuedAt?: Date;
+  ttlMs?: number;
+}): string {
+  return encodeTrustedHostContextHeader(createSignedTrustedHostContext(input));
+}
+
+export function createSignedTrustedHostContext(input: {
+  context: WorkspaceTrustedHostContext;
+  secret: string;
+  issuedAt?: Date;
+  ttlMs?: number;
+}): WorkspaceTrustedHostContext {
+  const issuedAtDate = input.issuedAt ?? new Date();
+  const expiresAtDate = new Date(issuedAtDate.getTime() + (input.ttlMs ?? WORKSPACE_HOST_CONTEXT_MAX_AGE_MS));
+  const unsigned = normalizeTrustedHostContext({
+    ...input.context,
+    signature: undefined,
+    signatureVersion: WORKSPACE_HOST_CONTEXT_SIGNATURE_VERSION,
+    issuedAt: issuedAtDate.toISOString(),
+    expiresAt: expiresAtDate.toISOString(),
+  });
+  if (!unsigned) {
+    throw new WorkspaceRuntimeResolutionError("missing-host-context", "Cannot sign an empty Agent UI host context.");
+  }
+  return {
+    ...unsigned,
+    signature: signTrustedHostContext(unsigned, input.secret),
+  };
+}
+
 export function decodeTrustedHostContext(value: string | null | undefined): WorkspaceTrustedHostContext | null {
   if (!value?.trim()) return null;
   const trimmed = value.trim();
@@ -284,6 +325,9 @@ function resolveTrustedHostSessionSnapshot(event?: WorkspaceRuntimeRequest | nul
   const fromLocals = resolveHostSessionFromLocals(event?.locals);
   if (fromLocals) return normalizeHostSessionSnapshot(fromLocals, "server-local-auth-adapter");
 
+  const signedContext = resolveSignedTrustedHostContextFromRequest(event?.request, env);
+  if (signedContext?.hostSession) return normalizeHostSessionSnapshot(signedContext.hostSession, "signed-embedded-host-context", signedContext);
+
   const unsignedContext = isUnsignedBrowserHostContextAllowed(env) ? resolveTrustedHostContextFromRequest(event?.request) : null;
   if (unsignedContext?.hostSession) return normalizeHostSessionSnapshot(unsignedContext.hostSession, "unsigned-dev-fixture-host-context", unsignedContext);
 
@@ -333,8 +377,55 @@ function normalizeHostSessionSnapshot(
   };
 }
 
+function resolveSignedTrustedHostContextFromRequest(request: Request | null | undefined, env: Record<string, unknown> | null): WorkspaceTrustedHostContext | null {
+  const context = resolveTrustedHostContextFromRequest(request);
+  const secret = readEnvString(env, "SONIK_AGENT_UI_HOST_CONTEXT_SECRET");
+  if (!context || !secret) return null;
+  return isSignedTrustedHostContextValid(context, secret) ? context : null;
+}
+
 function isUnsignedBrowserHostContextAllowed(env: Record<string, unknown> | null): boolean {
+  if (readEnvString(env, "SONIK_AGENT_UI_PERSISTENCE_MODE") === "cloud") return false;
   return readEnvString(env, "SONIK_AGENT_UI_ALLOW_UNSIGNED_HOST_CONTEXT") === "true";
+}
+
+function isSignedTrustedHostContextValid(context: WorkspaceTrustedHostContext, secret: string, now = new Date()): boolean {
+  const signature = cleanRuntimeString(context.signature);
+  if (!signature) return false;
+  if (context.signatureVersion !== WORKSPACE_HOST_CONTEXT_SIGNATURE_VERSION) return false;
+  const issuedAt = parseTrustedContextDate(context.issuedAt);
+  const expiresAt = parseTrustedContextDate(context.expiresAt);
+  if (!issuedAt || !expiresAt) return false;
+  if (issuedAt.getTime() - WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS > now.getTime()) return false;
+  if (expiresAt.getTime() + WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS < now.getTime()) return false;
+  if (expiresAt.getTime() - issuedAt.getTime() > WORKSPACE_HOST_CONTEXT_MAX_AGE_MS + WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS) return false;
+
+  const unsigned = stripTrustedHostContextSignature(context);
+  const expected = signTrustedHostContext(unsigned, secret);
+  return safeEqualSignature(signature, expected);
+}
+
+function signTrustedHostContext(context: WorkspaceTrustedHostContext, secret: string): string {
+  return createHmac("sha256", secret).update(stableJsonStringify(stripTrustedHostContextSignature(context))).digest("base64url");
+}
+
+function stripTrustedHostContextSignature(context: WorkspaceTrustedHostContext): WorkspaceTrustedHostContext {
+  const { signature: _signature, ...unsigned } = context;
+  return unsigned;
+}
+
+function safeEqualSignature(actual: string, expected: string): boolean {
+  const actualBytes = Buffer.from(actual);
+  const expectedBytes = Buffer.from(expected);
+  if (actualBytes.length !== expectedBytes.length) return false;
+  return timingSafeEqual(actualBytes, expectedBytes);
+}
+
+function parseTrustedContextDate(value: string | null | undefined): Date | null {
+  const cleaned = cleanRuntimeString(value);
+  if (!cleaned) return null;
+  const date = new Date(cleaned);
+  return Number.isFinite(date.getTime()) ? date : null;
 }
 
 function normalizeTrustedHostContext(value: unknown): WorkspaceTrustedHostContext | null {
@@ -344,7 +435,26 @@ function normalizeTrustedHostContext(value: unknown): WorkspaceTrustedHostContex
     organizationId: cleanRuntimeString(value.organizationId) ?? null,
     scopes: normalizeScopes(value.scopes),
     hostSession: isRecord(value.hostSession) ? value.hostSession as Partial<WorkspaceHostSessionSnapshot> : null,
+    signatureVersion: cleanRuntimeString(value.signatureVersion) ?? null,
+    issuedAt: cleanRuntimeString(value.issuedAt) ?? null,
+    expiresAt: cleanRuntimeString(value.expiresAt) ?? null,
+    signature: cleanRuntimeString(value.signature) ?? null,
   };
+}
+
+function stableJsonStringify(value: unknown): string {
+  return JSON.stringify(sortJsonValue(value));
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJsonValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => [key, sortJsonValue(value[key])]),
+  );
 }
 
 function normalizeScopes(value: unknown): string[] {
