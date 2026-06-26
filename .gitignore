@@ -9,8 +9,6 @@ build/
 .vercel/
 
 # Environment
-.env
-.env.*
 !.env.example
 
 # OS/editor
@@ -25,3 +23,4 @@ build/
 # Local runtime/test artifacts
 .omx/
 .playwright-mcp/
+config.bat
