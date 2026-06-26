@@ -1,0 +1,14 @@
+/*
+ * Runtime-tunable font stacks (e.g. staging Leva): set on :root or html.
+ * Keep in sync with src/design-system/foundations/typography/index.ts for TS consumers.
+ */
+:root {
+	--app-font-sans:
+		"TikTok Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+		"Roboto", "Helvetica Neue", sans-serif;
+	--app-font-display:
+		"Michroma", "TikTok Sans", "Inter", -apple-system, BlinkMacSystemFont,
+		"Segoe UI", "Roboto", sans-serif;
+	--app-font-mono:
+		source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+}

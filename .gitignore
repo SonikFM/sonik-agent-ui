@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+.svelte-kit/
+dist/
+build/
+.vercel/
+
+# Environment
+!.env.example
+
+# OS/editor
+.DS_Store
+*.log
+
+# Local donor mirrors used for Phase 0 provenance; do not commit these mirrors
+/json-render/
+/ui-dojo/
+/amplify-svelte/
+
+# Local runtime/test artifacts
+.omx/
+.playwright-mcp/
+config.bat

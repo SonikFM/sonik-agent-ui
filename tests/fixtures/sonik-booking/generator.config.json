@@ -1,0 +1,233 @@
+{
+  "provider": "sonik-booking-openapi-fixture",
+  "sourceAdapter": "openapi",
+  "generatedAt": "2026-06-21T00:00:00.000Z",
+  "families": [
+    {
+      "id": "booking",
+      "title": "Booking Contexts",
+      "description": "Sonik booking host commands for booking contexts.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "bookings",
+      "title": "Bookings",
+      "description": "Sonik booking host commands for bookings.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-customers",
+      "title": "Customers",
+      "description": "Sonik booking host commands for customers.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-house-accounts",
+      "title": "House Accounts",
+      "description": "Sonik booking host commands for house accounts.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-customer-profiles",
+      "title": "Customer Profiles",
+      "description": "Sonik booking host commands for customer profiles.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-resources",
+      "title": "Resources",
+      "description": "Sonik booking host commands for resources.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-waitlist",
+      "title": "Waitlist",
+      "description": "Sonik booking host commands for waitlist.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-policies",
+      "title": "Policies",
+      "description": "Sonik booking host commands for policies.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-holds",
+      "title": "Holds",
+      "description": "Sonik booking host commands for holds.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-quotes",
+      "title": "Quotes",
+      "description": "Sonik booking host commands for quotes.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-templates",
+      "title": "Templates",
+      "description": "Sonik booking host commands for templates.",
+      "aliases": [],
+      "source": "host"
+    },
+    {
+      "id": "booking-media",
+      "title": "Media",
+      "description": "Sonik booking host commands for media.",
+      "aliases": [],
+      "source": "host"
+    }
+  ],
+  "defaultFamilyId": "booking",
+  "defaultRuntimeStatus": "shadow",
+  "defaultLoadPolicy": {
+    "mode": "surface-eager",
+    "priority": 20,
+    "profile": "sonik-booking-openapi"
+  },
+  "defaultContextHints": {
+    "surfaces": [
+      "booking-admin",
+      "agent-ui"
+    ],
+    "skillFamilies": [
+      "sonik-booking"
+    ],
+    "commandFamilies": [
+      "booking"
+    ]
+  },
+  "defaultUiTargets": [
+    "chat",
+    "artifact"
+  ],
+  "tagFamilyMap": {
+    "booking": "booking",
+    "bookings": "bookings",
+    "booking-customers": "booking-customers",
+    "booking-house-accounts": "booking-house-accounts",
+    "booking-customer-profiles": "booking-customer-profiles",
+    "booking-resources": "booking-resources",
+    "booking-waitlist": "booking-waitlist",
+    "booking-policies": "booking-policies",
+    "booking-holds": "booking-holds",
+    "booking-quotes": "booking-quotes",
+    "booking-templates": "booking-templates",
+    "booking-media": "booking-media"
+  },
+  "tagCapabilityMap": {
+    "booking": [
+      "booking"
+    ],
+    "bookings": [
+      "bookings"
+    ],
+    "booking-customers": [
+      "booking-customers"
+    ],
+    "booking-house-accounts": [
+      "booking-house-accounts"
+    ],
+    "booking-customer-profiles": [
+      "booking-customer-profiles"
+    ],
+    "booking-resources": [
+      "booking-resources"
+    ],
+    "booking-waitlist": [
+      "booking-waitlist"
+    ],
+    "booking-policies": [
+      "booking-policies"
+    ],
+    "booking-holds": [
+      "booking-holds"
+    ],
+    "booking-quotes": [
+      "booking-quotes"
+    ],
+    "booking-templates": [
+      "booking-templates"
+    ],
+    "booking-media": [
+      "booking-media"
+    ]
+  },
+  "operationOverrides": {
+    "bookingPing": {
+      "loadPolicy": {
+        "mode": "eager-summary",
+        "priority": 100,
+        "profile": "sonik-booking-health"
+      },
+      "contextHints": {
+        "surfaces": [
+          "startup",
+          "booking-admin",
+          "agent-ui"
+        ],
+        "commandFamilies": [
+          "booking"
+        ]
+      }
+    },
+    "bookingListOrganizerTemplates": {
+      "loadPolicy": {
+        "mode": "eager-summary",
+        "priority": 90,
+        "profile": "sonik-booking-templates"
+      },
+      "contextHints": {
+        "surfaces": [
+          "booking-admin",
+          "agent-ui"
+        ],
+        "commandFamilies": [
+          "booking-templates"
+        ]
+      }
+    },
+    "bookingGetOrganizerTemplate": {
+      "loadPolicy": {
+        "mode": "eager-summary",
+        "priority": 80,
+        "profile": "sonik-booking-templates"
+      },
+      "contextHints": {
+        "surfaces": [
+          "booking-admin",
+          "agent-ui"
+        ],
+        "commandFamilies": [
+          "booking-templates"
+        ]
+      }
+    }
+  },
+  "projectionTargets": [
+    "cli",
+    "mcp"
+  ],
+  "projectionDefaults": {
+    "cli": {
+      "command": "sonik booking command execute",
+      "args": [
+        "--command-id",
+        "{commandId}"
+      ]
+    },
+    "mcp": {
+      "toolName": "sonik_booking_command_execute"
+    }
+  }
+}

@@ -1,0 +1,125 @@
+/*
+ * Amplify depth utilities — demo-safe opt-in surface treatment.
+ *
+ * These classes intentionally do not override DaisyUI's .card/.btn or theme
+ * tokens. They consume the active DaisyUI CSS variables so dark/light themes
+ * continue to own color semantics while demo surfaces can opt into a softer
+ * neumorphic/glow treatment.
+ */
+
+:root {
+	--amp-depth-radius: var(--radius-box, 1rem);
+	--amp-depth-border: color-mix(
+		in oklab,
+		var(--color-base-content) 12%,
+		transparent
+	);
+	--amp-depth-specular: oklch(100% 0 0 / 0.16);
+	--amp-depth-ambient: oklch(0% 0 0 / 0.46);
+	--amp-depth-shadow-dark: oklch(0% 0 0 / 0.38);
+	--amp-depth-shadow-light: oklch(100% 0 0 / 0.06);
+	--amp-depth-glow: color-mix(
+		in oklab,
+		var(--color-primary) 42%,
+		transparent
+	);
+	--amp-depth-bg-top: color-mix(
+		in oklab,
+		var(--color-base-200) 88%,
+		white 12%
+	);
+	--amp-depth-bg-bottom: color-mix(
+		in oklab,
+		var(--color-base-200) 92%,
+		black 8%
+	);
+	--amp-depth-shadow:
+		10px 14px 34px -20px var(--amp-depth-shadow-dark),
+		-8px -8px 26px -22px var(--amp-depth-shadow-light),
+		inset 0 1px 0 var(--amp-depth-specular),
+		inset 0 0 0 1px color-mix(in oklab, var(--amp-depth-border), transparent 35%);
+}
+
+[data-theme="light"],
+[data-theme="gunmetal-light"] {
+	--amp-depth-border: color-mix(
+		in oklab,
+		var(--color-base-content) 14%,
+		transparent
+	);
+	--amp-depth-specular: oklch(100% 0 0 / 0.92);
+	--amp-depth-ambient: oklch(42% 0.02 260 / 0.16);
+	--amp-depth-shadow-dark: oklch(46% 0.02 260 / 0.24);
+	--amp-depth-shadow-light: oklch(100% 0 0 / 0.9);
+	--amp-depth-bg-top: color-mix(
+		in oklab,
+		var(--color-base-100) 82%,
+		white 18%
+	);
+	--amp-depth-bg-bottom: color-mix(
+		in oklab,
+		var(--color-base-200) 88%,
+		black 4%
+	);
+}
+
+@layer components {
+	.amp-depth-card {
+		position: relative;
+		isolation: isolate;
+		overflow: hidden;
+		border: 1px solid var(--amp-depth-border);
+		border-radius: var(--amp-depth-radius);
+		background:
+			radial-gradient(
+				120% 80% at 0% 0%,
+				color-mix(in oklab, var(--color-primary) 12%, transparent),
+				transparent 52%
+			),
+			linear-gradient(145deg, var(--amp-depth-bg-top), var(--amp-depth-bg-bottom));
+		box-shadow: var(--amp-depth-shadow);
+	}
+
+	.amp-depth-card-glow::before {
+		position: absolute;
+		inset: -1px;
+		z-index: -1;
+		border-radius: inherit;
+		background:
+			radial-gradient(
+				70% 70% at 50% 0%,
+				var(--amp-depth-glow),
+				transparent 62%
+			),
+			linear-gradient(
+				135deg,
+				color-mix(in oklab, var(--color-primary) 30%, transparent),
+				color-mix(in oklab, var(--color-secondary) 24%, transparent)
+			);
+		content: "";
+		opacity: 0.34;
+		filter: blur(18px);
+		pointer-events: none;
+	}
+
+	.amp-depth-table {
+		border: 1px solid var(--amp-depth-border);
+		border-radius: var(--amp-depth-radius);
+		background: color-mix(in oklab, var(--color-base-200) 82%, transparent);
+		box-shadow: var(--amp-depth-shadow);
+	}
+
+	.amp-depth-button {
+		border: 1px solid color-mix(in oklab, var(--color-primary) 24%, transparent);
+		background: linear-gradient(
+			145deg,
+			color-mix(in oklab, var(--color-base-200) 86%, var(--color-primary) 14%),
+			color-mix(in oklab, var(--color-base-200) 92%, black 8%)
+		);
+		box-shadow:
+			6px 8px 22px -18px var(--amp-depth-shadow-dark),
+			-5px -5px 18px -16px var(--amp-depth-shadow-light),
+			0 0 0 1px color-mix(in oklab, var(--color-primary) 18%, transparent),
+			0 0 18px color-mix(in oklab, var(--color-primary) 18%, transparent);
+	}
+}

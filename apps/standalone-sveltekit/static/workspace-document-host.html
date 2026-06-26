@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workspace Document Editor Island</title>
+    <link rel="stylesheet" href="/vendor/workspace/static/style.css" />
+    <script src="/static/lib/highlight.min.js"></script>
+    <style>
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--sonik-background, var(--bg, #111318));
+        color: var(--sonik-foreground, var(--fg, #d6e7ef));
+      }
+
+      body {
+        display: block;
+      }
+
+      #chat-container,
+      #mode-agent-btn,
+      #mode-chat-btn,
+      #overflow-doc-btn,
+      #doc-indicator-btn,
+      #current-meta,
+      #chat-history {
+        display: none !important;
+      }
+
+      .doc-divider {
+        display: none !important;
+      }
+
+      .doc-editor-pane {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        transform: none !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        z-index: 1 !important;
+        background: var(--sonik-card, var(--sonik-background, #111318)) !important;
+        color: var(--sonik-foreground, #d6e7ef) !important;
+      }
+
+      .doc-editor-pane.doc-left {
+        left: 0 !important;
+        right: 0 !important;
+      }
+
+      .workspace-host-loading {
+        align-items: center;
+        color: var(--sonik-foreground, var(--fg, #d6e7ef));
+        display: flex;
+        font: 13px/1.5 var(--font-family, 'Fira Code', monospace);
+        height: 100%;
+        justify-content: center;
+        opacity: 0.72;
+      }
+
+      #doc-editor-textarea,
+      #doc-title-input,
+      #doc-language-select {
+        background: var(--sonik-control, var(--sonik-card, #151922)) !important;
+        border-color: var(--sonik-border, #2b3340) !important;
+        color: var(--sonik-foreground, #d6e7ef) !important;
+      }
+
+      #doc-html-preview,
+      #doc-rendered-preview,
+      #doc-preview-pane {
+        background: var(--sonik-card, #111318) !important;
+        color: var(--sonik-foreground, #d6e7ef) !important;
+      }
+    </style>
+  </head>
+  <body class="doc-view sidebar-collapsed">
+    <div id="chat-container" class="chat-container"></div>
+    <button id="mode-agent-btn" class="active" type="button">Agent</button>
+    <button id="mode-chat-btn" type="button">Chat</button>
+    <button id="overflow-doc-btn" type="button">Docs</button>
+    <button id="doc-indicator-btn" type="button">Doc</button>
+    <div id="current-meta">Workspace Document Island</div>
+    <div id="chat-history"></div>
+    <div id="workspace-host-loading" class="workspace-host-loading">Loading Workspace document editor…</div>
+
+    <script type="module">
+      const loading = document.getElementById('workspace-host-loading');
+      let documentModule;
+      let ready = false;
+      let lastSnapshotSignature = '';
+      let hasReceivedParentOpenRequest = false;
+      let defaultOpenTimer = null;
+      let openStabilization = null;
+      let parentTargetOrigin = window.location.origin;
+      const allowedParentOrigin = window.location.origin;
+      const pending = [];
+
+      function post(type, payload = {}) {
+        window.parent?.postMessage({ type, source: 'sonik-workspace-document-host', payload }, parentTargetOrigin);
+      }
+
+      function logHostTelemetry(event) {
+        const body = JSON.stringify({ event: { source: 'workspace-host', at: new Date().toISOString(), ...event } });
+        try {
+          if (navigator.sendBeacon?.('/api/telemetry', new Blob([body], { type: 'application/json' }))) return;
+          fetch('/api/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => undefined);
+        } catch {
+          // Telemetry must never affect document editing.
+        }
+      }
+
+      function applyTheme(payload = {}) {
+        const root = document.documentElement;
+        const body = document.body;
+        const panel = payload.appPanel || payload.card || payload.background;
+        const control = payload.appControl || payload.card || panel;
+        const accent = payload.primary || payload.accent;
+        const vars = {
+          '--sonik-background': payload.background,
+          '--sonik-foreground': payload.foreground,
+          '--sonik-card': panel,
+          '--sonik-control': control,
+          '--sonik-border': payload.border,
+          '--sonik-muted': payload.muted,
+          '--sonik-muted-foreground': payload.mutedForeground,
+          '--sonik-accent': accent,
+          '--bg': payload.background,
+          '--fg': payload.foreground,
+          '--panel': panel,
+          '--border': payload.border,
+          '--red': payload.error || accent,
+          '--accent-primary': accent,
+          '--input-bg': control,
+          '--input-border': payload.border
+        };
+        for (const [name, value] of Object.entries(vars)) {
+          if (typeof value === 'string' && value.trim()) root.style.setProperty(name, value.trim());
+        }
+        if (typeof payload.theme === 'string') {
+          root.dataset.theme = payload.theme;
+          body.dataset.theme = payload.theme;
+        }
+        if (typeof payload.colorScheme === 'string') {
+          root.dataset.colorScheme = payload.colorScheme;
+          root.style.colorScheme = payload.colorScheme;
+        }
+        logHostTelemetry({ event: 'document_host.theme_applied', mode: payload.theme || 'unknown', ok: true });
+      }
+
+      function normalizePayload(payload = {}) {
+        return {
+          documentId: typeof payload.documentId === 'string' && payload.documentId.trim() ? payload.documentId.trim() : null,
+          title: typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Workspace Document',
+          language: typeof payload.language === 'string' && payload.language.trim() ? payload.language.trim() : 'markdown',
+          content: typeof payload.content === 'string' ? payload.content : '# Workspace document editor\n\nUse the language selector to switch Markdown, HTML, JSON, code, or CSV render modes.',
+          preferredView: normalizePreferredView(payload.preferredView)
+        };
+      }
+
+      function normalizePreferredView(value) {
+        return value === 'edit' || value === 'preview' || value === 'auto' ? value : 'auto';
+      }
+
+      function contentHash(value) {
+        const text = String(value || '');
+        let hash = 5381;
+        for (let index = 0; index < text.length; index += 1) hash = ((hash << 5) + hash) ^ text.charCodeAt(index);
+        return (hash >>> 0).toString(36);
+      }
+
+      function isRenderPreviewLanguage(language) {
+        return /^(html|htm|svg|xml)$/i.test(language || '');
+      }
+
+      function isMarkdownPreviewLanguage(language) {
+        return /^(markdown|md)$/i.test(language || '');
+      }
+
+      function resolvePreferredView(payload) {
+        if (payload.preferredView === 'preview' || payload.preferredView === 'edit') return payload.preferredView;
+        if (isRenderPreviewLanguage(payload.language) || isMarkdownPreviewLanguage(payload.language)) return 'preview';
+        return 'edit';
+      }
+
+      function clickViewToggle(selector, shouldBeActive) {
+        const button = document.querySelector(selector);
+        if (!button) return false;
+        const isActive = button.classList.contains('active');
+        if (isActive !== shouldBeActive) button.click();
+        return true;
+      }
+
+      function applyPreferredView(payload) {
+        const preferredView = resolvePreferredView(payload);
+        const language = (payload.language || '').toLowerCase();
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            let applied = false;
+            if (isMarkdownPreviewLanguage(language)) {
+              applied = clickViewToggle(`#doc-md-view-toggle [data-mdview="${preferredView === 'preview' ? 'preview' : 'edit'}"]`, true);
+            } else if (isRenderPreviewLanguage(language)) {
+              applied = clickViewToggle(`#doc-render-view-toggle [data-renderview="${preferredView === 'preview' ? 'run' : 'code'}"]`, true);
+            }
+            if (applied) {
+              post('sonik:workspace-document:view', { preferredView, language });
+              logHostTelemetry({ event: 'document_host.preferred_view_applied', mode: preferredView, ok: true });
+            }
+          });
+        });
+      }
+
+      function afterAnimationFrames(count, callback) {
+        if (count <= 0) {
+          callback();
+          return;
+        }
+        requestAnimationFrame(() => afterAnimationFrames(count - 1, callback));
+      }
+
+      function writeEditorDomFromRecord(documentRecord) {
+        const titleInput = document.getElementById('doc-title-input');
+        const languageSelect = document.getElementById('doc-language-select');
+        const textarea = document.getElementById('doc-editor-textarea');
+        const badge = document.getElementById('doc-version-badge');
+        if (titleInput) titleInput.value = documentRecord.title || '';
+        if (languageSelect) languageSelect.value = documentRecord.language || 'markdown';
+        if (textarea) textarea.value = documentRecord.current_content || '';
+        if (badge) {
+          const version = Number(documentRecord.version_count || 1);
+          badge.textContent = `v${version}`;
+          badge.style.display = version > 1 ? '' : 'none';
+        }
+      }
+
+      function refreshRenderedPreview(documentRecord) {
+        const language = (documentRecord.language || '').toLowerCase();
+        if (isRenderPreviewLanguage(language)) {
+          const iframe = document.getElementById('doc-html-preview');
+          if (iframe && iframe.style.display !== 'none') iframe.srcdoc = documentRecord.current_content || '';
+        }
+      }
+
+      function stabilizeOpenedDocument(documentRecord, payload) {
+        openStabilization = {
+          documentId: documentRecord.id,
+          title: documentRecord.title,
+          language: documentRecord.language,
+          version_count: Number(documentRecord.version_count || 1),
+          contentHash: contentHash(documentRecord.current_content),
+          until: Date.now() + 500
+        };
+
+        afterAnimationFrames(3, () => {
+          writeEditorDomFromRecord(documentRecord);
+          refreshRenderedPreview(documentRecord);
+          applyPreferredView({ ...payload, language: documentRecord.language });
+          logHostTelemetry({
+            event: 'document_host.stabilized_open',
+            documentId: documentRecord.id,
+            documentVersion: documentRecord.version_count,
+            title: documentRecord.title,
+            mode: resolvePreferredView({ ...payload, language: documentRecord.language }),
+            ok: true
+          });
+          queueSnapshot('active', { force: true, clearStabilization: true });
+        });
+      }
+
+      async function fetchJson(url, options) {
+        const response = await fetch(url, options);
+        if (!response.ok) throw new Error(`${options?.method || 'GET'} ${url} failed with ${response.status}`);
+        return response.json();
+      }
+
+      function hasInlineDocumentSnapshot(doc) {
+        if (!doc?.documentId) return false;
+        return typeof doc.content === 'string'
+          || typeof doc.current_content === 'string'
+          || typeof doc.title === 'string'
+          || typeof doc.language === 'string';
+      }
+
+      async function resolveDocument(payload) {
+        const doc = normalizePayload(payload);
+        if (hasInlineDocumentSnapshot(doc)) {
+          return toDocumentRecord({
+            id: doc.documentId,
+            session_id: doc.session_id,
+            title: doc.title,
+            language: doc.language,
+            current_content: doc.current_content ?? doc.content,
+            version_count: doc.version_count ?? doc.version ?? 1,
+            created_at: doc.created_at,
+            updated_at: doc.updated_at
+          });
+        }
+
+        if (doc.documentId) {
+          return fetchJson(`/api/document/${encodeURIComponent(doc.documentId)}`);
+        }
+
+        return fetchJson('/api/document', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: 'workspace-document-island',
+            title: doc.title,
+            language: doc.language,
+            content: doc.content,
+            preferredView: doc.preferredView
+          })
+        });
+      }
+
+      async function openDocument(payload) {
+        payload = normalizePayload(payload);
+        hasReceivedParentOpenRequest = true;
+        if (defaultOpenTimer) {
+          clearTimeout(defaultOpenTimer);
+          defaultOpenTimer = null;
+        }
+        if (!ready || !documentModule) {
+          pending.push(payload);
+          return;
+        }
+
+        try {
+          const createdOrLoaded = await resolveDocument(payload);
+          const documentRecord = toDocumentRecord(createdOrLoaded);
+          documentModule.injectFreshDoc({
+            id: documentRecord.id,
+            session_id: documentRecord.session_id,
+            title: documentRecord.title,
+            language: documentRecord.language,
+            current_content: documentRecord.current_content,
+            content: documentRecord.current_content,
+            version_count: documentRecord.version_count,
+            version: documentRecord.version_count
+          });
+          stabilizeOpenedDocument(documentRecord, payload);
+          loading?.remove();
+          post('sonik:workspace-document:opened', { document: documentRecord, preferredView: normalizePreferredView(payload?.preferredView) });
+          logHostTelemetry({ event: 'document_host.opened', documentId: documentRecord.id, documentVersion: documentRecord.version_count, title: documentRecord.title, mode: resolvePreferredView({ ...payload, language: documentRecord.language }), ok: true });
+        } catch (error) {
+          console.error('[sonik-agent-ui] Workspace document open failed', error);
+          if (loading) loading.textContent = `Workspace document open failed: ${error?.message || error}`;
+          post('sonik:workspace-document:error', { message: error?.message || String(error) });
+          logHostTelemetry({ event: 'document_host.error', ok: false, error: error?.message || String(error) });
+        }
+      }
+
+      function toDocumentRecord(input = {}) {
+        return {
+          id: String(input.id || input.doc_id || `workspace-local-${Date.now()}`),
+          session_id: typeof input.session_id === 'string' ? input.session_id : 'workspace-document-island',
+          title: String(input.title || document.getElementById('doc-title-input')?.value || 'Untitled'),
+          language: String(input.language || document.getElementById('doc-language-select')?.value || 'markdown'),
+          current_content: String(input.current_content ?? input.content ?? document.getElementById('doc-editor-textarea')?.value ?? ''),
+          version_count: Number(input.version_count || input.version || 1),
+          created_at: typeof input.created_at === 'string' ? input.created_at : undefined,
+          updated_at: typeof input.updated_at === 'string' ? input.updated_at : new Date().toISOString()
+        };
+      }
+
+      function readActiveDocumentSnapshot() {
+        if (!documentModule?.getCurrentDocId) return null;
+        const id = documentModule.getCurrentDocId();
+        if (!id) return null;
+        const title = document.getElementById('doc-title-input')?.value || 'Untitled';
+        const language = document.getElementById('doc-language-select')?.value || 'markdown';
+        const current_content = document.getElementById('doc-editor-textarea')?.value || '';
+        const versionText = document.getElementById('doc-version-badge')?.textContent || 'v1';
+        const version_count = Number(versionText.replace(/[^0-9]/g, '')) || 1;
+        return {
+          id,
+          session_id: 'workspace-document-island',
+          title,
+          language,
+          current_content,
+          version_count,
+          updated_at: new Date().toISOString()
+        };
+      }
+
+      function shouldSuppressStaleOpenSnapshot(type, snapshot) {
+        if (type !== 'changed' || !openStabilization) return false;
+        if (Date.now() > openStabilization.until) {
+          openStabilization = null;
+          return false;
+        }
+        if (snapshot.id !== openStabilization.documentId) return false;
+        const stale = snapshot.title !== openStabilization.title
+          || snapshot.language !== openStabilization.language
+          || Number(snapshot.version_count || 1) < openStabilization.version_count
+          || contentHash(snapshot.current_content) !== openStabilization.contentHash;
+        if (!stale) return false;
+        logHostTelemetry({
+          event: 'document_host.stale_snapshot_suppressed',
+          documentId: snapshot.id,
+          documentVersion: snapshot.version_count,
+          title: snapshot.title,
+          mode: 'changed',
+          ok: true
+        });
+        return true;
+      }
+
+      function queueSnapshot(type = 'active', options = {}) {
+        requestAnimationFrame(() => {
+          const snapshot = readActiveDocumentSnapshot();
+          if (!snapshot) return;
+          if (shouldSuppressStaleOpenSnapshot(type, snapshot)) return;
+          const signature = `${snapshot.id}
+${snapshot.title}
+${snapshot.language}
+${snapshot.version_count}
+${snapshot.current_content}`;
+          if (!options.force && type === 'changed' && signature === lastSnapshotSignature) return;
+          lastSnapshotSignature = signature;
+          post(`sonik:workspace-document:${type}`, { document: snapshot });
+          if (options.clearStabilization) openStabilization = null;
+        });
+      }
+
+      function wireSnapshotEvents() {
+        const root = document.body;
+        root.addEventListener('input', (event) => {
+          if (event.target?.id === 'doc-editor-textarea' || event.target?.id === 'doc-title-input') queueSnapshot('changed');
+        }, true);
+        root.addEventListener('change', (event) => {
+          if (event.target?.id === 'doc-language-select') queueSnapshot('changed');
+        }, true);
+        setInterval(() => queueSnapshot('changed'), 1000);
+      }
+
+      window.addEventListener('message', (event) => {
+        if (event.origin !== allowedParentOrigin) return;
+        if (event.source !== window.parent) return;
+        parentTargetOrigin = event.origin || window.location.origin;
+        const message = event.data || {};
+        if (message.source !== 'sonik-agent-ui-parent') return;
+        if (message.type === 'sonik:workspace-document:theme') applyTheme(message.payload);
+        if (message.type === 'sonik:workspace-document:open') openDocument(message.payload);
+      });
+
+      try {
+        documentModule = await import('/vendor/workspace/static/js/document.js');
+        documentModule.init('');
+        ready = true;
+        wireSnapshotEvents();
+        post('sonik:workspace-document:ready');
+        logHostTelemetry({ event: 'document_host.ready', ok: true });
+        const hadPending = pending.length > 0;
+        while (pending.length) await openDocument(pending.shift());
+        if (!hadPending) {
+          defaultOpenTimer = setTimeout(() => {
+            defaultOpenTimer = null;
+            if (!hasReceivedParentOpenRequest && !document.getElementById('doc-editor-pane')) openDocument({});
+          }, 250);
+        }
+      } catch (error) {
+        console.error('[sonik-agent-ui] Failed to boot Workspace document island', error);
+        if (loading) loading.textContent = `Workspace document editor failed to load: ${error?.message || error}`;
+        post('sonik:workspace-document:error', { message: error?.message || String(error) });
+        logHostTelemetry({ event: 'document_host.boot_error', ok: false, error: error?.message || String(error) });
+      }
+    </script>
+  </body>
+</html>

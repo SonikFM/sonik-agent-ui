@@ -1,0 +1,69 @@
+/* Neumorphic light — tactile picker-matched theme */
+@plugin "daisyui/theme" {
+	name: "neumorphic-light";
+	default: false;
+	prefersdark: false;
+	color-scheme: "light";
+	--color-base-100: oklch(0.825 0.022 38.2);
+	--color-base-200: oklch(0.785 0.022 38.2);
+	--color-base-300: oklch(0.745 0.022 38.2);
+	--color-base-content: oklch(0.18 0.01 38.2);
+	--color-primary: oklch(0.66 0.18 270);
+	--color-primary-content: oklch(0.98 0.01 270);
+	--color-secondary: oklch(0.66 0.14 18);
+	--color-secondary-content: oklch(0.98 0.01 18);
+	--color-accent: oklch(0.72 0.16 280);
+	--color-accent-content: oklch(0.18 0.03 280);
+	--color-neutral: oklch(0.48 0.02 38.2);
+	--color-neutral-content: oklch(0.98 0.01 38.2);
+	--color-info: oklch(0.68 0.13 240);
+	--color-info-content: oklch(0.98 0.02 240);
+	--color-success: oklch(0.66 0.13 150);
+	--color-success-content: oklch(0.98 0.02 150);
+	--color-warning: oklch(0.74 0.15 80);
+	--color-warning-content: oklch(0.2 0.03 80);
+	--color-error: oklch(0.66 0.17 25);
+	--color-error-content: oklch(0.98 0.02 25);
+	--radius-selector: 999px;
+	--radius-field: 5px;
+	--radius-box: 15px;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 1;
+	--noise: 0;
+	--neu-canvas: oklch(0.825 0.022 38.2);
+	--neu-surface-a: oklch(0.840 0.022 38.2);
+	--neu-surface-b: oklch(0.810 0.022 38.2);
+	--neu-surface-c: oklch(0.785 0.022 38.2);
+	--neu-fg-strong: oklch(0.18 0.01 38.2);
+	--neu-fg-soft: color-mix(in oklab, var(--color-base-content), transparent 18%);
+	--neu-fg-mute: color-mix(in oklab, var(--color-base-content), transparent 36%);
+	--neu-stage-light: color-mix(
+		in oklab,
+		oklch(0.66 0.18 280),
+		transparent 90%
+	);
+	--neu-radius: var(--radius-box);
+	--neu-distance: 10px;
+	--neu-blur: 25px;
+	--neu-intensity: 5;
+	--neu-halo-bleed: 45px;
+	--neu-shadow-dark: oklch(0.833 0.014 81.8);
+	--neu-shadow-light: oklch(0.908 0.007 81.8);
+	--neu-glow-core: oklch(0.92 0.06 280);
+	--neu-glow-primary: oklch(0.66 0.18 280);
+	--neu-glow-secondary: oklch(0.66 0.14 180);
+	--neu-glow-violet: oklch(0.66 0.18 280);
+	--neu-glow-violet-soft: oklch(0.78 0.14 280);
+	--neu-glow-intensity: 1.45;
+	--neu-shadow-stack: 3px 3px 8.8px var(--neu-shadow-dark), 8.5px 8.5px 22.5px var(--neu-shadow-dark), 17px 17px 45px var(--neu-shadow-dark), -3px -3px 8.8px var(--neu-shadow-light), -8.5px -8.5px 22.5px var(--neu-shadow-light), -17px -17px 45px var(--neu-shadow-light);
+	--neu-shadow-stack-hover: 2.6px 2.6px 7.5px var(--neu-shadow-dark), 7px 7px 18px var(--neu-shadow-dark), -2.6px -2.6px 7.5px var(--neu-shadow-light), -7px -7px 18px var(--neu-shadow-light), 0 0 28px oklch(0.66 0.18 280 / 0.26);
+	--neu-shadow-inset: inset 3px 3px 8.8px var(--neu-shadow-dark), inset -3px -3px 8.8px var(--neu-shadow-light);
+	--neu-btn-shadow: 3px 3px 8.8px var(--neu-shadow-dark), -3px -3px 8.8px var(--neu-shadow-light);
+	--neu-btn-shadow-hover: 2.6px 2.6px 7.5px var(--neu-shadow-dark), -2.6px -2.6px 7.5px var(--neu-shadow-light), 0 0 0 1px oklch(0.72 0.16 280 / 0.34), 0 0 24px oklch(0.66 0.18 280 / 0.24);
+	--neu-btn-shadow-primary: 3px 3px 8.8px var(--neu-shadow-dark), -3px -3px 8.8px var(--neu-shadow-light), inset 0 1px 0 oklch(1 0 0 / 0.5), 0 0 0 1px oklch(0.72 0.16 280 / 0.3), 0 0 14px oklch(0.66 0.18 280 / 0.2);
+	--neu-btn-shadow-primary-hover: 2.6px 2.6px 7.5px var(--neu-shadow-dark), -2.6px -2.6px 7.5px var(--neu-shadow-light), inset 0 1px 0 oklch(1 0 0 / 0.6), 0 0 0 1px oklch(0.72 0.16 280 / 0.5), 0 0 22px oklch(0.66 0.18 280 / 0.32);
+	--neu-btn-shadow-secondary: 3px 3px 8.8px var(--neu-shadow-dark), -3px -3px 8.8px var(--neu-shadow-light), inset 0 1px 0 oklch(1 0 0 / 0.5), 0 0 0 1px oklch(0.72 0.14 180 / 0.3), 0 0 14px oklch(0.66 0.14 180 / 0.2);
+	--neu-btn-shadow-secondary-hover: 2.6px 2.6px 7.5px var(--neu-shadow-dark), -2.6px -2.6px 7.5px var(--neu-shadow-light), inset 0 1px 0 oklch(1 0 0 / 0.6), 0 0 0 1px oklch(0.72 0.14 180 / 0.5), 0 0 22px oklch(0.66 0.14 180 / 0.32);
+}

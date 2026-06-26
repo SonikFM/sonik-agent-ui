@@ -1,0 +1,2052 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Sonik Booking Service API",
+    "version": "0.1.0",
+    "description": "Generated contract truth for the Sonik booking service.\n\nThis is the booking surface denominator, not the legacy Node API inventory. Operations expose machine-readable x-sonik-status and x-sonik-adapter metadata:\n- mounted/mounted: served by sonik-booking-service today.\n- shadow/not-mounted: typed contract truth for future booking families; not mounted by runtime yet.\n\nThe document is generated from oRPC contract metadata, stamped with Better Auth session security, verified booking error rows, and committed fixture examples. Do not hand-edit the generated OpenAPI document."
+  },
+  "security": [],
+  "paths": {
+    "/api/v1/booking/ping": {
+      "get": {
+        "operationId": "bookingPing",
+        "summary": "Booking service health probe",
+        "description": "Liveness probe for the greenfield booking service. Returns service identity, ok flag, session source, explicit demo-auth posture, demoCustomerId for local/demo harness proof, venueProductionReady=false, and timestamp. No authentication required \u2014 anonymous callers receive authenticated: false. Mounted runtime: served by sonik-booking-service router.ts.",
+        "security": [],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/ping responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/contexts": {
+      "post": {
+        "operationId": "bookingCreateContext",
+        "summary": "Create a bookable context",
+        "description": "Creates a bookable context \u2014 the managed bookable thing (an event, a venue_schedule like a tee sheet or restaurant service, or a resource like a simulator bay). Provide its kind, display name, and timezone (required); config defaults to empty and slug is optional. The owning organization is taken from your session \u2014 never send it in the body. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/contexts request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/contexts responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListContexts",
+        "summary": "List bookable contexts",
+        "description": "Lists the bookable contexts in your organization, optionally filtered by kind (event, venue_schedule, or resource). Availability reads are not tracked, but this list is a plain read. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/contexts responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/event-shadows/contexts": {
+      "post": {
+        "operationId": "bookingProjectEventContext",
+        "summary": "Project a legacy event context",
+        "description": "Projects a real Sonik event into booking as bookable_context.kind=event using externalEventRef as a soft shadow key. This operation is idempotent per organization + externalEventRef, refreshes mutable display/config fields on replay, and does not make booking authoritative for legacy event ticketing, approvals, analytics, or commerce. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/event-shadows/contexts request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/event-shadows/contexts responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/contexts/{contextId}": {
+      "get": {
+        "operationId": "bookingGetContext",
+        "summary": "Get a bookable context",
+        "description": "Returns one bookable context by id. Only contexts in your organization are visible \u2014 a context owned by another org is indistinguishable from a missing one (both 404). Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/contexts/{contextId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "patch": {
+        "operationId": "bookingUpdateContext",
+        "summary": "Update a bookable context",
+        "description": "Updates a context's mutable fields \u2014 name, config, and/or slug. The context's kind cannot be changed: a kind determines how its schedule rules are interpreted, so changing it would orphan the rule semantics. Send only the fields you want to change. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "PATCH /api/v1/booking/contexts/{contextId} request"
+        },
+        "responses": {
+          "x-fixture-ref": "PATCH /api/v1/booking/contexts/{contextId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/contexts/{contextId}/schedule-rules": {
+      "post": {
+        "operationId": "bookingCreateScheduleRule",
+        "summary": "Create a schedule rule",
+        "description": "Adds a schedule rule to a context. A rule is an open config envelope expressing an effective-date range, a priority, and pacing/window/turn-time settings (e.g. opens/closes, slotMinutes, capacity); higher-priority rules win where effective windows overlap. Rules are how availability is defined \u2014 availability itself is always computed from them, never stored. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/contexts/{contextId}/schedule-rules request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/contexts/{contextId}/schedule-rules responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListScheduleRules",
+        "summary": "List a context's schedule rules",
+        "description": "Lists every schedule rule attached to a context, in the order they were created. Only your organization's contexts are visible. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/contexts/{contextId}/schedule-rules responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId}": {
+      "patch": {
+        "operationId": "bookingUpdateScheduleRule",
+        "summary": "Update a schedule rule",
+        "description": "Replaces a schedule rule's config envelope. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "ruleId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "PATCH /api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId} request"
+        },
+        "responses": {
+          "x-fixture-ref": "PATCH /api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "delete": {
+        "operationId": "bookingDeleteScheduleRule",
+        "summary": "Delete a schedule rule",
+        "description": "Removes a schedule rule from a context. Future availability computations stop applying it immediately. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "ruleId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "DELETE /api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/contexts/{contextId}/availability": {
+      "get": {
+        "operationId": "bookingGetAvailability",
+        "summary": "Get computed availability for a context",
+        "description": "Returns the computed availability slots for a context over a date range (from/to). This is THE law of the booking framework: availability is computed from the context's schedule rules every time it is requested \u2014 it is never stored as slots. Each returned slot carries its start, end, and remaining capacity after existing bookings. Optional partySize/source/resource filters let the read hide slots that active booking-window or party policies would reject; the response remains a bare slot array without pricing or reason-code expansion. This read is NOT tracked as an attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true
+          },
+          {
+            "name": "partySize",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "resourceTypeId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "resourceUnitId",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/contexts/{contextId}/availability responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings": {
+      "post": {
+        "operationId": "bookingCreateBooking",
+        "summary": "Create a booking",
+        "description": "Creates a booking against a bookable context for a customer over a time window. The same shape backs a tee time, a dinner reservation, or any other booking \u2014 the context decides what it means. Supply a clientRequestId to make the create idempotent: retrying with the same key returns the existing booking with 200 rather than creating a duplicate (the Worker-retry defense). The organization is taken from your session. Emits a v4 attribution signal carrying the source channel at capture time.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListBookings",
+        "summary": "List bookings",
+        "description": "Lists bookings in your organization, optionally filtered by context, customer, status, and a start-time date range. Org scoping is implicit \u2014 you only ever see your own organization's bookings.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "customerId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "startsAfter",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "startsBefore",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/bookings responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings/{bookingId}": {
+      "get": {
+        "operationId": "bookingGetBooking",
+        "summary": "Get a booking",
+        "description": "Returns a single booking by id, scoped to your organization. A booking in another organization is indistinguishable from one that does not exist \u2014 both return 404.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/bookings/{bookingId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings/{bookingId}/cancel": {
+      "post": {
+        "operationId": "bookingCancelBooking",
+        "summary": "Cancel a booking",
+        "description": "Cancels a booking, moving it to 'cancelled'. Cancelling an already-cancelled booking is a conflict (409) \u2014 the transition is illegal. Emits a v4 attribution signal carrying the source channel at capture time.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/cancel responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings/{bookingId}/confirm": {
+      "post": {
+        "operationId": "bookingConfirmBooking",
+        "summary": "Confirm a booking",
+        "description": "Confirms a booking, moving it from 'booked' to 'confirmed'. Confirming a booking that is not in 'booked' status is a conflict (409).",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/confirm responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings/{bookingId}/reschedule": {
+      "post": {
+        "operationId": "bookingRescheduleBooking",
+        "summary": "Reschedule a booking",
+        "description": "Moves a booking to a new time window on the same booking \u2014 a first-class operation, not a cancel-and-rebook. The booking keeps its id, party, and resource assignments. The new ends must be strictly after the new starts. Emits a v4 attribution signal carrying the source channel at capture time.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/reschedule request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/reschedule responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings/{bookingId}/party": {
+      "get": {
+        "operationId": "bookingListPartyMembers",
+        "summary": "List party members for a booking",
+        "description": "Returns the booking's current active party roster. Removed members remain tombstoned for audit/retry safety but are excluded from this current-roster response.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/bookings/{bookingId}/party responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "post": {
+        "operationId": "bookingAddPartyMember",
+        "summary": "Add a party member to a booking",
+        "description": "Adds a generic party member to a booking. Provide a customerId for a known guest, or omit it for a walk-in/guest \u2014 a guest without a customer record is identified by displayName alone and is never written as CRM/customer profile data. Supplying clientRequestId makes retried adds return the existing party row instead of duplicating the roster. Returns the booking's current active party roster.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/party request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/party responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings/{bookingId}/party/{partyMemberId}": {
+      "delete": {
+        "operationId": "bookingRemovePartyMember",
+        "summary": "Remove a party member from a booking",
+        "description": "Removes a generic party member from a booking by party-member id by tombstoning the booking_party row. Repeating the same remove for an already-removed party row is idempotent and returns the current active roster without emitting a duplicate lifecycle event. This mutates booking operational roster truth only; it does not delete or update CRM/customer profile data.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "partyMemberId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "DELETE /api/v1/booking/bookings/{bookingId}/party/{partyMemberId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings/{bookingId}/resources": {
+      "get": {
+        "operationId": "bookingListResourceAssignments",
+        "summary": "List resource assignments for a booking",
+        "description": "Returns the booking's current active resource assignments. This is the read-side companion to assign/unassign so the app can render mounted resource truth instead of inferred slot labels.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/bookings/{bookingId}/resources responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "post": {
+        "operationId": "bookingAssignResource",
+        "summary": "Assign a resource to a booking",
+        "description": "Assigns an active resource unit or resource combination to a booking. The service checks booking lifecycle, resource status, resource blocks, and overlapping active assignments before writing booking_resource. Returns the booking's active resource assignments.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/resources request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/bookings/{bookingId}/resources responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/bookings/{bookingId}/resources/{assignmentId}": {
+      "delete": {
+        "operationId": "bookingUnassignResource",
+        "summary": "Unassign a resource from a booking",
+        "description": "Releases an active booking_resource assignment by assignment id. The row is retained with status=released for audit-ready assignment truth. Returns the booking's remaining active resource assignments.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "DELETE /api/v1/booking/bookings/{bookingId}/resources/{assignmentId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/customers": {
+      "get": {
+        "operationId": "bookingSearchCustomers",
+        "summary": "Search the organizer's customers (the keystone identity lookup)",
+        "description": "THE keystone customer lookup. Searches the organizer's customers by free-text q over name, email, and phone, returning a paginated, org-scoped list. This is the SAME primitive everywhere: the Sonik MCP uses it to resolve a member booking a tee time, and the admin console uses it to find a customer when adding a charge to a house tab. Org scope is derived from your Better Auth session (RLS) \u2014 it is never a parameter. With no q, returns your most recent customers. Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-customers"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/customers responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      },
+      "post": {
+        "operationId": "bookingCreateCustomer",
+        "summary": "Create a customer",
+        "description": "Creates a customer for your organization. name and phone are required (the spine `phone_number` column is NOT NULL); email is optional. organizationId is NOT accepted \u2014 it is derived from your session. This writes a CUSTOMER record only; it never creates or mutates a user (organizers edit customers, never users). No uniqueness is enforced on phone/email, so creating a second customer with the same contact succeeds (dedup is a tooling concern, not a constraint) \u2014 there is no 409. A person with no phone cannot be a customer; capture them as a booking_party on the booking instead. Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-customers"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/customers request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/customers responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/customers/{customerId}": {
+      "get": {
+        "operationId": "bookingGetCustomer",
+        "summary": "Get one customer by id",
+        "description": "Returns a single org-scoped customer by id. 404 if the customer does not exist within your organization (org scope is session-derived; cross-org ids resolve as not-found, never as a leak). Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-customers"
+        ],
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/customers/{customerId} responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      },
+      "patch": {
+        "operationId": "bookingUpdateCustomer",
+        "summary": "Update a customer's contact fields",
+        "description": "Updates the contact fields (name, phone, email) on one of your customers. Send only the fields you want to change. phone, if supplied, must stay non-empty \u2014 the spine column is NOT NULL and cannot be cleared; email may be set to null to clear it. This edits the CUSTOMER row only \u2014 it never mutates a user (organizers edit customers, never users). 404 if the customer is not in your organization. Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-customers"
+        ],
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "PATCH /api/v1/booking/customers/{customerId} request"
+        },
+        "responses": {
+          "x-fixture-ref": "PATCH /api/v1/booking/customers/{customerId} responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/house-accounts": {
+      "post": {
+        "operationId": "bookingOpenHouseAccount",
+        "summary": "Open (or fetch) a member's house account",
+        "description": "Operator op. Opens a house account \u2014 a member's 'tab' \u2014 for a customer, or returns the existing one. Idempotent by the one-account-per-(org, customer) rule: calling it twice for the same member returns the same account with 200, never a conflict. Responds with the account and its computed balance. Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-house-accounts"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/house-accounts request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/house-accounts responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/house-accounts/{accountId}": {
+      "get": {
+        "operationId": "bookingGetHouseAccount",
+        "summary": "Get a house account with its balance",
+        "description": "Operator op. Returns a member's house account plus its running balance. The balance is computed live as the sum of all ledger entries \u2014 it is never stored \u2014 so it is always consistent with the tab. Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-house-accounts"
+        ],
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/house-accounts/{accountId} responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/house-accounts/{accountId}/entries": {
+      "get": {
+        "operationId": "bookingListHouseAccountEntries",
+        "summary": "List a house account's ledger entries",
+        "description": "Operator op. Returns a paginated page of a member's ledger entries, newest first, filterable by kind (charge / payment / adjustment), occurred-at window, and linked booking. A tee time and a dinner both appear here as charges against the one tab. Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-house-accounts"
+        ],
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "bookingId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/house-accounts/{accountId}/entries responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      },
+      "post": {
+        "operationId": "bookingAddHouseAccountEntry",
+        "summary": "Post a charge, payment, or adjustment",
+        "description": "Operator op. Records one ledger entry on a member's tab: a charge (positive \u2014 they owe more, e.g. a tee time or dinner), a payment (negative \u2014 they paid the tab down), or an adjustment (either sign \u2014 a comp or correction). amount_cents must be nonzero. Optionally links the entry to the booking that produced it. Ledger-only: this records money, it does not capture or settle any payment (no payment rails are integrated). Intended as the future Layer-1 monetary-signal emission point (capture-only). Responds with the created entry. Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-house-accounts"
+        ],
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/house-accounts/{accountId}/entries request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/house-accounts/{accountId}/entries responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/house-accounts/{accountId}/statement": {
+      "get": {
+        "operationId": "bookingGetHouseAccountStatement",
+        "summary": "Read a member's statement / F&B-minimum progress",
+        "description": "Operator op. Returns a computed statement for a member's tab over an optional occurred-at period: the net balance, per-kind subtotals (charges, payments, adjustments), and an entry count. The charge subtotal over a billing period is the food-and-beverage-minimum progress number \u2014 how much the member has spent toward their minimum. Every figure is a read-time aggregate over the ledger; nothing here is stored. Shadow contract: no adapter is mounted yet.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-house-accounts"
+        ],
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/house-accounts/{accountId}/statement responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/customers/{customerId}/profile": {
+      "get": {
+        "operationId": "bookingGetCustomerProfile",
+        "summary": "Get a customer profile",
+        "description": "Returns the future shadow CRM/profile projection for an existing booking customer. Booking does not own this persistence; a mounted implementation must proxy/project Amplify-owned CRM truth or remain read-only.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-customer-profiles"
+        ],
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/customers/{customerId}/profile responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      },
+      "patch": {
+        "operationId": "bookingUpdateCustomerProfile",
+        "summary": "Update a customer profile",
+        "description": "Shadow-only boundary for future profile preference updates. Booking must not persist CRM-owned profile data here unless a later RAL plan delegates the write to Amplify or reframes the payload as booking operational participant metadata; it never mutates an auth user.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-customer-profiles"
+        ],
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "PATCH /api/v1/booking/customers/{customerId}/profile request"
+        },
+        "responses": {
+          "x-fixture-ref": "PATCH /api/v1/booking/customers/{customerId}/profile responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/customers/{customerId}/insights": {
+      "get": {
+        "operationId": "bookingGetCustomerInsights",
+        "summary": "Get customer insights",
+        "description": "Returns future shadow booking insights projected from booking activity for an existing customer.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-customer-profiles"
+        ],
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/customers/{customerId}/insights responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/resources/types": {
+      "post": {
+        "operationId": "bookingCreateResourceType",
+        "summary": "Create a resource type",
+        "description": "Creates a persisted operational resource type in the booking schema. Resource types are inventory categories such as tee, cart, simulator bay, table, room, or instructor; they are scoped to the caller organization and optionally to a bookable context.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-resources"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/resources/types request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/resources/types responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListResourceTypes",
+        "summary": "List resource types",
+        "description": "Lists persisted resource types for the caller organization, optionally filtered by bookable context.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-resources"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/resources/types responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/resources/units": {
+      "post": {
+        "operationId": "bookingCreateResourceUnit",
+        "summary": "Create a resource unit",
+        "description": "Creates a persisted resource unit under a resource type. Units are individual bookable inventory items such as Tee 1, Cart 42, Bay A, or Table 12.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-resources"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/resources/units request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/resources/units responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListResourceUnits",
+        "summary": "List resource units",
+        "description": "Lists persisted resource units for the caller organization, optionally filtered by type, context, status, or legacy active flag.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-resources"
+        ],
+        "parameters": [
+          {
+            "name": "typeId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/resources/units responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/resources/blocks": {
+      "post": {
+        "operationId": "bookingCreateResourceBlock",
+        "summary": "Create a resource block",
+        "description": "Creates a persisted operational block over a context, resource type, or resource unit. Blocks are inventory facts for later availability/hold conflict checks; this slice persists them but does not implement the hold conflict engine.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-resources"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/resources/blocks request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/resources/blocks responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListResourceBlocks",
+        "summary": "List resource blocks",
+        "description": "Lists persisted resource blocks for the caller organization.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-resources"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "resourceTypeId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "resourceUnitId",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/resources/blocks responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/resources/combinations": {
+      "post": {
+        "operationId": "bookingCreateResourceCombination",
+        "summary": "Create a resource combination",
+        "description": "Creates a persisted combination of resource units, such as adjacent simulator bays, tee-plus-cart bundles, or joined tables. Combination members stay operational inventory, not CRM data.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-resources"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/resources/combinations request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/resources/combinations responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListResourceCombinations",
+        "summary": "List resource combinations",
+        "description": "Lists persisted resource combinations for the caller organization, optionally filtered by bookable context.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-resources"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/resources/combinations responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/waitlist": {
+      "post": {
+        "operationId": "bookingCreateWaitlistEntry",
+        "summary": "Create a waitlist entry",
+        "description": "Creates a future shadow waitlist entry for a requested booking window.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-waitlist"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/waitlist request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/waitlist responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      },
+      "get": {
+        "operationId": "bookingListWaitlistEntries",
+        "summary": "List waitlist entries",
+        "description": "Lists future shadow waitlist entries in the caller organization.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-waitlist"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/waitlist responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/waitlist/{entryId}": {
+      "get": {
+        "operationId": "bookingGetWaitlistEntry",
+        "summary": "Get a waitlist entry",
+        "description": "Returns one future shadow waitlist entry. Cross-org entries are 404.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-waitlist"
+        ],
+        "parameters": [
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/waitlist/{entryId} responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      },
+      "delete": {
+        "operationId": "bookingDeleteWaitlistEntry",
+        "summary": "Delete a waitlist entry",
+        "description": "Future lifecycle transition removing a waitlist entry from active consideration.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-waitlist"
+        ],
+        "parameters": [
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "DELETE /api/v1/booking/waitlist/{entryId} responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/waitlist/{entryId}/offer": {
+      "post": {
+        "operationId": "bookingOfferWaitlistEntry",
+        "summary": "Offer a waitlist entry",
+        "description": "Future lifecycle transition that offers a matching window to the waitlist customer.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-waitlist"
+        ],
+        "parameters": [
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/waitlist/{entryId}/offer request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/waitlist/{entryId}/offer responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/waitlist/{entryId}/claim": {
+      "post": {
+        "operationId": "bookingClaimWaitlistOffer",
+        "summary": "Claim a waitlist offer",
+        "description": "Future lifecycle transition claiming an offer. 410 documents expired offers; no payment capture occurs.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-waitlist"
+        ],
+        "parameters": [
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/waitlist/{entryId}/claim request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/waitlist/{entryId}/claim responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/waitlist/{entryId}/expire": {
+      "post": {
+        "operationId": "bookingExpireWaitlistEntry",
+        "summary": "Expire a waitlist entry",
+        "description": "Future lifecycle transition expiring a waitlist entry.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-waitlist"
+        ],
+        "parameters": [
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/waitlist/{entryId}/expire responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/policies": {
+      "post": {
+        "operationId": "bookingCreatePolicy",
+        "summary": "Create a booking policy",
+        "description": "Creates a mounted-narrow booking policy for the caller organization. Catalog/binding truth is persisted; active booking-window and party policies are enforced by hold/create-booking/reschedule/assignment service gates, while money-bearing settlement remains a later slice.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-policies"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/policies request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/policies responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListPolicies",
+        "summary": "List booking policies",
+        "description": "Lists mounted booking policies for the caller organization with optional active/kind/binding filters.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-policies"
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "resourceTypeId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "resourceUnitId",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/policies responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/policies/{policyId}": {
+      "patch": {
+        "operationId": "bookingUpdatePolicy",
+        "summary": "Update a booking policy",
+        "description": "Updates a mounted booking policy. 404 is used for unknown or cross-org policies.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-policies"
+        ],
+        "parameters": [
+          {
+            "name": "policyId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "PATCH /api/v1/booking/policies/{policyId} request"
+        },
+        "responses": {
+          "x-fixture-ref": "PATCH /api/v1/booking/policies/{policyId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/rate-plans": {
+      "post": {
+        "operationId": "bookingCreateRatePlan",
+        "summary": "Create a rate plan",
+        "description": "Creates a mounted static/rule-based rate plan; money is catalog/quote truth only, not payment settlement.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-policies"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/rate-plans request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/rate-plans responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "get": {
+        "operationId": "bookingListRatePlans",
+        "summary": "List rate plans",
+        "description": "Lists mounted rate plans for the caller organization with optional active/binding filters.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-policies"
+        ],
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "resourceTypeId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "resourceUnitId",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/rate-plans responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/rate-plans/{ratePlanId}": {
+      "patch": {
+        "operationId": "bookingUpdateRatePlan",
+        "summary": "Update a rate plan",
+        "description": "Updates a mounted rate plan. Dynamic pricing/yield remains out of scope.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-policies"
+        ],
+        "parameters": [
+          {
+            "name": "ratePlanId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "PATCH /api/v1/booking/rate-plans/{ratePlanId} request"
+        },
+        "responses": {
+          "x-fixture-ref": "PATCH /api/v1/booking/rate-plans/{ratePlanId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/holds": {
+      "post": {
+        "operationId": "bookingCreateHold",
+        "summary": "Create a booking hold",
+        "description": "Creates a temporary hold against a bookable context and required constrained resource target. Mounted runtime checks resource blocks, active bookings/assignments, and active unexpired holds before writing. No payment/deposit behavior is performed.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-holds"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/holds request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/holds responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/holds/{holdId}": {
+      "get": {
+        "operationId": "bookingGetHold",
+        "summary": "Get a booking hold",
+        "description": "Returns a hold in the caller organization, or 404 for unknown/cross-org holds.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-holds"
+        ],
+        "parameters": [
+          {
+            "name": "holdId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/holds/{holdId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/holds/{holdId}/commit": {
+      "post": {
+        "operationId": "bookingCommitHold",
+        "summary": "Commit a booking hold",
+        "description": "Atomically converts an active unexpired hold into a durable booking, copies the constrained resource target into booking_resource, marks the hold converted, and writes booking lifecycle audit evidence. 409 covers lifecycle/conflict failures, including expired holds at the oRPC boundary; REST keeps a 410 expired-hold response. No payment settlement is performed.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-holds"
+        ],
+        "parameters": [
+          {
+            "name": "holdId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/commit request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/commit responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/holds/{holdId}/release": {
+      "post": {
+        "operationId": "bookingReleaseHold",
+        "summary": "Release a booking hold",
+        "description": "Releases an active hold so it no longer blocks inventory. 409 covers illegal transitions; expired holds are returned as expired truth by the service.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-holds"
+        ],
+        "parameters": [
+          {
+            "name": "holdId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/release request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/release responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/holds/{holdId}/extend": {
+      "post": {
+        "operationId": "bookingExtendHold",
+        "summary": "Extend a booking hold",
+        "description": "Extends an active unexpired hold expiry while keeping the same conflict footprint. 409 covers illegal transitions; expired holds are returned as expired truth by the service.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-holds"
+        ],
+        "parameters": [
+          {
+            "name": "holdId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/extend request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/holds/{holdId}/extend responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/quotes": {
+      "post": {
+        "operationId": "bookingCreateQuote",
+        "summary": "Create a booking quote",
+        "description": "Creates a future shadow quote from a context, requested window, demand, and optional customer. This is contract truth only: no adapter, DB table, payment capture, or settlement behavior is mounted.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-quotes"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/quotes request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/quotes responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/quotes/{quoteId}": {
+      "get": {
+        "operationId": "bookingGetQuote",
+        "summary": "Get a booking quote",
+        "description": "Returns one future shadow quote within the caller organization. Cross-org and unknown quotes are both 404 under future org-scoped invisibility semantics.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-quotes"
+        ],
+        "parameters": [
+          {
+            "name": "quoteId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/quotes/{quoteId} responses"
+        },
+        "x-sonik-status": "shadow",
+        "x-sonik-adapter": "not-mounted"
+      }
+    },
+    "/api/v1/booking/templates": {
+      "get": {
+        "operationId": "bookingListOrganizerTemplates",
+        "summary": "List organizer templates",
+        "description": "Lists public capability-first organizer starter templates. Templates are bundle/config descriptors only; they do not create vertical runtime types and do not execute install mutations.",
+        "security": [],
+        "tags": [
+          "booking-templates"
+        ],
+        "parameters": [],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/templates responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/templates/{slug}": {
+      "get": {
+        "operationId": "bookingGetOrganizerTemplate",
+        "summary": "Inspect an organizer template manifest",
+        "description": "Returns the full organizer template manifest for a public starter. The manifest describes capability bundles, bookable-context kinds, proof surfaces, and non-live unsupported seams without claiming production install readiness.",
+        "security": [],
+        "tags": [
+          "booking-templates"
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/templates/{slug} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/templates/{slug}/dry-run": {
+      "get": {
+        "operationId": "bookingDryRunOrganizerTemplate",
+        "summary": "Dry-run organizer template install",
+        "description": "Returns a deterministic install report for the template and organization slug. This endpoint is read-only: executedMutations is false, venueProductionReady is false, and install mutations remain guarded/deferred.",
+        "security": [],
+        "tags": [
+          "booking-templates"
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "organizationSlug",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/templates/{slug}/dry-run responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/templates/{slug}/browser-handoff": {
+      "get": {
+        "operationId": "bookingGetOrganizerTemplateBrowserHandoff",
+        "summary": "Get organizer template browser handoff",
+        "description": "Returns the browser/manual-proof handoff generated from the same template dry-run report used by the CLI. Unsupported seams remain non-live and durable template-install tables remain deferred.",
+        "security": [],
+        "tags": [
+          "booking-templates"
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "organizationSlug",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/templates/{slug}/browser-handoff responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/media/assets": {
+      "get": {
+        "operationId": "bookingListMediaAssets",
+        "summary": "List booking media assets",
+        "description": "Lists private R2-backed media assets for the caller organization, optionally scoped to one bookable context. Assets remain served through authenticated Worker routes, not a public CDN.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-media"
+        ],
+        "parameters": [
+          {
+            "name": "contextId",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/media/assets responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "post": {
+        "operationId": "bookingUploadMediaAsset",
+        "summary": "Upload booking media asset",
+        "description": "Uploads a private context-scoped media asset into BOOKING_MEDIA_BUCKET. The mounted endpoint accepts multipart/form-data with contextId, role, and file; it also supports application/octet-stream with contextId/fileName/role query params for SDK and CLI proof.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-media"
+        ],
+        "requestBody": {
+          "x-fixture-ref": "POST /api/v1/booking/media/assets request"
+        },
+        "responses": {
+          "x-fixture-ref": "POST /api/v1/booking/media/assets responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    },
+    "/api/v1/booking/media/assets/{assetId}": {
+      "get": {
+        "operationId": "bookingGetMediaAsset",
+        "summary": "Read booking media asset",
+        "description": "Streams a private media asset for the caller organization. Passing metadata=true returns the same JSON asset summary used by list/upload, which keeps Scalar and SDK verification JSON-safe while the default route streams bytes.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-media"
+        ],
+        "parameters": [
+          {
+            "name": "assetId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "metadata",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "GET /api/v1/booking/media/assets/{assetId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      },
+      "delete": {
+        "operationId": "bookingDeleteMediaAsset",
+        "summary": "Delete booking media asset",
+        "description": "Deletes a private R2-backed media asset after verifying the asset id belongs to the caller organization prefix.",
+        "security": [
+          {
+            "betterAuthSession": []
+          }
+        ],
+        "tags": [
+          "booking-media"
+        ],
+        "parameters": [
+          {
+            "name": "assetId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "x-fixture-ref": "DELETE /api/v1/booking/media/assets/{assetId} responses"
+        },
+        "x-sonik-status": "mounted",
+        "x-sonik-adapter": "mounted"
+      }
+    }
+  },
+  "x-fixture-provenance": {
+    "sourceRepo": "/Users/danielletterio/Documents/GitHub/sonik-booking-service",
+    "sourceRef": "emdash/major-schools-raise-3zsc2",
+    "sourcePath": "packages/sonik-sdk/docs/booking-openapi.generated.json",
+    "sourceSha256": "5baf5b0a9588fea0c0349ca3fe1f25342b29c342d0cb749607acfd913ae8060f",
+    "sourceOperationCount": 71,
+    "extractedFor": "sonik-agent-ui command-generator fixture",
+    "note": "Operation metadata only; request/response schemas are intentionally replaced with refs because generator v0 only needs presence and path/method provenance."
+  }
+}

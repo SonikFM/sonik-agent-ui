@@ -1,0 +1,374 @@
+/*
+ * App theme surface projection.
+ *
+ * DaisyUI theme variables answer "what are the semantic colors?"  These
+ * classes answer "how does the Amplify app shell/card/table chrome use those
+ * semantic colors?"  Keep this centralized so theme switching is visible
+ * across the demo path without page-level color recipes.
+ */
+
+:root,
+[data-theme] {
+	--app-canvas-bg:
+		radial-gradient(
+			circle at 18% 12%,
+			color-mix(in oklab, var(--color-primary) 10%, transparent),
+			transparent 34rem
+		),
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--color-base-100) 94%, var(--color-base-200)),
+			var(--color-base-100)
+		);
+	--app-shell-bg: color-mix(
+		in oklab,
+		var(--color-base-100) 88%,
+		var(--color-base-200)
+	);
+	--app-shell-border: color-mix(
+		in oklab,
+		var(--color-base-300) 76%,
+		transparent
+	);
+	--app-card-bg: linear-gradient(
+		145deg,
+		color-mix(in oklab, var(--color-base-100) 92%, var(--color-base-200)),
+		var(--color-base-100)
+	);
+	--app-card-border: color-mix(
+		in oklab,
+		var(--color-base-300) 78%,
+		transparent
+	);
+	--app-card-shadow:
+		0 1px 0 color-mix(in oklab, var(--color-base-content) 8%, transparent)
+			inset,
+		0 18px 44px -34px
+			color-mix(in oklab, var(--color-base-content) 32%, transparent);
+	--app-card-shadow-elevated:
+		0 1px 0 color-mix(in oklab, var(--color-base-content) 10%, transparent)
+			inset,
+		0 22px 54px -30px
+			color-mix(in oklab, var(--color-base-content) 42%, transparent);
+	--app-panel-bg: color-mix(
+		in oklab,
+		var(--color-base-100) 72%,
+		var(--color-base-200)
+	);
+	--app-muted-panel-bg: color-mix(
+		in oklab,
+		var(--color-base-200) 82%,
+		transparent
+	);
+	--app-inset-panel-bg: color-mix(
+		in oklab,
+		var(--color-base-200) 62%,
+		var(--color-base-300)
+	);
+	--app-table-bg: var(--app-panel-bg);
+	--app-table-header-bg: color-mix(
+		in oklab,
+		var(--color-base-200) 82%,
+		var(--color-base-300)
+	);
+	--app-table-row-bg: color-mix(
+		in oklab,
+		var(--color-base-100) 82%,
+		var(--color-base-200)
+	);
+	--app-table-row-hover-bg: color-mix(
+		in oklab,
+		var(--color-base-200) 84%,
+		var(--color-primary) 16%
+	);
+	--app-table-row-selected-bg: color-mix(
+		in oklab,
+		var(--color-primary) 16%,
+		var(--color-base-100)
+	);
+	--app-drawer-bg: var(--app-panel-bg);
+	--app-surface-transition:
+		background 180ms ease,
+		background-color 180ms ease,
+		border-color 180ms ease,
+		box-shadow 180ms ease,
+		color 180ms ease;
+}
+
+[data-theme="gunmetal-dark"],
+[data-theme="gunmetal-light"] {
+	--app-canvas-bg:
+		radial-gradient(
+			circle at 16% 10%,
+			color-mix(in oklab, var(--color-primary) 22%, transparent),
+			transparent 28rem
+		),
+		radial-gradient(
+			circle at 88% 0%,
+			color-mix(in oklab, var(--color-secondary) 10%, transparent),
+			transparent 32rem
+		),
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--color-base-100) 82%, var(--color-base-200)),
+			var(--color-base-100)
+		);
+	--app-card-bg:
+		linear-gradient(
+			to bottom,
+			color-mix(in oklab, var(--color-base-content) 10%, transparent),
+			transparent 2px
+		),
+		linear-gradient(
+			145deg,
+			color-mix(in oklab, var(--color-base-200) 72%, var(--color-base-100)),
+			var(--color-base-100)
+		);
+	--app-card-shadow:
+		inset 0 1px 0
+			color-mix(in oklab, var(--color-base-content) 14%, transparent),
+		inset 0 0 0 1px
+			color-mix(in oklab, var(--color-base-content) 7%, transparent),
+		0 18px 42px -34px
+			color-mix(in oklab, var(--color-base-content) 48%, transparent);
+	--app-card-shadow-elevated:
+		inset 0 1px 0
+			color-mix(in oklab, var(--color-base-content) 18%, transparent),
+		inset 0 0 0 1px
+			color-mix(in oklab, var(--color-base-content) 8%, transparent),
+		0 24px 60px -34px
+			color-mix(in oklab, var(--color-base-content) 58%, transparent);
+}
+
+[data-theme="neumorphic-dark"],
+[data-theme="neumorphic-light"] {
+	--app-canvas-bg:
+		radial-gradient(
+			circle at 18% 14%,
+			color-mix(in oklab, var(--neu-glow-primary) 26%, transparent),
+			transparent 32rem
+		),
+		radial-gradient(
+			circle at 82% 6%,
+			color-mix(in oklab, var(--neu-glow-secondary) 20%, transparent),
+			transparent 34rem
+		),
+		linear-gradient(145deg, var(--color-base-100), var(--color-base-200));
+	--app-shell-bg: color-mix(
+		in oklab,
+		var(--neu-surface-a) 72%,
+		var(--color-base-100)
+	);
+	--app-card-bg: linear-gradient(
+		145deg,
+		var(--neu-surface-a),
+		var(--neu-surface-b)
+	);
+	--app-card-border: var(--neu-border);
+	--app-card-shadow: var(--neu-shadow-stack);
+	--app-card-shadow-elevated: var(--neu-shadow-stack-hover);
+	--app-panel-bg: linear-gradient(
+		145deg,
+		color-mix(in oklab, var(--neu-surface-a) 88%, var(--neu-surface-b)),
+		var(--neu-surface-b)
+	);
+	--app-muted-panel-bg: color-mix(
+		in oklab,
+		var(--neu-surface-b) 72%,
+		transparent
+	);
+	--app-inset-panel-bg: var(--neu-surface-inset);
+	--app-table-bg: var(--app-panel-bg);
+	--app-table-header-bg: color-mix(
+		in oklab,
+		var(--neu-surface-b) 82%,
+		var(--neu-glow-primary) 10%
+	);
+	--app-table-row-bg: color-mix(
+		in oklab,
+		var(--neu-surface-a) 76%,
+		var(--neu-surface-b)
+	);
+	--app-table-row-hover-bg: color-mix(
+		in oklab,
+		var(--neu-surface-b) 74%,
+		var(--neu-glow-primary) 16%
+	);
+	--app-table-row-selected-bg: color-mix(
+		in oklab,
+		var(--neu-glow-primary) 18%,
+		var(--neu-surface-a)
+	);
+	--app-drawer-bg: var(--app-panel-bg);
+}
+
+.app-canvas-surface {
+	min-height: 100%;
+	background: var(--app-canvas-bg);
+	color: var(--color-base-content);
+	transition: var(--app-surface-transition);
+}
+
+.app-shell-surface {
+	background: var(--app-shell-bg);
+	border-color: var(--app-shell-border);
+	box-shadow: var(--app-card-shadow);
+	color: var(--color-base-content);
+	transition: var(--app-surface-transition);
+}
+
+.app-sidebar-surface {
+	background: var(--app-shell-bg);
+	border-color: var(--app-shell-border);
+	color: var(--color-base-content);
+	transition: var(--app-surface-transition);
+}
+
+.app-card-surface,
+.app-card-surface-elevated,
+.app-card-surface-muted,
+.app-card-surface-success,
+.app-panel-surface,
+.app-muted-panel-surface,
+.app-inset-panel-surface,
+.app-table-surface,
+.app-drawer-surface {
+	border: var(--border, 1px) solid var(--app-card-border);
+	color: var(--color-base-content);
+	transition: var(--app-surface-transition);
+}
+
+.app-card-surface {
+	background: var(--app-card-bg);
+	box-shadow: var(--app-card-shadow);
+}
+
+.app-card-surface-elevated {
+	background: var(--app-card-bg);
+	box-shadow: var(--app-card-shadow-elevated);
+}
+
+.app-card-surface-muted {
+	background: var(--app-panel-bg);
+	box-shadow: var(--app-card-shadow);
+}
+
+.app-card-surface-success {
+	background: var(--app-card-bg);
+	border-color: color-mix(in oklab, var(--color-success) 48%, transparent);
+	box-shadow: var(--app-card-shadow);
+}
+
+.app-panel-surface {
+	background: var(--app-panel-bg);
+	box-shadow: var(--app-card-shadow);
+}
+
+.app-muted-panel-surface {
+	background: var(--app-muted-panel-bg);
+}
+
+.app-inset-panel-surface {
+	background: var(--app-inset-panel-bg);
+	box-shadow: inset 0 1px 0
+		color-mix(in oklab, var(--color-base-content) 6%, transparent);
+}
+
+.app-table-surface {
+	background: var(--app-table-bg);
+	box-shadow: var(--app-card-shadow);
+	overflow: hidden;
+}
+
+.app-table-header-surface {
+	background: var(--app-table-header-bg);
+	border-color: var(--app-card-border);
+	color: var(--color-base-content);
+	transition: var(--app-surface-transition);
+}
+
+.app-table-row-surface {
+	background: var(--app-table-row-bg);
+	transition: var(--app-surface-transition);
+}
+
+.app-table-row-hover-surface,
+.app-table-row-surface:hover {
+	background: var(--app-table-row-hover-bg);
+}
+
+.app-table-row-selected-surface {
+	background: var(--app-table-row-selected-bg);
+}
+
+.app-drawer-surface {
+	background: var(--app-drawer-bg);
+	box-shadow: var(--app-card-shadow-elevated);
+}
+
+.app-nav-item-surface,
+.app-nav-item-active-surface,
+.app-brand-mark-surface,
+.app-action-bar-surface,
+.app-icon-button-surface,
+.app-option-pill-surface,
+.app-selected-panel-surface,
+.app-row-option-surface,
+.app-status-pill-surface,
+.app-tab-bar-surface,
+.app-stat-card-surface,
+.app-campaign-card-surface {
+	border-color: var(--app-card-border);
+	color: var(--color-base-content);
+	transition: var(--app-surface-transition);
+}
+
+.app-nav-item-surface {
+	background: transparent;
+}
+
+.app-nav-item-surface:hover,
+.app-nav-item-active-surface {
+	background: color-mix(
+		in oklab,
+		var(--color-primary) 14%,
+		var(--app-panel-bg)
+	);
+}
+
+.app-brand-mark-surface {
+	background: color-mix(
+		in oklab,
+		var(--color-primary) 22%,
+		var(--app-card-bg)
+	);
+	box-shadow: var(--app-card-shadow);
+}
+
+.app-action-bar-surface,
+.app-icon-button-surface,
+.app-option-pill-surface,
+.app-selected-panel-surface,
+.app-row-option-surface,
+.app-status-pill-surface,
+.app-tab-bar-surface {
+	background: var(--app-inset-panel-bg);
+	box-shadow: var(--app-card-shadow);
+}
+
+.app-icon-button-surface:hover,
+.app-option-pill-surface:hover,
+.app-row-option-surface:hover {
+	background: var(--app-table-row-hover-bg);
+}
+
+.app-stat-card-surface,
+.app-campaign-card-surface {
+	background: var(--app-card-bg);
+	border-color: var(--app-card-border);
+	box-shadow: var(--app-card-shadow);
+}
+
+.app-campaign-card-surface:hover {
+	box-shadow: var(--app-card-shadow-elevated);
+}

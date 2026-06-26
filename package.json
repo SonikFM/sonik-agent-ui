@@ -1,0 +1,35 @@
+{
+  "name": "sonik-agent-ui",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @json-render/core build && pnpm --filter @json-render/svelte build && pnpm --filter @sonik-agent-ui/agent-observability build && pnpm --filter @sonik-agent-ui/workspace-session build && pnpm --filter @sonik-agent-ui/tool-contracts build && pnpm --filter @sonik-agent-ui/command-generator build && pnpm --filter @sonik-agent-ui/platform-adapters build && pnpm --filter @sonik-agent-ui/agent-embed build && pnpm --filter @sonik-agent-ui/artifact-model build && pnpm --filter @sonik-agent-ui/workspace-core build && pnpm --filter @sonik-agent-ui/json-ui-runtime build && pnpm --filter @sonik-agent-ui/chat-surface build && pnpm --filter svelte-chat dev",
+    "build": "pnpm --filter @json-render/core build && pnpm --filter @json-render/svelte build && pnpm --filter @sonik-agent-ui/agent-observability build && pnpm --filter @sonik-agent-ui/workspace-session build && pnpm --filter @sonik-agent-ui/tool-contracts build && pnpm --filter @sonik-agent-ui/command-generator build && pnpm --filter @sonik-agent-ui/platform-adapters build && pnpm --filter @sonik-agent-ui/agent-embed build && pnpm --filter @sonik-agent-ui/artifact-model build && pnpm --filter @sonik-agent-ui/workspace-core build && pnpm --filter @sonik-agent-ui/json-ui-runtime build && pnpm --filter @sonik-agent-ui/chat-surface build && pnpm --filter svelte-chat build",
+    "check-types": "pnpm --filter @json-render/core typecheck && pnpm --filter @json-render/core build && pnpm --filter @json-render/svelte typecheck && pnpm --filter @json-render/svelte build && pnpm --filter @sonik-agent-ui/agent-observability typecheck && pnpm --filter @sonik-agent-ui/agent-observability build && pnpm --filter @sonik-agent-ui/workspace-session build && pnpm --filter @sonik-agent-ui/tool-contracts build && pnpm --filter @sonik-agent-ui/command-generator typecheck && pnpm --filter @sonik-agent-ui/command-generator build && pnpm --filter @sonik-agent-ui/platform-adapters build && pnpm --filter @sonik-agent-ui/agent-embed typecheck && pnpm --filter @sonik-agent-ui/agent-embed build && pnpm --filter @sonik-agent-ui/artifact-model typecheck && pnpm --filter @sonik-agent-ui/artifact-model build && pnpm --filter @sonik-agent-ui/workspace-core typecheck && pnpm --filter @sonik-agent-ui/workspace-core build && pnpm --filter @sonik-agent-ui/json-ui-runtime typecheck && pnpm --filter @sonik-agent-ui/json-ui-runtime build && pnpm --filter @sonik-agent-ui/chat-surface typecheck && pnpm --filter @sonik-agent-ui/chat-surface build && pnpm --filter svelte-chat check-types",
+    "phase0:verify": "pnpm check-types && pnpm check:commands && pnpm test && pnpm build",
+    "test": "pnpm --filter @json-render/core build && pnpm --filter @json-render/svelte build && pnpm --filter @sonik-agent-ui/agent-observability build && pnpm --filter @sonik-agent-ui/workspace-session build && pnpm --filter @sonik-agent-ui/tool-contracts build && pnpm --filter @sonik-agent-ui/command-generator build && pnpm --filter @sonik-agent-ui/platform-adapters build && pnpm --filter @sonik-agent-ui/agent-embed build && pnpm --filter @sonik-agent-ui/artifact-model build && pnpm --filter @sonik-agent-ui/workspace-core build && node --experimental-strip-types tests/unit/agent-observability.test.mjs && node --experimental-strip-types tests/unit/agent-embed.test.mjs && node --experimental-strip-types tests/unit/workspace-session.test.mjs && node tests/unit/artifact-model.test.mjs && node --experimental-strip-types tests/unit/artifact-promotion.test.mjs && node tests/unit/workspace-core.test.mjs && node --experimental-strip-types tests/unit/workspace-store.test.mjs && node --experimental-strip-types tests/unit/workspace-cloud-migration.test.mjs && node --experimental-strip-types tests/unit/workspace-access-grants-migration.test.mjs && node --experimental-strip-types tests/unit/workspace-runtime-boundary.test.mjs && node --experimental-strip-types tests/unit/workspace-cloud-sql-adapter.test.mjs && node --experimental-strip-types tests/unit/chat-text.test.mjs && node --experimental-strip-types tests/unit/stream-telemetry.test.mjs && node --experimental-strip-types tests/unit/stream-safety.test.mjs && node --experimental-strip-types tests/unit/json-artifact-spec.test.mjs && node tests/unit/artifact-tool-contract.test.mjs && node --experimental-strip-types tests/unit/artifact-warehouse.test.mjs && node tests/unit/app-shell-session-rail.test.mjs && node --experimental-strip-types tests/unit/tool-contracts.test.mjs && node --experimental-strip-types tests/unit/command-generator.test.mjs && node --experimental-strip-types tests/unit/sonik-booking-command-fixture.test.mjs && node --experimental-strip-types tests/unit/sonik-global-command-registry.test.mjs && node --experimental-strip-types tests/unit/global-command-registry-runtime.test.mjs",
+    "generate:commands:sonik-booking": "node --experimental-strip-types scripts/generate-sonik-booking-command-fixture.mjs",
+    "check:commands:sonik-booking": "node --experimental-strip-types scripts/generate-sonik-booking-command-fixture.mjs --check",
+    "check:commands": "pnpm check:commands:sonik-booking && pnpm check:commands:sonik-global",
+    "dev:evidence": "node scripts/agent-ui-dev-evidence-server.mjs",
+    "smoke:agent-ui": "node scripts/agent-ui-smoke.mjs",
+    "smoke:agent-ui:crash": "node scripts/agent-ui-smoke.mjs",
+    "smoke:agent-ui:real-model": "AGENT_UI_SMOKE_REAL_MODEL=true node scripts/agent-ui-smoke.mjs",
+    "smoke:agent-ui:embed": "node scripts/agent-ui-embed-smoke.mjs",
+    "smoke:agent-ui:embed:real-model": "AGENT_UI_EMBED_SMOKE_REAL_MODEL=true node scripts/agent-ui-embed-smoke.mjs",
+    "db:migrate": "node scripts/run-postgres-migrations.mjs",
+    "db:migrate:dry-run": "node scripts/run-postgres-migrations.mjs --dry-run",
+    "smoke:agent-ui:amplify": "node scripts/agent-ui-amplify-smoke.mjs",
+    "generate:commands:sonik-global": "node --experimental-strip-types scripts/generate-sonik-global-command-registry.mjs",
+    "check:commands:sonik-global": "node --experimental-strip-types scripts/generate-sonik-global-command-registry.mjs --check"
+  },
+  "packageManager": "pnpm@11.1.3",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
+}

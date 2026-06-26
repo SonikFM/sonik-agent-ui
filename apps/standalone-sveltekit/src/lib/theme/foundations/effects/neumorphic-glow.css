@@ -1,0 +1,431 @@
+/*
+ * Neumorphic glow tokens and opt-in component classes.
+ *
+ * These variables intentionally do not map to the current Amplify/Sunset color
+ * semantics. They provide a globally importable `--neu-*` namespace so visual
+ * experiments can remain token-disciplined while the product theme is redesigned.
+ */
+
+
+@layer base {
+	html {
+		--neu-canvas: oklch(0.167 0.015 34.3);
+		--neu-surface-a: oklch(0.182 0.015 34.3);
+		--neu-surface-b: oklch(0.152 0.015 34.3);
+		--neu-surface-c: oklch(0.127 0.015 34.3);
+		--neu-fg-strong: oklch(0.94 0.01 34.3);
+		--neu-fg-soft: color-mix(in oklab, var(--neu-fg-strong), transparent 18%);
+		--neu-fg-mute: color-mix(in oklab, var(--neu-fg-strong), transparent 34%);
+		--neu-stage-light: color-mix(
+			in oklab,
+			oklch(0.66 0.18 280),
+			transparent 94%
+		);
+		--neu-radius: var(--radius-box, 15px);
+		--neu-distance: 10px;
+		--neu-blur: 25px;
+		--neu-intensity: 5;
+		--neu-halo-bleed: 45px;
+		--neu-shadow-dark: oklch(0.237 0.006 75.3);
+		--neu-shadow-light: oklch(0.343 0.010 75.3);
+		--neu-glow-core: oklch(0.92 0.06 280);
+		--neu-glow-primary: oklch(0.66 0.18 280);
+		--neu-glow-violet: oklch(0.66 0.18 280);
+		--neu-glow-violet-soft: oklch(0.78 0.14 280);
+		--neu-glow-secondary: oklch(0.66 0.14 180);
+		--neu-glow-intensity: 1.45;
+		--neu-shadow-stack:
+			3px 3px 8.8px var(--neu-shadow-dark),
+			8.5px 8.5px 22.5px var(--neu-shadow-dark),
+			17px 17px 45px var(--neu-shadow-dark),
+			-3px -3px 8.8px var(--neu-shadow-light),
+			-8.5px -8.5px 22.5px var(--neu-shadow-light),
+			-17px -17px 45px var(--neu-shadow-light);
+		--neu-shadow-stack-hover:
+			2.6px 2.6px 7.5px var(--neu-shadow-dark),
+			7px 7px 18px var(--neu-shadow-dark),
+			-2.6px -2.6px 7.5px var(--neu-shadow-light),
+			-7px -7px 18px var(--neu-shadow-light),
+			0 0 28px oklch(0.66 0.18 280 / 0.35);
+		--neu-shadow-inset:
+			inset 3px 3px 8.8px var(--neu-shadow-dark),
+			inset -3px -3px 8.8px var(--neu-shadow-light);
+		--neu-btn-shadow:
+			3px 3px 8.8px var(--neu-shadow-dark),
+			-3px -3px 8.8px var(--neu-shadow-light);
+		--neu-btn-shadow-hover:
+			2.6px 2.6px 7.5px var(--neu-shadow-dark),
+			-2.6px -2.6px 7.5px var(--neu-shadow-light),
+			0 0 0 1px oklch(0.72 0.16 280 / 0.4),
+			0 0 24px oklch(0.66 0.18 280 / 0.3);
+		--neu-btn-shadow-primary:
+			3px 3px 8.8px var(--neu-shadow-dark),
+			-3px -3px 8.8px var(--neu-shadow-light),
+			inset 0 1px 0 oklch(0.85 0.1 280 / 0.3),
+			0 0 0 1px oklch(0.72 0.16 280 / 0.3),
+			0 0 14px oklch(0.66 0.18 280 / 0.22);
+		--neu-btn-shadow-primary-hover:
+			2.6px 2.6px 7.5px var(--neu-shadow-dark),
+			-2.6px -2.6px 7.5px var(--neu-shadow-light),
+			inset 0 1px 0 oklch(0.85 0.1 280 / 0.35),
+			0 0 0 1px oklch(0.72 0.16 280 / 0.55),
+			0 0 22px oklch(0.66 0.18 280 / 0.4);
+		--neu-btn-shadow-secondary:
+			3px 3px 8.8px var(--neu-shadow-dark),
+			-3px -3px 8.8px var(--neu-shadow-light),
+			inset 0 1px 0 oklch(0.85 0.1 180 / 0.3),
+			0 0 0 1px oklch(0.72 0.14 180 / 0.3),
+			0 0 14px oklch(0.66 0.14 180 / 0.22);
+		--neu-btn-shadow-secondary-hover:
+			2.6px 2.6px 7.5px var(--neu-shadow-dark),
+			-2.6px -2.6px 7.5px var(--neu-shadow-light),
+			inset 0 1px 0 oklch(0.85 0.1 180 / 0.35),
+			0 0 0 1px oklch(0.72 0.14 180 / 0.55),
+			0 0 22px oklch(0.66 0.14 180 / 0.4);
+		}
+
+}
+
+@layer components {
+	.neu-glow-stage {
+		position: relative;
+		background: var(--neu-canvas);
+		transition: background 240ms ease-out;
+	}
+
+	.neu-glow-stage::before {
+		position: absolute;
+		inset: 0;
+		background: radial-gradient(
+			ellipse at 50% -10%,
+			var(--neu-stage-light),
+			transparent 55%
+		);
+		content: "";
+		pointer-events: none;
+	}
+
+	.neu-card {
+		border-radius: var(--radius-box);
+		background: linear-gradient(
+			145deg,
+			var(--neu-surface-a),
+			var(--neu-surface-b)
+		);
+		box-shadow: var(--neu-shadow-stack);
+	}
+
+	.neu-glow-card {
+		position: relative;
+		display: grid;
+		isolation: isolate;
+		overflow: visible;
+		border-radius: var(--neu-radius);
+		background: linear-gradient(
+			145deg,
+			var(--neu-surface-a),
+			var(--neu-surface-b)
+		);
+		box-shadow: var(--neu-shadow-stack);
+		transform: translate3d(0, 0, 0.01px);
+		transition:
+			box-shadow 480ms cubic-bezier(0.22, 0.61, 0.36, 1),
+			background 240ms ease-out,
+			border-radius 240ms ease-out;
+		--neu-bg-angle: 45deg;
+		--neu-bg-edge-prox: 0;
+		--neu-bg-active: 0;
+	}
+
+	.neu-glow-card__content {
+		position: relative;
+		z-index: 2;
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		border-radius: inherit;
+		color: var(--neu-fg-strong);
+	}
+
+	.neu-glow-card__rim {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		border: 1px solid transparent;
+		border-radius: inherit;
+		background:
+			linear-gradient(145deg, var(--neu-surface-a), var(--neu-surface-b))
+				padding-box,
+			radial-gradient(
+				at 80% 55%,
+				var(--neu-glow-violet) 0,
+				transparent 50%
+			)
+				border-box,
+			radial-gradient(
+				at 69% 34%,
+				var(--neu-glow-core) 0,
+				transparent 50%
+			)
+				border-box,
+			radial-gradient(
+				at 8% 6%,
+				var(--neu-glow-violet-soft) 0,
+				transparent 50%
+			)
+				border-box,
+			radial-gradient(
+				at 41% 38%,
+				var(--neu-glow-violet) 0,
+				transparent 50%
+			)
+				border-box,
+			radial-gradient(
+				at 86% 85%,
+				var(--neu-glow-core) 0,
+				transparent 50%
+			)
+				border-box,
+			radial-gradient(
+				at 82% 18%,
+				var(--neu-glow-violet-soft) 0,
+				transparent 50%
+			)
+				border-box,
+			radial-gradient(
+				at 51% 4%,
+				var(--neu-glow-core) 0,
+				transparent 50%
+			)
+				border-box,
+			linear-gradient(var(--neu-glow-violet) 0 100%) border-box;
+		-webkit-mask-image: conic-gradient(
+			from var(--neu-bg-angle) at center,
+			black 25%,
+			transparent 40%,
+			transparent 60%,
+			black 75%
+		);
+		mask-image: conic-gradient(
+			from var(--neu-bg-angle) at center,
+			black 25%,
+			transparent 40%,
+			transparent 60%,
+			black 75%
+			);
+		opacity: calc(
+			var(--neu-bg-active) * max(0, (var(--neu-bg-edge-prox) * 100 - 50)) / 50 *
+				var(--neu-glow-intensity)
+		);
+		pointer-events: none;
+		transition: opacity 240ms ease-out;
+	}
+
+	.neu-glow-card__halo {
+		position: absolute;
+		inset: calc(var(--neu-halo-bleed) * -1);
+		z-index: 0;
+		border-radius: inherit;
+		-webkit-mask-image: conic-gradient(
+			from var(--neu-bg-angle) at center,
+			black 2.5%,
+			transparent 12%,
+			transparent 88%,
+			black 97.5%
+		);
+		mask-image: conic-gradient(
+			from var(--neu-bg-angle) at center,
+			black 2.5%,
+			transparent 12%,
+			transparent 88%,
+			black 97.5%
+		);
+			mix-blend-mode: plus-lighter;
+		opacity: calc(
+			var(--neu-bg-active) * max(0, (var(--neu-bg-edge-prox) * 100 - 30)) / 70 *
+				var(--neu-glow-intensity)
+		);
+		pointer-events: none;
+		transition: opacity 240ms ease-out;
+	}
+
+	.neu-glow-card__halo::after {
+		position: absolute;
+		inset: var(--neu-halo-bleed);
+		border-radius: inherit;
+		box-shadow:
+			inset 0 0 0 1px var(--neu-glow-core),
+			inset 0 0 1px 0 color-mix(in oklab, var(--neu-glow-core), transparent 40%),
+			inset 0 0 6px 0 color-mix(in oklab, var(--neu-glow-violet), transparent 50%),
+			inset 0 0 15px 0 color-mix(in oklab, var(--neu-glow-violet), transparent 70%),
+			inset 0 0 25px 2px color-mix(in oklab, var(--neu-glow-violet), transparent 80%),
+			0 0 1px 0 color-mix(in oklab, var(--neu-glow-core), transparent 40%),
+			0 0 6px 0 color-mix(in oklab, var(--neu-glow-violet), transparent 50%),
+			0 0 15px 0 color-mix(in oklab, var(--neu-glow-violet), transparent 70%),
+			0 0 25px 2px color-mix(in oklab, var(--neu-glow-violet), transparent 80%),
+			0 0 50px 2px color-mix(in oklab, var(--neu-glow-violet), transparent 90%);
+		content: "";
+	}
+
+	.neu-glow-button,
+	.btn.neu-glow-button {
+		border-color: transparent;
+		background: linear-gradient(
+			145deg,
+			var(--neu-surface-a),
+			var(--neu-surface-b)
+		);
+		box-shadow: var(--neu-btn-shadow);
+		color: var(--neu-fg-strong);
+		transition:
+			box-shadow 200ms ease-out,
+			color 200ms ease-out,
+			transform 200ms ease-out;
+	}
+
+	.neu-glow-button:hover,
+	.btn.neu-glow-button:hover {
+		box-shadow: var(--neu-btn-shadow-hover);
+		color: var(--neu-fg-strong);
+		transform: translateY(-1px);
+	}
+
+	.neu-glow-button-primary,
+	.btn.neu-glow-button-primary {
+		background: linear-gradient(
+			145deg,
+			color-mix(in oklab, var(--neu-surface-a), var(--neu-glow-violet) 14%),
+			color-mix(in oklab, var(--neu-surface-b), var(--neu-glow-violet) 24%)
+		);
+		box-shadow: var(--neu-btn-shadow-primary);
+		color: var(--neu-fg-strong);
+	}
+
+	.neu-glow-button-primary:hover,
+	.btn.neu-glow-button-primary:hover {
+		box-shadow: var(--neu-btn-shadow-primary-hover);
+	}
+}
+
+/* DaisyUI button rules are unlayered in v5, so the neumorphic button bridge
+ * also needs an unlayered selector to win without `!important`.
+ */
+.btn.neu-glow-button {
+	border-color: transparent;
+	background: linear-gradient(
+		145deg,
+		var(--neu-surface-a),
+		var(--neu-surface-b)
+	);
+	box-shadow: var(--neu-btn-shadow);
+	color: var(--neu-fg-strong);
+	transition:
+		box-shadow 200ms ease-out,
+		color 200ms ease-out,
+		transform 200ms ease-out;
+}
+
+.btn.neu-glow-button:hover {
+	box-shadow: var(--neu-btn-shadow-hover);
+	color: var(--neu-fg-strong);
+	transform: translateY(-1px);
+}
+
+.btn.neu-glow-button-primary {
+	background: linear-gradient(
+		145deg,
+		color-mix(in oklab, var(--neu-surface-a), var(--neu-glow-violet) 14%),
+		color-mix(in oklab, var(--neu-surface-b), var(--neu-glow-violet) 24%)
+	);
+	box-shadow: var(--neu-btn-shadow-primary);
+	color: var(--neu-fg-strong);
+}
+
+.btn.neu-glow-button-primary:hover {
+	box-shadow: var(--neu-btn-shadow-primary-hover);
+}
+
+.btn.neu-glow-button-secondary {
+	background: linear-gradient(
+		145deg,
+		color-mix(in oklab, var(--neu-surface-a), var(--neu-glow-secondary) 14%),
+		color-mix(in oklab, var(--neu-surface-b), var(--neu-glow-secondary) 24%)
+	);
+	box-shadow: var(--neu-btn-shadow-secondary);
+	color: var(--neu-fg-strong);
+}
+
+.btn.neu-glow-button-secondary:hover {
+	box-shadow: var(--neu-btn-shadow-secondary-hover);
+}
+@layer components {
+	.neu-surface {
+		position: relative;
+		isolation: isolate;
+		border: 1px solid color-mix(in oklab, var(--neu-glow-primary), transparent 86%);
+		border-radius: var(--neu-radius);
+		background: linear-gradient(
+			145deg,
+			var(--neu-surface-a),
+			var(--neu-surface-b)
+		);
+		box-shadow: var(--neu-shadow-stack);
+		color: var(--neu-fg-strong);
+		transition:
+			box-shadow 240ms ease-out,
+			border-color 240ms ease-out,
+			transform 240ms ease-out,
+			background 240ms ease-out;
+	}
+
+	.neu-surface--sm {
+		padding: 1rem;
+	}
+
+	.neu-surface--md {
+		padding: 1.5rem;
+	}
+
+	.neu-surface--lg {
+		padding: 2rem;
+	}
+
+	.neu-surface--panel,
+	.neu-panel {
+		border-radius: calc(var(--neu-radius) * 0.72);
+		background: linear-gradient(
+			145deg,
+			var(--neu-surface-c),
+			var(--neu-surface-a)
+		);
+		box-shadow: var(--neu-btn-shadow);
+	}
+
+	.neu-surface--field,
+	.neu-field,
+	.neu-surface--inset,
+	.neu-inset {
+		border-color: color-mix(in oklab, var(--neu-shadow-dark), transparent 45%);
+		background: var(--neu-surface-b);
+		box-shadow: var(--neu-shadow-inset);
+		color: var(--neu-fg-soft);
+	}
+
+	.neu-surface--control,
+	.neu-control {
+		border-radius: calc(var(--neu-radius) * 0.48);
+		background: linear-gradient(
+			145deg,
+			var(--neu-surface-a),
+			var(--neu-surface-b)
+		);
+		box-shadow: var(--neu-btn-shadow);
+	}
+
+	.neu-surface--interactive:hover,
+	.neu-control:hover {
+		border-color: color-mix(in oklab, var(--neu-glow-primary), transparent 55%);
+		box-shadow: var(--neu-shadow-stack-hover);
+		transform: translateY(-1px);
+	}
+}

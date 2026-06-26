@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sonik-agent-ui",
+  "main": ".svelte-kit/cloudflare/_worker.js",
+  "compatibility_date": "2026-06-22",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".svelte-kit/cloudflare"
+  },
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "destinations": []
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "destinations": []
+    }
+  },
+  "tail_consumers": [
+    {
+      "service": "sonik-dev-observability-pipe-b"
+    }
+  ],
+  "vars": {
+    "PUBLIC_AGENT_UI_ALLOWED_HOST_ORIGINS": "https://*.workers.dev,https://*.sonik.fm",
+    "AI_GATEWAY_MODEL": "deepseek/deepseek-v4-flash",
+    "RATE_LIMIT_PER_MINUTE": "10",
+    "RATE_LIMIT_PER_DAY": "100",
+    "SONIK_BOOKING_API_BASE_URL": "https://sonik-booking-app.liam-trampota.workers.dev",
+    "SONIK_BOOKING_AUTH_MODE": "anonymous",
+    "SONIK_AGENT_UI_PERSISTENCE_MODE": "cloud"
+  }
+}

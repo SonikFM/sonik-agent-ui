@@ -1,0 +1,38 @@
+/* Sonik default dark — distinct from built-in "dark" */
+@plugin "daisyui/theme" {
+	name: "amplify-dark";
+	default: false;
+	prefersdark: false;
+	color-scheme: "dark";
+	--color-base-100: oklch(13% 0.028 261.692);
+	--color-base-200: oklch(27% 0.033 256.848);
+	--color-base-300: oklch(70% 0.04 256.788);
+	--color-base-content: oklch(96% 0.007 247.896);
+	--color-primary: oklch(62% 0.265 303.9);
+	--color-primary-content: #160603;
+	--color-secondary: #fd6f9c;
+	--color-secondary-content: #160409;
+	--color-accent: #bc72ff;
+	--color-accent-content: oklch(14.258% 0.033 299.844);
+	--color-neutral: oklch(55% 0.027 264.364);
+	--color-neutral-content: oklch(20% 0.042 265.755);
+	--color-info: #7c85ff;
+	--color-info-content: oklch(17.111% 0.017 206.015);
+	--color-success: #addfad;
+	--color-success-content: oklch(17.112% 0.017 144.778);
+	--color-warning: #f1c892;
+	--color-warning-content: oklch(17.113% 0.016 74.427);
+	--color-error: #ffbbbd;
+	--color-error-content: oklch(17.102% 0.015 16.886);
+	--radius-selector: 0.75rem;
+	--radius-field: 0.75rem;
+	--radius-box: 1rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 1;
+	--noise: 0;
+	--color-gunmetal: oklch(28% 0.015 258);
+	--color-gunmetal-edge: oklch(38% 0.018 258);
+	--color-gunmetal-shadow: 0 0 0 1px oklch(38% 0.018 258 / 0.6), 0 8px 24px -8px oklch(6% 0.02 258 / 0.75);
+}

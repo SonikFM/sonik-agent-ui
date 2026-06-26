@@ -1,0 +1,113 @@
+/*
+ * Gunmetal chassis — reusable card treatment used by TemplateCard and
+ * TemplateCardBuilder. Lift is produced entirely by a top-edge specular
+ * highlight + 1px inset border + inset/radial ambient shadow. No outer
+ * drop shadow is emitted.
+ *
+ * Defaults target a dark gunmetal surface. When the nearest ancestor with
+ * [data-color-scheme="light"] or the html[data-theme="light"] is active,
+ * the light gunmetal palette takes over via the media-free overrides below.
+ */
+
+.gunmetal-chassis {
+	--gunmetal-bg: oklch(22% 0.01 260);
+	--gunmetal-border-outer: oklch(32% 0.012 260);
+	--gunmetal-border-inner: oklch(45% 0.012 260 / 0.35);
+	--gunmetal-specular: oklch(100% 0 0 / 0.22);
+	--gunmetal-specular-fade: oklch(100% 0 0 / 0);
+	--gunmetal-ambient: oklch(8% 0 0 / 0.55);
+	--gunmetal-ambient-wash: oklch(12% 0 0 / 0.35);
+	--gunmetal-hover-specular: oklch(100% 0 0 / 0.32);
+	--gunmetal-hover-ambient: oklch(6% 0 0 / 0.7);
+
+	position: relative;
+	background-color: var(--gunmetal-bg);
+	background-image:
+		linear-gradient(
+			to bottom,
+			var(--gunmetal-specular) 0%,
+			var(--gunmetal-specular-fade) 2px
+		),
+		radial-gradient(
+			120% 60% at 50% 0%,
+			var(--gunmetal-ambient-wash),
+			transparent 65%
+		);
+	background-repeat: no-repeat;
+	background-size:
+		100% 2px,
+		100% 100%;
+	background-position:
+		top,
+		top;
+	border: 1px solid var(--gunmetal-border-outer);
+	box-shadow:
+		inset 0 1px 0 var(--gunmetal-specular),
+		inset 0 0 0 1px var(--gunmetal-border-inner),
+		inset 0 -24px 48px -24px var(--gunmetal-ambient-wash),
+		inset 0 0 64px -32px var(--gunmetal-ambient);
+	transition:
+		box-shadow 180ms ease-out,
+		background-color 180ms ease-out,
+		border-color 180ms ease-out;
+}
+
+.gunmetal-chassis:hover,
+.gunmetal-chassis[data-gunmetal-hovered="true"] {
+	box-shadow:
+		inset 0 1px 0 var(--gunmetal-hover-specular),
+		inset 0 0 0 1px var(--gunmetal-border-inner),
+		inset 0 -28px 56px -24px var(--gunmetal-ambient-wash),
+		inset 0 0 80px -28px var(--gunmetal-hover-ambient);
+}
+
+/* Light gunmetal palette — cool grey-blue */
+[data-theme="light"] .gunmetal-chassis,
+[data-color-scheme="light"] .gunmetal-chassis,
+.gunmetal-chassis[data-gunmetal-tone="light"] {
+	--gunmetal-bg: oklch(94% 0.006 260);
+	--gunmetal-border-outer: oklch(82% 0.01 260);
+	--gunmetal-border-inner: oklch(70% 0.014 260 / 0.35);
+	--gunmetal-specular: oklch(100% 0 0 / 0.85);
+	--gunmetal-specular-fade: oklch(100% 0 0 / 0);
+	--gunmetal-ambient: oklch(55% 0.012 260 / 0.28);
+	--gunmetal-ambient-wash: oklch(68% 0.012 260 / 0.22);
+	--gunmetal-hover-specular: oklch(100% 0 0 / 0.95);
+	--gunmetal-hover-ambient: oklch(45% 0.012 260 / 0.38);
+}
+
+/* Explicit dark override (for scoped use inside light pages) */
+.gunmetal-chassis[data-gunmetal-tone="dark"] {
+	--gunmetal-bg: oklch(22% 0.01 260);
+	--gunmetal-border-outer: oklch(32% 0.012 260);
+	--gunmetal-border-inner: oklch(45% 0.012 260 / 0.35);
+	--gunmetal-specular: oklch(100% 0 0 / 0.22);
+	--gunmetal-specular-fade: oklch(100% 0 0 / 0);
+	--gunmetal-ambient: oklch(8% 0 0 / 0.55);
+	--gunmetal-ambient-wash: oklch(12% 0 0 / 0.35);
+	--gunmetal-hover-specular: oklch(100% 0 0 / 0.32);
+	--gunmetal-hover-ambient: oklch(6% 0 0 / 0.7);
+}
+
+/*
+ * Section card — the editor-pane variant. Uses the same specular +
+ * inset-border language as the full chassis but softer, so editor
+ * controls read as surfaces rather than lifted cards.
+ */
+.gunmetal-section {
+	position: relative;
+	background-color: var(--gunmetal-bg, oklch(24% 0.008 260));
+	border: 1px solid var(--gunmetal-border-outer, oklch(30% 0.01 260));
+	box-shadow:
+		inset 0 1px 0 var(--gunmetal-specular, oklch(100% 0 0 / 0.14)),
+		inset 0 0 0 1px var(--gunmetal-border-inner, oklch(40% 0.01 260 / 0.28));
+}
+
+[data-theme="light"] .gunmetal-section,
+[data-color-scheme="light"] .gunmetal-section,
+.gunmetal-section[data-gunmetal-tone="light"] {
+	--gunmetal-bg: oklch(96% 0.004 260);
+	--gunmetal-border-outer: oklch(85% 0.008 260);
+	--gunmetal-border-inner: oklch(78% 0.01 260 / 0.4);
+	--gunmetal-specular: oklch(100% 0 0 / 0.9);
+}

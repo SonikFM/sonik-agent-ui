@@ -1,0 +1,172 @@
+@import "tailwindcss";
+@import "./lib/theme/foundations/typography/font-variables.css";
+@import "./lib/theme/foundations/themes/daisy.css";
+@import "./lib/theme/foundations/themes/custom/amplify-dark.css";
+@import "./lib/theme/foundations/themes/custom/light.css";
+@import "./lib/theme/foundations/themes/custom/gunmetal-dark.css";
+@import "./lib/theme/foundations/themes/custom/gunmetal-light.css";
+@import "./lib/theme/foundations/themes/custom/neumorphic-dark.css";
+@import "./lib/theme/foundations/themes/custom/neumorphic-light.css";
+@import "./lib/theme/foundations/global-base.css";
+@import "./lib/theme/foundations/gunmetal/gunmetal.css";
+@import "./lib/theme/foundations/effects/amplify-depth.css";
+@import "./lib/theme/foundations/effects/neumorphic-glow.css";
+@import "./lib/theme/foundations/effects/app-theme-surfaces.css";
+@import "./lib/theme/foundations/effects/bento-theme.css";
+
+@source "../../../packages/chat-surface/src";
+@source "../../../packages/chat-surface/dist";
+@source "../../../packages/workspace-core/src";
+@source "../../../packages/workspace-core/dist";
+@source "../../../packages/json-ui-runtime/src";
+@source "../../../packages/json-ui-runtime/dist";
+@source "../../../packages/svelte/src";
+@source "../../../packages/svelte/dist";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Compatibility aliases: this app still hosts copied shadcn-style and Workspace
+ * surfaces. DaisyUI owns the canonical theme variables; these aliases project
+ * the active Daisy/Amplify theme into the older token names without creating a
+ * second theme system.
+ */
+@theme inline {
+  --radius-sm: calc(var(--radius-field, 0.75rem) - 4px);
+  --radius-md: calc(var(--radius-field, 0.75rem) - 2px);
+  --radius-lg: var(--radius-field, 0.75rem);
+  --radius-xl: var(--radius-box, 1rem);
+  --radius-2xl: calc(var(--radius-box, 1rem) + 0.25rem);
+  --radius-3xl: calc(var(--radius-box, 1rem) + 0.5rem);
+  --radius-4xl: calc(var(--radius-box, 1rem) + 1rem);
+  --color-background: var(--color-base-100);
+  --color-foreground: var(--color-base-content);
+  --color-card: var(--color-base-200);
+  --color-card-foreground: var(--color-base-content);
+  --color-popover: var(--color-base-200);
+  --color-popover-foreground: var(--color-base-content);
+  --color-primary-foreground: var(--color-primary-content);
+  --color-secondary-foreground: var(--color-secondary-content);
+  --color-muted: var(--color-base-300);
+  --color-muted-foreground: color-mix(in oklab, var(--color-base-content) 68%, transparent);
+  --color-accent-foreground: var(--color-accent-content);
+  --color-destructive: var(--color-error);
+  --color-border: var(--color-base-300);
+  --color-input: var(--color-base-200);
+  --color-ring: var(--color-primary);
+  --color-chart-1: var(--color-primary);
+  --color-chart-2: var(--color-secondary);
+  --color-chart-3: var(--color-accent);
+  --color-chart-4: var(--color-info);
+  --color-chart-5: var(--color-warning);
+}
+
+:root,
+[data-theme] {
+  --radius: var(--radius-box, 1rem);
+  --background: var(--color-base-100);
+  --foreground: var(--color-base-content);
+  --card: var(--color-base-200);
+  --card-foreground: var(--color-base-content);
+  --popover: var(--color-base-200);
+  --popover-foreground: var(--color-base-content);
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-primary-content);
+  --secondary: var(--color-secondary);
+  --secondary-foreground: var(--color-secondary-content);
+  --muted: var(--color-base-300);
+  --muted-foreground: color-mix(in oklab, var(--color-base-content) 68%, transparent);
+  --accent: color-mix(in oklab, var(--color-accent) 18%, var(--color-base-200));
+  --accent-foreground: var(--color-base-content);
+  --destructive: var(--color-error);
+  --sonik-border-color: color-mix(in oklab, var(--color-base-300) 78%, transparent);
+  --input: var(--color-base-200);
+  --ring: var(--color-primary);
+  --app-rail-bg: var(--app-shell-bg);
+  --app-control-bg: color-mix(in oklab, var(--color-base-100) 86%, var(--color-base-200));
+  --app-control-hover-bg: color-mix(in oklab, var(--color-base-200) 82%, var(--color-primary) 18%);
+  --app-user-message-bg: color-mix(in oklab, var(--color-primary) 14%, var(--color-base-200));
+  --app-panel-muted-bg: var(--app-muted-panel-bg);
+  --app-shadow-soft: var(--app-card-shadow);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-base-100 text-base-content;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .app-shell-surface {
+    background: var(--app-shell-bg);
+    color: var(--color-base-content);
+  }
+
+  .app-panel-surface {
+    border: var(--border, 1px) solid var(--app-card-border);
+    background: var(--app-panel-bg);
+    color: var(--color-base-content);
+  }
+
+  .app-rail-surface {
+    border-color: var(--app-shell-border);
+    background: var(--app-rail-bg);
+    color: var(--color-base-content);
+  }
+
+  .app-control-surface {
+    border: var(--border, 1px) solid var(--app-card-border);
+    background: var(--app-control-bg);
+    color: var(--color-base-content);
+  }
+
+  .app-control-surface:hover {
+    background: var(--app-control-hover-bg);
+  }
+
+  .app-muted-surface {
+    background: var(--app-panel-muted-bg);
+    color: var(--muted-foreground);
+  }
+
+  .app-user-message-surface {
+    background: var(--app-user-message-bg);
+    color: var(--color-base-content);
+  }
+}
+
+button {
+  cursor: pointer;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    currentColor 25%,
+    color-mix(in oklab, currentColor 45%, var(--color-base-100)) 50%,
+    currentColor 75%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 2s ease-in-out infinite;
+}

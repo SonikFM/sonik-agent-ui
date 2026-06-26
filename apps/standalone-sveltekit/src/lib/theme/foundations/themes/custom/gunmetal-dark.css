@@ -1,0 +1,35 @@
+/* Sonik gunmetal dark — cool, desaturated steel palette */
+@plugin "daisyui/theme" {
+	name: "gunmetal-dark";
+	default: true;
+	prefersdark: true;
+	color-scheme: "dark";
+	--color-base-100: #1a1d21;
+	--color-base-200: #232830;
+	--color-base-300: #2e343e;
+	--color-base-content: #e5e9ef;
+	--color-primary: #5c6670;
+	--color-primary-content: #f5f7fa;
+	--color-secondary: #8b95a1;
+	--color-secondary-content: #0f1114;
+	--color-accent: #9aa6b2;
+	--color-accent-content: #0f1114;
+	--color-neutral: #8b95a1;
+	--color-neutral-content: #0f1114;
+	--color-info: #7c85ff;
+	--color-info-content: oklch(17.111% 0.017 206.015);
+	--color-success: #addfad;
+	--color-success-content: oklch(17.112% 0.017 144.778);
+	--color-warning: #f1c892;
+	--color-warning-content: oklch(17.113% 0.016 74.427);
+	--color-error: #ffbbbd;
+	--color-error-content: oklch(17.102% 0.015 16.886);
+	--radius-selector: 0.75rem;
+	--radius-field: 0.75rem;
+	--radius-box: 1rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 1;
+	--noise: 0;
+}

@@ -1,0 +1,4 @@
+/* Built-in DaisyUI themes: compile all registered themes from the package */
+@plugin "daisyui" {
+	themes: all;
+}

@@ -1,0 +1,593 @@
+{
+	"name": "odysseus-document-editor-island",
+	"upstream": {
+		"repoPath": "/Users/danielletterio/Documents/GitHub/odysseus",
+		"gitRemote": "https://github.com/pewdiepie-archdaemon/odysseus.git",
+		"revision": "b51d83b16dff03c3f873bac7d22f1cbf93dc7e25",
+		"license": "AGPL-3.0"
+	},
+	"entries": [
+		{
+			"source": "static/js/chatRenderer.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/chatRenderer.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "2ca52cceeb46a367ec87a854da60d5f77fb433bd26197d649784f08bc0e6d12d"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/codeRunner.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/codeRunner.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "7ea9a5c685ee1367535624bdae544f8e3fa67d3cc4387aeb061af6b9470d9aad"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/color/hex.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/color/hex.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "aecac275272b5c0df87a46e93e2ac839ecea93b4287382a41309ac1f60073bd5"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/colorPicker.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/colorPicker.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "4a9244a309a7d6bdba5f339822897c8f7bb67ab46dad8a95f8e3b69f1eaba189"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/document.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/document.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "50f47e43097995103265df0ba579d0b4c4b00d660c996f18eb210630c2626d62"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/documentLibrary.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/documentLibrary.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "3f580880111cedfc89547401b9c847724b1c8bff9fc12c7e7597b3974f26defb"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/emojiPicker.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/emojiPicker.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "2af941375e61269b7d0099376c30b7d08b1f79c73c4bebf097dfa79b5cfc7f25"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/emojiShortcodes.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/emojiShortcodes.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "186c18a803d327a7e8e20f70ff912472fe08106f7068932d8d6698e4b907822d"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/escMenuStack.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/escMenuStack.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "a0069a5d272480fcacd408a50b2c50d4408882b28c97ee2a460736223a16194f"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/langIcons.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/langIcons.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "c7583006b46fb28a4aece6eaaac0cf4970fe427348c13960667bc4033fcd8be3"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/markdown.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/markdown.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "215fb63a8925b159a1caafe21fdeb0dc6e92628b915cf8418bb63639874aaad2"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/markdown/tableRow.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/markdown/tableRow.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "832c1f38586d33d1807f9391d5987de0caf56724f15563a3922d04f3b4a48c0d"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/modalManager.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/modalManager.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "4a5d25ebfe8765bfed68ce4299747eeabe789c1a4b1d8fc550b5ef7f8db07983"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/modalSnap.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/modalSnap.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "a02830cfd448fc2f866a69b5298f63d2d099b6e0df6d617cf4803f76e71ea2eb"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/model/matchKey.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/model/matchKey.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "3aa31acccee5dff62ba8356644bcd77a2350e07e675b55454acf0ae96660c49b"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/modelPicker.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/modelPicker.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "fd6b7e84052e1bd6759eeb70c3c7208119d6ea7cf38ff6550cd80e81e16726d1"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/modelSort.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/modelSort.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "c17535335277f55e79db4676a9117e02958e4f2138b5332c34d0a0794b1ab241"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/platform.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/platform.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "e1164859e396d67724e6a10c0e7ee0635dd6524f07e35c636d5839a3bcfea745"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/providers.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/providers.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "ce541374f0e45a324540231d20ed80217bb82874019f11141c7c89199ea27ff0"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/search.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/search.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "b8ebdc5f016196ffdb63d9aa6844a89c6061d60d8dd97d82f30737fc52e668e9"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/sessions.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/sessions.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "9614f47fdf6e0735ec1787dc76ae200f0decea1446ef6c2eb5c5a96e15b819c6"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/settings.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/settings.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "fc705a28a26e1e9b1b1bc75492fcf710914d2e68e1a508b77f30fd5c52ab7be6"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/signature.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/signature.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "fa7ff76a2fec54097c91b6ef37e0b24d896f371250feef958f53e9a8d874ea37"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/spinner.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/spinner.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "f2488ad53378db5f0de4151e090b6aa829321bd6428e03a5a98a8fc474ba6a59"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/storage.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/storage.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "06e6f76c2dcd189905e369949f177c8f2f525e778c35ddcf9ce90b449d1bc3ed"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/theme.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/theme.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "8fc9b9b629bce352a6216152683a7ec6cd31f0e6ed803aeda7bb250c910fe433"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/tileManager.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/tileManager.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "9847754672607d9b3a068c047d36814a281f8d3320e8c9935ad2ba55d2aff50f"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/toolWindowZOrder.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/toolWindowZOrder.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "d037cb9ec5955c63b5d350a1271c36217baa7844ed3615d7ee939f1402528b62"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/tts-ai.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/tts-ai.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "8f5d85b337de0eb761811db2f392835224d0449768090ca919bb0e811b3116a1"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/ui.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/ui.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "255d4f9e65f20da7f4bed754d4f1b1342ec9f06d31384476f30833edf6da20f9"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/windowDrag.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/windowDrag.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "7ed016fa49d0715015a8d84d4aa49728b14fa87e4269e334171fdb24e099a500"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/js/windowResize.js",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/js/windowResize.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "baaec99bfd43d9ac461f928c3d4a0904b98b1404a375b89b52807f1ba16873bf"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/style.css",
+			"destination": "apps/standalone-sveltekit/static/vendor/odysseus/static/style.css",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "6990eca96402947bfa61c8302064fd628cf057390cc942445bccb3a2bc137efc"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/lib",
+			"destination": "apps/standalone-sveltekit/static/static/lib",
+			"ignore": [
+				"**/.DS_Store"
+			],
+			"integrity": {
+				"files": [
+					{
+						"path": "docx.umd.min.js",
+						"sha256": "02d568d203c0180af37609bcf5ff6c0919d220f933a88ca896eba0556a08faad"
+					},
+					{
+						"path": "highlight.min.js",
+						"sha256": "837a6fa5b0c736b52bbde2b2b6190f305da3fc9ed41681db5321507057b5c846"
+					},
+					{
+						"path": "html2pdf.bundle.min.js",
+						"sha256": "9edbed630ebd644bc5189b99e8138893041c89a3118a672047fa2b625a12e48c"
+					},
+					{
+						"path": "mammoth.browser.min.js",
+						"sha256": "deb07bf230d1cb3e190bc5adc6743f35c6531b6571d1e5469b24f452a7f0f4ab"
+					},
+					{
+						"path": "qrcode.min.js",
+						"sha256": "0935de514006b84fe54404b4a98fb3b5cc45478d9efa64d75e19719025663c19"
+					},
+					{
+						"path": "xlsx.full.min.js",
+						"sha256": "cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41"
+					}
+				]
+			}
+		},
+		{
+			"source": "static/fonts",
+			"destination": "apps/standalone-sveltekit/static/static/fonts",
+			"ignore": [
+				"**/.DS_Store"
+			],
+			"integrity": {
+				"files": [
+					{
+						"path": "FiraCode-Light.woff2",
+						"sha256": "e3aa3db06cfb19dfc0b0f1f38355add3e8d1ef45d3af39ce95d9ca7d96114e6c"
+					},
+					{
+						"path": "FiraCode-Regular.woff2",
+						"sha256": "a6ce59520b90e15d7062ffef214f94c8add5a4085c0bbb1683602ef227a4d1fe"
+					},
+					{
+						"path": "FiraCode-SemiBold.woff2",
+						"sha256": "d16779aa6dfc7c4effe686ece5bdf4b1356a7352167e37fa256f596a9d428f11"
+					},
+					{
+						"path": "Inter-Medium.woff2",
+						"sha256": "7e80d9f65861ee6836a0081d4e75d88fb8789e5651d05edbc49640442a9610ee"
+					},
+					{
+						"path": "Inter-Regular.woff2",
+						"sha256": "338239f6b590b8ced3bf857654d32da3fd3663294cd3003651ed57aa3abd7aa1"
+					},
+					{
+						"path": "Inter-SemiBold.woff2",
+						"sha256": "5013f48d77ab627b1db7c2415914284ef09abc3f60a8e0d0d8f3cd1bfebefb5e"
+					},
+					{
+						"path": "custom/GohuFont.ttf",
+						"sha256": "db1c6de2a3c60e441948f10a5078b11952531850e7cb205b9be6037963ab660a"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/test_document_ai_preview_refresh_js.py",
+			"destination": "docs/upstream-proofs/odysseus/tests/test_document_ai_preview_refresh_js.py",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "5f86ee2282bb20f75c06e55950e2f2fa486f49870cd2eaba705741e05937c5b4"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/test_active_document_clear.py",
+			"destination": "docs/upstream-proofs/odysseus/tests/test_active_document_clear.py",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "e320e7818e9dfda837006c03b0a300e046e40e23c211ee19ebe82fb8c53cbfb5"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/test_document_editor_scroll.py",
+			"destination": "docs/upstream-proofs/odysseus/tests/test_document_editor_scroll.py",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "89a58368d53487ddd446d192f4094750b49f6d0d052e78cba8dfc6e9e7b9a7c4"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/test_document_render_pdf_iframe.py",
+			"destination": "docs/upstream-proofs/odysseus/tests/test_document_render_pdf_iframe.py",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "7f7e9454d1090e4e0dbff07044dab178b64ab557c81656deb9936dceba30fe80"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/test_document_diff_discard_on_update_js.py",
+			"destination": "docs/upstream-proofs/odysseus/tests/test_document_diff_discard_on_update_js.py",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "50752d2a70e55ba874a0e5754081e75cede9a18d8d4412a856b6a43e08a03655"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/test_canvas_coords_empty_touches_js.py",
+			"destination": "docs/upstream-proofs/odysseus/tests/test_canvas_coords_empty_touches_js.py",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "261cbdff965753a5f011e6afc1a19ebb97d4fdd30a3cdbf3a338115545062608"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": []
+}
