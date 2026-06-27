@@ -1,0 +1,111 @@
+{
+  "version": "sonik-agent-ui.booking-demo-command-binding.v1",
+  "sourcePlan": ".omx/plans/prd-chat-demo-readiness-v0-2.md",
+  "testConfigLocation": "tests/fixtures/sonik-booking/demo-command-binding.json",
+  "posture": "phase-1-mapping-only-no-runtime-write-mount",
+  "invariants": [
+    "Generated booking commands remain shadow/non-executable in registry discovery.",
+    "The demo mutation must be reversible without cancel/delete/payment/destructive flow.",
+    "Organization/session/user authority must come from trusted host runtime context.",
+    "Phase 1 binding does not encode future adapter status; adapter mount posture belongs to the next runtime-adapter slice."
+  ],
+  "selectedRead": {
+    "role": "availability-read-before-mutation",
+    "commandId": "booking.get.availability",
+    "sourceOperationId": "bookingGetAvailability",
+    "method": "GET",
+    "path": "/api/v1/booking/contexts/{contextId}/availability",
+    "effect": "read",
+    "approval": "none",
+    "why": "Availability is computed from schedule rules and is the safest app-aware proof that the agent understands the current booking context before attempting a workflow mutation.",
+    "expectedDiscoveryRuntimeStatus": "shadow"
+  },
+  "selectedMutation": {
+    "role": "safe-real-workflow-mutation",
+    "commandId": "booking.create.hold",
+    "sourceOperationId": "bookingCreateHold",
+    "method": "POST",
+    "path": "/api/v1/booking/holds",
+    "effect": "write",
+    "approval": "required",
+    "why": "A hold is a real booking/reservation inventory workflow mutation, but it is temporary, has TTL, performs no payment/deposit behavior, and can be released as cleanup.",
+    "expectedDiscoveryRuntimeStatus": "shadow"
+  },
+  "confirmationRead": {
+    "role": "post-mutation-confirmation-read",
+    "commandId": "booking.get.hold",
+    "sourceOperationId": "bookingGetHold",
+    "method": "GET",
+    "path": "/api/v1/booking/holds/{holdId}",
+    "effect": "read",
+    "approval": "none",
+    "expectedDiscoveryRuntimeStatus": "shadow"
+  },
+  "cleanupMutation": {
+    "role": "seed-cleanup-release",
+    "commandId": "booking.release.hold",
+    "sourceOperationId": "bookingReleaseHold",
+    "method": "POST",
+    "path": "/api/v1/booking/holds/{holdId}/release",
+    "effect": "write",
+    "approval": "required",
+    "cleanupReason": "agent-ui-v0.2-demo-cleanup",
+    "expectedDiscoveryRuntimeStatus": "shadow"
+  },
+  "seedFixture": {
+    "organizationIdEnv": "SONIK_AGENT_UI_DEMO_ORGANIZATION_ID",
+    "contextIdEnv": "SONIK_AGENT_UI_DEMO_CONTEXT_ID",
+    "userIdEnv": "SONIK_AGENT_UI_DEMO_USER_ID",
+    "windowStrategy": "select-first-availability-slot-with-capacityRemaining-greater-than-zero",
+    "partySize": 2,
+    "source": "admin",
+    "ttlSeconds": 600,
+    "clientRequestIdPrefix": "agent-ui-v02-demo-hold",
+    "metadata": {
+      "createdBy": "sonik-agent-ui-v0.2-demo",
+      "purpose": "ultratest-booking-contract-binding"
+    },
+    "resourceTargetStrategy": "host-context-first-fail-closed",
+    "resourceUnitIdEnv": "SONIK_AGENT_UI_DEMO_RESOURCE_UNIT_ID",
+    "resourceCombinationIdEnv": "SONIK_AGENT_UI_DEMO_RESOURCE_COMBINATION_ID",
+    "resourceTargetRule": "If the host page context or env exposes resourceUnitId or resourceCombinationId, pass it through createHold. If neither is available, proceed only when the selected context is explicitly context-capacity based and createHold accepts a context-only hold; otherwise fail before mutation with missing-resource-target."
+  },
+  "confirmationFields": [
+    "id",
+    "organizationId",
+    "contextId",
+    "window.startsAt",
+    "window.endsAt",
+    "partySize",
+    "status",
+    "expiresAt"
+  ],
+  "successCriteria": {
+    "afterCreate": {
+      "status": "active",
+      "contextId": "$SONIK_AGENT_UI_DEMO_CONTEXT_ID",
+      "partySize": 2
+    },
+    "afterCleanup": {
+      "status": "released"
+    }
+  },
+  "rejectedForV02Demo": [
+    {
+      "commandId": "booking.create.booking",
+      "reason": "Creates a durable booking record; cleanup would require cancel semantics, which the ralplan excluded from the demo path."
+    },
+    {
+      "commandId": "booking.cancel.booking",
+      "reason": "Cancel-like workflow is explicitly out of scope for v0.2."
+    },
+    {
+      "commandId": "booking.commit.hold",
+      "reason": "Commits a temporary hold into a durable booking; defer until cancellation/rollback semantics are explicitly approved."
+    },
+    {
+      "commandId": "booking.delete.schedule.rule",
+      "reason": "Destructive operation."
+    }
+  ]
+}
