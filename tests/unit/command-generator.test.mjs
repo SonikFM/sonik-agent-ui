@@ -209,57 +209,90 @@ const composedRegistry = createComposedCommandFamilyRegistry("composed-generator
 assert.equal(composedCatalog.commands.length, output.catalog.commands.length, "generated catalog composes through host adapter seam");
 assert.equal(composedRegistry.families.some((family) => family.id === "venue"), true, "generated families compose through host adapter seam");
 
-const readRuntimeReceipt = await executeHostCatalogCommand({
-  catalog: output.catalog,
-  commandId: "venue.locations.list",
-  commandInput: { limit: 2 },
-  execution: { source: "agent-ui", requestId: "runtime-read", authenticated: true, organizationId: "org_1", scopes: ["venue:read"] },
-  runtimeAdapters: [{
+const generatedRuntimeAdapters = [
+  {
     provider: "generated-read-runtime",
     bindings: [{
       commandId: "venue.locations.list",
       status: "mounted-read",
       execute: (input, context) => ({ summary: { ok: true, input, runtimeStatus: context.command.metadata.runtimeStatus }, nextActions: ["learnCommand"] }),
     }],
-  }],
-});
-assert.equal(readRuntimeReceipt.ok, true, "runtime adapter can mount generated read command without changing the descriptor");
-assert.equal(readRuntimeReceipt.summary.runtimeStatus, "mounted-read");
-
-const writeExecuteReceipt = await executeHostCatalogCommand({
-  catalog: output.catalog,
-  commandId: "venue.locations.create",
-  commandInput: { name: "New Venue" },
-  execution: { source: "agent-ui", requestId: "runtime-write-execute", authenticated: true, organizationId: "org_1", scopes: ["venue:write"] },
-  runtimeAdapters: [{ provider: "generated-write-runtime", bindings: [{ commandId: "venue.locations.create", status: "mounted-write", commit: () => ({ summary: { ok: true } }) }] }],
-});
-assert.equal(writeExecuteReceipt.ok, false, "mutation commands cannot run through execute action");
-assert.ok(writeExecuteReceipt.policy.reasons.includes("runtime_not_mounted_for_execute"));
-
-const writeNeedsApproval = await executeHostCatalogCommand({
-  catalog: output.catalog,
-  commandId: "venue.locations.create",
-  commandInput: { name: "New Venue" },
-  execution: { action: "commit", source: "agent-ui", requestId: "runtime-write-needs-approval", authenticated: true, organizationId: "org_1", scopes: ["venue:write"] },
-  runtimeAdapters: [{ provider: "generated-write-runtime", bindings: [{ commandId: "venue.locations.create", status: "mounted-write", commit: () => ({ summary: { ok: true } }) }] }],
-});
-assert.equal(writeNeedsApproval.ok, false, "mutation commit requires explicit approval");
-assert.equal(writeNeedsApproval.policy.decision, "needs_approval");
-assert.ok(writeNeedsApproval.nextActions.includes("commitCommand"));
-
-const writeCommitReceipt = await executeHostCatalogCommand({
-  catalog: output.catalog,
-  commandId: "venue.locations.create",
-  commandInput: { name: "New Venue" },
-  execution: { action: "commit", approved: true, source: "agent-ui", requestId: "runtime-write-commit", authenticated: true, organizationId: "org_1", scopes: ["venue:write"] },
-  runtimeAdapters: [{
+  },
+  {
     provider: "generated-write-runtime",
     bindings: [{
       commandId: "venue.locations.create",
       status: "mounted-write",
       commit: (input) => ({ summary: { ok: true, input }, resources: [{ uri: "venue://new", title: "New Venue" }], handle: "venue:new" }),
     }],
-  }],
+  },
+];
+
+const shadowRuntimeReceipt = await executeHostCatalogCommand({
+  catalog: output.catalog,
+  commandId: "venue.locations.list",
+  commandInput: { limit: 2 },
+  execution: { source: "agent-ui", requestId: "runtime-read-shadow", authenticated: true, organizationId: "org_1", scopes: ["venue:read"], hostSessionSource: "embedded-host" },
+  runtimeAdapters: [generatedRuntimeAdapters[0]],
+});
+assert.equal(shadowRuntimeReceipt.ok, false, "runtime adapters cannot execute shadow generated descriptors from the global registry");
+assert.ok(shadowRuntimeReceipt.policy.reasons.includes("runtime_not_mounted:shadow"));
+
+const mountedGeneratedRuntimeCatalog = createCommandCatalog("mounted-generated-runtime-test", output.catalog.commands.map((command) => {
+  if (command.id === "venue.locations.list") {
+    return {
+      ...command,
+      transport: { ...command.transport, runtimeStatus: "mounted" },
+      metadata: { ...command.metadata, liveExecution: true, runtimeAdapterProvider: "generated-read-runtime" },
+    };
+  }
+  if (command.id === "venue.locations.create") {
+    return {
+      ...command,
+      transport: { ...command.transport, runtimeStatus: "mounted" },
+      metadata: { ...command.metadata, liveExecution: true, runtimeAdapterProvider: "generated-write-runtime" },
+    };
+  }
+  return command;
+}), generatedAt);
+
+const readRuntimeReceipt = await executeHostCatalogCommand({
+  catalog: mountedGeneratedRuntimeCatalog,
+  commandId: "venue.locations.list",
+  commandInput: { limit: 2 },
+  execution: { source: "agent-ui", requestId: "runtime-read", authenticated: true, organizationId: "org_1", scopes: ["venue:read"], hostSessionSource: "embedded-host" },
+  runtimeAdapters: [generatedRuntimeAdapters[0]],
+});
+assert.equal(readRuntimeReceipt.ok, true, "runtime adapter can execute generated read command only after host catalog promotion");
+assert.equal(readRuntimeReceipt.summary.runtimeStatus, "mounted-read");
+
+const writeExecuteReceipt = await executeHostCatalogCommand({
+  catalog: mountedGeneratedRuntimeCatalog,
+  commandId: "venue.locations.create",
+  commandInput: { name: "New Venue" },
+  execution: { source: "agent-ui", requestId: "runtime-write-execute", authenticated: true, organizationId: "org_1", scopes: ["venue:write"], hostSessionSource: "embedded-host" },
+  runtimeAdapters: [generatedRuntimeAdapters[1]],
+});
+assert.equal(writeExecuteReceipt.ok, false, "mutation commands cannot run through execute action");
+assert.ok(writeExecuteReceipt.policy.reasons.includes("runtime_not_mounted_for_execute"));
+
+const writeNeedsApproval = await executeHostCatalogCommand({
+  catalog: mountedGeneratedRuntimeCatalog,
+  commandId: "venue.locations.create",
+  commandInput: { name: "New Venue" },
+  execution: { action: "commit", source: "agent-ui", requestId: "runtime-write-needs-approval", authenticated: true, organizationId: "org_1", scopes: ["venue:write"], hostSessionSource: "embedded-host" },
+  runtimeAdapters: [generatedRuntimeAdapters[1]],
+});
+assert.equal(writeNeedsApproval.ok, false, "mutation commit requires explicit approval");
+assert.equal(writeNeedsApproval.policy.decision, "needs_approval");
+assert.ok(writeNeedsApproval.nextActions.includes("commitCommand"));
+
+const writeCommitReceipt = await executeHostCatalogCommand({
+  catalog: mountedGeneratedRuntimeCatalog,
+  commandId: "venue.locations.create",
+  commandInput: { name: "New Venue" },
+  execution: { action: "commit", approved: true, source: "agent-ui", requestId: "runtime-write-commit", authenticated: true, organizationId: "org_1", scopes: ["venue:write"], hostSessionSource: "embedded-host" },
+  runtimeAdapters: [generatedRuntimeAdapters[1]],
 });
 assert.equal(writeCommitReceipt.ok, true, "approved commit can pass through a mounted host runtime adapter");
 assert.equal(writeCommitReceipt.handle, "venue:new");

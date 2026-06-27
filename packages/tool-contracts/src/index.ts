@@ -611,6 +611,12 @@ export function evaluateCommandPolicy(command: CommandDescriptor, context: Comma
   const reasons: string[] = [];
   if (command.transport.runtimeStatus !== "mounted") reasons.push(`runtime_not_mounted:${command.transport.runtimeStatus}`);
   if ((command.source === "orpc" || command.source === "openapi") && command.metadata.liveExecution !== true) reasons.push("orpc_execution_adapter_not_mounted");
+  if (
+    (command.source === "orpc" || command.source === "openapi")
+    && command.metadata.liveExecution === true
+    && command.transport.runtimeStatus === "mounted"
+    && (!context.hostSessionSource || context.hostSessionSource === "anonymous")
+  ) reasons.push("trusted_host_session_required");
   if (command.source === "mcp") reasons.push("mcp_projection_not_native_execution");
   if (command.source === "sandbox" && context.allowSandbox !== true) reasons.push("sandbox_execution_not_enabled");
   if (command.auth.required && context.authenticated !== true) reasons.push("auth_required");

@@ -81,11 +81,11 @@ const createBooking = commands.get("booking.create.booking");
 assert.equal(createBooking?.transport?.runtimeStatus, "shadow", "direct booking creation remains shadow in generated discovery");
 assert.equal(createBooking?.approval, "required", "direct booking creation remains approval-gated");
 
-const phaseOneRuntimeAdapters = createStandaloneHostRuntimeAdapters({
+const trustedRuntimeAdapters = createStandaloneHostRuntimeAdapters({
   bookingServiceBaseUrl: "https://booking-runtime.example.test",
   bookingRuntimeAuth: { mode: "bearer", token: "redacted-demo-token" },
   fetcher: async () => {
-    throw new Error("phase 1 write-negative test must not issue outbound fetches");
+    throw new Error("global registry shadow-negative test must not issue outbound fetches");
   },
 });
 for (const sectionName of ["selectedMutation", "cleanupMutation"]) {
@@ -93,7 +93,7 @@ for (const sectionName of ["selectedMutation", "cleanupMutation"]) {
     catalog: globalRegistry.catalog,
     commandId: binding[sectionName].commandId,
     commandInput: {},
-    runtimeAdapters: phaseOneRuntimeAdapters,
+    runtimeAdapters: trustedRuntimeAdapters,
     execution: {
       source: "agent-ui",
       requestId: `req_phase1_no_write_mount_${sectionName}`,
@@ -104,7 +104,7 @@ for (const sectionName of ["selectedMutation", "cleanupMutation"]) {
     },
   });
   assert.equal(receipt.ok, false, `${sectionName} is not mounted for runtime writes in phase 1`);
-  assert.equal(receipt.policy.reasons.includes("runtime_unavailable"), true, `${sectionName} returns runtime_unavailable until trusted adapter slice`);
+  assert.equal(receipt.policy.reasons.includes("runtime_not_mounted:shadow"), true, `${sectionName} remains denied from the generated shadow registry even when trusted adapters exist`);
 }
 
 console.log(JSON.stringify({

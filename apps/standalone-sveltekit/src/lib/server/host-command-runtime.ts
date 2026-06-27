@@ -37,7 +37,12 @@ export const GENERATED_BOOKING_PING_COMMAND_ID = "booking.ping";
 export const GENERATED_BOOKING_LIST_CONTEXTS_COMMAND_ID = "booking.list.contexts";
 export const GENERATED_BOOKING_TEMPLATES_COMMAND_ID = "booking.list.organizer.templates";
 export const GENERATED_BOOKING_TEMPLATE_COMMAND_ID = "booking.get.organizer.template";
+export const GENERATED_BOOKING_AVAILABILITY_COMMAND_ID = "booking.get.availability";
+export const GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID = "booking.create.hold";
+export const GENERATED_BOOKING_GET_HOLD_COMMAND_ID = "booking.get.hold";
+export const GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID = "booking.release.hold";
 export const GENERATED_BOOKING_RUNTIME_PROVIDER = "sonik-booking-openapi-runtime";
+export const GENERATED_BOOKING_DEMO_RUNTIME_PROVIDER = "sonik-booking-openapi-demo-runtime";
 
 export type BookingRuntimeAuthMode = "anonymous" | "bearer" | "service-token" | "cookie";
 
@@ -63,6 +68,16 @@ const GENERATED_BOOKING_READ_COMMAND_IDS = new Set([
   GENERATED_BOOKING_TEMPLATE_COMMAND_ID,
 ]);
 
+const GENERATED_BOOKING_DEMO_READ_COMMAND_IDS = new Set([
+  GENERATED_BOOKING_AVAILABILITY_COMMAND_ID,
+  GENERATED_BOOKING_GET_HOLD_COMMAND_ID,
+]);
+
+const GENERATED_BOOKING_DEMO_WRITE_COMMAND_IDS = new Set([
+  GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
+  GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID,
+]);
+
 type GeneratedBookingReadInputPolicy = {
   pathParams: Set<string>;
   queryParams: Set<string>;
@@ -78,6 +93,12 @@ const GENERATED_BOOKING_READ_INPUT_POLICIES: Record<string, GeneratedBookingRead
   },
   [GENERATED_BOOKING_TEMPLATES_COMMAND_ID]: { pathParams: new Set(), queryParams: new Set() },
   [GENERATED_BOOKING_TEMPLATE_COMMAND_ID]: { pathParams: new Set(["slug"]), queryParams: new Set() },
+  [GENERATED_BOOKING_AVAILABILITY_COMMAND_ID]: {
+    pathParams: new Set(["contextId"]),
+    queryParams: new Set(["from", "to", "partySize", "source", "resourceTypeId", "resourceUnitId"]),
+    queryEnums: { source: new Set(["admin", "web", "mcp", "microsite"]) },
+  },
+  [GENERATED_BOOKING_GET_HOLD_COMMAND_ID]: { pathParams: new Set(["holdId"]), queryParams: new Set() },
 };
 
 type GeneratedBookingArtifacts = {
@@ -97,17 +118,34 @@ function isGeneratedMountedReadCommand(command: CommandDescriptor): boolean {
 function generatedMountedBookingReadCommands(): CommandDescriptor[] {
   return generatedBookingArtifacts.catalog.commands
     .filter(isGeneratedMountedReadCommand)
-    .map((command) => ({
-      ...command,
-      transport: { ...command.transport, runtimeStatus: "mounted" },
-      metadata: {
-        ...command.metadata,
-        liveExecution: true,
-        runtimeAdapterProvider: GENERATED_BOOKING_RUNTIME_PROVIDER,
-        mountedFromGeneratedDescriptor: true,
-        descriptorRuntimeStatus: command.transport.runtimeStatus,
-      },
-    }));
+    .map((command) => mountGeneratedBookingCommand(command, GENERATED_BOOKING_RUNTIME_PROVIDER));
+}
+
+function generatedTrustedDemoBookingReadCommands(): CommandDescriptor[] {
+  return generatedBookingArtifacts.catalog.commands
+    .filter((command) => GENERATED_BOOKING_DEMO_READ_COMMAND_IDS.has(command.id))
+    .map((command) => mountGeneratedBookingCommand(command, GENERATED_BOOKING_DEMO_RUNTIME_PROVIDER));
+}
+
+function generatedTrustedDemoBookingWriteCommands(): CommandDescriptor[] {
+  return generatedBookingArtifacts.catalog.commands
+    .filter((command) => GENERATED_BOOKING_DEMO_WRITE_COMMAND_IDS.has(command.id))
+    .map((command) => mountGeneratedBookingCommand(command, GENERATED_BOOKING_DEMO_RUNTIME_PROVIDER));
+}
+
+function mountGeneratedBookingCommand(command: CommandDescriptor, runtimeProvider: string): CommandDescriptor {
+  return {
+    ...command,
+    transport: { ...command.transport, runtimeStatus: "mounted" },
+    metadata: {
+      ...command.metadata,
+      liveExecution: true,
+      runtimeAdapterProvider: runtimeProvider,
+      mountedFromGeneratedDescriptor: true,
+      descriptorRuntimeStatus: command.transport.runtimeStatus,
+      trustedHostRuntimeAdapter: runtimeProvider === GENERATED_BOOKING_DEMO_RUNTIME_PROVIDER,
+    },
+  };
 }
 
 function generatedMountedBookingFamilies(commands: CommandDescriptor[]): CommandFamilyDefinition[] {
@@ -119,6 +157,26 @@ function createGeneratedBookingReadHostAdapter(): HostCommandAdapter {
   const commands = generatedMountedBookingReadCommands();
   return {
     provider: "sonik-booking-openapi-generated-host",
+    families: generatedMountedBookingFamilies(commands),
+    commands,
+  };
+}
+
+function createGeneratedBookingDemoReadHostAdapter(): HostCommandAdapter {
+  const commands = generatedTrustedDemoBookingReadCommands();
+  return {
+    provider: "sonik-booking-openapi-demo-read-host",
+    isEligible: (context) => context.authenticated === true && Boolean(context.organizationId) && (context.scopes ?? []).includes(STANDALONE_DEMO_BOOKING_READ_SCOPE),
+    families: generatedMountedBookingFamilies(commands),
+    commands,
+  };
+}
+
+function createGeneratedBookingDemoWriteHostAdapter(): HostCommandAdapter {
+  const commands = generatedTrustedDemoBookingWriteCommands();
+  return {
+    provider: "sonik-booking-openapi-demo-write-host",
+    isEligible: (context) => context.authenticated === true && Boolean(context.organizationId) && (context.scopes ?? []).includes("booking:write"),
     families: generatedMountedBookingFamilies(commands),
     commands,
   };
@@ -136,6 +194,38 @@ function createGeneratedBookingRuntimeAdapter(input: StandaloneHostRuntimeInput)
       status: baseUrl && fetcher && canExecuteGeneratedBookingRead(command, authContext) ? "mounted-read" : "unavailable",
       execute: baseUrl && fetcher && canExecuteGeneratedBookingRead(command, authContext) ? executeGeneratedOpenApiReadCommand(baseUrl, fetcher, authContext) : undefined,
     })),
+  };
+}
+
+function createGeneratedBookingDemoRuntimeAdapter(input: StandaloneHostRuntimeInput): HostCommandRuntimeAdapter {
+  const baseUrl = normalizeBaseUrl(input.bookingServiceBaseUrl ?? readProcessEnv("SONIK_BOOKING_API_BASE_URL") ?? readProcessEnv("BOOKING_SERVICE_BASE_URL"));
+  const fetcher: typeof fetch | undefined = input.fetcher ?? (typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined);
+  const authContext = resolveBookingRuntimeAuthContext(input.bookingRuntimeAuth);
+  const canExecute = Boolean(baseUrl && fetcher && hasBookingRuntimeCredential(authContext));
+  return {
+    provider: GENERATED_BOOKING_DEMO_RUNTIME_PROVIDER,
+    bindings: [
+      {
+        commandId: GENERATED_BOOKING_AVAILABILITY_COMMAND_ID,
+        status: canExecute ? "mounted-read" : "unavailable",
+        execute: canExecute ? executeGeneratedOpenApiReadCommand(baseUrl!, fetcher!, authContext) : undefined,
+      },
+      {
+        commandId: GENERATED_BOOKING_GET_HOLD_COMMAND_ID,
+        status: canExecute ? "mounted-read" : "unavailable",
+        execute: canExecute ? executeGeneratedOpenApiReadCommand(baseUrl!, fetcher!, authContext) : undefined,
+      },
+      {
+        commandId: GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
+        status: canExecute ? "mounted-write" : "unavailable",
+        commit: canExecute ? executeGeneratedOpenApiWriteCommand(baseUrl!, fetcher!, authContext) : undefined,
+      },
+      {
+        commandId: GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID,
+        status: canExecute ? "mounted-write" : "unavailable",
+        commit: canExecute ? executeGeneratedOpenApiWriteCommand(baseUrl!, fetcher!, authContext) : undefined,
+      },
+    ],
   };
 }
 
@@ -179,6 +269,196 @@ function executeGeneratedOpenApiReadCommand(baseUrl: string, fetcher: typeof fet
       nextActions: response.ok ? ["learnCommand"] : ["learnCommand", "checkBookingRuntimeConfiguration"],
     };
   };
+}
+
+function executeGeneratedOpenApiWriteCommand(baseUrl: string, fetcher: typeof fetch, authContext: BookingRuntimeAuthContext) {
+  return async (input: unknown, context: { command: CommandDescriptor; execution: CommandExecutionContext }) => {
+    const method = context.command.transport.method ?? "POST";
+    if (method.toUpperCase() !== "POST") {
+      throw new Error(`Generated booking demo write runtime only supports POST commands, received ${method}`);
+    }
+    const record = isRecord(input) ? input : {};
+    const request = buildOpenApiWriteRequest(baseUrl, context.command, record, context.execution);
+    const headers = {
+      ...createGeneratedBookingRuntimeHeaders(authContext, context.execution),
+      "content-type": "application/json",
+      "x-sonik-idempotency-key": safeHeaderValue(request.idempotencyKey, 180),
+    };
+    const response = await fetcher(request.url, {
+      method: "POST",
+      headers,
+      credentials: authContext.includeCredentials === true ? "include" : "same-origin",
+      body: JSON.stringify(request.body),
+    });
+    const contentType = response.headers.get("content-type") ?? "";
+    const rawBody = contentType.includes("application/json") ? await response.json() : await response.text();
+    const body = redactGeneratedBookingRuntimeBody(rawBody, authContext);
+    return {
+      summary: {
+        ok: response.ok,
+        status: response.status,
+        commandId: context.command.id,
+        method,
+        path: context.command.transport.path,
+        url: redactUrlForReceipt(request.url),
+        authMode: authContext.mode,
+        credentialed: hasBookingRuntimeCredential(authContext),
+        receipt: createGeneratedBookingWriteReceipt(context.command.id, context.execution, request, body),
+        body,
+      },
+      nextActions: response.ok ? request.nextActions : ["learnCommand", "checkBookingRuntimeConfiguration"],
+    };
+  };
+}
+
+type GeneratedBookingWriteRequest = {
+  url: string;
+  body: Record<string, unknown>;
+  idempotencyKey: string;
+  nextActions: string[];
+};
+
+function buildOpenApiWriteRequest(baseUrl: string, command: CommandDescriptor, input: Record<string, unknown>, execution: CommandExecutionContext): GeneratedBookingWriteRequest {
+  if (command.id === GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID) {
+    const body = normalizeCreateHoldInput(input, execution);
+    const url = new URL((command.transport.path ?? "/").replace(/^\//, ""), `${baseUrl}/`).toString();
+    return {
+      url,
+      body,
+      idempotencyKey: String(body.clientRequestId),
+      nextActions: ["executeCommand", GENERATED_BOOKING_GET_HOLD_COMMAND_ID, GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID],
+    };
+  }
+
+  if (command.id === GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID) {
+    const holdId = validateGeneratedBookingUuidParam("holdId", input.holdId);
+    const path = (command.transport.path ?? "/").replace("{holdId}", encodeURIComponent(holdId));
+    const url = new URL(path.replace(/^\//, ""), `${baseUrl}/`).toString();
+    const reason = typeof input.reason === "string" && input.reason.trim() ? input.reason.trim().slice(0, 240) : "agent-ui-v0.2-demo-cleanup";
+    return {
+      url,
+      body: { reason },
+      idempotencyKey: safeHeaderValue(`${execution.requestId ?? `agent-ui-${Date.now()}`}:release:${holdId}`, 180),
+      nextActions: ["executeCommand", GENERATED_BOOKING_GET_HOLD_COMMAND_ID],
+    };
+  }
+
+  throw new Error(`Unsupported generated booking write command: ${command.id}`);
+}
+
+function normalizeCreateHoldInput(input: Record<string, unknown>, execution: CommandExecutionContext): Record<string, unknown> {
+  const contextId = validateGeneratedBookingUuidParam("contextId", input.contextId);
+  const window = normalizeBookingWindow(input.window);
+  const partySize = normalizeInteger(input.partySize ?? 2, "partySize", 1, 500);
+  const source = normalizeBookingSource(input.source ?? "admin");
+  const ttlSeconds = normalizeInteger(input.ttlSeconds ?? 600, "ttlSeconds", 60, 86_400);
+  const resourceUnitId = optionalGeneratedBookingUuidParam("resourceUnitId", input.resourceUnitId);
+  const resourceCombinationId = optionalGeneratedBookingUuidParam("resourceCombinationId", input.resourceCombinationId);
+  if (resourceUnitId && resourceCombinationId) throw new Error("resourceUnitId and resourceCombinationId are mutually exclusive");
+  if (!resourceUnitId && !resourceCombinationId) throw new Error("missing-resource-target: resourceUnitId or resourceCombinationId is required for mounted holds");
+  const clientRequestId = normalizeClientRequestId(input.clientRequestId, execution.requestId);
+  const body: Record<string, unknown> = {
+    contextId,
+    window,
+    partySize,
+    source,
+    clientRequestId,
+    ttlSeconds,
+    metadata: normalizeMetadata(input.metadata, execution),
+  };
+  const trustedUserId = optionalBoundedString(execution.principalId, "execution.principalId", 128);
+  const requestedUserId = optionalBoundedString(input.userId, "userId", 128);
+  if (requestedUserId && trustedUserId && requestedUserId !== trustedUserId) throw new Error("trusted-principal-mismatch: userId must match the trusted host principal");
+  if (requestedUserId && !trustedUserId) throw new Error("trusted-principal-required: userId cannot be supplied without a trusted host principal");
+  const customerId = optionalGeneratedBookingUuidParam("customerId", input.customerId);
+  if (trustedUserId) body.userId = trustedUserId;
+  if (customerId) body.customerId = customerId;
+  if (resourceUnitId) body.resourceUnitId = resourceUnitId;
+  if (resourceCombinationId) body.resourceCombinationId = resourceCombinationId;
+  return body;
+}
+
+function createGeneratedBookingWriteReceipt(commandId: string, execution: CommandExecutionContext, request: GeneratedBookingWriteRequest, responseBody: unknown): Record<string, unknown> {
+  const body = isRecord(responseBody) ? responseBody : {};
+  return {
+    commandId,
+    requestId: execution.requestId ?? null,
+    organizationId: execution.organizationId ?? null,
+    sessionId: execution.sessionId ?? null,
+    principalId: execution.principalId ?? null,
+    idempotencyKey: request.idempotencyKey,
+    confirmation: pickConfirmationFields(body),
+  };
+}
+
+function pickConfirmationFields(body: Record<string, unknown>): Record<string, unknown> {
+  const confirmation: Record<string, unknown> = {};
+  for (const key of ["id", "organizationId", "contextId", "partySize", "status", "expiresAt", "resourceUnitId", "resourceCombinationId"]) {
+    if (body[key] !== undefined) confirmation[key] = body[key];
+  }
+  if (isRecord(body.window)) confirmation.window = { startsAt: body.window.startsAt, endsAt: body.window.endsAt };
+  return confirmation;
+}
+
+function normalizeBookingWindow(value: unknown): { startsAt: string; endsAt: string } {
+  if (!isRecord(value)) throw new Error("window is required");
+  const startsAt = validateIsoDateString("window.startsAt", value.startsAt);
+  const endsAt = validateIsoDateString("window.endsAt", value.endsAt);
+  if (new Date(endsAt).getTime() <= new Date(startsAt).getTime()) throw new Error("window.endsAt must be after window.startsAt");
+  return { startsAt, endsAt };
+}
+
+function validateIsoDateString(key: string, value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${key} is required`);
+  const normalized = value.trim();
+  const time = new Date(normalized).getTime();
+  if (!Number.isFinite(time)) throw new Error(`${key} must be an ISO date-time string`);
+  return normalized;
+}
+
+function normalizeInteger(value: unknown, key: string, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) throw new Error(`${key} must be an integer from ${min} to ${max}`);
+  return value;
+}
+
+function normalizeBookingSource(value: unknown): "admin" | "web" | "mcp" | "microsite" {
+  if (value === "admin" || value === "web" || value === "mcp" || value === "microsite") return value;
+  throw new Error("source must be admin, web, mcp, or microsite");
+}
+
+function normalizeClientRequestId(value: unknown, requestId: string | undefined): string {
+  const candidate = typeof value === "string" && value.trim() ? value.trim() : `agent-ui-v02-demo-hold-${requestId ?? Date.now()}`;
+  return safeHeaderValue(candidate, 180);
+}
+
+function normalizeMetadata(value: unknown, execution: CommandExecutionContext): Record<string, unknown> {
+  const metadata = isRecord(value) ? redactSecretValue(value, []) as Record<string, unknown> : {};
+  return {
+    ...metadata,
+    createdBy: "sonik-agent-ui-v0.2-demo",
+    agentRequestId: execution.requestId ?? null,
+  };
+}
+
+function optionalBoundedString(value: unknown, key: string, maxLength: number): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw new Error(`${key} must be a string`);
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (normalized.length > maxLength) throw new Error(`${key} is too long`);
+  return normalized;
+}
+
+function optionalGeneratedBookingUuidParam(key: string, value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  return validateGeneratedBookingUuidParam(key, value);
+}
+
+function validateGeneratedBookingUuidParam(key: string, value: unknown): string {
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim())) {
+    throw new Error(`${key} must be a UUID`);
+  }
+  return value.trim();
 }
 
 function createGeneratedBookingRuntimeHeaders(authContext: BookingRuntimeAuthContext, execution: CommandExecutionContext): Record<string, string> {
@@ -503,11 +783,11 @@ const bookingRuntimeAdapter: HostCommandRuntimeAdapter = {
 };
 
 export function createStandaloneHostCommandAdapters(): HostCommandAdapter[] {
-  return [createGeneratedBookingReadHostAdapter(), bookingReadHostAdapter, bookingWriteHostAdapter];
+  return [createGeneratedBookingReadHostAdapter(), createGeneratedBookingDemoReadHostAdapter(), createGeneratedBookingDemoWriteHostAdapter(), bookingReadHostAdapter, bookingWriteHostAdapter];
 }
 
 export function createStandaloneHostRuntimeAdapters(input: StandaloneHostRuntimeInput = {}): HostCommandRuntimeAdapter[] {
-  return [createGeneratedBookingRuntimeAdapter(input), bookingRuntimeAdapter];
+  return [createGeneratedBookingRuntimeAdapter(input), createGeneratedBookingDemoRuntimeAdapter(input), bookingRuntimeAdapter];
 }
 
 export function createStandaloneDemoHostSession(input: PlatformAdapterContext = {}): HostSessionEnvelope {

@@ -18,6 +18,8 @@ import { createDevSmokeStream, readDevSmokeRunId, shouldUseDevSmokeStream, write
 import { getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord } from "$lib/server/workspace-request-store";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createBookingRuntimeAuthContextFromEnv, hasBookingRuntimeCredential } from "$lib/server/host-command-runtime";
+import { resolveTrustedHostSessionSnapshot } from "$lib/server/workspace-services";
+import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import {
   optionalRouteString,
@@ -32,6 +34,29 @@ import type { RequestHandler } from "./$types";
 
 const PAGE_CONTEXT_FIELD_MAX_CHARS = 160;
 const PAGE_CONTEXT_LIST_MAX_ITEMS = 8;
+
+
+function createAgentHostSessionEnvelope(event: RequestEvent): HostSessionEnvelope | null {
+  const snapshot = resolveTrustedHostSessionSnapshot(event);
+  if (!snapshot.authenticated || !snapshot.organizationId) return null;
+  return {
+    source: "amplify-embedded",
+    sessionId: snapshot.sessionId ?? null,
+    userId: snapshot.userId ?? null,
+    principalId: snapshot.principalId ?? snapshot.userId ?? null,
+    organizationId: snapshot.organizationId,
+    authenticated: true,
+    scopes: snapshot.scopes ?? [],
+    expiresAt: snapshot.expiresAt ?? null,
+    metadata: snapshot.metadata,
+  };
+}
+
+function approvedCommandIdsFromHostSession(hostSession: HostSessionEnvelope | null): string[] {
+  const value = hostSession?.metadata?.approvedCommandIds;
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0))].slice(0, 20);
+}
 
 function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: WorkspaceDocumentRecord | null } = {}): AgentPageContext | undefined {
   const record = typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -167,6 +192,8 @@ export const POST: RequestHandler = async (event) => {
   const pageContextSource = resolvePageContextSource(body, activeDocument);
   const bookingServiceBaseUrl = env.SONIK_BOOKING_API_BASE_URL ?? env.BOOKING_SERVICE_BASE_URL ?? null;
   const bookingRuntimeAuth = createBookingRuntimeAuthContextFromEnv(env);
+  const hostSession = createAgentHostSessionEnvelope(event);
+  const approvedCommandIds = approvedCommandIdsFromHostSession(hostSession);
   const startedAt = Date.now();
 
   if (!uiMessages || !Array.isArray(uiMessages) || uiMessages.length === 0) {
@@ -199,7 +226,7 @@ export const POST: RequestHandler = async (event) => {
 
   const modelMessages = await convertToModelMessages(uiMessages);
   const contextSummary = summarizeWorkspaceContext({ activeDocument });
-  const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSessionMode: "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth });
+  const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSession: hostSession ?? undefined, hostSessionMode: hostSession ? undefined : "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth });
   const pageContextSummary = createCurrentPageContextSummary(pageContext);
   const systemContext = [contextSummary, pageContextSummary, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
@@ -224,6 +251,8 @@ export const POST: RequestHandler = async (event) => {
     payload: {
       bookingRuntimeAuthMode: bookingRuntimeAuth.mode,
       bookingRuntimeCredentialed: hasBookingRuntimeCredential(bookingRuntimeAuth),
+      hostSessionSource: hostSession?.source ?? null,
+      approvedCommandCount: approvedCommandIds.length,
     },
     ok: true,
   }).catch(() => undefined);
@@ -245,7 +274,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth, persistence: requestPersistence });
+  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, persistence: requestPersistence });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

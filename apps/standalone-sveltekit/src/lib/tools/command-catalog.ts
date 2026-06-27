@@ -9,13 +9,15 @@ import {
 } from "@sonik-agent-ui/tool-contracts";
 import { executeHostCatalogCommand } from "@sonik-agent-ui/platform-adapters";
 import { createStandaloneHostCommandIndex, createStandaloneHostCommandRuntimeBundle, type BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
+import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
 
 const commandAspectSchema = z.enum(["description", "schema", "examples", "policy", "output", "surfaces", "transport", "auth"]);
 
-export function createCommandCatalogTools(context: { sessionId?: string | null; approvedCommandIds?: string[]; pageContext?: AgentPageContext; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null } = {}) {
-  const createBundle = () => createStandaloneHostCommandRuntimeBundle({ sessionId: context.sessionId, pageContext: context.pageContext, hostSessionMode: "standalone-demo", bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth });
-  const createContextCommandIds = () => new Set(createStandaloneHostCommandIndex({ sessionId: context.sessionId, pageContext: context.pageContext, hostSessionMode: "standalone-demo", bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth }).commands.map((command) => command.id));
+export function createCommandCatalogTools(context: { sessionId?: string | null; approvedCommandIds?: string[]; hostSession?: HostSessionEnvelope | null; pageContext?: AgentPageContext; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null } = {}) {
+  const hostSessionInput = () => context.hostSession ? { hostSession: context.hostSession } : { hostSessionMode: "standalone-demo" as const };
+  const createBundle = () => createStandaloneHostCommandRuntimeBundle({ sessionId: context.sessionId, pageContext: context.pageContext, ...hostSessionInput(), bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth });
+  const createContextCommandIds = () => new Set(createStandaloneHostCommandIndex({ sessionId: context.sessionId, pageContext: context.pageContext, ...hostSessionInput(), bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth }).commands.map((command) => command.id));
   const summarizeCommandTelemetry = (command: CommandDescriptor | undefined, contextCommandIds = createContextCommandIds()) => ({
     commandFamily: command?.familyId,
     commandSource: command?.source,
@@ -96,7 +98,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
             ...executionContext,
             action: "execute",
             source: "agent-ui",
-            sessionId: context.sessionId,
+            sessionId: executionContext.sessionId ?? context.sessionId,
           },
         });
         await writeAgentTelemetry({
@@ -115,7 +117,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
     }),
     commitCommand: tool({
       description:
-        "Request commit of an approval-gated command from the Sonik command catalog. Approval is resolved from trusted host/session state, not model-provided booleans. This slice only allows mounted local UI/demo commands; ORPC business mutations remain metadata-only.",
+        "Request commit of an approval-gated command from the Sonik command catalog. Approval is resolved from trusted host/session state, not model-provided booleans. Only trusted host/runtime-mounted mutations can commit; generated discovery records remain metadata-only unless this runtime adapter mounted the command.",
       inputSchema: z.object({
         commandId: z.string().describe("Command id to commit."),
         input: z.record(z.string(), z.unknown()).default({}).describe("Structured command input."),
@@ -133,7 +135,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
             ...executionContext,
             action: "commit",
             source: "agent-ui",
-            sessionId: context.sessionId,
+            sessionId: executionContext.sessionId ?? context.sessionId,
             approved: context.approvedCommandIds?.includes(commandId) === true,
           },
         });

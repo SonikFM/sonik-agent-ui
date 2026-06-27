@@ -292,6 +292,12 @@ export async function executeHostCatalogCommand(input: {
   if (binding.binding.status === "shadow") {
     return deniedRuntimeReceipt(input.catalog, command, execution.action ?? "execute", input.commandInput, { ...execution, requestId, source }, startedAt, binding.adapter.provider, ["runtime_shadow"]);
   }
+  if (command.transport.runtimeStatus !== "mounted") {
+    return deniedRuntimeReceipt(input.catalog, command, execution.action ?? "execute", input.commandInput, { ...execution, requestId, source }, startedAt, binding.adapter.provider, [`runtime_not_mounted:${command.transport.runtimeStatus}`]);
+  }
+  if ((command.source === "orpc" || command.source === "openapi") && command.metadata.runtimeAdapterProvider !== binding.adapter.provider) {
+    return deniedRuntimeReceipt(input.catalog, command, execution.action ?? "execute", input.commandInput, { ...execution, requestId, source }, startedAt, binding.adapter.provider, ["runtime_adapter_not_authorized_for_descriptor"]);
+  }
 
   const action = execution.action ?? "execute";
   if (binding.binding.status === "unavailable") {

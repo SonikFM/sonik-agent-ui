@@ -320,7 +320,7 @@ function resolveCloudWorkspaceRuntime(event: WorkspaceRuntimeRequest | null, req
   return createCloudWorkspaceRuntime(authorized);
 }
 
-function resolveTrustedHostSessionSnapshot(event?: WorkspaceRuntimeRequest | null): WorkspaceHostSessionSnapshot {
+export function resolveTrustedHostSessionSnapshot(event?: WorkspaceRuntimeRequest | null): WorkspaceHostSessionSnapshot {
   const env = event?.platform?.env ?? null;
   const fromLocals = resolveHostSessionFromLocals(event?.locals);
   if (fromLocals) return normalizeHostSessionSnapshot(fromLocals, "server-local-auth-adapter");

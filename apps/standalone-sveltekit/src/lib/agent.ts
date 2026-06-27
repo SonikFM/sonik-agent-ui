@@ -12,6 +12,7 @@ import { createToolManifestTools } from "./tools/tool-manifest";
 import { createCommandCatalogTools } from "./tools/command-catalog";
 import { MODEL_ID, gateway } from "./ai-gateway";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
+import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
 
 const AGENT_INSTRUCTIONS = `You are a knowledgeable assistant that helps users explore data and learn about any topic. You look up real-time information, build visual dashboards, and create rich educational content.
@@ -90,12 +91,12 @@ ${explorerCatalog.prompt({
   ],
 })}`;
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null };
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null };
 
 export function createAgent(context: AgentRuntimeContext = {}) {
   const documentTools = createDocumentTools(context);
   const toolManifestTools = createToolManifestTools();
-  const commandCatalogTools = createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth });
+  const commandCatalogTools = createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth });
   return new ToolLoopAgent({
     model: gateway(MODEL_ID),
     instructions: AGENT_INSTRUCTIONS,
