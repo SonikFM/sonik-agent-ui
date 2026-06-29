@@ -14,6 +14,82 @@ This repo is the standalone and embeddable Agent UI runtime. It can run as:
 
 The current production target is a hosted Agent UI, e.g. `agent-ui.sonik.fm` or a Worker preview URL, embedded into Amplify and the Sonik booking app with signed host context and organization-scoped persistence.
 
+## v0.2 deep init — app-aware contract tool platform
+
+v0.1 proved the Agent UI shell: embedded chat, canvas, document artifacts, JSON rendering, signed host context, cloud persistence, and initial command discovery. v0.2 turns that shell into an **app-aware, contract-driven tool platform**. The demo bar is no longer "can the assistant chat inside a host page?" It is: **can the assistant understand the current page, discover exact allowed commands, perform a real read/write booking workflow safely, and keep the user in control of artifacts, page context, and command execution?**
+
+### v0.2 north star
+
+- **App-aware agent**: the assistant sees sanitized page context by default, can explain where the user is, and can keep page context attached/detached like any other context source.
+- **Contract tool platform**: command availability comes from generated ORPC/OpenAPI/SDK contracts plus host policy, not handwritten prompt-only tools.
+- **Real workflow mutation**: the first write demo is a reversible booking hold lifecycle: read availability → create hold → confirm hold → release hold.
+- **Host-owned authority**: browser context is helpful but untrusted; writes require signed host context, org/user/session identity, scopes, command approval, and runtime adapter policy.
+- **No visual redesign dependency**: v0.2 should deepen behavior without requiring a major UI restyle. The existing chat/canvas/document shell remains the working baseline.
+
+### Current paired-system state
+
+As of the v0.2 init pass, the paired booking-service work has been normalized around the clean signed-runtime bridge:
+
+- `sonik-agent-ui` `main` includes the v0.1/v0.2 foundation after PR #2 merge.
+- `sonik-booking-service` `main` includes PR #20, `Mount signed Agent UI booking runtime bridge`, as the canonical booking host-context implementation.
+- Older booking-service Agent UI PRs such as PR #16 and PR #13 are stale for the signed Agent UI bridge. They are conflicting, broad, or superseded by PR #20 and should not be merged for this seam without surgical salvage.
+- Booking-service PR #20 constrains signed Agent UI context to the selected booking runtime commands and denies broad `/rpc` bypass for `agent-ui-host-context`.
+
+### v0.2 phase map
+
+1. **Exact booking contract mapping**
+   - Bind the demo to the booking hold lifecycle, not durable booking creation.
+   - Canonical commands: `booking.get.availability`, `booking.create.hold`, `booking.get.hold`, `booking.release.hold`.
+   - Keep generated registry descriptors deterministic and shadow by default.
+
+2. **Command discovery and learning UX**
+   - Use compact command search first.
+   - Load detailed command schemas/policies only when needed.
+   - Keep model context small by surfacing command families and page-scoped eager summaries rather than flooding every route.
+
+3. **Trusted runtime adapter promotion**
+   - Promote only selected host-approved descriptors to mounted runtime status in a trusted host catalog.
+   - Require signed host context, organization id, principal/user id, session id, scopes, explicit command approval, and idempotency keys before write commits.
+   - Redact receipts and never echo credentials.
+
+4. **Booking provider runtime smoke**
+   - Run availability read, hold create, hold confirm, and hold release against the booking host/runtime.
+   - Fail closed if the page or test environment does not donate a resource target where one is required.
+   - Capture Worker/tail/evidence logs for every mutation.
+
+5. **Agent site navigation capabilities**
+   - Add page/action descriptors that let the assistant route the user through supported Sonik/Amplify/booking surfaces.
+   - Navigation commands should be distinct from data mutations and should be host-controlled.
+
+6. **Context attachments**
+   - Treat page context as an attachable context source, similar to future file uploads.
+   - Support simple page context, rich page context, and visible context chips so users can see what the agent is using.
+
+7. **Persistence and sharing hardening**
+   - Continue cloud-session persistence for chats, messages, artifacts, documents, versions, telemetry, access grants, and access-grant audit.
+   - Prepare shared chats and shared artifact workspaces with owner/grantee semantics before productizing collaborative sessions.
+
+### v0.2 demo acceptance criteria
+
+A v0.2 demo is not complete until all of the following are true:
+
+- Embedded Agent UI can identify the current booking page from donated page context.
+- The assistant can search/learn the booking command set without loading the entire registry into prompt context.
+- The assistant can execute a mounted booking availability read through the trusted runtime path.
+- The assistant can create a temporary booking hold only after explicit approval and only with valid host-scoped org/session/user context.
+- The assistant can confirm and release that hold, leaving the test environment clean.
+- The UI shows meaningful command/tool progress instead of opaque "thinking" or silent failure.
+- Persistence survives close/reopen for the chat, messages, artifact/document state, and relevant command receipts.
+- Automated evidence exists: unit tests, command drift checks, smoke JSON, screenshots where useful, and Worker/tail log excerpts for runtime writes.
+
+### v0.2 non-goals
+
+- Do not mount the full ORPC surface as executable by default. Discovery can be broad; execution must be scoped and policy-gated.
+- Do not use browser page context as write authority.
+- Do not make MCP mandatory for hosted chat; MCP remains a desktop/local-tool bridge.
+- Do not create durable bookings, payments, cancellations, or destructive mutations as the first demo write path.
+- Do not fork host app logic into Agent UI; host apps donate context and adapters, and Agent UI consumes contracts.
+
 ## Core v0.1 capabilities
 
 ### 1. Embeddable chat and canvas shell
@@ -288,6 +364,34 @@ await agent.postContext();
 
 For production hosts, context should be signed server-side and forwarded to Agent UI through the trusted host context path. Do not expose raw cookies, tokens, or headers in page context.
 
+## v0.2 command/runtime verification runbook
+
+Use this runbook before claiming that a contract-tool slice is ready for demo testing:
+
+```sh
+# Registry determinism and drift gates
+pnpm check:commands
+
+# Focused contract/runtime unit coverage
+node --experimental-strip-types tests/unit/sonik-booking-demo-command-binding.test.mjs
+node --experimental-strip-types tests/unit/booking-runtime-write-adapter.test.mjs
+node --experimental-strip-types tests/unit/global-command-registry-runtime.test.mjs
+
+# Full local regression suite when touching runtime, SDK, persistence, or generation
+pnpm test
+```
+
+For hosted/embedded validation, pair the Agent UI evidence with booking-service evidence:
+
+1. Deploy the Agent UI Worker with `AI_GATEWAY_API_KEY`, database URL, and `SONIK_AGENT_UI_HOST_CONTEXT_SECRET`.
+2. Deploy the booking host/service branch that includes the signed host context bridge.
+3. Open the embedded host page while authenticated.
+4. Confirm page context is present in the iframe and signed host context is present server-side.
+5. Ask the assistant to summarize the current page.
+6. Ask it to search/learn booking commands.
+7. Run the hold lifecycle with explicit approval and cleanup.
+8. Pull Worker/tail evidence and confirm no broad `/rpc`, missing-host-context, auth-scope, or persistence errors occurred.
+
 ## v0.1 validation evidence
 
 Latest focused authenticated smoke evidence from this repo:
@@ -321,7 +425,9 @@ One warning was retained from historical invalid artifact replay. Fresh v0.1 art
 - Shared workspaces and Google-doc-style permissions are schema-prepped but not fully productized in UI.
 - File upload, screenshot upload, contacts, and rich document analysis are v0.2+ work.
 
-## v0.2 goals
+## v0.2 backlog after the booking demo gate
+
+The deep-init phase above is the immediate v0.2 path. The broader backlog below remains valid after the booking hold demo is green.
 
 ### Product and UX
 
