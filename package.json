@@ -22,7 +22,8 @@
     "db:migrate:dry-run": "node scripts/run-postgres-migrations.mjs --dry-run",
     "smoke:agent-ui:amplify": "node scripts/agent-ui-amplify-smoke.mjs",
     "generate:commands:sonik-global": "node --experimental-strip-types scripts/generate-sonik-global-command-registry.mjs",
-    "check:commands:sonik-global": "node --experimental-strip-types scripts/generate-sonik-global-command-registry.mjs --check"
+    "check:commands:sonik-global": "node --experimental-strip-types scripts/generate-sonik-global-command-registry.mjs --check",
+    "smoke:agent-ui:booking-pipeb:document": "node scripts/agent-ui-booking-pipeb-document-smoke.mjs"
   },
   "packageManager": "pnpm@11.1.3",
   "engines": {
