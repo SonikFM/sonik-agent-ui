@@ -117,6 +117,10 @@ assert.equal(learned.inputSchema.properties.source.enum.includes("admin"), true)
 assert.equal(Array.isArray(learned.examples), true);
 assert.equal(learned.examples.length > 0, true, "learnCommand exposes generated examples for model payload construction");
 assert.equal(learned.examples[0].input.contextId, "11111111-1111-4111-8111-111111111111");
+assert.equal(learned.examples[0].input.userId, "GUEST_USER_ID_FROM_booking.create.guest", "reservation creation examples must use the guest/user id returned by booking.create.guest, not the trusted host principal");
+assert.notEqual(learned.examples[0].input.userId, "CURRENT_HOST_PRINCIPAL_ID", "booking.create.booking examples must not cause actor/guest identity confusion");
+assert.equal(learned.examples[0].input.partySize, 3, "reservation workflow example carries the requested party size shape");
+assert.equal(learned.examples[0].input.clientRequestId, "agent-ui-reservation-demo-001", "reservation workflow example includes idempotency guidance");
 assert.equal(learned.examples[0].input.endsAt, "2026-07-01T19:00:00.000Z", "generated examples avoid invalid zero-length booking windows");
 assert.equal(learned.inputConvention, "pass path/query/body fields directly as command input; do not wrap JSON bodies in body unless binary or explicitly required by the schema");
 assert.ok(learned.forbiddenFields.includes("organizationId"), "learnCommand teaches host-derived org fields instead of making the model guess");

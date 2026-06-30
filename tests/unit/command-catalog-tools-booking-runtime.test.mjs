@@ -138,6 +138,12 @@ assert.equal(contextRead.receipt.ok, true, "preflight repair binds page contextI
 assert.equal(calls.at(-1).method, "GET");
 assert.equal(calls.at(-1).url, `https://booking.example.test/api/v1/booking/contexts/${CONTEXT_ID}`);
 
+const learnedCreateBooking = await tools.learnCommand.execute({ commandId: "booking.create.booking", aspects: ["schema", "examples", "policy"] });
+assert.equal(learnedCreateBooking.ok, true, "learnCommand resolves the durable booking creation descriptor");
+assert.equal(learnedCreateBooking.examples[0].input.userId, "GUEST_USER_ID_FROM_booking.create.guest", "agent-facing booking creation example uses the guest/user id returned by booking.create.guest");
+assert.notEqual(learnedCreateBooking.examples[0].input.userId, USER_ID, "agent-facing booking creation example does not reuse the trusted host principal");
+assert.notEqual(learnedCreateBooking.examples[0].input.userId, "CURRENT_HOST_PRINCIPAL_ID", "agent-facing booking creation example does not teach the host principal sentinel for guest identity");
+
 const learnedAvailability = await tools.learnCommand.execute({ commandId: GENERATED_BOOKING_AVAILABILITY_COMMAND_ID, aspects: ["schema", "examples"] });
 assert.equal(learnedAvailability.ok, true, "learnCommand recovers the exact availability schema after preflight failure");
 assert.deepEqual(learnedAvailability.inputSchema.required, ["contextId", "from", "to"]);

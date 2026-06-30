@@ -125,7 +125,7 @@ console.log(JSON.stringify({
 
 function sampleInputForBinding(binding, command) {
   const generatedExample = command?.examples?.[0]?.input;
-  if (generatedExample && typeof generatedExample === "object" && !Array.isArray(generatedExample) && Object.keys(generatedExample).length > 0) return generatedExample;
+  if (generatedExample && typeof generatedExample === "object" && !Array.isArray(generatedExample) && Object.keys(generatedExample).length > 0) return materializeExampleInput(generatedExample);
   if (binding.commandId === "booking.create.hold") {
     return { contextId: ids.contextId, window: windowInput(), partySize: 2, source: "admin", clientRequestId: "runtime-coverage-create-hold", ttlSeconds: 600, resourceUnitId: ids.resourceUnitId };
   }
@@ -135,6 +135,15 @@ function sampleInputForBinding(binding, command) {
   const input = { ...routeInput(binding) };
   if (binding.requestBody.bodyEncoding === "json" || binding.requestBody.required) return { ...input, ...bodyInput(binding.commandId) };
   return input;
+}
+
+function materializeExampleInput(value) {
+  if (value === "GUEST_USER_ID_FROM_booking.create.guest") return USER_ID;
+  if (Array.isArray(value)) return value.map((entry) => materializeExampleInput(entry));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, materializeExampleInput(entry)]));
+  }
+  return value;
 }
 
 function routeInput(binding) {
