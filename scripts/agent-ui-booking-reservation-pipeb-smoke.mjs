@@ -19,7 +19,7 @@ const pipeBPath = path.resolve('.omx/logs', `${runId}.pipe-b.jsonl`);
 const pipeBErrPath = path.resolve('.omx/logs', `${runId}.pipe-b.stderr.log`);
 const pipeBRawDir = path.resolve('.omx/logs', `${runId}.r2`);
 const timeoutMs = Number(process.env.AGENT_UI_BOOKING_RESERVATION_TIMEOUT_MS ?? 300_000);
-const prompt = process.env.AGENT_UI_BOOKING_RESERVATION_PROMPT ?? `Use the booking command catalog to prove the reservation flow against the CURRENT HOST/PAGE CONTEXT. First learn the schemas you need. Use inputJson for every executeCommand or commitCommand call. Check availability for the current booking page context from 2026-07-01T18:00:00.000Z to 2026-07-01T19:00:00.000Z for party size 2. Then commit booking.create.guest for Agent UI Smoke Guest with email agent-ui-smoke@example.test. Then commit booking.create.booking for that returned guest/user id in the same context and time window with source admin, partySize 2, and a unique clientRequestId. If a preflight receipt says fields are missing or unsupported, learn the command and retry once with corrected direct command inputJson. Reply with the command ids you successfully used and the reservation or booking id.`;
+const prompt = process.env.AGENT_UI_BOOKING_RESERVATION_PROMPT ?? `Use the booking command catalog to prove the reservation flow against the CURRENT HOST/PAGE CONTEXT. First call searchSkillCatalog for the reservation workflow, then call learnSkill for booking.reservation.create. Follow that learned skill exactly. Then learn the command schemas you need. Use inputJson for every executeCommand or commitCommand call. Check availability for the current booking page context from 2026-07-01T18:00:00.000Z to 2026-07-01T19:00:00.000Z for party size 2. Then commit booking.create.guest for Agent UI Smoke Guest with email agent-ui-smoke@example.test. Then commit booking.create.booking for that returned guest/customer id in the same context and time window with source admin, partySize 2, and a unique clientRequestId. Do not call booking.create.hold; this is a reservation workflow, not a hold workflow. Do not invent, edit, or provision the trusted actor userId; trusted host context supplies it. If a preflight receipt says fields are missing or unsupported, learn the command and retry once with corrected direct command inputJson. Reply with the skill id, command ids you successfully used, and the reservation or booking id.`;
 
 if (!useFakeHost && (!email || !password)) throw new Error('Missing TEST_EMAIL/TEST_PASSWORD for booking reservation smoke.');
 
@@ -66,7 +66,7 @@ async function refreshPipeBStats() {
   const text = await readFile(pipeBPath, 'utf8').catch(() => '');
   const lines = text.split('\n').filter(Boolean);
   evidence.pipeB.lineCount = lines.length;
-  evidence.pipeB.relevantLineCount = lines.filter((line) => line.includes(runId) || line.includes('booking.') || line.includes('tool.executeCommand') || line.includes('tool.commitCommand') || line.includes('tool.learnCommand')).length;
+  evidence.pipeB.relevantLineCount = lines.filter((line) => line.includes(runId) || line.includes('booking.') || line.includes('tool.') || line.includes('api.generate.skill_index_context')).length;
   evidence.pipeB.status = lines.length > 0 ? 'captured' : evidence.pipeB.status === 'started' ? 'started_no_events' : evidence.pipeB.status;
   const err = await stat(pipeBErrPath).catch(() => null);
   evidence.pipeB.stderrBytes = err?.size ?? 0;
@@ -151,7 +151,7 @@ function extractPipeBToolEvents(text) {
   const visit = (value) => {
     if (value == null) return;
     if (typeof value === 'string') {
-      if (value.includes('booking.') || value.includes('tool.') || value.includes('booking.runtime.fetch')) events.push(value);
+      if (value.includes('booking.') || value.includes('tool.') || value.includes('api.generate.skill_index_context') || value.includes('booking.runtime.fetch')) events.push(value);
       try { visit(JSON.parse(value)); } catch {}
       return;
     }
@@ -161,7 +161,7 @@ function extractPipeBToolEvents(text) {
     }
     if (typeof value === 'object') {
       const compact = JSON.stringify(value);
-      if (compact.includes('booking.') || compact.includes('tool.') || compact.includes('booking.runtime.fetch')) events.push(compact);
+      if (compact.includes('booking.') || compact.includes('tool.') || compact.includes('api.generate.skill_index_context') || compact.includes('booking.runtime.fetch')) events.push(compact);
       for (const item of Object.values(value)) visit(item);
     }
   };
@@ -277,8 +277,13 @@ try {
 ${pipeText}`;
   const successfulGenerate = evidence.responses.filter((entry) => entry.origin === agentOrigin && entry.path === '/api/generate' && entry.status === 200).length;
   const agentFailures = evidence.responses.filter((entry) => entry.origin === agentOrigin && entry.status >= 400).map((entry) => `${entry.status} ${entry.path}`);
-  const hasTelemetryEvent = (commandId, eventName, ok) => toolEvents.some((line) => {
-    if (!line.includes(commandId) || !line.includes(`"event":"${eventName}"`)) return false;
+  const hasTelemetryEvent = (identifier, eventName, ok) => toolEvents.some((line) => {
+    if (!line.includes(identifier) || !line.includes(`"event":"${eventName}"`)) return false;
+    if (ok === undefined) return true;
+    return line.includes(`"ok":${ok ? 'true' : 'false'}`);
+  });
+  const hasEventName = (eventName, ok) => toolEvents.some((line) => {
+    if (!line.includes(`"event":"${eventName}"`)) return false;
     if (ok === undefined) return true;
     return line.includes(`"ok":${ok ? 'true' : 'false'}`);
   });
@@ -288,7 +293,11 @@ ${pipeText}`;
   const successfulCommit = (commandId) => hasTelemetryEvent(commandId, 'tool.commitCommand', true);
   const successfulExecute = (commandId) => hasTelemetryEvent(commandId, 'tool.executeCommand', true);
   const preflightFailureEvents = toolEvents.filter((line) => line.includes('command_input_preflight_failed') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand')));
+  const holdCommandEvents = toolEvents.filter((line) => line.includes('booking.create.hold') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand') || line.includes('booking.runtime.fetch')));
   evidence.pipeB.requiredEvidence = {
+    skillIndexContextOk: hasEventName('api.generate.skill_index_context', true) && toolEvents.some((line) => line.includes('booking.reservation.create')),
+    skillSearchOk: hasTelemetryEvent('booking.reservation.create', 'tool.searchSkillCatalog', true) || hasEventName('tool.searchSkillCatalog', true),
+    skillLearnOk: hasTelemetryEvent('booking.reservation.create', 'tool.learnSkill', true),
     availabilityRuntimeFetchOk: successfulRuntimeFetch('booking.get.availability'),
     availabilityExecuteOk: successfulExecute('booking.get.availability'),
     guestRuntimeFetchOk: successfulRuntimeFetch('booking.create.guest'),
@@ -298,6 +307,7 @@ ${pipeText}`;
     bookingRuntimeFetchFailed: failedRuntimeFetch('booking.create.booking'),
     bookingCommitFailed: failedCommit('booking.create.booking'),
     preflightFailureEventCount: preflightFailureEvents.length,
+    holdCommandEventCount: holdCommandEvents.length,
   };
   evidence.checks = {
     loginOk: useFakeHost || evidence.loginStatus < 400,
@@ -309,6 +319,9 @@ ${pipeText}`;
     mentionsAvailability: /booking\.get\.availability|get availability|availability/i.test(responseText),
     mentionsGuestCreate: /booking\.create\.guest|create guest|created guest/i.test(responseText),
     mentionsBookingCreate: /booking\.create\.booking|create booking|created booking|reservation/i.test(responseText),
+    skillWorkflowEvidence: evidence.pipeB.requiredEvidence.skillIndexContextOk === true
+      && evidence.pipeB.requiredEvidence.skillSearchOk === true
+      && evidence.pipeB.requiredEvidence.skillLearnOk === true,
     pipeBToolEvidence: evidence.pipeB.requiredEvidence.availabilityRuntimeFetchOk === true
       && evidence.pipeB.requiredEvidence.availabilityExecuteOk === true
       && evidence.pipeB.requiredEvidence.guestRuntimeFetchOk === true
@@ -318,6 +331,7 @@ ${pipeText}`;
       && evidence.pipeB.requiredEvidence.bookingRuntimeFetchFailed === false
       && evidence.pipeB.requiredEvidence.bookingCommitFailed === false,
     preflightDidNotLoopBadInputs: evidence.pipeB.requiredEvidence.preflightFailureEventCount <= 2 && !/Missing path parameter: contextId|Unsupported generated booking parameter: date|tool is sending an empty object|retry with the same bad call/i.test(after.text),
+    noHoldCommandUsed: evidence.pipeB.requiredEvidence.holdCommandEventCount === 0 && !/booking\.create\.hold|create hold/i.test(after.text),
     agentFailures,
   };
   const pass = Object.entries(evidence.checks).every(([key, value]) => key === 'agentFailures' ? Array.isArray(value) && value.length === 0 : Boolean(value));
