@@ -41,6 +41,14 @@ const PAGE_CONTEXT_LIST_MAX_ITEMS = 8;
 const APPROVED_COMMAND_IDS_MAX_ITEMS = 128;
 
 
+function createServiceBindingFetcher(binding: unknown): typeof fetch | undefined {
+  if (!binding || typeof binding !== "object") return undefined;
+  const candidate = binding as { fetch?: typeof fetch };
+  if (typeof candidate.fetch !== "function") return undefined;
+  const bindingFetch = candidate.fetch.bind(candidate);
+  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => bindingFetch(input, init)) as typeof fetch;
+}
+
 function createAgentHostSessionEnvelope(event: RequestEvent): HostSessionEnvelope | null {
   const snapshot = resolveTrustedHostSessionSnapshot(event);
   if (!snapshot.authenticated || !snapshot.organizationId) return null;
@@ -202,6 +210,7 @@ export const POST: RequestHandler = async (event) => {
   const telemetryPageContext = sanitizePageContext(body?.pageContext ?? body?.workspace?.pageContext);
   const pageContextSource = resolvePageContextSource(body, activeDocument);
   const bookingServiceBaseUrl = env.SONIK_BOOKING_API_BASE_URL ?? env.BOOKING_SERVICE_BASE_URL ?? null;
+  const bookingRuntimeFetcher = createServiceBindingFetcher(event.platform?.env?.BOOKING_SERVICE);
   const bookingRuntimeAuth = createBookingRuntimeAuthContextFromTrustedHostHeader({
     header: request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER),
     fallback: createBookingRuntimeAuthContextFromEnv(env),
@@ -288,7 +297,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, persistence: requestPersistence });
+  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

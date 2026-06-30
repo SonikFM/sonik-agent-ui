@@ -742,6 +742,7 @@
     const authenticated = hostSession?.authenticated === true || hostPageContext?.authenticated === true;
     const userId = hostSession?.userId ?? hostSession?.principalId;
     if (!authenticated || !organizationId || !userId || !hostSession) return {};
+    if (isEmbeddedHostContextExpected() && !hasSignedHostContext(hostPageContext)) return {};
     return {
       "x-sonik-agent-ui-host-context": encodeWorkspaceHostContextHeader({
         authenticated,
@@ -760,6 +761,23 @@
         },
       }),
     };
+  }
+
+  function hasSignedHostContext(context: AgentHostMergedPageContext | null): boolean {
+    return Boolean(
+      context?.hostSession
+        && context.authenticated === true
+        && context.organizationId
+        && context.signatureVersion
+        && context.issuedAt
+        && context.expiresAt
+        && context.signature,
+    );
+  }
+
+  function isWorkspaceHostContextReady(): boolean {
+    if (!isEmbeddedHostContextExpected()) return true;
+    return hasSignedHostContext(hostPageContext);
   }
 
   function encodeWorkspaceHostContextHeader(value: unknown): string {
@@ -1123,6 +1141,11 @@
   });
 
   function maybeBootstrapSessions(reason: string): void {
+    if (!isWorkspaceHostContextReady()) {
+      requestHostPageContext(`session_bootstrap_${reason}`);
+      logSessionTelemetry("session.bootstrap.waiting_for_signed_host_context", { ok: false, reason });
+      return;
+    }
     const hostPageKey = createHostPageContextKey();
     const bootstrapKey = hostPageKey ?? (isEmbeddedHostContextExpected() ? null : "standalone");
     if (!bootstrapKey) return;
@@ -1209,6 +1232,12 @@
   async function createSession({ force = false }: { force?: boolean } = {}): Promise<void> {
     if (isStreaming) {
       sessionRailError = "Stop the current stream before creating a new session.";
+      return;
+    }
+    if (!isWorkspaceHostContextReady()) {
+      sessionRailError = "Waiting for signed host context from the embedded page.";
+      requestHostPageContext("session_create_waiting_for_signed_host_context");
+      logSessionTelemetry("session.create.waiting_for_signed_host_context", { ok: false, reason: "missing_signed_host_context" });
       return;
     }
     if (sessionRailBusy && !force) return;

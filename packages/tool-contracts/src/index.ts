@@ -596,7 +596,13 @@ export function learnCommandDescriptor(catalog: CommandCatalog, commandId: strin
   if (!command) return { ok: false, error: "UNKNOWN_COMMAND", commandId };
   const learned: Record<string, unknown> = { ok: true, commandId: command.id, title: command.title, source: command.source, effect: command.effect, approval: command.approval };
   if (aspects.includes("description")) learned.description = command.description;
-  if (aspects.includes("schema")) learned.inputSchema = command.inputSchemaJson ?? command.input;
+  if (aspects.includes("schema")) {
+    learned.inputSchema = command.inputSchemaJson ?? command.input;
+    if (typeof command.metadata.inputConvention === "string") learned.inputConvention = command.metadata.inputConvention;
+    if (Array.isArray(command.metadata.hostDerivedFields)) learned.hostDerivedFields = command.metadata.hostDerivedFields;
+    if (Array.isArray(command.metadata.forbiddenFields)) learned.forbiddenFields = command.metadata.forbiddenFields;
+    if (Array.isArray(command.metadata.commonErrors)) learned.commonErrors = command.metadata.commonErrors;
+  }
   if (aspects.includes("examples")) learned.examples = command.examples;
   if (aspects.includes("policy")) learned.policy = command.policy;
   if (aspects.includes("output")) learned.output = command.output;

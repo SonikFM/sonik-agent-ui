@@ -84,12 +84,17 @@ assert.ok(search.contextLoadedCommandIds.length >= 20, "trusted host search expo
 assert.ok(search.totalMatches >= 53, "trusted host search can discover the generated source-mounted booking command catalog");
 assert.equal(search.truncated, true, "generated booking catalog remains bounded instead of flooding context");
 
-const learnedCreate = await tools.learnCommand.execute({ commandId: GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID, aspects: ["policy", "transport", "auth", "schema"] });
+const learnedCreate = await tools.learnCommand.execute({ commandId: GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID, aspects: ["policy", "transport", "auth", "schema", "examples"] });
 assert.equal(learnedCreate.ok, true, "agent-facing learnCommand resolves the create-hold descriptor");
 assert.equal(learnedCreate.contextLoaded, true, "learnCommand marks create hold as page-context loaded");
 assert.equal(learnedCreate.transport.runtimeStatus, "mounted", "learnCommand sees trusted runtime-mounted descriptor, not the global shadow descriptor");
 assert.equal(learnedCreate.effect, "write");
 assert.equal(learnedCreate.approval, "required");
+assert.equal(learnedCreate.inputSchema.type, "object", "agent-facing learnCommand returns concrete JSON Schema");
+assert.equal(learnedCreate.inputSchema.properties.contextId.format, "uuid");
+assert.equal(learnedCreate.examples.length > 0, true, "agent-facing learnCommand returns generated examples");
+assert.equal(learnedCreate.inputConvention.includes("directly"), true, "agent-facing learnCommand returns input-shape guidance");
+assert.equal(learnedCreate.forbiddenFields.includes("organizationId"), true, "agent-facing learnCommand teaches host-derived org scope");
 
 const deniedExecuteMutation = await tools.executeCommand.execute({
   commandId: GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,

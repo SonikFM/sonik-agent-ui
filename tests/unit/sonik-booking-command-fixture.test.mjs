@@ -62,6 +62,11 @@ for (const id of [
 assert.equal(commands.every((command) => command.source === "openapi"), true, "booking fixture commands remain OpenAPI metadata, not local UI tools");
 assert.equal(commands.every((command) => command.transport.runtimeStatus === "shadow"), true, "booking fixture commands are non-executable until host runtime mounting");
 assert.equal(commands.every((command) => command.metadata.generated === true && command.metadata.sourceAdapter === "openapi" && typeof command.metadata.sourceOperationId === "string"), true, "every command records generated provenance");
+const commandsWithInput = commands.filter((command) => command.input.kind !== "unknown");
+assert.equal(commandsWithInput.every((command) => command.input.kind === "json-schema"), true, "generated OpenAPI commands with inputs expose concrete JSON Schema for learnCommand");
+assert.equal(commandsWithInput.every((command) => command.inputSchemaJson?.type === "object"), true, "generated input schemas are promoted into command inputSchemaJson");
+assert.equal(commandsWithInput.every((command) => command.examples.length > 0), true, "generated commands with inputs include at least one model-usable example");
+assert.equal(commandsWithInput.every((command) => typeof command.metadata.inputConvention === "string" && command.metadata.inputConvention.includes("directly")), true, "generated commands teach the direct input convention");
 const sourcePostureCounts = commands.reduce((counts, command) => {
   counts[command.metadata.sourceRuntimeStatus] = (counts[command.metadata.sourceRuntimeStatus] ?? 0) + 1;
   return counts;
@@ -103,14 +108,28 @@ const surfaceIndex = createSurfaceCommandIndex(catalog, {
 assert.equal(surfaceIndex.totalMatches, 72, "authenticated booking-admin surface can see the generated booking catalog");
 assert.equal(surfaceIndex.commands.every((entry) => !Object.hasOwn(entry, "input") && !Object.hasOwn(entry, "inputSchemaJson")), true, "surface command index remains schema-free");
 
-const learned = learnCommandDescriptor(catalog, "booking.create.booking", ["schema", "policy", "transport", "auth", "surfaces"]);
+const learned = learnCommandDescriptor(catalog, "booking.create.booking", ["schema", "examples", "policy", "transport", "auth", "surfaces"]);
 assert.equal(learned.ok, true);
-assert.equal(learned.inputSchema.ref, "POST /api/v1/booking/bookings request");
+assert.equal(learned.inputSchema.type, "object", "learnCommand exposes concrete JSON schema, not an OpenAPI ref");
+assert.deepEqual(learned.inputSchema.required, ["contextId", "userId", "startsAt", "endsAt", "source"]);
+assert.equal(learned.inputSchema.properties.contextId.format, "uuid");
+assert.equal(learned.inputSchema.properties.source.enum.includes("admin"), true);
+assert.equal(Array.isArray(learned.examples), true);
+assert.equal(learned.examples.length > 0, true, "learnCommand exposes generated examples for model payload construction");
+assert.equal(learned.examples[0].input.contextId, "contextId_uuid");
+assert.equal(learned.examples[0].input.endsAt, "2026-07-01T13:00:00.000Z", "generated examples avoid invalid zero-length booking windows");
+assert.equal(learned.inputConvention, "pass path/query/body fields directly as command input; do not wrap JSON bodies in body unless binary or explicitly required by the schema");
+assert.ok(learned.forbiddenFields.includes("organizationId"), "learnCommand teaches host-derived org fields instead of making the model guess");
+assert.ok(learned.commonErrors.some((entry) => entry.includes("commitCommand")), "learnCommand returns workflow guidance alongside schema");
 assert.equal(learned.transport.path, "/api/v1/booking/bookings");
 assert.equal(learned.transport.runtimeStatus, "shadow");
 assert.equal(learned.auth.required, true);
 assert.equal(learned.policy.readOnly, false);
 assert.deepEqual(learned.surfaces, ["chat", "artifact"]);
+
+const learnedPathParam = learnCommandDescriptor(catalog, "booking.get.booking", ["schema", "examples"]);
+assert.equal(learnedPathParam.inputSchema.properties.bookingId.description.includes("path parameter"), true, "path parameter commands teach direct path key input");
+assert.deepEqual(learnedPathParam.examples[0].input, { bookingId: "bookingId_uuid" });
 
 const readReceipt = executeCatalogCommand(catalog, "booking.list.contexts", {}, {
   source: "agent-ui",

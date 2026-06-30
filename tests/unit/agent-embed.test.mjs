@@ -122,6 +122,28 @@ const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
     },
   },
 });
+const approvedCommandGrantList = Array.from({ length: 72 }, (_, index) => `booking.generated.${index + 1}`);
+const signedTrustedSessionWithFullCommandMetadata = sanitizeAgentHostPageContext({
+  authenticated: true,
+  organizationId: "org_signed",
+  scopes: ["agent-ui.workspace.persistence"],
+  signatureVersion: "sonik.agent_ui.host_context.hmac.v1",
+  issuedAt: "2026-06-24T22:00:00.000Z",
+  expiresAt: "2026-06-24T22:10:00.000Z",
+  signature: "abc123_signature",
+  hostSession: {
+    source: "amplify-embedded",
+    userId: "user_signed",
+    principalId: "user_signed",
+    organizationId: "org_signed",
+    authenticated: true,
+    scopes: ["agent-ui.workspace.persistence"],
+    expiresAt: "2026-06-24T22:10:00.000Z",
+    metadata: {
+      approvedCommandIds: approvedCommandGrantList,
+    },
+  },
+});
 assert.deepEqual(
   signedTrustedSessionWithMetadata?.hostSession?.metadata,
   {
@@ -130,6 +152,11 @@ assert.deepEqual(
     approvedCommandIds: ["booking.create.hold", "booking.release.hold"],
   },
   "signed host-context metadata, including command-id arrays, must survive unchanged when it is part of the HMAC payload",
+);
+assert.deepEqual(
+  signedTrustedSessionWithFullCommandMetadata?.hostSession?.metadata?.approvedCommandIds,
+  approvedCommandGrantList,
+  "full signed approvedCommandIds grants must not be truncated before the Agent UI re-encodes the HMAC-covered host context",
 );
 
 assert.deepEqual(

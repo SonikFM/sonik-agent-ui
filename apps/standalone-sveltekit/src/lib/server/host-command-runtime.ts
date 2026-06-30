@@ -1,5 +1,6 @@
 import bookingCommandArtifacts from "./generated/sonik-booking-command-artifacts.generated.json" with { type: "json" };
 import bookingRuntimeBindings from "./generated/sonik-booking-runtime-bindings.generated.json" with { type: "json" };
+import { writeAgentTelemetry } from "./agent-telemetry.ts";
 import {
   createCommandIndexContext,
   createAnonymousHostSessionEnvelope,
@@ -204,11 +205,20 @@ function executeGeneratedOpenApiReadCommand(baseUrl: string, fetcher: typeof fet
     const record = isRecord(input) ? input : {};
     const url = buildGeneratedOpenApiUrl(baseUrl, binding, record);
     const headers = createGeneratedBookingRuntimeHeaders(authContext, context.execution);
-    const response = await fetcher(url, {
-      method,
-      headers,
-      credentials: authContext.includeCredentials === true ? "include" : "same-origin",
-    });
+    const fetchStartedAt = Date.now();
+    emitGeneratedBookingRuntimeFetchTelemetry("start", { binding, commandId: context.command.id, method, url, execution: context.execution, ok: true });
+    let response: Response;
+    try {
+      response = await fetcher(url, {
+        method,
+        headers,
+        credentials: authContext.includeCredentials === true ? "include" : "same-origin",
+      });
+    } catch (error) {
+      emitGeneratedBookingRuntimeFetchTelemetry("error", { binding, commandId: context.command.id, method, url, execution: context.execution, durationMs: Date.now() - fetchStartedAt, ok: false, error });
+      throw error;
+    }
+    emitGeneratedBookingRuntimeFetchTelemetry("end", { binding, commandId: context.command.id, method, url, execution: context.execution, durationMs: Date.now() - fetchStartedAt, ok: response.ok, response });
     const contentType = response.headers.get("content-type") ?? "";
     const rawBody = contentType.includes("application/json") ? await response.json() : await response.text();
     const body = redactGeneratedBookingRuntimeBody(rawBody, authContext);
@@ -244,12 +254,21 @@ function executeGeneratedOpenApiWriteCommand(baseUrl: string, fetcher: typeof fe
       "x-sonik-idempotency-key": safeHeaderValue(request.idempotencyKey, 180),
     };
     if (request.contentType) headers["content-type"] = request.contentType;
-    const response = await fetcher(request.url, {
-      method,
-      headers,
-      credentials: authContext.includeCredentials === true ? "include" : "same-origin",
-      body: request.body ?? undefined,
-    });
+    const fetchStartedAt = Date.now();
+    emitGeneratedBookingRuntimeFetchTelemetry("start", { binding, commandId: context.command.id, method, url: request.url, execution: context.execution, ok: true });
+    let response: Response;
+    try {
+      response = await fetcher(request.url, {
+        method,
+        headers,
+        credentials: authContext.includeCredentials === true ? "include" : "same-origin",
+        body: request.body ?? undefined,
+      });
+    } catch (error) {
+      emitGeneratedBookingRuntimeFetchTelemetry("error", { binding, commandId: context.command.id, method, url: request.url, execution: context.execution, durationMs: Date.now() - fetchStartedAt, ok: false, error });
+      throw error;
+    }
+    emitGeneratedBookingRuntimeFetchTelemetry("end", { binding, commandId: context.command.id, method, url: request.url, execution: context.execution, durationMs: Date.now() - fetchStartedAt, ok: response.ok, response });
     const contentType = response.headers.get("content-type") ?? "";
     const rawBody = contentType.includes("application/json") ? await response.json() : await response.text();
     const body = redactGeneratedBookingRuntimeBody(rawBody, authContext);
@@ -389,6 +408,56 @@ function normalizeCreateHoldInput(input: Record<string, unknown>, execution: Com
   if (resourceUnitId) body.resourceUnitId = resourceUnitId;
   if (resourceCombinationId) body.resourceCombinationId = resourceCombinationId;
   return body;
+}
+
+type GeneratedBookingRuntimeFetchTelemetryInput = {
+  binding: GeneratedBookingRuntimeBinding;
+  commandId: string;
+  method: string;
+  url: string;
+  execution: CommandExecutionContext;
+  durationMs?: number;
+  ok: boolean;
+  response?: Response;
+  error?: unknown;
+};
+
+function emitGeneratedBookingRuntimeFetchTelemetry(phase: "start" | "end" | "error", input: GeneratedBookingRuntimeFetchTelemetryInput): void {
+  const target = safeRuntimeFetchTarget(input.url);
+  const responseRequestId = input.response?.headers.get("x-sonik-request-id") ?? undefined;
+  const responseTraceId = input.response?.headers.get("x-sonik-trace-id") ?? undefined;
+  const responseTraceparent = input.response?.headers.get("traceparent") ?? undefined;
+  const errorMessage = input.error instanceof Error ? input.error.message : input.error ? String(input.error) : undefined;
+  void writeAgentTelemetry({
+    source: "server",
+    event: `booking.runtime.fetch.${phase}`,
+    ok: input.ok,
+    toolCallId: input.commandId,
+    requestId: input.execution.requestId,
+    sessionId: input.execution.sessionId ?? undefined,
+    runtimeProvider: GENERATED_BOOKING_RUNTIME_PROVIDER,
+    hostSessionSource: input.execution.hostSessionSource,
+    commandFamily: input.binding.familyId,
+    commandSource: "openapi",
+    commandEffect: input.binding.effect,
+    runtimeStatus: input.binding.status,
+    durationMs: input.durationMs,
+    error: errorMessage,
+    payload: {
+      commandId: input.commandId,
+      operationId: input.binding.operationId,
+      method: input.method,
+      path: input.binding.path,
+      targetOrigin: target.origin,
+      targetHost: target.host,
+      url: redactUrlForReceipt(input.url),
+      status: input.response?.status,
+      responseOk: input.response?.ok,
+      responseRequestId,
+      responseTraceId,
+      responseTraceparent,
+    },
+  }).catch(() => undefined);
 }
 
 function createGeneratedBookingWriteReceipt(commandId: string, execution: CommandExecutionContext, request: GeneratedBookingWriteRequest, responseBody: unknown): Record<string, unknown> {
@@ -608,6 +677,15 @@ function normalizeBaseUrl(value: string | null | undefined): string | null {
 
 function readProcessEnv(name: string): string | undefined {
   return typeof process !== "undefined" ? process.env?.[name] : undefined;
+}
+
+function safeRuntimeFetchTarget(url: string): { origin: string; host: string } {
+  try {
+    const parsed = new URL(url);
+    return { origin: parsed.origin, host: parsed.host };
+  } catch {
+    return { origin: "unknown", host: "unknown" };
+  }
 }
 
 function redactUrlForReceipt(url: string): string {

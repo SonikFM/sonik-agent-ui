@@ -114,6 +114,8 @@ export type AgentEmbedController = {
 
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
+const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
+const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds"]);
 const ALLOWED_CONTEXT_KEYS = new Set([
   "route",
   "surface",
@@ -546,20 +548,31 @@ type SanitizedHostSessionMetadataValue = string | number | boolean | string[];
 function sanitizeHostSessionMetadata(value: unknown): Record<string, SanitizedHostSessionMetadataValue> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const entries: Array<[string, SanitizedHostSessionMetadataValue]> = [];
-  for (const [rawKey, rawValue] of Object.entries(value as Record<string, unknown>).slice(0, MAX_LIST_ITEMS)) {
+  let publicMetadataCount = 0;
+  for (const [rawKey, rawValue] of Object.entries(value as Record<string, unknown>)) {
     const key = cleanText(rawKey);
     if (!key) continue;
+    const isSignedCommandMetadata = SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS.has(key);
+    if (!isSignedCommandMetadata && publicMetadataCount >= MAX_LIST_ITEMS) continue;
     if (typeof rawValue === "boolean" || typeof rawValue === "number") {
       entries.push([key, rawValue]);
+      if (!isSignedCommandMetadata) publicMetadataCount += 1;
       continue;
     }
     if (Array.isArray(rawValue)) {
-      const values = rawValue.map(cleanText).filter((entry): entry is string => Boolean(entry)).slice(0, MAX_LIST_ITEMS);
-      if (values.length > 0) entries.push([key, values]);
+      const maxItems = isSignedCommandMetadata ? MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS : MAX_LIST_ITEMS;
+      const values = rawValue.map(cleanText).filter((entry): entry is string => Boolean(entry)).slice(0, maxItems);
+      if (values.length > 0) {
+        entries.push([key, values]);
+        if (!isSignedCommandMetadata) publicMetadataCount += 1;
+      }
       continue;
     }
     const text = cleanText(rawValue);
-    if (text) entries.push([key, text]);
+    if (text) {
+      entries.push([key, text]);
+      if (!isSignedCommandMetadata) publicMetadataCount += 1;
+    }
   }
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }

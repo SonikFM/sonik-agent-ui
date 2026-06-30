@@ -13,6 +13,7 @@ export type { AgentTelemetryEvent, AgentTelemetrySource } from "@sonik-agent-ui/
 
 export async function writeAgentTelemetry(event: AgentTelemetryEvent): Promise<void> {
   const payload = sanitizeAgentTelemetry(event);
+  emitTelemetryToWorkerLogs(payload);
   const logPath = resolveTelemetryLogPath();
   await appendTelemetryJsonl(logPath, payload);
   try {
@@ -27,6 +28,21 @@ export async function writeAgentTelemetry(event: AgentTelemetryEvent): Promise<v
     });
   } catch {
     // Intentional fail-safe: workspace telemetry is only a bounded mirror; JSONL above remains the source of evidence.
+  }
+}
+
+function emitTelemetryToWorkerLogs(payload: AgentTelemetryEvent): void {
+  try {
+    console.info(
+      "sonik_agent_ui_telemetry",
+      JSON.stringify({
+        schemaVersion: "agent-ui-telemetry.v1",
+        emittedAt: new Date().toISOString(),
+        payload,
+      }),
+    );
+  } catch {
+    // Telemetry must never break agent generation or tool execution.
   }
 }
 
