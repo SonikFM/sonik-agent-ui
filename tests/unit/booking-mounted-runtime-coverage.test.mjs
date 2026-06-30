@@ -12,6 +12,7 @@ const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "user_runtime_coverage";
 const SESSION_ID = "session_runtime_coverage";
 const TOKEN = "runtime-coverage-token";
+const GUEST_FROM_CREATE_GUEST_SENTINEL = "GUEST_USER_ID_FROM_booking.create.guest";
 const ids = {
   contextId: "22222222-2222-4222-8222-222222222222",
   bookingId: "33333333-3333-4333-8333-333333333333",
@@ -76,6 +77,13 @@ for (const shadowCommandId of runtimeBindings.summary.shadowCommandIds) {
   assert.equal(bundle.catalog.commands.some((command) => command.id === shadowCommandId), false, `${shadowCommandId} remains absent from executable trusted host catalog`);
 }
 
+const createBookingCommand = bundle.catalog.commands.find((entry) => entry.id === "booking.create.booking");
+assert.equal(
+  createBookingCommand?.examples?.[0]?.input?.userId,
+  GUEST_FROM_CREATE_GUEST_SENTINEL,
+  "booking.create.booking learned example intentionally teaches agents to use the guest id returned by booking.create.guest",
+);
+
 const results = [];
 for (const binding of runtimeBindings.bindings) {
   const command = bundle.catalog.commands.find((entry) => entry.id === binding.commandId);
@@ -138,7 +146,7 @@ function sampleInputForBinding(binding, command) {
 }
 
 function materializeExampleInput(value) {
-  if (value === "GUEST_USER_ID_FROM_booking.create.guest") return USER_ID;
+  if (value === GUEST_FROM_CREATE_GUEST_SENTINEL) return USER_ID;
   if (Array.isArray(value)) return value.map((entry) => materializeExampleInput(entry));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, materializeExampleInput(entry)]));
