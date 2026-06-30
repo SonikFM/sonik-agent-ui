@@ -938,7 +938,9 @@ const generatedInvalidContextReceipt = await executeHostCatalogCommand({
   execution: { ...generatedCredentialedLiveBundle.executionContext, requestId: "req_generated_contexts_invalid" },
 });
 assert.equal(generatedInvalidContextReceipt.ok, false, "generated booking runtime should reject undeclared enum-like query values");
-assert.match(generatedInvalidContextReceipt.summary.error, /Unsupported generated booking query value/);
+assert.equal(generatedInvalidContextReceipt.summary.kind, "command_input_preflight_failed", "invalid enum-like query values are rejected by schema preflight before runtime fetch");
+assert.equal(generatedInvalidContextReceipt.policy.reasons.includes("invalid_input_fields"), true);
+assert.deepEqual(generatedInvalidContextReceipt.summary.invalidFields, [{ path: "kind", message: "Expected one of event, venue_schedule, resource" }]);
 const generatedTemplateReceipt = await executeHostCatalogCommand({
   catalog: generatedLiveBundle.catalog,
   commandId: GENERATED_BOOKING_TEMPLATE_COMMAND_ID,

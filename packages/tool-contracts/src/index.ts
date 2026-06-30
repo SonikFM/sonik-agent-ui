@@ -379,6 +379,40 @@ export type CommandCatalog = z.infer<typeof commandCatalogSchema>;
 export type CommandIndexSummary = z.infer<typeof commandIndexSummarySchema>;
 export type CommandIndex = z.infer<typeof commandIndexSchema>;
 
+export const commandWorkflowRecipeStepSchema = z.object({
+  commandId: z.string().min(1),
+  action: commandActionSchema,
+  why: z.string().min(1),
+  requiredBefore: z.array(z.string()).default([]),
+});
+
+export const commandWorkflowRecipeSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  familyId: z.string().min(1),
+  intentAliases: z.array(z.string().min(1)).default([]),
+  canonicalRegressionPrompt: z.string().min(1),
+  commandSequence: z.array(z.string().min(1)).min(1),
+  steps: z.array(commandWorkflowRecipeStepSchema).min(1),
+  forbiddenUnlessExplicit: z.array(z.string().min(1)).default([]),
+  actorFields: z.array(z.string().min(1)).default([]),
+  guestFields: z.array(z.string().min(1)).default([]),
+  trustedActorRules: z.array(z.string().min(1)).default([]),
+  pageContextRequirements: z.array(z.string().min(1)).default([]),
+  successEvidence: z.array(z.string().min(1)).default([]),
+  negativeTranscriptRegression: z.object({
+    prompt: z.string().min(1),
+    failIfCommandIds: z.array(z.string().min(1)).default([]),
+    failIfActorFieldsMutated: z.array(z.string().min(1)).default([]),
+    failIfRationalesContain: z.array(z.string().min(1)).default([]),
+    expectedCommandPath: z.array(z.string().min(1)).min(1),
+  }),
+});
+
+export type CommandWorkflowRecipeStep = z.infer<typeof commandWorkflowRecipeStepSchema>;
+export type CommandWorkflowRecipe = z.infer<typeof commandWorkflowRecipeSchema>;
+
 export type CommandExecutionContext = {
   action?: CommandAction;
   source?: CommandExecutionSource;
