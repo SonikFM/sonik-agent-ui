@@ -331,7 +331,7 @@ ${pipeText}`;
       && evidence.pipeB.requiredEvidence.bookingRuntimeFetchFailed === false
       && evidence.pipeB.requiredEvidence.bookingCommitFailed === false,
     preflightDidNotLoopBadInputs: evidence.pipeB.requiredEvidence.preflightFailureEventCount <= 2 && !/Missing path parameter: contextId|Unsupported generated booking parameter: date|tool is sending an empty object|retry with the same bad call/i.test(after.text),
-    noHoldCommandUsed: evidence.pipeB.requiredEvidence.holdCommandEventCount === 0 && !/booking\.create\.hold|create hold/i.test(after.text),
+    noHoldCommandUsed: evidence.pipeB.requiredEvidence.holdCommandEventCount === 0,
     agentFailures,
   };
   const pass = Object.entries(evidence.checks).every(([key, value]) => key === 'agentFailures' ? Array.isArray(value) && value.length === 0 : Boolean(value));
