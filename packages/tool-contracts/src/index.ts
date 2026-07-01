@@ -1520,3 +1520,240 @@ function tokenizeCommandText(value: string): string[] {
 function commandReceiptRequestId(commandId: string, startedAt: number): string {
   return `cmd_${commandId.replace(/[^a-z0-9]+/gi, "_")}_${startedAt}`;
 }
+
+export const intakeManifestTypeSchema = z.enum(["venue_schedule", "event", "amplify_campaign_template"]);
+export const intakeManifestStatusSchema = z.enum(["draft", "validated", "exported"]);
+
+const intakeManifestSourceSchema = z.object({
+  createdBy: z.string().min(1).optional(),
+  created_by: z.string().min(1).optional(),
+  skill: z.string().min(1).optional(),
+  sourceMaterials: z.array(z.unknown()).optional(),
+  source_materials: z.array(z.unknown()).optional(),
+}).passthrough().default({});
+
+export const intakeManifestSchema = z.object({
+  manifestType: intakeManifestTypeSchema,
+  status: intakeManifestStatusSchema.default("draft"),
+  source: intakeManifestSourceSchema,
+}).passthrough();
+
+export type IntakeManifestType = z.infer<typeof intakeManifestTypeSchema>;
+export type IntakeManifestStatus = z.infer<typeof intakeManifestStatusSchema>;
+export type IntakeManifest = z.infer<typeof intakeManifestSchema>;
+
+export type IntakeManifestIssue = {
+  code: string;
+  message: string;
+  path: string;
+  severity: "blocking" | "warning";
+};
+
+export type IntakeManifestCommandPreview = {
+  commandId: string;
+  familyId: string;
+  effect: "write";
+  mode: "preview_only";
+  approval: "required";
+  reason: string;
+};
+
+export type IntakeManifestValidationResult = {
+  ok: boolean;
+  manifestType?: IntakeManifestType;
+  status: "valid" | "invalid";
+  issues: IntakeManifestIssue[];
+  blockingItems: IntakeManifestIssue[];
+  warnings: IntakeManifestIssue[];
+  commandPreview: IntakeManifestCommandPreview[];
+};
+
+export type IntakeManifestExportPayload = {
+  version: "sonik-agent-ui.intake-manifest-export.v1";
+  exportedAt: string;
+  manifest: IntakeManifest;
+  validation: IntakeManifestValidationResult;
+  commandPreview: IntakeManifestCommandPreview[];
+  execution: "none";
+  approval: "not_granted";
+};
+
+const manifestRequiredFields: Record<IntakeManifestType, Array<{ path: string; message: string }>> = {
+  venue_schedule: [
+    { path: "/intakeMode", message: "Venue schedule manifests require intakeMode." },
+    { path: "/inventory/coreDescription", message: "Venue schedule manifests require core inventory." },
+    { path: "/inventory/confirmationMode", message: "Venue schedule manifests require confirmation mode or explicit unknown." },
+  ],
+  event: [
+    { path: "/event/title", message: "Event manifests require an event title." },
+    { path: "/event/startsAt", message: "Event manifests require an event start date/time." },
+    { path: "/inventory/coreDescription", message: "Event manifests require ticket/reservation/inventory description." },
+  ],
+  amplify_campaign_template: [
+    { path: "/campaign/goal", message: "Campaign template manifests require a campaign goal." },
+    { path: "/audience/description", message: "Campaign template manifests require an audience description." },
+    { path: "/channels", message: "Campaign template manifests require channels or explicit unknown." },
+  ],
+};
+
+type IntakeManifestFieldRule = {
+  path: string;
+  code: string;
+  message: string;
+  accepts: (value: unknown) => boolean;
+};
+
+const manifestFieldRules: Record<IntakeManifestType, IntakeManifestFieldRule[]> = {
+  venue_schedule: [
+    { path: "/intakeMode", code: "invalid_intake_mode", message: "Venue schedule intakeMode must be venue_schedule or hybrid.", accepts: (value) => value === "venue_schedule" || value === "hybrid" },
+    { path: "/inventory/coreDescription", code: "invalid_core_inventory", message: "Venue schedule core inventory must be a non-empty text description.", accepts: isNonEmptyString },
+    { path: "/inventory/confirmationMode", code: "invalid_confirmation_mode", message: "Venue schedule confirmation mode must be a non-empty string or explicit unknown.", accepts: isNonEmptyString },
+  ],
+  event: [
+    { path: "/event/title", code: "invalid_event_title", message: "Event title must be a non-empty string.", accepts: isNonEmptyString },
+    { path: "/event/startsAt", code: "invalid_event_start", message: "Event start must be a parseable ISO-like date/time string.", accepts: isDateTimeString },
+    { path: "/inventory/coreDescription", code: "invalid_event_inventory", message: "Event inventory must be a non-empty text description.", accepts: isNonEmptyString },
+  ],
+  amplify_campaign_template: [
+    { path: "/campaign/goal", code: "invalid_campaign_goal", message: "Campaign goal must be a non-empty string.", accepts: isNonEmptyString },
+    { path: "/audience/description", code: "invalid_audience_description", message: "Audience description must be a non-empty string.", accepts: isNonEmptyString },
+    { path: "/channels", code: "invalid_campaign_channels", message: "Campaign channels must be a non-empty array or explicit unknown.", accepts: isNonEmptyArrayOrUnknownString },
+  ],
+};
+
+const manifestCommandPreview: Record<IntakeManifestType, IntakeManifestCommandPreview[]> = {
+  venue_schedule: [
+    {
+      commandId: "booking.create.context",
+      familyId: "booking-contexts",
+      effect: "write",
+      mode: "preview_only",
+      approval: "required",
+      reason: "A validated venue schedule manifest can later map to trusted booking context creation commands.",
+    },
+  ],
+  event: [
+    {
+      commandId: "booking.create.event",
+      familyId: "booking-events",
+      effect: "write",
+      mode: "preview_only",
+      approval: "required",
+      reason: "A validated event manifest can later map to trusted event/context/ticket commands.",
+    },
+  ],
+  amplify_campaign_template: [
+    {
+      commandId: "amplify.create.campaign.template",
+      familyId: "amplify-campaigns",
+      effect: "write",
+      mode: "preview_only",
+      approval: "required",
+      reason: "A validated campaign template manifest can later map to trusted Amplify campaign template commands.",
+    },
+  ],
+};
+
+export function validateIntakeManifest(input: unknown): IntakeManifestValidationResult {
+  const parsed = intakeManifestSchema.safeParse(input);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue): IntakeManifestIssue => ({
+      code: issue.code,
+      message: issue.message,
+      path: `/${issue.path.join("/")}`,
+      severity: "blocking",
+    }));
+    return { ok: false, status: "invalid", issues, blockingItems: issues, warnings: [], commandPreview: [] };
+  }
+
+  const manifest = parsed.data;
+  const issues: IntakeManifestIssue[] = [];
+  for (const required of manifestRequiredFields[manifest.manifestType]) {
+    const value = readJsonPointer(manifest, required.path);
+    if (isMissingManifestValue(value)) {
+      issues.push({ code: "missing_required_field", message: required.message, path: required.path, severity: "blocking" });
+    }
+  }
+  for (const rule of manifestFieldRules[manifest.manifestType]) {
+    const value = readJsonPointer(manifest, rule.path);
+    if (!isMissingManifestValue(value) && !rule.accepts(value)) {
+      issues.push({ code: rule.code, message: rule.message, path: rule.path, severity: "blocking" });
+    }
+  }
+
+  const policyWarnings = collectPolicyWarnings(manifest);
+  const blockingItems = issues.filter((issue) => issue.severity === "blocking");
+  const warnings = [...issues.filter((issue) => issue.severity === "warning"), ...policyWarnings];
+  return {
+    ok: blockingItems.length === 0,
+    manifestType: manifest.manifestType,
+    status: blockingItems.length === 0 ? "valid" : "invalid",
+    issues: [...blockingItems, ...warnings],
+    blockingItems,
+    warnings,
+    commandPreview: manifestCommandPreview[manifest.manifestType].map((preview) => ({ ...preview })),
+  };
+}
+
+export function exportIntakeManifestPayload(input: unknown, options: { exportedAt?: string | Date } = {}): IntakeManifestExportPayload {
+  const manifest = intakeManifestSchema.parse(input);
+  const validation = validateIntakeManifest(manifest);
+  if (!validation.ok) {
+    const message = validation.blockingItems.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
+    throw new Error(`Cannot export invalid intake manifest: ${message || "manifest validation failed"}`);
+  }
+  return {
+    version: "sonik-agent-ui.intake-manifest-export.v1",
+    exportedAt: options.exportedAt instanceof Date ? options.exportedAt.toISOString() : options.exportedAt ?? new Date().toISOString(),
+    manifest: { ...manifest, status: "exported" },
+    validation,
+    commandPreview: validation.commandPreview,
+    execution: "none",
+    approval: "not_granted",
+  };
+}
+
+function readJsonPointer(input: unknown, pointer: string): unknown {
+  if (!pointer.startsWith("/")) return undefined;
+  return pointer.slice(1).split("/").reduce((value: unknown, segment) => {
+    if (value === undefined || value === null || typeof value !== "object") return undefined;
+    const key = decodeJsonPointerSegment(segment);
+    return (value as Record<string, unknown>)[key];
+  }, input);
+}
+
+function isMissingManifestValue(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string") return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isDateTimeString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0 && !Number.isNaN(Date.parse(value));
+}
+
+function isNonEmptyArrayOrUnknownString(value: unknown): boolean {
+  return Array.isArray(value) ? value.length > 0 : value === "unknown";
+}
+
+function collectPolicyWarnings(manifest: IntakeManifest): IntakeManifestIssue[] {
+  const warnings: IntakeManifestIssue[] = [];
+  const policyPaths = ["/pricing", "/payment", "/policies", "/eligibility", "/compliance"];
+  for (const path of policyPaths) {
+    const value = readJsonPointer(manifest, path);
+    if (value && typeof value === "object") {
+      warnings.push({
+        code: "review_policy_field",
+        message: `${path} contains operational policy fields and must be human-reviewed before command execution.`,
+        path,
+        severity: "warning",
+      });
+    }
+  }
+  return warnings;
+}
