@@ -95,8 +95,8 @@
               What are we working on?
             </h2>
             <p class="text-muted-foreground">
-              Ask a question, create a JSON-render artifact, or update the active document.
-              The chat stays conversational unless you ask for a canvas artifact.
+              Ask a question, launch a guided workflow, create a JSON-render artifact,
+              or update the active document.
             </p>
           </div>
 

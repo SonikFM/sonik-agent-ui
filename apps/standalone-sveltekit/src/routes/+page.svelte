@@ -40,6 +40,7 @@
     type AgentEmbedRailMode,
   } from "@sonik-agent-ui/agent-embed";
   import { registry } from "$lib/render/registry";
+  import { createWorkflowSuggestions } from "$lib/agent-workflows/suggestions";
 
   interface ActiveDocumentSnapshot {
     id: string;
@@ -1603,27 +1604,10 @@
   }
 
   // =============================================================================
-  // Suggestions
+  // Workflow Suggestions
   // =============================================================================
 
-  const SUGGESTIONS = [
-    {
-      label: "Weather comparison",
-      prompt: "Compare the weather in New York, London, and Tokyo",
-    },
-    {
-      label: "GitHub repo stats",
-      prompt: "Show me stats for the vercel/next.js and vercel/ai GitHub repos",
-    },
-    {
-      label: "Crypto dashboard",
-      prompt: "Build a crypto dashboard for Bitcoin, Ethereum, and Solana",
-    },
-    {
-      label: "Hacker News top stories",
-      prompt: "Show me the top 15 Hacker News stories right now",
-    },
-  ];
+  const workflowSuggestions = $derived(createWorkflowSuggestions(createPageContextSnapshot()));
 
   // =============================================================================
   // Tool Labels
@@ -1789,7 +1773,7 @@
       messages={conversation.messages as AgentChatMessage[]}
       status={conversation.status}
       error={conversation.error}
-      suggestions={SUGGESTIONS}
+      suggestions={workflowSuggestions}
       toolLabels={TOOL_LABELS}
       activity={agentActivity}
       bind:input
