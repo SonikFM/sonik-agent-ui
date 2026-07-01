@@ -10,6 +10,7 @@ import {
   type SkillIndex,
   type SkillLearnAspect,
 } from "@sonik-agent-ui/tool-contracts";
+import { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE, BOOKING_CONTEXT_INTAKE_WORKFLOW } from "./booking-workflows/context-intake.ts";
 import { BOOKING_RESERVATION_CREATE_RECIPE } from "./booking-workflows/reservation-create.ts";
 
 export type RuntimeSkillRegistryContext = AgentPageContext & {
@@ -20,7 +21,59 @@ export type RuntimeSkillRegistryContext = AgentPageContext & {
 
 const generatedAt = "2026-06-30T00:00:00.000Z";
 
+export const RUNTIME_SKILL_FAMILIES = [
+  "booking-context-intake",
+  "booking-reservation",
+] as const;
+
 const catalog = createSkillCatalog("sonik-agent-ui-runtime", [
+  {
+    id: BOOKING_CONTEXT_INTAKE_WORKFLOW.id,
+    title: BOOKING_CONTEXT_INTAKE_WORKFLOW.title,
+    description: BOOKING_CONTEXT_INTAKE_WORKFLOW.description,
+    familyId: "booking-context-intake",
+    loadPolicy: { mode: "surface-eager", priority: 95, profile: "booking" },
+    contextHints: {
+      routes: [],
+      surfaces: ["booking-context-intake"],
+      pageTypes: ["booking-context", "venue-schedule", "event-setup"],
+      artifactTypes: ["booking-context-intake", "booking-context-manifest"],
+      skillFamilies: ["booking-context-intake", "booking-ops"],
+      commandFamilies: ["booking-templates"],
+      requiredScopes: ["booking:read"],
+    },
+    intentAliases: [...BOOKING_CONTEXT_INTAKE_WORKFLOW.intentAliases],
+    commandSequence: [],
+    requiredCommands: [],
+    forbiddenUnlessExplicit: [...BOOKING_CONTEXT_INTAKE_WORKFLOW.forbiddenUnlessExplicit],
+    examples: [
+      {
+        title: "Create a booking context intake artifact from existing source copy",
+        prompt: "Create a booking context intake for this country club tee-time schedule and ask me only for missing operational rules.",
+        expectedCommandPath: [],
+      },
+    ],
+    negativeExamples: [
+      {
+        title: "Do not treat intake as a booking mutation",
+        prompt: "Create a booking context intake and go ahead and create the booking too.",
+        failIfCommandIds: ["booking.create.booking", "booking.create.hold"],
+        expectedCommandPath: [],
+      },
+    ],
+    metadata: {
+      workflowSteps: [...BOOKING_CONTEXT_INTAKE_WORKFLOW.workflowSteps],
+      questionPolicy: BOOKING_CONTEXT_INTAKE_WORKFLOW.questionPolicy,
+      requiredTools: [...BOOKING_CONTEXT_INTAKE_WORKFLOW.requiredTools],
+      optionalTools: [...BOOKING_CONTEXT_INTAKE_WORKFLOW.optionalTools],
+      interactiveSurfaceTemplate: BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE,
+      successEvidence: [...BOOKING_CONTEXT_INTAKE_WORKFLOW.successEvidence],
+      telemetryEvents: [...BOOKING_CONTEXT_INTAKE_WORKFLOW.telemetryEvents],
+      negativeRules: [...BOOKING_CONTEXT_INTAKE_WORKFLOW.negativeRules],
+      execution: "none",
+      approval: "not_granted",
+    },
+  },
   {
     id: "booking.reservation.create",
     title: BOOKING_RESERVATION_CREATE_RECIPE.title,

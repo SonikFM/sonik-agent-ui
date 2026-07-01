@@ -31,6 +31,21 @@ export function createInteractiveSurfaceJsonRenderSpec(surfaceInput: unknown): J
     },
   };
 
+  if (surface.state.manifest && typeof surface.state.manifest === "object") {
+    const mainElement = elements.main;
+    if (!mainElement) throw new Error("Interactive surface renderer invariant failed: missing main element.");
+    mainElement.children = [...(mainElement.children ?? []), "manifest-preview"];
+    elements["manifest-preview"] = {
+      type: "ManifestPreview",
+      props: {
+        title: "Manifest draft",
+        manifest: { $bindState: "/manifest" },
+        emptyMessage: "No manifest draft yet.",
+      },
+      children: [],
+    };
+  }
+
   const draftAnswers: Record<string, unknown> = {};
   const questionStates: Record<string, unknown> = {};
   for (const [index, question] of surface.questions.entries()) {
