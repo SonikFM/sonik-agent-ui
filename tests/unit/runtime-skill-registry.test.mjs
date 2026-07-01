@@ -41,13 +41,59 @@ const intakePageContext = {
   scopes: ["booking:read"],
 };
 
+const eventPageContext = {
+  route: "/booking/events/new",
+  surface: "event-console",
+  pageType: "event-setup",
+  activeEntity: { type: "event-context", id: CONTEXT_ID, label: "Member Dinner" },
+  commandFamilies: ["booking-events", "booking-templates"],
+  skillFamilies: ["booking-event"],
+  visibleActions: ["create-event-manifest"],
+  authenticated: true,
+  organizationId,
+  scopes: ["booking:read"],
+};
+
+const campaignPageContext = {
+  route: "/amplify/campaigns/new",
+  surface: "amplify-campaign-wizard",
+  pageType: "campaign-wizard",
+  activeEntity: { type: "campaign-template", id: "campaign_template_draft", label: "VIP Table Offer" },
+  commandFamilies: ["amplify-campaigns", "campaign-templates"],
+  skillFamilies: ["amplify-campaign-template"],
+  visibleActions: ["create-campaign-template"],
+  authenticated: true,
+  organizationId,
+  scopes: ["amplify:read"],
+};
+
 const catalog = getRuntimeSkillCatalog();
 assert.equal(catalog.version, "sonik-agent-ui.skill-catalog.v1");
 assert.equal(catalog.provider, "sonik-agent-ui-runtime");
-assert.equal(catalog.skills.length, 2, "runtime registry includes reservation execution guidance plus booking context intake guidance");
-assert.deepEqual([...RUNTIME_SKILL_FAMILIES].sort(), ["booking-context-intake", "booking-reservation"]);
+assert.equal(catalog.skills.length, 4, "runtime registry includes reservation execution guidance plus all Phase 4 intake skills");
+assert.deepEqual([...RUNTIME_SKILL_FAMILIES].sort(), ["amplify-campaign-template", "booking-context-intake", "booking-event", "booking-reservation"]);
 for (const skill of catalog.skills) {
   assert.ok(RUNTIME_SKILL_FAMILIES.includes(skill.familyId), `${skill.id} must use a centralized runtime skill family`);
+}
+
+function assertNonExecutingIntakeSkill(skill, expected) {
+  assert.ok(skill, `${expected.id} is registered`);
+  assert.equal(skill.familyId, expected.familyId);
+  assert.equal(skill.loadPolicy.mode, "surface-eager");
+  assert.deepEqual(skill.commandSequence, [], `${expected.id} must not execute commands`);
+  assert.deepEqual(skill.requiredCommands, [], `${expected.id} must not require executable commands`);
+  assert.ok(skill.contextHints.requiredScopes.includes(expected.requiredScope), `${expected.id} keeps its read scope visible`);
+  for (const forbidden of expected.forbiddenCommands) {
+    assert.ok(skill.forbiddenUnlessExplicit.includes(forbidden), `${expected.id} forbids ${forbidden} unless explicitly approved later`);
+  }
+  assert.equal(skill.metadata.execution, "none");
+  assert.equal(skill.metadata.approval, "not_granted");
+  assert.ok(skill.metadata.requiredTools.includes("ask_user_question"));
+  assert.ok(skill.metadata.requiredTools.includes("create_or_update_intake_artifact"));
+  assert.ok(skill.metadata.optionalTools.includes("manifest_validate"), `${expected.id} exposes Phase 5 validation as optional only`);
+  assert.ok(skill.metadata.telemetryEvents.includes("tool.askUserQuestion"));
+  assert.ok(skill.metadata.telemetryEvents.includes("artifact.intake.created"));
+  assert.ok(skill.metadata.negativeRules.some((rule) => /Do not call executeCommand or commitCommand/i.test(rule)));
 }
 
 const reservationSkill = catalog.skills.find((entry) => entry.id === "booking.reservation.create");
@@ -61,21 +107,28 @@ assert.ok(reservationSkill.contextHints.requiredScopes.includes("booking:write")
 assert.ok(reservationSkill.metadata.successEvidence.some((line) => /Pipe B telemetry/i.test(line)), "skill requires telemetry proof");
 
 const intakeSkill = catalog.skills.find((entry) => entry.id === "booking.context.intake");
-assert.ok(intakeSkill, "booking context intake skill is registered");
-assert.equal(intakeSkill.familyId, "booking-context-intake");
-assert.equal(intakeSkill.loadPolicy.mode, "surface-eager");
-assert.deepEqual(intakeSkill.commandSequence, [], "intake skill must not execute booking commands");
-assert.deepEqual(intakeSkill.requiredCommands, [], "intake skill must not require executable commands");
-assert.ok(intakeSkill.contextHints.requiredScopes.includes("booking:read"), "intake needs only read context at startup");
-assert.ok(intakeSkill.forbiddenUnlessExplicit.includes("booking.create.booking"), "booking writes stay forbidden unless explicitly confirmed outside intake");
-assert.equal(intakeSkill.metadata.execution, "none");
-assert.equal(intakeSkill.metadata.approval, "not_granted");
-assert.ok(intakeSkill.metadata.requiredTools.includes("ask_user_question"));
-assert.ok(intakeSkill.metadata.requiredTools.includes("create_or_update_intake_artifact"));
-assert.ok(intakeSkill.metadata.optionalTools.includes("manifest_validate"), "Phase 5 validation is discoverable but optional here");
-assert.ok(intakeSkill.metadata.telemetryEvents.includes("tool.askUserQuestion"));
-assert.ok(intakeSkill.metadata.telemetryEvents.includes("artifact.intake.created"));
-assert.ok(intakeSkill.metadata.negativeRules.some((rule) => /Do not call executeCommand or commitCommand/i.test(rule)));
+assertNonExecutingIntakeSkill(intakeSkill, {
+  id: "booking.context.intake",
+  familyId: "booking-context-intake",
+  requiredScope: "booking:read",
+  forbiddenCommands: ["booking.create.booking", "booking.create.hold"],
+});
+
+const eventSkill = catalog.skills.find((entry) => entry.id === "booking.event.create");
+assertNonExecutingIntakeSkill(eventSkill, {
+  id: "booking.event.create",
+  familyId: "booking-event",
+  requiredScope: "booking:read",
+  forbiddenCommands: ["booking.create.event", "booking.create.ticket"],
+});
+
+const campaignSkill = catalog.skills.find((entry) => entry.id === "amplify.campaign.template.create");
+assertNonExecutingIntakeSkill(campaignSkill, {
+  id: "amplify.campaign.template.create",
+  familyId: "amplify-campaign-template",
+  requiredScope: "amplify:read",
+  forbiddenCommands: ["amplify.create.campaign", "amplify.send.campaign"],
+});
 
 const noAuthIndex = createRuntimeSkillIndex({ ...pageContext, authenticated: false, organizationId: null, scopes: [] });
 assert.equal(noAuthIndex.skills.length, 0, "runtime skills are hidden without trusted booking scopes");
@@ -92,6 +145,16 @@ const intakeIndex = createRuntimeSkillIndex(intakePageContext);
 assert.equal(intakeIndex.skills[0].id, "booking.context.intake", "booking context pages surface-eager-load the intake workflow skill");
 assert.equal(intakeIndex.skills[0].commandSequence.length, 0, "loaded intake summary remains non-executable");
 
+const eventIndex = createRuntimeSkillIndex(eventPageContext);
+assert.equal(eventIndex.skills[0].id, "booking.event.create", "event setup pages surface-eager-load the event workflow skill first");
+assert.equal(eventIndex.skills[0].commandSequence.length, 0, "loaded event summary remains non-executable");
+assert.equal(eventIndex.skills.some((entry) => entry.id === "booking.context.intake"), false, "event setup pages must not co-surface generic booking context intake");
+
+const campaignIndex = createRuntimeSkillIndex(campaignPageContext);
+assert.equal(campaignIndex.skills[0].id, "amplify.campaign.template.create", "Amplify campaign wizard pages surface-eager-load the campaign template workflow skill");
+assert.equal(campaignIndex.skills[0].commandSequence.length, 0, "loaded campaign template summary remains non-executable");
+assert.equal(campaignIndex.skills.some((entry) => entry.id === "booking.context.intake"), false, "Amplify campaign pages must not co-surface booking context intake");
+
 const summary = createRuntimeSkillIndexSummary(pageContext);
 assert.match(summary, /booking\.reservation\.create/);
 assert.match(summary, /Skills teach tool usage; they do not grant approval or authorization/);
@@ -99,6 +162,14 @@ assert.match(summary, /Skills teach tool usage; they do not grant approval or au
 const intakeSummary = createRuntimeSkillIndexSummary(intakePageContext);
 assert.match(intakeSummary, /booking\.context\.intake/);
 assert.match(intakeSummary, /commands=none/);
+
+const eventSummary = createRuntimeSkillIndexSummary(eventPageContext);
+assert.match(eventSummary, /booking\.event\.create/);
+assert.match(eventSummary, /commands=none/);
+
+const campaignSummary = createRuntimeSkillIndexSummary(campaignPageContext);
+assert.match(campaignSummary, /amplify\.campaign\.template\.create/);
+assert.match(campaignSummary, /commands=none/);
 
 const search = searchRuntimeSkillCatalog({ query: "create reservation", context: pageContext });
 assert.equal(search.skills[0].id, "booking.reservation.create", "reservation intent finds the reservation workflow skill");
@@ -108,6 +179,18 @@ assert.equal(intakeSearch.skills[0].id, "booking.context.intake", "booking conte
 
 const lazyIntakeSearch = searchRuntimeSkillCatalog({ query: "create booking context", context: { authenticated: true, organizationId, scopes: ["booking:read"] } });
 assert.equal(lazyIntakeSearch.skills[0].id, "booking.context.intake", "intake can still be discovered lazily outside matching page surfaces");
+
+const eventSearch = searchRuntimeSkillCatalog({ query: "create event", context: eventPageContext });
+assert.equal(eventSearch.skills[0].id, "booking.event.create", "event creation intent finds event workflow skill");
+
+const lazyEventSearch = searchRuntimeSkillCatalog({ query: "create event", context: { authenticated: true, organizationId, scopes: ["booking:read"] } });
+assert.equal(lazyEventSearch.skills[0].id, "booking.event.create", "event workflow can still be discovered lazily outside matching page surfaces");
+
+const campaignSearch = searchRuntimeSkillCatalog({ query: "create campaign template", context: campaignPageContext });
+assert.equal(campaignSearch.skills[0].id, "amplify.campaign.template.create", "campaign template intent finds Amplify campaign workflow skill");
+
+const lazyCampaignSearch = searchRuntimeSkillCatalog({ query: "create campaign template", context: { authenticated: true, organizationId, scopes: ["amplify:read"] } });
+assert.equal(lazyCampaignSearch.skills[0].id, "amplify.campaign.template.create", "campaign workflow can still be discovered lazily outside matching page surfaces");
 
 const learned = learnRuntimeSkill({ skillId: "booking.reservation.create", aspects: ["description", "workflow", "examples", "policy", "context", "commands"] });
 assert.equal(learned.ok, true);
@@ -134,6 +217,25 @@ const validation = explorerCatalog.validate(intakeSpec);
 assert.equal(validation.success, true, validation.success ? "" : JSON.stringify(validation.errors, null, 2));
 assert.ok(Object.values(intakeSpec.elements).some((element) => element.type === "QuestionCard"), "intake template renders through the QuestionCard adapter");
 assert.ok(Object.values(intakeSpec.elements).some((element) => element.type === "ManifestPreview"), "intake template renders a manifest preview");
+
+for (const skillId of ["booking.event.create", "amplify.campaign.template.create"]) {
+  const learnedIntakeWorkflow = learnRuntimeSkill({ skillId, aspects: ["description", "examples", "policy", "context", "commands"] });
+  assert.equal(learnedIntakeWorkflow.ok, true, `${skillId} can be learned`);
+  assert.deepEqual(learnedIntakeWorkflow.commandSequence, [], `${skillId} command path is intentionally empty`);
+  assert.deepEqual(learnedIntakeWorkflow.requiredCommands, [], `${skillId} has no required command execution`);
+  assert.equal(learnedIntakeWorkflow.metadata.execution, "none");
+  assert.equal(learnedIntakeWorkflow.metadata.approval, "not_granted");
+  assert.ok(learnedIntakeWorkflow.metadata.questionPolicy.neverInvent.length > 0, `${skillId} teaches non-invention policy`);
+  assert.ok(learnedIntakeWorkflow.metadata.interactiveSurfaceTemplate.questions.length >= 3, `${skillId} returns a usable intake question set`);
+  assert.ok(learnedIntakeWorkflow.metadata.interactiveSurfaceTemplate.questions.every((question) => question.writesTo?.startsWith("/manifest/")), `${skillId} answers write only into manifest draft state`);
+  assert.ok(!JSON.stringify(learnedIntakeWorkflow.metadata.interactiveSurfaceTemplate).includes("commitCommand"), `${skillId} renderer template must not mention command execution`);
+  assert.ok(!JSON.stringify(learnedIntakeWorkflow.metadata.interactiveSurfaceTemplate).includes("executeCommand"), `${skillId} renderer template must not mention command execution`);
+  const spec = createInteractiveSurfaceJsonRenderSpec(learnedIntakeWorkflow.metadata.interactiveSurfaceTemplate);
+  const specValidation = explorerCatalog.validate(spec);
+  assert.equal(specValidation.success, true, specValidation.success ? "" : JSON.stringify(specValidation.errors, null, 2));
+  assert.ok(Object.values(spec.elements).some((element) => element.type === "QuestionCard"), `${skillId} template renders through the QuestionCard adapter`);
+  assert.ok(Object.values(spec.elements).some((element) => element.type === "ManifestPreview"), `${skillId} template renders a manifest preview`);
+}
 
 const tools = createSkillCatalogTools({
   sessionId: "session_skill_test",
@@ -181,6 +283,54 @@ assert.equal(toolLearnIntake.ok, true);
 assert.deepEqual(toolLearnIntake.commandSequence, []);
 assert.equal(toolLearnIntake.metadata.execution, "none");
 assert.equal(toolLearnIntake.metadata.interactiveSurfaceTemplate.kind, "question_group");
+
+const eventTools = createSkillCatalogTools({
+  sessionId: "session_event_skill_test",
+  pageContext: eventPageContext,
+  hostSession: {
+    source: "booking-embedded",
+    sessionId: "session_event_skill_test",
+    userId: "user_event_test",
+    principalId: "user_event_test",
+    organizationId: eventPageContext.organizationId,
+    authenticated: true,
+    scopes: eventPageContext.scopes,
+    metadata: {},
+  },
+});
+const toolSearchEvent = await eventTools.searchSkillCatalog.execute({ query: "create event", limit: 5 });
+assert.equal(toolSearchEvent.kind, "skill-catalog-search");
+assert.equal(toolSearchEvent.skills[0].id, "booking.event.create");
+const toolLearnEvent = await eventTools.learnSkill.execute({ skillId: "booking.event.create", aspects: ["policy", "context", "commands"] });
+assert.equal(toolLearnEvent.kind, "skill-learn");
+assert.equal(toolLearnEvent.ok, true);
+assert.deepEqual(toolLearnEvent.commandSequence, []);
+assert.equal(toolLearnEvent.metadata.execution, "none");
+assert.equal(toolLearnEvent.metadata.interactiveSurfaceTemplate.kind, "question_group");
+
+const campaignTools = createSkillCatalogTools({
+  sessionId: "session_campaign_skill_test",
+  pageContext: campaignPageContext,
+  hostSession: {
+    source: "amplify-embedded",
+    sessionId: "session_campaign_skill_test",
+    userId: "user_campaign_test",
+    principalId: "user_campaign_test",
+    organizationId: campaignPageContext.organizationId,
+    authenticated: true,
+    scopes: campaignPageContext.scopes,
+    metadata: {},
+  },
+});
+const toolSearchCampaign = await campaignTools.searchSkillCatalog.execute({ query: "create campaign template", limit: 5 });
+assert.equal(toolSearchCampaign.kind, "skill-catalog-search");
+assert.equal(toolSearchCampaign.skills[0].id, "amplify.campaign.template.create");
+const toolLearnCampaign = await campaignTools.learnSkill.execute({ skillId: "amplify.campaign.template.create", aspects: ["policy", "context", "commands"] });
+assert.equal(toolLearnCampaign.kind, "skill-learn");
+assert.equal(toolLearnCampaign.ok, true);
+assert.deepEqual(toolLearnCampaign.commandSequence, []);
+assert.equal(toolLearnCampaign.metadata.execution, "none");
+assert.equal(toolLearnCampaign.metadata.interactiveSurfaceTemplate.kind, "question_group");
 
 const agentSource = await readFile("apps/standalone-sveltekit/src/lib/agent.ts", "utf8");
 assert.equal(agentSource.includes("createSkillCatalogTools"), true, "agent runtime mounts skill catalog tools");
