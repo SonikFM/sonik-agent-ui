@@ -236,6 +236,9 @@ importers:
       '@json-render/svelte':
         specifier: workspace:*
         version: link:../svelte
+      '@sonik-agent-ui/tool-contracts':
+        specifier: workspace:*
+        version: link:../tool-contracts
       zod:
         specifier: ^4.0.0
         version: 4.3.6

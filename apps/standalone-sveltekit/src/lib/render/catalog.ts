@@ -339,6 +339,147 @@ export const explorerCatalog = schema.createCatalog({
       },
     },
 
+    ChoiceCards: {
+      props: z.object({
+        label: z.string().nullable(),
+        value: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number(), z.boolean()]))]).nullable(),
+        options: z.array(z.object({
+          value: z.union([z.string(), z.number(), z.boolean()]),
+          label: z.string().nullable(),
+          description: z.string().nullable(),
+          disabled: z.boolean().nullable(),
+        })),
+        mode: z.enum(["single", "multiple"]).nullable(),
+        helperText: z.string().nullable(),
+      }),
+      description: 'Choice-card input for ask-user-question and intake artifacts. Use { "$bindState": "/path" } for value; this component only edits JSON state.',
+    },
+
+    EditableField: {
+      props: z.object({
+        label: z.string(),
+        value: z.union([z.string(), z.number()]).nullable(),
+        placeholder: z.string().nullable(),
+        type: z.enum(["text", "email", "number", "url", "date", "datetime-local"]).nullable(),
+        required: z.boolean().nullable(),
+        helperText: z.string().nullable(),
+      }),
+      description: 'Editable scalar field for manifest/intake drafts. Use { "$bindState": "/path" } for value.',
+    },
+
+    TextareaField: {
+      props: z.object({
+        label: z.string(),
+        value: z.string().nullable(),
+        placeholder: z.string().nullable(),
+        required: z.boolean().nullable(),
+        helperText: z.string().nullable(),
+        rows: z.number().nullable(),
+      }),
+      description: 'Editable long text field for source copy, policies, descriptions, and notes. Use { "$bindState": "/path" } for value.',
+    },
+
+    QuestionCard: {
+      props: z.object({
+        questionId: z.string(),
+        title: z.string(),
+        body: z.string(),
+        whyThisMatters: z.string().nullable(),
+        answerType: z.enum([
+          "single_choice",
+          "multi_choice",
+          "choice_cards",
+          "short_text",
+          "long_text",
+          "textarea",
+          "boolean",
+          "number",
+          "date",
+          "datetime",
+          "list",
+          "structured_list",
+          "weekly_schedule",
+          "confirmation",
+        ]),
+        choices: z.array(z.object({
+          value: z.union([z.string(), z.number(), z.boolean()]),
+          label: z.string().nullable(),
+          description: z.string().nullable(),
+          disabled: z.boolean().nullable(),
+        })).nullable(),
+        value: z.unknown().nullable(),
+        required: z.boolean().nullable(),
+        allowSkip: z.boolean().nullable(),
+        skipValue: z.unknown().nullable(),
+        writesTo: z.string().nullable(),
+        minSelections: z.number().nullable(),
+        maxSelections: z.number().nullable(),
+        confidence: z.number().nullable(),
+        reviewRequired: z.boolean().nullable(),
+        submitLabel: z.string().nullable(),
+        skipLabel: z.string().nullable(),
+      }),
+      description: 'Trusted ask-user-question renderer. Saves answers to artifact state only; it does not execute commands or approve tools.',
+    },
+
+    ManifestPreview: {
+      props: z.object({
+        title: z.string().nullable(),
+        manifest: z.unknown().nullable(),
+        emptyMessage: z.string().nullable(),
+      }),
+      description: 'Read-only JSON manifest preview for intake artifacts.',
+    },
+
+    MissingFieldsList: {
+      props: z.object({
+        title: z.string().nullable(),
+        items: z.array(z.union([
+          z.string(),
+          z.object({
+            field: z.string().nullable(),
+            label: z.string().nullable(),
+            reason: z.string().nullable(),
+            severity: z.enum(["blocking", "warning", "optional"]).nullable(),
+          }),
+        ])).nullable(),
+        emptyMessage: z.string().nullable(),
+      }),
+      description: 'Displays blocking/warning/optional missing fields from a manifest readiness check.',
+    },
+
+    ConfidenceTable: {
+      props: z.object({
+        title: z.string().nullable(),
+        rows: z.array(z.object({
+          field: z.string(),
+          value: z.unknown().nullable(),
+          confidence: z.number().nullable(),
+          source: z.string().nullable(),
+          status: z.string().nullable(),
+          reviewRequired: z.boolean().nullable(),
+        })).nullable(),
+        emptyMessage: z.string().nullable(),
+      }),
+      description: 'Shows inferred/user-confirmed/missing field confidence and provenance.',
+    },
+
+    ActionRail: {
+      props: z.object({
+        title: z.string().nullable(),
+        actions: z.array(z.object({
+          id: z.string(),
+          label: z.string(),
+          description: z.string().nullable(),
+          status: z.enum(["ready", "blocked", "preview", "requires_confirmation"]).nullable(),
+          commandId: z.string().nullable(),
+        })).nullable(),
+        emptyMessage: z.string().nullable(),
+      }),
+      description: 'Read-only action preview rail. Commands are never executed from this renderer component.',
+    },
+
+
     Button: {
       props: z.object({
         label: z.string(),

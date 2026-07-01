@@ -26,6 +26,14 @@ import RadioGroupComponent from "./components/RadioGroup.svelte";
 import SelectInputComponent from "./components/SelectInput.svelte";
 import TextInputComponent from "./components/TextInput.svelte";
 import ButtonComponent from "./components/Button.svelte";
+import ChoiceCardsComponent from "./components/ChoiceCards.svelte";
+import EditableFieldComponent from "./components/EditableField.svelte";
+import TextareaFieldComponent from "./components/TextareaField.svelte";
+import QuestionCardComponent from "./components/QuestionCard.svelte";
+import ManifestPreviewComponent from "./components/ManifestPreview.svelte";
+import MissingFieldsListComponent from "./components/MissingFieldsList.svelte";
+import ConfidenceTableComponent from "./components/ConfidenceTable.svelte";
+import ActionRailComponent from "./components/ActionRail.svelte";
 
 const components = {
   Stack: StackComponent,
@@ -52,6 +60,14 @@ const components = {
   RadioGroup: RadioGroupComponent,
   SelectInput: SelectInputComponent,
   TextInput: TextInputComponent,
+  ChoiceCards: ChoiceCardsComponent,
+  EditableField: EditableFieldComponent,
+  TextareaField: TextareaFieldComponent,
+  QuestionCard: QuestionCardComponent,
+  ManifestPreview: ManifestPreviewComponent,
+  MissingFieldsList: MissingFieldsListComponent,
+  ConfidenceTable: ConfidenceTableComponent,
+  ActionRail: ActionRailComponent,
   Button: ButtonComponent,
 };
 

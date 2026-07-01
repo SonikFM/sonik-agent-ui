@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createInteractiveSurfaceJsonRenderSpec } from "../../packages/json-ui-runtime/src/intake.ts";
 import {
   createCommandCatalog,
   createCommandFamilyRegistry,
@@ -14,6 +15,8 @@ import {
   createAskUserQuestionSpec,
   createAskUserQuestionsFromQuestionForm,
   createInteractiveSurfaceSpec,
+  createQuestionAnswerStateUpdates,
+  createQuestionAnswerStateUpdateRecord,
   createToolManifest,
   evaluateToolPolicy,
   filterAvailableTools,
@@ -104,6 +107,19 @@ assert.throws(() => createAskUserQuestionSpec({
   choices: ["a"],
 }), /must not include choices/, "free-text questions should not carry choice options");
 
+assert.throws(() => createAskUserQuestionSpec({
+  id: "__proto__",
+  title: "Unsafe id",
+  body: "Unsafe id",
+  answerType: "short_text",
+}), /prototype-polluting/, "question ids must reject prototype-polluting path segments before state paths are generated");
+assert.throws(() => createAskUserQuestionSpec({
+  id: "manifest/constructor/name",
+  title: "Unsafe nested id",
+  body: "Unsafe nested id",
+  answerType: "short_text",
+}), /prototype-polluting/, "question ids must reject nested prototype-polluting path segments");
+
 const validAnswer = validateQuestionAnswer(confirmationQuestion, {
   question_id: "q_confirmation_mode",
   value: "manual_approval",
@@ -116,6 +132,45 @@ assert.equal(invalidAnswer.ok, false, "undeclared single_choice values should fa
 assert.equal(!invalidAnswer.ok && invalidAnswer.errors.some((error) => error.code === "invalid_choice"), true);
 const skippedRequired = validateQuestionAnswer(confirmationQuestion, { questionId: "q_confirmation_mode", skipped: true });
 assert.equal(skippedRequired.ok, false, "required non-skippable questions should reject skipped submissions");
+
+const requiredTextQuestion = createAskUserQuestionSpec({
+  id: "q_required_text",
+  title: "Required text",
+  body: "Required text",
+  answerType: "short_text",
+  required: true,
+  allowSkip: false,
+});
+const blankRequiredText = validateQuestionAnswer(requiredTextQuestion, { questionId: "q_required_text", value: "   " });
+assert.equal(blankRequiredText.ok, false, "required text answers should reject blank strings");
+assert.equal(!blankRequiredText.ok && blankRequiredText.errors.some((error) => error.code === "answer_required"), true);
+
+const disabledChoiceQuestion = createAskUserQuestionSpec({
+  id: "q_disabled_choice",
+  title: "Disabled choice",
+  body: "Disabled choice",
+  answerType: "single_choice",
+  choices: ["enabled", { value: "disabled", label: "Disabled", disabled: true }],
+});
+const disabledChoiceAnswer = validateQuestionAnswer(disabledChoiceQuestion, { questionId: "q_disabled_choice", value: "disabled" });
+assert.equal(disabledChoiceAnswer.ok, false, "disabled single-choice answers should be rejected by the controller, not only by UI affordances");
+assert.equal(!disabledChoiceAnswer.ok && disabledChoiceAnswer.errors.some((error) => error.code === "disabled_choice"), true);
+
+const disabledMultiChoiceQuestion = createAskUserQuestionSpec({
+  id: "q_disabled_multi_choice",
+  title: "Disabled multi choice",
+  body: "Disabled multi choice",
+  answerType: "multi_choice",
+  choices: ["enabled", { value: "disabled", label: "Disabled", disabled: true }],
+  required: true,
+  allowSkip: false,
+});
+const emptyRequiredMultiChoice = validateQuestionAnswer(disabledMultiChoiceQuestion, { questionId: "q_disabled_multi_choice", value: [] });
+assert.equal(emptyRequiredMultiChoice.ok, false, "required multi-choice answers should reject an empty array even without an explicit minSelections");
+assert.equal(!emptyRequiredMultiChoice.ok && emptyRequiredMultiChoice.errors.some((error) => error.code === "answer_required" || error.code === "min_selections"), true);
+const disabledMultiChoiceAnswer = validateQuestionAnswer(disabledMultiChoiceQuestion, { questionId: "q_disabled_multi_choice", value: ["disabled"] });
+assert.equal(disabledMultiChoiceAnswer.ok, false, "disabled multi-choice answers should be rejected by controller validation");
+assert.equal(!disabledMultiChoiceAnswer.ok && disabledMultiChoiceAnswer.errors.some((error) => error.code === "disabled_choice"), true);
 
 const multiQuestion = createAskUserQuestionSpec({
   id: "q_channels",
@@ -167,6 +222,67 @@ assert.throws(() => createInteractiveSurfaceSpec({
   questions: [confirmationQuestion],
   actions: [{ id: "submit", label: "Submit", kind: "submit_answer", commandId: "booking.create.booking" }],
 }), /preview command\/tool targets only/, "submit actions must not bind directly to executable commands");
+
+
+const answerUpdates = createQuestionAnswerStateUpdates(confirmationQuestion, {
+  questionId: "q_confirmation_mode",
+  value: "manual_approval",
+  artifactId: "artifact-intake-1",
+}, { now: "2026-06-30T12:00:00.000Z" });
+assert.equal(answerUpdates.ok, true, "state controller should accept validated question answers");
+assert.deepEqual(answerUpdates.ok && answerUpdates.updates.map((update) => update.path), [
+  "/answers/q_confirmation_mode",
+  "/questionStates/q_confirmation_mode",
+  "/questionSubmissions/q_confirmation_mode",
+  "/lastQuestionSubmission",
+  "/answerWrites/q_confirmation_mode",
+], "non-pointer writesTo targets are tracked as manifest writes without blindly mutating a dot-path");
+assert.equal(answerUpdates.ok && answerUpdates.receipt.execution, "none", "answer receipt must not imply command execution");
+assert.equal(answerUpdates.ok && answerUpdates.receipt.approval, "not_granted", "answer receipt must not imply tool approval");
+assert.equal(answerUpdates.ok && answerUpdates.submission.metadata.controller, "sonik-agent-ui.question-answer-state.v1");
+
+const directWriteQuestion = createAskUserQuestionSpec({
+  id: "q_business_name",
+  title: "Business name",
+  body: "What is the business name?",
+  answerType: "short_text",
+  writesTo: "/manifest/business/name",
+});
+const directWriteRecord = createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: "Sonik Golf",
+}, { now: "2026-06-30T12:01:00.000Z" });
+assert.equal(directWriteRecord["/answers/q_business_name"], "Sonik Golf", "answers are always captured under question id");
+assert.equal(directWriteRecord["/manifest/business/name"], "Sonik Golf", "JSON Pointer writesTo targets can update the manifest draft directly");
+
+assert.throws(() => createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: "Unsafe",
+  writesTo: "/answers/q_business_name",
+}), /unsafe_writes_to/, "direct JSON Pointer writes must not target renderer bookkeeping state");
+assert.throws(() => createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: "Unsafe",
+  writesTo: "/manifest/__proto__/polluted",
+}), /unsafe_writes_to/, "direct JSON Pointer writes must reject prototype-polluting segments");
+assert.throws(() => createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: "Unsafe",
+  writesTo: "/manifest/constructor/polluted",
+}), /unsafe_writes_to/, "direct JSON Pointer writes must reject constructor segments");
+assert.throws(() => createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: 123,
+}), /invalid_text/, "state controller should remain schema-aware and reject malformed values");
+
+const surfaceJsonSpec = createInteractiveSurfaceJsonRenderSpec(questionSurface);
+assert.equal(surfaceJsonSpec.root, "main", "interactive surfaces should convert into a JSON-render root");
+const surfaceQuestionElementEntry = Object.entries(surfaceJsonSpec.elements).find(([, element]) => element.type === "QuestionCard");
+assert.equal(surfaceQuestionElementEntry?.[1].type, "QuestionCard", "question surfaces should use the trusted Svelte QuestionCard adapter");
+assert.equal(surfaceQuestionElementEntry?.[1].props.value?.$bindState, "/draftAnswers/q_confirmation_mode", "question card values should bind to draft answer state before submission");
+assert.equal(surfaceJsonSpec.state.questionStates.q_confirmation_mode, "draft", "question state should start as draft");
+assert.equal(Object.values(surfaceJsonSpec.elements).filter((element) => element.type === "QuestionCard").length, 1, "generated question specs should include exactly one QuestionCard for this surface");
+assert.deepEqual(Object.values(surfaceJsonSpec.elements).map((element) => element.type).sort(), ["Card", "QuestionCard", "Stack"], "generated question specs should not inject executable tool/action elements");
 
 const questionFormQuestions = createAskUserQuestionsFromQuestionForm({
   id: "discovery",

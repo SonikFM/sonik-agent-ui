@@ -283,9 +283,16 @@ function normalizeAskQuestionWireInput(input: unknown): unknown {
   };
 }
 
+export const safeQuestionIdSchema = z.string().min(1).superRefine((id, ctx) => {
+  const segments = id.split("/").map((segment) => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
+  if (segments.some((segment) => segment === "__proto__" || segment === "prototype" || segment === "constructor")) {
+    ctx.addIssue({ code: "custom", message: "Question ids must not contain prototype-polluting path segments." });
+  }
+});
+
 export const askUserQuestionSpecSchema = z.preprocess(normalizeAskQuestionWireInput, z.object({
   version: z.literal("sonik-agent-ui.ask-user-question.v1").default("sonik-agent-ui.ask-user-question.v1"),
-  id: z.string().min(1),
+  id: safeQuestionIdSchema,
   title: z.string().min(1),
   body: z.string().min(1),
   whyThisMatters: z.string().min(1).optional(),
@@ -488,20 +495,27 @@ export function validateQuestionAnswer(questionInput: unknown, submissionInput: 
   if (submission.questionId !== question.id) {
     errors.push({ code: "question_id_mismatch", message: "Submission questionId must match the question spec id.", path: ["questionId"] });
   }
+  const selectedWritesTo = submission.writesTo ?? question.writesTo;
   if (submission.skipped) {
     if (!question.allowSkip) {
       errors.push({ code: "skip_not_allowed", message: "This question cannot be skipped.", path: ["skipped"] });
     }
-    return errors.length > 0 ? { ok: false, errors } : { ok: true, submission, writesTo: submission.writesTo ?? question.writesTo, normalizedValue: question.skipValue };
+    const writesToError = validateQuestionWritesToPath(selectedWritesTo);
+    if (writesToError) errors.push(writesToError);
+    return errors.length > 0 ? { ok: false, errors } : { ok: true, submission, writesTo: selectedWritesTo, normalizedValue: question.skipValue };
   }
-  if (question.required && submission.value === undefined) {
-    errors.push({ code: "answer_required", message: "A value is required for this question.", path: ["value"] });
+  if (question.required && isEffectivelyEmptyAnswer(submission.value)) {
+    errors.push({ code: "answer_required", message: "A non-empty value is required for this question.", path: ["value"] });
   }
 
-  const choiceValues = new Set(question.choices.map((choice) => choice.value));
+  const enabledChoiceValues = new Set(question.choices.filter((choice) => !choice.disabled).map((choice) => choice.value));
+  const disabledChoiceValues = new Set(question.choices.filter((choice) => choice.disabled).map((choice) => choice.value));
   if (question.answerType === "single_choice" || question.answerType === "choice_cards" || question.answerType === "confirmation") {
-    if (!choiceValues.has(submission.value as string | number | boolean)) {
-      errors.push({ code: "invalid_choice", message: "Answer must match one of the declared choices.", path: ["value"] });
+    const submittedValue = submission.value as string | number | boolean;
+    if (disabledChoiceValues.has(submittedValue)) {
+      errors.push({ code: "disabled_choice", message: "Answer must not select a disabled choice.", path: ["value"] });
+    } else if (!enabledChoiceValues.has(submittedValue)) {
+      errors.push({ code: "invalid_choice", message: "Answer must match one of the declared enabled choices.", path: ["value"] });
     }
   }
   if (question.answerType === "multi_choice") {
@@ -513,17 +527,22 @@ export function validateQuestionAnswer(questionInput: unknown, submissionInput: 
         errors.push({ code: "duplicate_selection", message: "Multi-choice answers must not contain duplicate selections.", path: ["value"] });
       }
       for (const value of selected) {
-        if (!choiceValues.has(value)) errors.push({ code: "invalid_choice", message: `Unknown choice value: ${String(value)}`, path: ["value"] });
+        if (disabledChoiceValues.has(value)) {
+          errors.push({ code: "disabled_choice", message: `Disabled choice value: ${String(value)}`, path: ["value"] });
+        } else if (!enabledChoiceValues.has(value)) {
+          errors.push({ code: "invalid_choice", message: `Unknown choice value: ${String(value)}`, path: ["value"] });
+        }
       }
-      if (selected.length < question.minSelections) errors.push({ code: "min_selections", message: `Select at least ${question.minSelections} choices.`, path: ["value"] });
+      const minimumSelections = question.required ? Math.max(1, question.minSelections) : question.minSelections;
+      if (selected.length < minimumSelections) errors.push({ code: "min_selections", message: `Select at least ${minimumSelections} choices.`, path: ["value"] });
       if (question.maxSelections && selected.length > question.maxSelections) errors.push({ code: "max_selections", message: `Select no more than ${question.maxSelections} choices.`, path: ["value"] });
     }
   }
   if (question.answerType === "boolean" && typeof submission.value !== "boolean") {
     errors.push({ code: "invalid_boolean", message: "Answer must be boolean.", path: ["value"] });
   }
-  if (question.answerType === "number" && typeof submission.value !== "number") {
-    errors.push({ code: "invalid_number", message: "Answer must be a number.", path: ["value"] });
+  if (question.answerType === "number" && (typeof submission.value !== "number" || !Number.isFinite(submission.value))) {
+    errors.push({ code: "invalid_number", message: "Answer must be a finite number.", path: ["value"] });
   }
   if (["short_text", "long_text", "textarea", "date", "datetime", "weekly_schedule"].includes(question.answerType) && typeof submission.value !== "string") {
     errors.push({ code: "invalid_text", message: `${question.answerType} answers must be strings.`, path: ["value"] });
@@ -531,8 +550,18 @@ export function validateQuestionAnswer(questionInput: unknown, submissionInput: 
   if ((question.answerType === "list" || question.answerType === "structured_list") && !Array.isArray(submission.value)) {
     errors.push({ code: "invalid_list", message: `${question.answerType} answers must be arrays.`, path: ["value"] });
   }
+  const writesToError = validateQuestionWritesToPath(selectedWritesTo);
+  if (writesToError) errors.push(writesToError);
 
-  return errors.length > 0 ? { ok: false, errors } : { ok: true, submission, writesTo: submission.writesTo ?? question.writesTo, normalizedValue: submission.value };
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, submission, writesTo: selectedWritesTo, normalizedValue: submission.value };
+}
+
+function isEffectivelyEmptyAnswer(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string") return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "number") return !Number.isFinite(value);
+  return false;
 }
 
 function zodIssues(result: { success: true } | { success: false; error: { issues: Array<{ code: string; message: string; path: Array<PropertyKey> }> } }): Array<{ code: string; message: string; path: Array<string | number> }> {
@@ -542,6 +571,132 @@ function zodIssues(result: { success: true } | { success: false; error: { issues
     message: issue.message,
     path: issue.path.map((part) => typeof part === "symbol" ? part.toString() : part),
   }));
+}
+
+
+export const questionAnswerLifecycleSchema = z.enum(["draft", "answered", "skipped", "invalid"]);
+
+export type QuestionAnswerStateUpdate = { path: string; value: unknown };
+export type QuestionAnswerControllerReceipt = {
+  questionId: string;
+  lifecycle: z.infer<typeof questionAnswerLifecycleSchema>;
+  writesTo?: string;
+  authority: "user_answer_only";
+  execution: "none";
+  approval: "not_granted";
+};
+
+export type QuestionAnswerStateUpdateResult =
+  | { ok: true; submission: QuestionAnswerSubmission; normalizedValue: unknown; updates: QuestionAnswerStateUpdate[]; receipt: QuestionAnswerControllerReceipt }
+  | { ok: false; errors: Array<{ code: string; message: string; path: Array<string | number> }> };
+
+function escapeJsonPointerSegment(segment: string): string {
+  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function decodeJsonPointerSegment(segment: string): string {
+  return segment.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+function isJsonPointerPath(path: string | undefined): path is string {
+  return typeof path === "string" && path.startsWith("/");
+}
+
+function validateQuestionWritesToPath(path: string | undefined): { code: string; message: string; path: Array<string | number> } | null {
+  if (!isJsonPointerPath(path)) return null;
+  if (!path.startsWith("/manifest/")) {
+    return { code: "unsafe_writes_to", message: "JSON Pointer writesTo targets must stay inside /manifest/.", path: ["writesTo"] };
+  }
+  const segments = path.slice(1).split("/").map(decodeJsonPointerSegment);
+  if (segments.some((segment) => segment === "__proto__" || segment === "prototype" || segment === "constructor")) {
+    return { code: "unsafe_writes_to", message: "JSON Pointer writesTo targets must not contain prototype-polluting segments.", path: ["writesTo"] };
+  }
+  return null;
+}
+
+function nowIso(options?: { now?: string | Date }): string {
+  if (typeof options?.now === "string") return options.now;
+  if (options?.now instanceof Date) return options.now.toISOString();
+  return new Date().toISOString();
+}
+
+export function createQuestionAnswerStateUpdates(
+  questionInput: unknown,
+  submissionInput: unknown,
+  options: { now?: string | Date } = {},
+): QuestionAnswerStateUpdateResult {
+  const validation = validateQuestionAnswer(questionInput, submissionInput);
+  if (!validation.ok) return validation;
+
+  const question = createAskUserQuestionSpec(questionInput);
+  const questionIdSegment = escapeJsonPointerSegment(question.id);
+  const answeredAt = validation.submission.answeredAt ?? nowIso(options);
+  const writesTo = validation.writesTo;
+  const lifecycle = validation.submission.skipped ? "skipped" : "answered";
+  const submission: QuestionAnswerSubmission = {
+    ...validation.submission,
+    answeredAt,
+    writesTo,
+    metadata: {
+      ...validation.submission.metadata,
+      controller: "sonik-agent-ui.question-answer-state.v1",
+      execution: "none",
+      approval: "not_granted",
+    },
+  };
+
+  const updates: QuestionAnswerStateUpdate[] = [
+    { path: `/answers/${questionIdSegment}`, value: validation.normalizedValue },
+    { path: `/questionStates/${questionIdSegment}`, value: lifecycle },
+    { path: `/questionSubmissions/${questionIdSegment}`, value: submission },
+    {
+      path: "/lastQuestionSubmission",
+      value: {
+        questionId: question.id,
+        lifecycle,
+        answeredAt,
+        writesTo,
+      },
+    },
+  ];
+
+  if (writesTo) {
+    updates.push({
+      path: `/answerWrites/${questionIdSegment}`,
+      value: { questionId: question.id, writesTo, value: validation.normalizedValue, answeredAt },
+    });
+    if (isJsonPointerPath(writesTo)) {
+      updates.push({ path: writesTo, value: validation.normalizedValue });
+    }
+  }
+
+  return {
+    ok: true,
+    submission,
+    normalizedValue: validation.normalizedValue,
+    updates,
+    receipt: {
+      questionId: question.id,
+      lifecycle,
+      writesTo,
+      authority: "user_answer_only",
+      execution: "none",
+      approval: "not_granted",
+    },
+  };
+}
+
+export function createQuestionAnswerStateUpdateRecord(
+  questionInput: unknown,
+  submissionInput: unknown,
+  options: { now?: string | Date } = {},
+): Record<string, unknown> {
+  const result = createQuestionAnswerStateUpdates(questionInput, submissionInput, options);
+  if (!result.ok) {
+    const message = result.errors.map((error) => `${error.code}: ${error.message}`).join("; ");
+    throw new Error(message || "Invalid question answer submission.");
+  }
+  return Object.fromEntries(result.updates.map((update) => [update.path, update.value]));
 }
 
 export const commandShapeSchema = z.enum(["dispatch", "record", "catalog", "media", "local-ui", "composite"]);
