@@ -303,6 +303,9 @@ assert.equal(pageSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "
 assert.equal(pageSource.includes("sessionBootstrapPromise"), true, "embedded session bootstrap should guard repeated host page-context messages while initialization is in flight");
 assert.equal(pageSource.includes("if (!authenticated || !organizationId || !userId || !hostSession) return {}"), true, "workspace authority headers should require an authenticated donated hostSession, not display-only page context");
 assert.equal(pageSource.includes("signature: hostPageContext?.signature ?? null"), true, "workspace authority headers should forward signed host-context proof into cloud API requests");
+assert.equal(pageSource.includes("function createSignedWorkspaceHostSession"), true, "workspace authority headers should canonicalize the signed hostSession envelope before re-encoding it");
+assert.equal(pageSource.includes("...hostSession,"), false, "workspace authority headers must not spread sanitized display-only hostSession fields into the HMAC-covered envelope");
+assert.equal(pageSource.includes("hostSession.theme"), true, "the regression guard should document that display-only hostSession.theme exists outside the signed workspace header");
 assert.equal(agentEmbedSource.includes("signatureVersion"), true, "agent embed sanitizer should preserve signed host-context proof fields across postMessage donation");
 assert.equal(pageSource.includes("workspace.persistence.runtime"), true, "embedded app should log safe runtime persistence diagnostics from response headers");
 assert.equal(pageSource.includes("readWorkspaceResponseError"), true, "client workspace fetch failures should parse structured error envelopes before falling back to bounded text");

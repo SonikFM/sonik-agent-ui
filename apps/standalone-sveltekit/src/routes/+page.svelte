@@ -1067,14 +1067,33 @@
         issuedAt: hostPageContext?.issuedAt ?? null,
         expiresAt: hostPageContext?.expiresAt ?? null,
         signature: hostPageContext?.signature ?? null,
-        hostSession: {
-          ...hostSession,
+        hostSession: createSignedWorkspaceHostSession(hostSession, {
           authenticated,
           organizationId,
           userId,
-          principalId: hostSession.principalId ?? userId,
-        },
+        }),
       }),
+    };
+  }
+
+  function createSignedWorkspaceHostSession(
+    hostSession: NonNullable<AgentHostMergedPageContext["hostSession"]>,
+    input: { authenticated: boolean; organizationId: string; userId: string },
+  ) {
+    // This object is HMAC-covered by the embedding host. Do not spread sanitized
+    // display-only fields (for example hostSession.theme) into the header: adding
+    // even a harmless null changes the stable JSON payload and makes the cloud
+    // runtime reject the session as missing-host-context.
+    return {
+      source: hostSession.source,
+      sessionId: hostSession.sessionId ?? null,
+      userId: input.userId,
+      principalId: hostSession.principalId ?? input.userId,
+      organizationId: input.organizationId,
+      authenticated: input.authenticated,
+      scopes: hostSession.scopes ?? [],
+      expiresAt: hostSession.expiresAt ?? null,
+      ...(hostSession.metadata ? { metadata: hostSession.metadata } : {}),
     };
   }
 

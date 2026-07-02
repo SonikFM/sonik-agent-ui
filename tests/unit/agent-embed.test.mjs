@@ -103,6 +103,7 @@ assert.equal(signedTrustedSession?.signatureVersion, "sonik.agent_ui.host_contex
 assert.equal(signedTrustedSession?.signature, "abc123_signature", "signed host-context signature must survive postMessage donation");
 assert.equal(signedTrustedSession?.issuedAt, "2026-06-24T22:00:00.000Z", "signed host-context issuedAt must survive postMessage donation");
 assert.equal(signedTrustedSession?.expiresAt, "2026-06-24T22:10:00.000Z", "signed host-context expiresAt must survive postMessage donation");
+assert.equal(signedTrustedSession?.hostSession?.theme, undefined, "signed host-context sanitizer must not materialize display-only theme when the host did not sign it");
 
 const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
   authenticated: true,
