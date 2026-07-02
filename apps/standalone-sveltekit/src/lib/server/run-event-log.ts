@@ -1,6 +1,6 @@
 import { SPEC_DATA_PART_TYPE } from "@json-render/core";
 export { SPEC_DATA_PART_TYPE } from "@json-render/core";
-import type { PersistedRunEvent, RunCorrelation, RunErrorCode } from "@sonik-agent-ui/tool-contracts";
+import type { AgentAnalyticsHints, PersistedRunEvent, RunCorrelation, RunErrorCode } from "@sonik-agent-ui/tool-contracts";
 import type { AgentRunContextSelection } from "@sonik-agent-ui/tool-contracts/run-context";
 import type { WorkspaceRunContextSelection, WorkspaceRunEventRecord, WorkspaceRunRecord, WorkspaceRunStatus } from "@sonik-agent-ui/workspace-session";
 
@@ -264,7 +264,7 @@ export interface RunPromptComposition {
 
 export async function startRunRecorder(
   persistence: RunPersistencePort,
-  input: { sessionId: string; messageId?: string | null; correlation: RunCorrelation; contextSelection?: AgentRunContextSelection | null; promptComposition?: RunPromptComposition | null },
+  input: { sessionId: string; messageId?: string | null; correlation: RunCorrelation; contextSelection?: AgentRunContextSelection | null; promptComposition?: RunPromptComposition | null; analyticsHints?: AgentAnalyticsHints | null },
 ): Promise<RunRecorder | null> {
   let run: WorkspaceRunRecord;
   try {
@@ -305,6 +305,19 @@ export async function startRunRecorder(
       kind: "status",
       label: "prompt_composition",
       detail: JSON.stringify(input.promptComposition),
+    }]);
+  }
+
+  // Record the analytics-only hints for this turn as a status event so a run is
+  // analysable ("did this session reach an artifact, and on which turn?")
+  // without persisting them into the agent path. Analytics-only: never trusted
+  // for behavior, and ignored by rebuildRunMessageParts so it never alters the
+  // reattached message.
+  if (input.analyticsHints) {
+    persistEvents([{
+      kind: "status",
+      label: "analytics_hints",
+      detail: JSON.stringify(input.analyticsHints),
     }]);
   }
 

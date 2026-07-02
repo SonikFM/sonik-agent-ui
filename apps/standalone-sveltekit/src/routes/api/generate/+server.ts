@@ -13,7 +13,7 @@ import { pipeArtifactToolOutputsToSpecParts } from "$lib/artifacts/artifact-stre
 import { logArtifactTelemetry } from "$lib/artifacts/artifact-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
 import { createTelemetryCorrelation, sanitizePageContext } from "@sonik-agent-ui/agent-observability";
-import { classifyRunErrorCode } from "@sonik-agent-ui/tool-contracts";
+import { classifyRunErrorCode, sanitizeAgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
 import {
   parseAgentRunContextSelection,
   resolveAgentContextSelection,
@@ -285,6 +285,11 @@ export const POST: RequestHandler = async (event) => {
     requestSkillIds: body?.skillIds ?? body?.workspace?.skillIds,
     selectedSkillFamilies: selectionResolution.skillFamilies,
   });
+  // Analytics-only run hints (entryFrom / turnIndex / isFirstRun /
+  // hasExistingArtifact). Sanitized + bounded here and used ONLY for run and
+  // telemetry analytics — never passed to createAgent, prompt composition, or
+  // tool inputs. Absent/dropped hints reproduce today's behavior.
+  const analyticsHints = sanitizeAgentAnalyticsHints(body?.analyticsHints ?? body?.workspace?.analyticsHints);
   // Compose the per-turn prompt once so the same module/skill ids we record on
   // the run are the ones createAgent seeds below (deterministic for this context).
   const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl });
@@ -353,6 +358,9 @@ export const POST: RequestHandler = async (event) => {
       bookingRuntimeCredentialed: hasBookingRuntimeCredential(bookingRuntimeAuth),
       hostSessionSource: hostSession?.source ?? null,
       approvedCommandCount: approvedCommandIds.length,
+      // Analytics-only run hints, stamped onto the run telemetry / Pipe-B so a
+      // session's run sequence is queryable. Never influences behavior.
+      analyticsHints: analyticsHints ?? null,
     },
     ok: true,
   }).catch(() => undefined);
@@ -384,6 +392,7 @@ export const POST: RequestHandler = async (event) => {
         correlation,
         contextSelection: runContextSelection ?? null,
         promptComposition: { moduleIds: promptComposition.moduleIds, skillIds: promptComposition.skillIds },
+        analyticsHints: analyticsHints ?? null,
       })
     : null;
 
