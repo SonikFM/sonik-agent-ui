@@ -23,7 +23,7 @@ import {
 import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
 import { createDevSmokeStream, readDevSmokeFailMode, readDevSmokeRunId, readDevSmokeScenario, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
 import { startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
-import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord } from "$lib/server/workspace-request-store";
+import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord, type WorkspaceSessionRecord } from "$lib/server/workspace-request-store";
 import { resolveEffectiveContextDocument } from "$lib/server/run-context-document";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
@@ -35,6 +35,13 @@ import {
 import { AGENT_UI_HOST_CONTEXT_HEADER, resolveTrustedHostSessionSnapshot } from "$lib/server/workspace-services";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
+import {
+  couldStartWorkspaceSessionTitleMarker,
+  deriveWorkspaceSessionTitle,
+  extractWorkspaceSessionTitleMarker,
+  isDefaultWorkspaceSessionName,
+  WORKSPACE_SESSION_TITLE_MARKER_PREFIX,
+} from "@sonik-agent-ui/workspace-session";
 import {
   optionalRouteString,
   routeString,
@@ -52,6 +59,7 @@ const APPROVED_COMMAND_IDS_MAX_ITEMS = 128;
 const AGENT_SKILL_IDS_MAX_ITEMS = 8;
 const AGENT_SKILL_ID_MAX_CHARS = 160;
 const AGENT_UI_RUN_ID_HEADER = "x-sonik-agent-ui-run-id";
+const TITLE_GENERATION_BUFFER_MAX_CHARS = 320;
 
 // Per-turn skill ids: donor-style `ChatRequest.skillIds` on the request, unioned
 // with the explicit runtime-skill composer chips for this turn. Sourced only from
@@ -202,6 +210,131 @@ function createCurrentPageContextSummary(context: AgentPageContext | undefined):
   return lines.join("\n");
 }
 
+function createConversationTitleGenerationPrompt(input: { firstUserMessage: string; fallbackTitle: string }): string {
+  return [
+    "CONVERSATION TITLE GENERATION:",
+    "This is the first turn of a new conversation. Begin the first assistant text block with exactly one hidden title marker:",
+    `${WORKSPACE_SESSION_TITLE_MARKER_PREFIX} <2-7 word conversation title>]]`,
+    "Use a concise natural title based on the user's first message. Do not quote the title, do not add punctuation inside the marker, and do not mention the marker in the visible response.",
+    `First user message: ${input.firstUserMessage}`,
+    `If unsure, use a short variant of this fallback title: ${input.fallbackTitle}`,
+  ].join("\n");
+}
+
+function readUiMessageText(message: UIMessage | undefined): string {
+  if (!message || typeof message !== "object") return "";
+  const parts = Array.isArray((message as { parts?: unknown }).parts) ? (message as { parts: unknown[] }).parts : [];
+  const fromParts = parts
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const candidate = part as { type?: unknown; text?: unknown };
+      return candidate.type === "text" && typeof candidate.text === "string" ? candidate.text : "";
+    })
+    .join("");
+  if (fromParts.trim()) return fromParts;
+  const fallback = message as unknown as { content?: unknown };
+  return typeof fallback.content === "string" ? fallback.content : "";
+}
+
+function resolveFirstUserMessage(messages: UIMessage[]): string {
+  const userMessage = messages.find((message) => message.role === "user") ?? messages.at(-1);
+  return readUiMessageText(userMessage).trim();
+}
+
+function shouldRequestConversationTitle(input: { session: WorkspaceSessionRecord | null; analyticsHints?: { isFirstRun?: boolean } | null; fallbackTitle: string }): boolean {
+  const session = input.session;
+  if (!session) return false;
+  if (session.message_count > 0) return false;
+  if (input.analyticsHints && input.analyticsHints.isFirstRun === false) return false;
+  const name = session.name.trim();
+  return isDefaultWorkspaceSessionName(name) || name === input.fallbackTitle;
+}
+
+function pipeConversationTitleGeneration(
+  stream: ReadableStream<UIMessageChunk>,
+  input: {
+    sessionId: string;
+    firstUserMessage: string;
+    fallbackTitle: string;
+    initialSessionName: string;
+    getSession: (id: string) => Promise<WorkspaceSessionRecord | null>;
+    patchSession: (id: string, patch: { name: string }) => Promise<WorkspaceSessionRecord | null>;
+  },
+): ReadableStream<UIMessageChunk> {
+  let resolved = false;
+  let buffer = "";
+  let patchPromise: Promise<void> | null = null;
+  let lastTextDeltaChunk: UIMessageChunk | null = null;
+
+  function canPatchSessionName(name: string): boolean {
+    const trimmed = name.trim();
+    return isDefaultWorkspaceSessionName(trimmed) || trimmed === input.fallbackTitle || trimmed === input.initialSessionName.trim();
+  }
+
+  function persistTitle(title: string): void {
+    if (patchPromise) return;
+    patchPromise = (async () => {
+      const current = await input.getSession(input.sessionId).catch(() => null);
+      if (!current || !canPatchSessionName(current.name)) return;
+      if (current.name.trim() === title) return;
+      await input.patchSession(input.sessionId, { name: title }).catch(() => null);
+    })();
+  }
+
+  function emitText(controller: TransformStreamDefaultController<UIMessageChunk>, template: UIMessageChunk | null, delta: string): void {
+    if (!delta) return;
+    controller.enqueue({ ...(template ?? { type: "text-delta", id: "conversation-title" }), delta } as UIMessageChunk);
+  }
+
+  function resolveBufferedText(controller: TransformStreamDefaultController<UIMessageChunk>): void {
+    if (!buffer) return;
+    const extracted = extractWorkspaceSessionTitleMarker(buffer, input.firstUserMessage);
+    persistTitle(extracted.title);
+    emitText(controller, lastTextDeltaChunk, extracted.markerFound ? extracted.visibleText : buffer);
+    buffer = "";
+    resolved = true;
+  }
+
+  return stream.pipeThrough(new TransformStream<UIMessageChunk, UIMessageChunk>({
+    transform(chunk, controller) {
+      if (resolved) {
+        controller.enqueue(chunk);
+        return;
+      }
+      if (chunk.type !== "text-delta" || typeof chunk.delta !== "string") {
+        resolveBufferedText(controller);
+        controller.enqueue(chunk);
+        return;
+      }
+
+      lastTextDeltaChunk = chunk;
+      buffer += chunk.delta;
+      const extracted = extractWorkspaceSessionTitleMarker(buffer, input.firstUserMessage);
+      if (extracted.markerFound) {
+        resolved = true;
+        persistTitle(extracted.title);
+        emitText(controller, chunk, extracted.visibleText);
+        return;
+      }
+
+      if (buffer.length < TITLE_GENERATION_BUFFER_MAX_CHARS && couldStartWorkspaceSessionTitleMarker(buffer)) return;
+
+      resolved = true;
+      persistTitle(input.fallbackTitle);
+      emitText(controller, chunk, buffer);
+      buffer = "";
+    },
+    async flush(controller) {
+      if (!resolved && buffer) {
+        resolveBufferedText(controller);
+      } else if (!resolved) {
+        persistTitle(input.fallbackTitle);
+      }
+      await patchPromise;
+    },
+  }));
+}
+
 function resolvePageContextSource(body: Record<string, unknown>, activeDocument: WorkspaceDocumentRecord | null): string {
   if (body.pageContext !== undefined) return "request.pageContext";
   const workspace = isRecord(body.workspace) ? body.workspace : {};
@@ -316,6 +449,15 @@ export const POST: RequestHandler = async (event) => {
   }
 
   const lastMessage = uiMessages.at(-1);
+  const firstUserMessage = resolveFirstUserMessage(uiMessages);
+  const fallbackConversationTitle = firstUserMessage ? deriveWorkspaceSessionTitle(firstUserMessage) : "";
+  const titleSession = workspaceSessionId ? await requestPersistence.getSession(workspaceSessionId).catch(() => null) : null;
+  const titleGenerationEnabled = Boolean(
+    workspaceSessionId &&
+    firstUserMessage &&
+    fallbackConversationTitle &&
+    shouldRequestConversationTitle({ session: titleSession, analyticsHints, fallbackTitle: fallbackConversationTitle }),
+  );
   const startEvent = {
     source: "server" as const,
     event: "api.generate.start",
@@ -343,7 +485,10 @@ export const POST: RequestHandler = async (event) => {
     scopes: hostSession?.scopes,
   });
   const pageContextSummary = createCurrentPageContextSummary(pageContext);
-  const systemContext = [contextSummary, pageContextSummary, `CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
+  const conversationTitlePrompt = titleGenerationEnabled
+    ? createConversationTitleGenerationPrompt({ firstUserMessage, fallbackTitle: fallbackConversationTitle })
+    : "";
+  const systemContext = [contextSummary, pageContextSummary, conversationTitlePrompt, `CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;
@@ -420,8 +565,18 @@ export const POST: RequestHandler = async (event) => {
     };
     await writeDevSmokeStreamTelemetry(smokeInput);
     const smokeStream = createDevSmokeStream(smokeInput);
+    const titledSmokeStream = titleGenerationEnabled && workspaceSessionId && titleSession
+      ? pipeConversationTitleGeneration(smokeStream, {
+          sessionId: workspaceSessionId,
+          firstUserMessage,
+          fallbackTitle: fallbackConversationTitle,
+          initialSessionName: titleSession.name,
+          getSession: (id) => requestPersistence.getSession(id),
+          patchSession: (id, patch) => requestPersistence.patchSession(id, patch),
+        })
+      : smokeStream;
     const response = createUIMessageStreamResponse({
-      stream: runRecorder ? teeRunEvents(smokeStream, runRecorder) : smokeStream,
+      stream: runRecorder ? teeRunEvents(titledSmokeStream, runRecorder) : titledSmokeStream,
     });
     for (const [key, value] of Object.entries(correlationHeaders)) response.headers.set(key, value);
     if (runRecorder) response.headers.set(AGENT_UI_RUN_ID_HEADER, runRecorder.runId);
@@ -461,7 +616,17 @@ export const POST: RequestHandler = async (event) => {
             },
           },
         );
-        const instrumented = instrumentGenerateStream(aiStream, {
+        const titleStream = titleGenerationEnabled && workspaceSessionId && titleSession
+          ? pipeConversationTitleGeneration(aiStream, {
+              sessionId: workspaceSessionId,
+              firstUserMessage,
+              fallbackTitle: fallbackConversationTitle,
+              initialSessionName: titleSession.name,
+              getSession: (id) => requestPersistence.getSession(id),
+              patchSession: (id, patch) => requestPersistence.patchSession(id, patch),
+            })
+          : aiStream;
+        const instrumented = instrumentGenerateStream(titleStream, {
           requestId,
           traceId,
           traceparent,
@@ -474,7 +639,7 @@ export const POST: RequestHandler = async (event) => {
           waitingMs: 10_000,
           waitingIntervalMs: 20_000,
         });
-        writer.merge(runRecorder ? teeRunEvents(instrumented, runRecorder) : instrumented);
+        writer.merge((runRecorder ? teeRunEvents(instrumented, runRecorder) : instrumented) as ReadableStream<UIMessageChunk>);
         void writeAgentTelemetry({
           source: "server",
           event: "api.generate.stream_attached",

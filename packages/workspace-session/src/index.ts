@@ -28,6 +28,88 @@ export function deriveWorkspaceSessionTitle(message: string, input: { maxWords?:
   return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 3).trim()}...` : sentence;
 }
 
+export const WORKSPACE_SESSION_TITLE_MARKER_NAME = "titleGeneration";
+export const WORKSPACE_SESSION_TITLE_MARKER_PREFIX = `[[${WORKSPACE_SESSION_TITLE_MARKER_NAME}:`;
+const WORKSPACE_SESSION_TITLE_MARKER_SUFFIX = "]]";
+
+export interface WorkspaceSessionTitleExtraction {
+  title: string;
+  visibleText: string;
+  source: "marker" | "fallback";
+  markerFound: boolean;
+  markerMalformed: boolean;
+}
+
+export function extractWorkspaceSessionTitleMarker(text: string, fallbackMessage: string, input: { maxWords?: number; maxLength?: number } = {}): WorkspaceSessionTitleExtraction {
+  const fallback = deriveWorkspaceSessionTitle(fallbackMessage, input);
+  const leadingWhitespace = text.match(/^\s*/u)?.[0] ?? "";
+  const candidate = text.slice(leadingWhitespace.length);
+  const marker = readWorkspaceSessionTitleMarker(candidate);
+  if (!marker) {
+    return {
+      title: fallback,
+      visibleText: text,
+      source: "fallback",
+      markerFound: false,
+      markerMalformed: false,
+    };
+  }
+
+  const normalized = normalizeWorkspaceSessionTitleCandidate(marker.rawTitle, input);
+  return {
+    title: normalized || fallback,
+    visibleText: `${leadingWhitespace}${candidate.slice(marker.endIndex)}`.replace(/^\s*\n/u, ""),
+    source: normalized ? "marker" : "fallback",
+    markerFound: true,
+    markerMalformed: !normalized,
+  };
+}
+
+export function couldStartWorkspaceSessionTitleMarker(text: string): boolean {
+  const candidate = text.trimStart();
+  if (!candidate) return true;
+  return WORKSPACE_SESSION_TITLE_MARKER_PREFIX.startsWith(candidate) || candidate.startsWith(WORKSPACE_SESSION_TITLE_MARKER_PREFIX);
+}
+
+function readWorkspaceSessionTitleMarker(text: string): { rawTitle: string; endIndex: number } | null {
+  if (text.startsWith(WORKSPACE_SESSION_TITLE_MARKER_PREFIX)) {
+    const titleStart = WORKSPACE_SESSION_TITLE_MARKER_PREFIX.length;
+    const titleEnd = text.indexOf(WORKSPACE_SESSION_TITLE_MARKER_SUFFIX, titleStart);
+    if (titleEnd === -1) return null;
+    return { rawTitle: text.slice(titleStart, titleEnd), endIndex: titleEnd + WORKSPACE_SESSION_TITLE_MARKER_SUFFIX.length };
+  }
+
+  const xmlStart = `<${WORKSPACE_SESSION_TITLE_MARKER_NAME}>`;
+  const xmlEnd = `</${WORKSPACE_SESSION_TITLE_MARKER_NAME}>`;
+  if (text.startsWith(xmlStart)) {
+    const titleEnd = text.indexOf(xmlEnd, xmlStart.length);
+    if (titleEnd === -1) return null;
+    return { rawTitle: text.slice(xmlStart.length, titleEnd), endIndex: titleEnd + xmlEnd.length };
+  }
+
+  const jsonMatch = text.match(/^\{\s*"titleGeneration"\s*:\s*"([^"]*)"\s*\}/u);
+  return jsonMatch ? { rawTitle: jsonMatch[1] ?? "", endIndex: jsonMatch[0].length } : null;
+}
+
+function normalizeWorkspaceSessionTitleCandidate(title: string, input: { maxWords?: number; maxLength?: number }): string | null {
+  const maxWords = Math.max(1, input.maxWords ?? 7);
+  const maxLength = Math.max(16, input.maxLength ?? 56);
+  const cleaned = title
+    .replace(/[\r\n\t]+/gu, " ")
+    .replace(/[`*_#>\[\](){}]/g, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/gu, "")
+    .replace(/[?.!,;:]+$/gu, "")
+    .trim();
+  if (!cleaned) return null;
+  const words = cleaned.split(/\s+/u).filter(Boolean);
+  if (words.length > maxWords * 2) return null;
+  const titleWords = words.slice(0, maxWords).join(" ");
+  const sentence = titleWords.charAt(0).toUpperCase() + titleWords.slice(1);
+  return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 3).trim()}...` : sentence;
+}
+
 export type WorkspaceArtifactKind = "json-render" | "document";
 export type WorkspaceDocumentVersionSource = "user" | "ai" | "system";
 
