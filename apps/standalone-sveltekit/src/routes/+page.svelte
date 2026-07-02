@@ -10,7 +10,7 @@
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
   import { AgentConversation, getSpec, getText, snapshotDataParts, type AgentActivityStatus, type AgentChatMessage } from "@sonik-agent-ui/chat-surface";
-  import { upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
+  import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, describeRunError, isRunErrorCode } from "@sonik-agent-ui/tool-contracts";
   import {
@@ -25,6 +25,7 @@
   import { deriveAgentContextCandidates } from "$lib/agent-context/context-sources";
   import { promoteJsonRenderArtifact } from "$lib/artifacts/json-render-promotion";
   import { findDocumentArtifactToolCandidate, findJsonArtifactToolCandidate, type PreferredDocumentView } from "$lib/artifacts/tool-artifact-extraction";
+  import { findStreamingJsonArtifactSpecCandidate } from "$lib/artifacts/streaming-artifact";
   import { hasActiveArtifactUpdateIntent, hasExplicitArtifactIntent } from "$lib/artifacts/artifact-promotion";
   import { logArtifactTelemetry, summarizeSpec } from "$lib/artifacts/artifact-telemetry";
   import { createInMemoryArtifactWarehouse, type ArtifactWarehouseSnapshot, type ArtifactWarehouseVersion } from "$lib/artifacts/artifact-warehouse";
@@ -190,6 +191,11 @@
   let persistedMessageIds = new SvelteSet<string>();
   let reportedToolErrorKeys = new SvelteSet<string>();
   let processedJsonRenderPromotionKeys = new SvelteSet<string>();
+  // Live tool-input streaming: the partial-spec signature currently mounted as a
+  // preview, and the artifact ids we have already logged a first preview mount
+  // for. Non-reactive bookkeeping so the preview effect skips no-op re-runs.
+  let lastStreamingPreviewSignature: string | null = null;
+  let streamingPreviewMountedIds = new SvelteSet<string>();
   let messagePersistInFlight = false;
   let pendingDocumentSnapshot: ActiveDocumentSnapshot | null = null;
   let documentPersistPromise: Promise<void> | null = null;
@@ -311,6 +317,22 @@
       };
     }
 
+    return null;
+  });
+  // Live preview of a createJsonArtifact spec while its tool-call arguments are
+  // still streaming. Only fires while streaming and only until the completed
+  // tool output exists — at that point findJsonArtifactToolCandidate owns the
+  // artifact (latestJsonRenderSpec below), so the partial preview hands off to
+  // the authoritative, persisted version with no double-render.
+  const streamingJsonRenderPreview = $derived.by<{ id: string; spec: Spec; title?: string } | null>(() => {
+    if (!isStreaming) return null;
+    for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+      const message = conversation.messages[index];
+      if (!message || message.role !== "assistant") continue;
+      const parts = snapshotDataParts(message.parts as DataPart[]);
+      if (findJsonArtifactToolCandidate(message.id, parts as unknown[])) return null;
+      return findStreamingJsonArtifactSpecCandidate(message.id, parts as unknown[]);
+    }
     return null;
   });
   const latestDocumentArtifact = $derived.by<{ id: string; document: ActiveDocumentSnapshot; action: "create" | "update"; title: string; preferredView?: PreferredDocumentView } | null>(() => {
@@ -461,6 +483,51 @@
       persistJsonRenderArtifactSnapshot(promotedSnapshot, "agent");
       activeArtifactStatus = createArtifactStatus(promotedSnapshot.artifact, event);
       pendingArtifactIntent = null;
+    }
+  });
+
+  // Mount the streaming createJsonArtifact spec into the live canvas as its
+  // arguments arrive. This stays in memory only — no warehouse version commit
+  // and no /api/artifact persistence per delta — so the completed tool output
+  // (handled by the promotion effect above) remains the single authoritative,
+  // persisted spec. Reusing the same artifact id makes partial -> final an
+  // in-place update rather than a swap.
+  $effect(() => {
+    const preview = streamingJsonRenderPreview;
+    if (!preview) {
+      lastStreamingPreviewSignature = null;
+      return;
+    }
+
+    let signature: string;
+    let upsert: ReturnType<typeof upsertJsonRenderArtifact>;
+    try {
+      signature = createJsonRenderArtifactSignature(preview.spec);
+      if (signature === lastStreamingPreviewSignature && activeArtifact?.id === preview.id) return;
+      upsert = upsertJsonRenderArtifact({
+        previous: activeArtifact?.id === preview.id ? activeArtifact : null,
+        id: preview.id,
+        title: preview.title ?? "Live artifact",
+        spec: preview.spec,
+      });
+    } catch (error) {
+      reportClientEffectError("json_artifact.stream_preview_error", error, { messageId: preview.id });
+      return;
+    }
+
+    lastStreamingPreviewSignature = signature;
+    activeArtifact = upsert.artifact;
+    pendingArtifactIntent = null;
+
+    if (!streamingPreviewMountedIds.has(preview.id)) {
+      streamingPreviewMountedIds.add(preview.id);
+      logArtifactTelemetry({
+        source: "client",
+        event: "artifact.stream.preview_mounted",
+        artifactId: preview.id,
+        ...summarizeSpec(preview.spec),
+        ok: true,
+      });
     }
   });
 
