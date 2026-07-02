@@ -23,7 +23,8 @@ import {
 import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
 import { createDevSmokeStream, readDevSmokeFailMode, readDevSmokeRunId, readDevSmokeScenario, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
 import { startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
-import { getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord } from "$lib/server/workspace-request-store";
+import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord } from "$lib/server/workspace-request-store";
+import { resolveEffectiveContextDocument } from "$lib/server/run-context-document";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import {
@@ -266,7 +267,16 @@ export const POST: RequestHandler = async (event) => {
   // the current implicit behavior.
   const runContextSelection: AgentRunContextSelection | undefined = parseAgentRunContextSelection(body?.contextSelection ?? body?.workspace?.contextSelection);
   const selectionResolution = resolveAgentContextSelection(runContextSelection);
-  const effectiveActiveDocument = selectionResolution.includeActiveDocument ? activeDocument : null;
+  // Feed the chip-selected document's content (loaded from session-scoped
+  // persistence) rather than always the request's active document, so a non-active
+  // document selection actually reaches the agent. Out-of-scope ids are ignored.
+  const effectiveActiveDocument = await resolveEffectiveContextDocument({
+    includeActiveDocument: selectionResolution.includeActiveDocument,
+    selectedDocumentId: selectionResolution.documentIds[0],
+    requestActiveDocument: activeDocument,
+    sessionId: telemetrySessionId,
+    loadDocument: (id) => getRequestWorkspaceDocument(event, id),
+  });
   const pageContext = applyRunContextSelectionToPageContext(
     resolveAgentPageContext(body?.pageContext ?? body?.workspace?.pageContext, { activeDocument: effectiveActiveDocument }),
     selectionResolution,
