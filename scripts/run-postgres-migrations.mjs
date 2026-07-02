@@ -45,6 +45,21 @@ const migrations = [
 				)::text
 			`,
 	},
+	{
+		version: "0004",
+		name: "run_context_selection",
+		file: "packages/workspace-session/migrations/postgres/0004_run_context_selection.sql",
+		baselineCheck: `
+				select (
+					exists (
+						select 1 from information_schema.columns
+						where table_schema = 'sonik_agent_ui'
+							and table_name = 'agent_workspace_runs'
+							and column_name = 'context_selection'
+					)
+				)::text
+			`,
+	},
 ];
 
 if (!databaseUrl) {

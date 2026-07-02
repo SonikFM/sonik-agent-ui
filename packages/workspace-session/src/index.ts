@@ -142,6 +142,24 @@ export interface WorkspaceTelemetryEventRecord<TPayload = unknown> {
 
 export type WorkspaceRunStatus = "running" | "succeeded" | "failed" | "canceled";
 
+// Composer context selection persisted on a run. Structural (not imported from
+// @sonik-agent-ui/tool-contracts) so this package stays dependency-light; the app
+// layer narrows it to AgentRunContextSelection.
+export interface WorkspaceRunContextItem {
+  id: string;
+  kind: string;
+  label: string;
+  source: string;
+  ref?: string;
+  detail?: string;
+  route?: string;
+  metadata?: Record<string, unknown>;
+}
+export interface WorkspaceRunContextSelection {
+  items: WorkspaceRunContextItem[];
+  dismissedAutoSeedIds: string[];
+}
+
 // Persisted run object. Types are structural (not imported from
 // @sonik-agent-ui/tool-contracts) so this package stays dependency-light and
 // keeps its position in the build order; the app layer narrows `error_code` to
@@ -157,6 +175,9 @@ export interface WorkspaceRunRecord {
   request_id: string | null;
   trace_id: string | null;
   traceparent: string | null;
+  /** Composer context selection for this turn; null when no explicit selection
+   *  was sent (implicit-context fallback). */
+  context_selection: WorkspaceRunContextSelection | null;
   started_at: string;
   ended_at: string | null;
   created_at: string;
@@ -238,7 +259,7 @@ export interface WorkspaceTelemetryStore {
 }
 
 export interface WorkspaceRunStore {
-  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null }): WorkspaceRunRecord;
+  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord;
   getRun(id: string): WorkspaceRunRecord | null;
   listRuns(sessionId: string): WorkspaceRunRecord[];
   updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null; ended_at?: string | null }): WorkspaceRunRecord | null;
@@ -323,7 +344,7 @@ export interface AsyncWorkspaceTelemetryStore {
 }
 
 export interface AsyncWorkspaceRunStore {
-  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null }): Promise<WorkspaceRunRecord>;
+  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): Promise<WorkspaceRunRecord>;
   getRun(id: string): Promise<WorkspaceRunRecord | null>;
   listRuns(sessionId: string): Promise<WorkspaceRunRecord[]>;
   updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null; ended_at?: string | null }): Promise<WorkspaceRunRecord | null>;
@@ -567,6 +588,7 @@ type CloudWorkspaceRunRow = {
   request_id: string | null;
   trace_id: string | null;
   traceparent: string | null;
+  context_selection: WorkspaceRunContextSelection | null;
   started_at: string | Date;
   ended_at: string | Date | null;
   created_at: string | Date;
@@ -1057,16 +1079,16 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       return rows.map(mapCloudArtifactVersionRow<TContent>);
     });
   }
-  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null }): Promise<WorkspaceRunRecord> {
+  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): Promise<WorkspaceRunRecord> {
     return this.#withContext(async (tx) => {
       const session = await this.#ensureSession(tx, input.session_id);
       const id = input.id?.trim() || this.#nextId("workspace-run");
       const { rows } = await tx.query<CloudWorkspaceRunRow>(
         `insert into sonik_agent_ui.agent_workspace_runs
-          (organization_id, user_id, id, session_id, message_id, status, resumable, request_id, trace_id, traceparent)
-         values ($1, $2, $3, $4, $5, 'running', false, $6, $7, $8)
-         returning id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, started_at, ended_at, created_at, updated_at`,
-        [this.#authorized.organizationId, this.#authorized.userId, id, session.id, input.message_id ?? null, input.request_id ?? null, input.trace_id ?? null, input.traceparent ?? null],
+          (organization_id, user_id, id, session_id, message_id, status, resumable, request_id, trace_id, traceparent, context_selection)
+         values ($1, $2, $3, $4, $5, 'running', false, $6, $7, $8, $9::jsonb)
+         returning id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, session.id, input.message_id ?? null, input.request_id ?? null, input.trace_id ?? null, input.traceparent ?? null, input.context_selection != null ? JSON.stringify(input.context_selection) : null],
       );
       const row = rows[0];
       if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run insert returned no row.");
@@ -1081,7 +1103,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   listRuns(sessionId: string): Promise<WorkspaceRunRecord[]> {
     return this.#withContext(async (tx) => {
       const { rows } = await tx.query<CloudWorkspaceRunRow>(
-        `select id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, started_at, ended_at, created_at, updated_at
+        `select id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at
          from sonik_agent_ui.agent_workspace_runs
          where organization_id = $1 and user_id = $2 and session_id = $3
          order by created_at asc`,
@@ -1113,7 +1135,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
         `update sonik_agent_ui.agent_workspace_runs
          set status = $4, resumable = $5, error = $6, error_code = $7, message_id = $8, ended_at = $9, updated_at = now()
          where organization_id = $1 and user_id = $2 and id = $3
-         returning id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, started_at, ended_at, created_at, updated_at`,
+         returning id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
         [this.#authorized.organizationId, this.#authorized.userId, id, next.status, next.resumable, next.error, next.error_code, next.message_id, next.ended_at],
       );
       return rows[0] ? mapCloudRunRow(rows[0]) : null;
@@ -1151,7 +1173,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   async #selectRun(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceRunRecord | null> {
     const { rows } = await tx.query<CloudWorkspaceRunRow>(
-      `select id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, started_at, ended_at, created_at, updated_at
+      `select id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at
        from sonik_agent_ui.agent_workspace_runs
        where organization_id = $1 and user_id = $2 and id = $3`,
       [this.#authorized.organizationId, this.#authorized.userId, id],
@@ -1517,6 +1539,7 @@ function mapCloudRunRow(row: CloudWorkspaceRunRow): WorkspaceRunRecord {
     request_id: row.request_id ?? null,
     trace_id: row.trace_id ?? null,
     traceparent: row.traceparent ?? null,
+    context_selection: row.context_selection ?? null,
     started_at: toIsoTimestamp(row.started_at),
     ended_at: row.ended_at ? toIsoTimestamp(row.ended_at) : null,
     created_at: toIsoTimestamp(row.created_at),
@@ -1957,7 +1980,7 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
       .map(clone);
   }
 
-  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null }): WorkspaceRunRecord {
+  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord {
     const session = this.ensureSession(input.session_id);
     const timestamp = this.#now();
     const run: WorkspaceRunRecord = {
@@ -1971,6 +1994,7 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
       request_id: input.request_id ?? null,
       trace_id: input.trace_id ?? null,
       traceparent: input.traceparent ?? null,
+      context_selection: input.context_selection ?? null,
       started_at: timestamp,
       ended_at: null,
       created_at: timestamp,

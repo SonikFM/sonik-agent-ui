@@ -1,7 +1,8 @@
 import { SPEC_DATA_PART_TYPE } from "@json-render/core";
 export { SPEC_DATA_PART_TYPE } from "@json-render/core";
 import type { PersistedRunEvent, RunCorrelation, RunErrorCode } from "@sonik-agent-ui/tool-contracts";
-import type { WorkspaceRunEventRecord, WorkspaceRunRecord, WorkspaceRunStatus } from "@sonik-agent-ui/workspace-session";
+import type { AgentRunContextSelection } from "@sonik-agent-ui/tool-contracts/run-context";
+import type { WorkspaceRunContextSelection, WorkspaceRunEventRecord, WorkspaceRunRecord, WorkspaceRunStatus } from "@sonik-agent-ui/workspace-session";
 
 // Flush the coalesced text/reasoning buffer once it grows past this, so a
 // mid-turn interrupt still persists most of what streamed (bounded row count).
@@ -232,7 +233,7 @@ export function rebuildRunMessageText(events: Array<Pick<WorkspaceRunEventRecord
 // Minimal persistence surface the recorder needs. Accepts sync or async
 // implementations (in-memory adapter is sync; cloud is async) by awaiting.
 export interface RunPersistencePort {
-  createRun(input: { session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null }): WorkspaceRunRecord | Promise<WorkspaceRunRecord>;
+  createRun(input: { session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord | Promise<WorkspaceRunRecord>;
   appendRunEvent(input: { run_id: string; session_id?: string | null; kind: string; event: PersistedRunEvent }): unknown;
   updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null }): unknown;
 }
@@ -258,7 +259,7 @@ export interface RunRecorder {
  */
 export async function startRunRecorder(
   persistence: RunPersistencePort,
-  input: { sessionId: string; messageId?: string | null; correlation: RunCorrelation },
+  input: { sessionId: string; messageId?: string | null; correlation: RunCorrelation; contextSelection?: AgentRunContextSelection | null },
 ): Promise<RunRecorder | null> {
   let run: WorkspaceRunRecord;
   try {
@@ -268,6 +269,10 @@ export async function startRunRecorder(
       request_id: input.correlation.requestId,
       trace_id: input.correlation.traceId,
       traceparent: input.correlation.traceparent,
+      // The composer selection for this turn is persisted on the run so it can be
+      // replayed as provenance and re-hydrated on reload (removed chips stay
+      // removed). Structurally compatible with WorkspaceRunContextSelection.
+      context_selection: input.contextSelection ?? null,
     });
   } catch {
     return null;

@@ -9,6 +9,7 @@ import {
   type WorkspaceMessageRecord,
   type WorkspaceMode,
   type WorkspacePersistenceAdapter,
+  type WorkspaceRunContextSelection,
   type WorkspaceRunEventRecord,
   type WorkspaceRunRecord,
   type WorkspaceRunStatus,
@@ -201,6 +202,7 @@ export function createWorkspaceRun(input: {
   request_id?: string | null;
   trace_id?: string | null;
   traceparent?: string | null;
+  context_selection?: WorkspaceRunContextSelection | null;
 } = {}): WorkspaceRunRecord {
   return workspacePersistence.createRun(input);
 }
