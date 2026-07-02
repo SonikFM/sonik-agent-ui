@@ -14,12 +14,18 @@ type CatalogComponentDefinition = {
 
 // Intentional contract mirror: createJsonArtifact uses the same catalog prop schemas that the renderer uses, so catalog edits are agent tool-contract edits too.
 const catalogComponents = (explorerCatalog.data as { components: Record<string, CatalogComponentDefinition> }).components;
+const actionParamsSchema = z.record(z.string(), z.unknown());
+const actionBindingSchema = z.object({
+  action: z.string().describe("Renderer action name, for example setState."),
+  params: actionParamsSchema.optional().describe("Object payload passed to the renderer action."),
+}).strict();
+const actionBindingValueSchema = z.union([actionBindingSchema, z.array(actionBindingSchema)]);
 const elementControlSchema = {
   children: z.array(z.string()).optional().describe("Child element ids. Use [] for simple artifacts; if an id is listed here, it must also exist in spec.elements."),
   visible: z.unknown().optional(),
-  on: z.record(z.string(), z.unknown()).optional(),
+  on: z.record(z.string(), actionBindingValueSchema).optional(),
   repeat: z.object({ statePath: z.string(), key: z.string().optional() }).optional(),
-  watch: z.record(z.string(), z.unknown()).optional(),
+  watch: z.record(z.string(), actionBindingValueSchema).optional(),
 };
 
 const catalogElementSchemas = catalogComponentNames.map((name) => {

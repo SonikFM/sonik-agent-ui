@@ -60,6 +60,74 @@ try {
   const validDashboard = createJsonArtifact.inputSchema.safeParse({ title: "Dashboard", spec: JSON_ARTIFACT_DASHBOARD_SPEC });
   assert.equal(validDashboard.success, true, validDashboard.success ? "" : JSON.stringify(validDashboard.error.issues));
 
+  const interactiveSetStateArtifact = {
+    title: "Interactive",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Button",
+          props: { label: "Save", variant: "default", size: "default", disabled: false },
+          on: {
+            press: {
+              action: "setState",
+              params: { statePath: "/saved", value: true },
+            },
+          },
+          children: [],
+        },
+      },
+      state: { saved: false },
+    },
+  };
+  const validInteractive = createJsonArtifact.inputSchema.safeParse(interactiveSetStateArtifact);
+  assert.equal(validInteractive.success, true, validInteractive.success ? "" : JSON.stringify(validInteractive.error.issues));
+  const storedInteractive = await createJsonArtifact.execute(validInteractive.data);
+  assert.deepEqual(
+    storedInteractive.spec.elements.main.on,
+    interactiveSetStateArtifact.spec.elements.main.on,
+    "on.press setState binding must survive createJsonArtifact validation into the stored spec",
+  );
+
+  const validActionArray = createJsonArtifact.inputSchema.safeParse({
+    title: "Interactive array",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Button",
+          props: { label: "Save", variant: "default", size: "default", disabled: false },
+          on: {
+            press: [
+              { action: "setState", params: { statePath: "/saved", value: true } },
+              { action: "setState", params: { statePath: "/submitted", value: true } },
+            ],
+          },
+          children: [],
+        },
+      },
+      state: { saved: false, submitted: false },
+    },
+  });
+  assert.equal(validActionArray.success, true, validActionArray.success ? "" : JSON.stringify(validActionArray.error.issues));
+
+  const arbitraryOnObject = createJsonArtifact.inputSchema.safeParse({
+    title: "Bad",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Button",
+          props: { label: "Bad", variant: "default", size: "default", disabled: false },
+          on: { press: { arbitrary: true } },
+          children: [],
+        },
+      },
+      state: {},
+    },
+  });
+  assert.equal(arbitraryOnObject.success, false, "on.* values must be action objects or arrays, not arbitrary objects");
+
   const emptyElements = createJsonArtifact.inputSchema.safeParse({ title: "Bad", spec: { root: "main", elements: {}, state: {} } });
   assert.equal(emptyElements.success, false, "empty element maps must be rejected");
 
