@@ -337,8 +337,9 @@ assert.equal(toolLearnCampaign.metadata.execution, "none");
 assert.equal(toolLearnCampaign.metadata.interactiveSurfaceTemplate.kind, "question_group");
 
 const agentSource = await readFile("apps/standalone-sveltekit/src/lib/agent.ts", "utf8");
+const agentPromptSource = await readFile("apps/standalone-sveltekit/src/lib/agent-prompt.ts", "utf8");
 assert.equal(agentSource.includes("createSkillCatalogTools"), true, "agent runtime mounts skill catalog tools");
-assert.equal(agentSource.includes("searchSkillCatalog/learnSkill"), true, "base prompt teaches workflow discovery before command execution");
+assert.equal(agentPromptSource.includes("searchSkillCatalog/learnSkill"), true, "base prompt teaches workflow discovery before command execution");
 
 const generateSource = await readFile("apps/standalone-sveltekit/src/routes/api/generate/+server.ts", "utf8");
 assert.equal(generateSource.includes("CONTEXT-RELEVANT SKILL STARTUP INDEX"), true, "generate route injects compact skill startup context");

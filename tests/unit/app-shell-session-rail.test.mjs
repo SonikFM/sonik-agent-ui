@@ -135,7 +135,7 @@ assert.equal(generateRoute.includes("fallback: createBookingRuntimeAuthContextFr
 assert.equal(generateRoute.includes("const APPROVED_COMMAND_IDS_MAX_ITEMS = 128"), true, "generate route should preserve generated booking command grants beyond the old demo-only 20-id cap");
 assert.equal(generateRoute.includes(".slice(0, APPROVED_COMMAND_IDS_MAX_ITEMS)"), true, "generate route should still bound trusted approved command ids with a named guardrail");
 assert.equal(generateRoute.includes("bookingRuntimeCredentialed"), true, "generate telemetry should expose credential posture without logging credentials");
-assert.equal(generateRoute.includes("createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence })"), true, "agent tools should receive the selection-gated active document, active workspace session id, page context, trusted host session, approval grants, configured booking runtime base URL, server-side auth mode, and injectable runtime fetcher");
+assert.equal(generateRoute.includes("createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds })"), true, "agent tools should receive the selection-gated active document, active workspace session id, page context, trusted host session, approval grants, configured booking runtime base URL, server-side auth mode, injectable runtime fetcher, and the per-turn composed skill ids");
 assert.equal(generateRoute.includes("resolveAgentContextSelection(runContextSelection)"), true, "generate route should resolve the explicit composer context selection");
 assert.equal(generateRoute.includes("selectionResolution.includeActiveDocument ? activeDocument : null"), true, "generate route should drop the active document when the user deselected its chip (authoritative removal at the server boundary)");
 assert.equal(generateRoute.includes("contextSelection: runContextSelection ?? null"), true, "generate route should persist the composer selection on the run record");
@@ -391,7 +391,7 @@ assert.equal(agentTelemetrySource.includes("Cloudflare Workers do not provide a 
 const artifactToolSource = await readFile("apps/standalone-sveltekit/src/lib/tools/artifact.ts", "utf8");
 const jsonArtifactSpecSource = await readFile("apps/standalone-sveltekit/src/lib/artifacts/json-artifact-spec.ts", "utf8");
 const artifactGuidanceSource = await readFile("apps/standalone-sveltekit/src/lib/artifacts/artifact-generation-guidance.ts", "utf8");
-const agentSource = await readFile("apps/standalone-sveltekit/src/lib/agent.ts", "utf8");
+const agentPromptSource = await readFile("apps/standalone-sveltekit/src/lib/agent-prompt.ts", "utf8");
 const componentRegistrySource = await readFile("apps/standalone-sveltekit/src/lib/render/component-registry.ts", "utf8");
 const rootReadmeSource = await readFile("README.md", "utf8");
 assert.equal(artifactToolSource.includes("validateSpec"), true, "artifact tool should use shared json-render structural validation");
@@ -413,10 +413,10 @@ assert.equal(artifactGuidanceSource.includes("getJsonArtifactToolDescription"), 
 assert.equal(artifactGuidanceSource.includes("JSON.stringify(starterToolInput"), true, "artifact guidance should derive the minimal prompt example from the validated starter object");
 assert.equal(artifactGuidanceSource.includes("JSON.stringify(dashboardToolInput"), true, "artifact guidance should derive the dashboard prompt example from the validated dashboard object");
 assert.equal(artifactToolSource.includes("getJsonArtifactToolDescription()"), true, "artifact tool should consume centralized generation guidance instead of duplicating examples");
-assert.equal(agentSource.includes("JSON_ARTIFACT_TOOL_OBJECT_GUIDANCE"), true, "agent instructions should include object-form artifact examples for live model generation quality");
-assert.equal(agentSource.includes("ARTIFACT TOOL OBJECT EXAMPLES"), true, "agent instructions should have a dedicated artifact tool object section");
-assert.equal(agentSource.includes("DATA BINDING FOR INLINE SPEC FENCES AND NON-TOOL UI SPECS"), true, "agent instructions should scope broad $state guidance away from strict tool input");
-assert.equal(agentSource.includes("For inline JSON-render responses outside createJsonArtifact"), true, "agent instructions should keep generic $state data guidance outside strict createJsonArtifact input");
+assert.equal(agentPromptSource.includes("JSON_ARTIFACT_TOOL_OBJECT_GUIDANCE"), true, "agent instructions should include object-form artifact examples for live model generation quality");
+assert.equal(agentPromptSource.includes("ARTIFACT TOOL OBJECT EXAMPLES"), true, "agent instructions should have a dedicated artifact tool object section");
+assert.equal(agentPromptSource.includes("DATA BINDING FOR INLINE SPEC FENCES AND NON-TOOL UI SPECS"), true, "agent instructions should scope broad $state guidance away from strict tool input");
+assert.equal(agentPromptSource.includes("For inline JSON-render responses outside createJsonArtifact"), true, "agent instructions should keep generic $state data guidance outside strict createJsonArtifact input");
 assert.equal(artifactToolSource.includes("Intentional contract mirror"), true, "artifact tool should document catalog-to-tool schema coupling as an intentional contract");
 assert.equal(componentRegistrySource.includes("JSON_RENDER_COMPONENT_GROUPS"), true, "json-render components should have a human/agent-readable grouped registry map");
 assert.equal(componentRegistrySource.includes("JSON_RENDER_COMPONENT_REGISTRY_PATHS"), true, "json-render component registry should document the catalog/registry/runtime paths");
