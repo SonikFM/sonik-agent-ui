@@ -47,6 +47,8 @@ gate when neither is available (each is then reported as an explicit SKIP).
 | `host-context-secret` | deploy | The shared host-context secret is present (never prints the value) | reports presence; SKIPPED when the secret is not exported |
 | `run-persistence-target` | live | Run persistence + reattach works against a deployed environment | `AGENT_UI_GATE_TARGET_BASE_URL` set |
 
+> **PostgreSQL 15+ required** for the `migrations` check: `packages/workspace-session/migrations/postgres/0003_agent_run_lifecycle.sql` uses column-list `ON DELETE SET NULL (session_id)` syntax, which fails to apply on PostgreSQL ≤14 (Neon runs 15+; verify the version before applying elsewhere).
+
 ## Environment variables
 
 | Variable | Effect |
