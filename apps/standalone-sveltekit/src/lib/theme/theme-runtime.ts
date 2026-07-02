@@ -20,6 +20,12 @@ export function normalizeThemeSetting(value: string | null | undefined): ThemeSe
   return value && isDocumentThemeId(value) ? value : DEFAULT_THEME_SETTING;
 }
 
+export function parseThemeSetting(value: string | null | undefined): ThemeSetting | undefined {
+  const trimmed = typeof value === "string" ? value.trim() : value;
+  if (trimmed === "system") return "system";
+  return trimmed && isDocumentThemeId(trimmed) ? trimmed : undefined;
+}
+
 export function resolveSystemTheme(): DocumentThemeId {
   if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
     return SYSTEM_DARK_THEME;
@@ -34,9 +40,18 @@ export function resolveThemeSetting(setting: ThemeSetting): DocumentThemeId {
 export function readStoredThemeSetting(): ThemeSetting {
   if (typeof window === "undefined") return DEFAULT_THEME_SETTING;
   try {
-    return normalizeThemeSetting(window.localStorage.getItem(THEME_STORAGE_KEY));
+    return parseThemeSetting(window.localStorage.getItem(THEME_STORAGE_KEY)) ?? DEFAULT_THEME_SETTING;
   } catch {
     return DEFAULT_THEME_SETTING;
+  }
+}
+
+export function readStoredThemePreference(): ThemeSetting | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    return parseThemeSetting(window.localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return undefined;
   }
 }
 
@@ -79,6 +94,31 @@ export function commitThemeSetting(setting: ThemeSetting): DocumentThemeId {
   const resolved = applyThemeSetting(normalized);
   emitThemeChange(normalized, resolved);
   return resolved;
+}
+
+export function resolveEmbeddedThemeSetting(input: {
+  hostTheme?: string | null;
+  storedSetting?: ThemeSetting | null;
+  defaultTheme?: DocumentThemeId;
+} = {}): ThemeSetting {
+  return parseThemeSetting(input.hostTheme)
+    ?? input.storedSetting
+    ?? input.defaultTheme
+    ?? DEFAULT_DOCUMENT_THEME_ID;
+}
+
+export function applyEmbeddedThemeSetting(input: {
+  hostTheme?: string | null;
+  storedSetting?: ThemeSetting | null;
+  defaultTheme?: DocumentThemeId;
+} = {}): ThemeSetting {
+  const setting = resolveEmbeddedThemeSetting({
+    ...input,
+    storedSetting: input.storedSetting ?? readStoredThemePreference() ?? null,
+  });
+  const resolved = applyThemeSetting(setting);
+  emitThemeChange(setting, resolved);
+  return setting;
 }
 
 export function initializeTheme(): ThemeSetting {

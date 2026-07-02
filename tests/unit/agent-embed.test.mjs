@@ -23,6 +23,7 @@ const message = {
     surface: "booking-console",
     pageType: "event-booking-detail",
     title: "Summer Jazz Night",
+    theme: "gunmetal-light",
     activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" },
     commandFamilies: ["booking", "event", "", "booking"],
     skillFamilies: ["booking-ops"],
@@ -37,6 +38,7 @@ assert.equal(isAgentHostPageContextMessage({ ...message, payload: null }), false
 
 const sanitized = sanitizeAgentHostPageContext(message.payload);
 assert.equal(sanitized?.surface, "booking-console");
+assert.equal(sanitized?.theme, "gunmetal-light", "host page theme should survive page-context sanitization");
 assert.equal(sanitized?.activeEntity?.label, "Summer Jazz Night");
 assert.equal(sanitized?.organizationId, "forged-org", "allowed hosts may donate sanitized org context for the host-asserted embed runtime");
 assert.deepEqual(sanitized?.scopes, ["admin:*"], "allowed hosts may donate sanitized scopes for the host-asserted embed runtime");
@@ -48,6 +50,7 @@ const merged = mergeAgentHostPageContext(
 );
 assert.equal(merged.route, "/booking/bookings/booking_123", "host page context should overlay local route");
 assert.equal(merged.surface, "booking-console", "host page context should overlay local surface");
+assert.equal(merged.theme, "gunmetal-light", "host page context should overlay local theme");
 assert.equal(merged.activeSessionId, "sess-local", "local app session state should be retained when host does not override it");
 assert.equal(merged.activeEntity?.id, "booking_123", "merged context should include active entity id");
 assert.equal(merged.organizationId, "org-trusted", "trusted context should be appended explicitly");
@@ -70,11 +73,13 @@ const trustedSession = sanitizeAgentHostPageContext({
     organizationId: "org_123",
     authenticated: true,
     scopes: ["booking:read"],
+    theme: "gunmetal-dark",
     metadata: { token: "vck_SHOULDNOTSURVIVE123456" },
   },
 });
 assert.equal(trustedSession?.authenticated, true, "trusted host authentication flag should survive sanitization");
 assert.equal(trustedSession?.hostSession?.source, "amplify-embedded", "known host session source should survive sanitization");
+assert.equal(trustedSession?.hostSession?.theme, "gunmetal-dark", "trusted host session theme should survive sanitization");
 assert.deepEqual(trustedSession?.hostSession?.metadata, { token: "[REDACTED]" }, "host session metadata should preserve signed-envelope shape with redacted string values");
 
 

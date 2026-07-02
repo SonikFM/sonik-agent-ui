@@ -32,6 +32,7 @@
   import ArtifactInspector from "$lib/artifacts/ArtifactInspector.svelte";
   import SessionRail from "$lib/session/SessionRail.svelte";
   import ThemePicker from "$lib/theme/ThemePicker.svelte";
+  import { applyEmbeddedThemeSetting } from "$lib/theme/theme-runtime";
   import {
     appendArtifactObservationEvent,
     createArtifactObservationEvent,
@@ -217,6 +218,8 @@
   let sessionBootstrapPromise: Promise<void> | null = null;
   let hostContextWaitTimer: number | null = null;
   let hostPageContext = $state<AgentHostMergedPageContext | null>(null);
+  let embeddedHostContextExpected = $state(false);
+  let embeddedUrlTheme: string | null = null;
   let embedMode = $state<AgentEmbedMode>(getInitialEmbedIntent().mode);
   let embedRailMode = $state<AgentEmbedRailMode>(getInitialEmbedIntent().railMode);
   let streamStartedAt = $state<number | null>(null);
@@ -1109,8 +1112,7 @@
   }
 
   function isEmbeddedHostContextExpected(): boolean {
-    if (typeof window === "undefined") return false;
-    return new URLSearchParams(window.location.search).has("agentUiHostOrigin");
+    return embeddedHostContextExpected;
   }
 
   function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {
@@ -1196,6 +1198,7 @@
       return;
     }
     hostPageContext = nextContext;
+    applyEmbeddedThemeFromHost(nextContext.theme ?? embeddedUrlTheme);
     logArtifactTelemetry({
       source: "client",
       event: "host.page_context.updated",
@@ -1224,7 +1227,17 @@
       artifactType: activeDocument?.language ?? (activeArtifact ? "json-render" : null),
       conversationStatus: conversation.status,
       messageCount: conversation.messages.length,
-      visibleActions: ["theme-picker", "workspace-docs", "start-over", "createSession", "submitPrompt", "stop", "clearChat", "clearArtifact", "openWorkspaceDocument"],
+      visibleActions: [
+        ...(isEmbeddedHostContextExpected() ? [] : ["theme-picker"]),
+        "workspace-docs",
+        "start-over",
+        "createSession",
+        "submitPrompt",
+        "stop",
+        "clearChat",
+        "clearArtifact",
+        "openWorkspaceDocument",
+      ],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
       commandFamilies: documentEditorOpen ? ["local-ui", "document", "artifact"] : activeArtifact ? ["local-ui", "artifact"] : ["local-ui", "discovery"],
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
@@ -1352,6 +1365,8 @@
 
   function applyEmbedUrlOptions(): void {
     const params = new URLSearchParams(window.location.search);
+    embeddedHostContextExpected = params.has("agentUiHostOrigin");
+    embeddedUrlTheme = params.get("theme");
     const nextIntent = normalizeAgentEmbedIntent({
       embedMode: params.get("embedMode"),
       agentUiMode: params.get("agentUiMode"),
@@ -1360,6 +1375,12 @@
     });
     embedMode = nextIntent.mode;
     embedRailMode = nextIntent.railMode;
+    applyEmbeddedThemeFromHost(embeddedUrlTheme);
+  }
+
+  function applyEmbeddedThemeFromHost(hostTheme?: string | null): void {
+    if (!isEmbeddedHostContextExpected()) return;
+    applyEmbeddedThemeSetting({ hostTheme });
   }
 
   function installDevLongTaskTelemetry(): (() => void) | undefined {
@@ -2262,7 +2283,9 @@
       shouldRenderArtifact={shouldRenderInlineArtifact}
     >
       {#snippet actions()}
-        <ThemePicker />
+        {#if !isEmbeddedHostContextExpected()}
+          <ThemePicker />
+        {/if}
         <button
           type="button"
           onclick={openDocumentEditor}

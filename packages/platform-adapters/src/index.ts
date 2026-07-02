@@ -32,6 +32,7 @@ export type PlatformAdapterContext = {
   organizationId?: string | null;
   authenticated?: boolean;
   scopes?: string[];
+  theme?: string | null;
 };
 
 export type HostSessionSource = "anonymous" | "standalone-demo" | "embedded-host" | "amplify-embedded";
@@ -44,6 +45,7 @@ export type HostSessionEnvelope = {
   organizationId?: string | null;
   authenticated: boolean;
   scopes: string[];
+  theme?: string | null;
   expiresAt?: string | null;
   metadata?: Record<string, unknown>;
 };
@@ -59,6 +61,7 @@ export function createAnonymousHostSessionEnvelope(input: Partial<HostSessionEnv
     organizationId: null,
     authenticated: false,
     scopes: [],
+    theme: input.theme ?? null,
     expiresAt: input.expiresAt ?? null,
     metadata: input.metadata,
   };
@@ -71,6 +74,7 @@ export function createTrustedHostSessionEnvelope(input: {
   principalId?: string | null;
   organizationId: string;
   scopes: string[];
+  theme?: string | null;
   expiresAt?: string | null;
   metadata?: Record<string, unknown>;
 }): HostSessionEnvelope {
@@ -82,6 +86,7 @@ export function createTrustedHostSessionEnvelope(input: {
     organizationId: input.organizationId,
     authenticated: true,
     scopes: [...new Set(input.scopes)].sort(),
+    theme: input.theme ?? null,
     expiresAt: input.expiresAt ?? null,
     metadata: input.metadata,
   };
@@ -94,6 +99,7 @@ export function createEmbeddedHostSessionEnvelope(input: {
   organizationId?: string | null;
   authenticated?: boolean;
   scopes?: string[];
+  theme?: string | null;
   expiresAt?: string | null;
   source?: "embedded-host" | "amplify-embedded";
   metadata?: Record<string, unknown>;
@@ -104,6 +110,7 @@ export function createEmbeddedHostSessionEnvelope(input: {
       sessionId: input.sessionId,
       userId: input.userId,
       principalId: input.principalId,
+      theme: input.theme,
       expiresAt: input.expiresAt,
       metadata: input.metadata,
     });
@@ -116,6 +123,7 @@ export function createEmbeddedHostSessionEnvelope(input: {
     principalId: input.principalId,
     organizationId: input.organizationId,
     scopes: input.scopes ?? [],
+    theme: input.theme,
     expiresAt: input.expiresAt,
     metadata: input.metadata,
   });
@@ -128,6 +136,7 @@ export function platformAdapterContextFromHostSession(session: HostSessionEnvelo
     authenticated: session.authenticated,
     organizationId: session.authenticated ? session.organizationId ?? null : null,
     scopes: session.authenticated ? session.scopes : [],
+    theme: session.theme ?? null,
   };
 }
 
