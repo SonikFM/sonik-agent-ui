@@ -25,3 +25,6 @@ build/
 .playwright-mcp/
 config.bat
 .claude/settings.local.json
+.codex/
+.omc/
+booking-agent-ui-embed-local-2026-06-25.png
