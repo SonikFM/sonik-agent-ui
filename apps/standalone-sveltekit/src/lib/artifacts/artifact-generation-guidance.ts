@@ -1,5 +1,5 @@
 import { formatSpecIssues, validateSpec, type Spec } from "@json-render/core";
-import { explorerCatalog } from "../render/catalog";
+import { explorerCatalog } from "../render/catalog.ts";
 
 export const JSON_ARTIFACT_ALLOWED_COMPONENTS = explorerCatalog.componentNames as [string, ...string[]];
 export const JSON_ARTIFACT_COMPONENT_HINT = JSON_ARTIFACT_ALLOWED_COMPONENTS.join(", ");

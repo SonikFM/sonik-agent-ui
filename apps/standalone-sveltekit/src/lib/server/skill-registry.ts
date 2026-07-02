@@ -221,6 +221,66 @@ export function getRuntimeSkillCatalog(): SkillCatalog {
   return catalog;
 }
 
+// Defensive caps for per-turn skill prompt composition, mirroring the
+// route-limits discipline: bound how many skills and how much text a single turn
+// can append to the system prompt so an over-eager (or hostile) selection cannot
+// balloon the prompt. Skills beyond the count cap are dropped; a rendered body is
+// truncated to the per-skill char cap; the join is bounded by the total cap.
+export const RUNTIME_SKILL_PROMPT_MAX_MODULES = 6;
+export const RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS = 2_000;
+export const RUNTIME_SKILL_PROMPT_MAX_TOTAL_CHARS = 8_000;
+
+export interface RuntimeSkillPromptModule {
+  id: string;
+  body: string;
+}
+
+function boundedBody(value: string): string {
+  return value.length > RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS
+    ? `${value.slice(0, RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS)}…`
+    : value;
+}
+
+function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
+  const lines = [`RUNTIME SKILL: ${skill.id} [${skill.familyId}]`, skill.title];
+  if (skill.description) lines.push(skill.description);
+  const commandPath = skill.commandSequence.join(" -> ");
+  if (commandPath) lines.push(`Command path: ${commandPath}`);
+  if (skill.forbiddenUnlessExplicit.length > 0) {
+    lines.push(`Do not (unless the user explicitly asks): ${skill.forbiddenUnlessExplicit.join(", ")}`);
+  }
+  return boundedBody(lines.join("\n"));
+}
+
+/**
+ * Resolves per-turn skill ids into prompt-ready bodies for {@link composeAgentSystemPrompt}.
+ * An id matches a skill by its exact skill id or by its family id (page-context
+ * `skillFamilies` and runtime-skill chips both surface family ids). Resolution is
+ * order-preserving and de-duplicated, and enforces the count/char caps above.
+ * Unknown ids are silently ignored so a stale chip never breaks a turn. Skills
+ * are only ever appended for the current run — never persisted onto the session.
+ */
+export function resolveRuntimeSkillPromptModules(skillIds: string[] = []): RuntimeSkillPromptModule[] {
+  const modules: RuntimeSkillPromptModule[] = [];
+  const seen = new Set<string>();
+  let totalChars = 0;
+  for (const rawId of skillIds) {
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    if (!id) continue;
+    const matches = catalog.skills.filter((skill) => skill.id === id || skill.familyId === id);
+    for (const skill of matches) {
+      if (seen.has(skill.id)) continue;
+      if (modules.length >= RUNTIME_SKILL_PROMPT_MAX_MODULES) return modules;
+      const body = renderSkillPromptBody(skill);
+      if (totalChars + body.length > RUNTIME_SKILL_PROMPT_MAX_TOTAL_CHARS) return modules;
+      seen.add(skill.id);
+      totalChars += body.length;
+      modules.push({ id: skill.id, body });
+    }
+  }
+  return modules;
+}
+
 export function createRuntimeSkillIndex(context: RuntimeSkillRegistryContext = {}, input: { limit?: number } = {}): SkillIndex {
   const normalized = normalizeSkillRegistryContext(context);
   const hasSurfaceContext = Boolean(
