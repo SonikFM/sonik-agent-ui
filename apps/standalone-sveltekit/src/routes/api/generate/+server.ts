@@ -1,5 +1,5 @@
 import { env } from "$env/dynamic/private";
-import { createAgent } from "$lib/agent";
+import { createAgent, resolveAgentPromptComposition } from "$lib/agent";
 import { minuteRateLimit, dailyRateLimit } from "$lib/rate-limit";
 import {
   convertToModelMessages,
@@ -48,7 +48,24 @@ import type { RequestHandler } from "./$types";
 const PAGE_CONTEXT_FIELD_MAX_CHARS = 160;
 const PAGE_CONTEXT_LIST_MAX_ITEMS = 8;
 const APPROVED_COMMAND_IDS_MAX_ITEMS = 128;
+const AGENT_SKILL_IDS_MAX_ITEMS = 8;
+const AGENT_SKILL_ID_MAX_CHARS = 160;
 const AGENT_UI_RUN_ID_HEADER = "x-sonik-agent-ui-run-id";
+
+// Per-turn skill ids: donor-style `ChatRequest.skillIds` on the request, unioned
+// with the explicit runtime-skill composer chips for this turn. Sourced only from
+// EXPLICIT selection (never implicit page-context skill families) so a default
+// turn composes exactly today's monolith-equivalent prompt with no appended
+// skills. Bounded in count and length; resolved through the skill registry.
+function resolveRequestSkillIds(input: { requestSkillIds: unknown; selectedSkillFamilies: string[] }): string[] {
+  const fromRequest = Array.isArray(input.requestSkillIds)
+    ? input.requestSkillIds
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0 && entry.length <= AGENT_SKILL_ID_MAX_CHARS)
+    : [];
+  return [...new Set([...fromRequest, ...input.selectedSkillFamilies])].slice(0, AGENT_SKILL_IDS_MAX_ITEMS);
+}
 
 
 function createServiceBindingFetcher(binding: unknown): typeof fetch | undefined {
@@ -264,6 +281,13 @@ export const POST: RequestHandler = async (event) => {
   });
   const hostSession = createAgentHostSessionEnvelope(event);
   const approvedCommandIds = approvedCommandIdsFromHostSession(hostSession);
+  const skillIds = resolveRequestSkillIds({
+    requestSkillIds: body?.skillIds ?? body?.workspace?.skillIds,
+    selectedSkillFamilies: selectionResolution.skillFamilies,
+  });
+  // Compose the per-turn prompt once so the same module/skill ids we record on
+  // the run are the ones createAgent seeds below (deterministic for this context).
+  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl });
   const startedAt = Date.now();
 
   if (!uiMessages || !Array.isArray(uiMessages) || uiMessages.length === 0) {
@@ -359,6 +383,7 @@ export const POST: RequestHandler = async (event) => {
         messageId: null,
         correlation,
         contextSelection: runContextSelection ?? null,
+        promptComposition: { moduleIds: promptComposition.moduleIds, skillIds: promptComposition.skillIds },
       })
     : null;
 
@@ -384,7 +409,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

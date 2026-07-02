@@ -257,9 +257,14 @@ export interface RunRecorder {
  * (e.g. cloud persistence without host context) so the caller degrades to the
  * existing, non-persisted streaming behavior.
  */
+export interface RunPromptComposition {
+  moduleIds: string[];
+  skillIds: string[];
+}
+
 export async function startRunRecorder(
   persistence: RunPersistencePort,
-  input: { sessionId: string; messageId?: string | null; correlation: RunCorrelation; contextSelection?: AgentRunContextSelection | null },
+  input: { sessionId: string; messageId?: string | null; correlation: RunCorrelation; contextSelection?: AgentRunContextSelection | null; promptComposition?: RunPromptComposition | null },
 ): Promise<RunRecorder | null> {
   let run: WorkspaceRunRecord;
   try {
@@ -291,6 +296,17 @@ export async function startRunRecorder(
       enqueue(() => persistence.appendRunEvent({ run_id: run.id, session_id: input.sessionId, kind: event.kind, event }));
     }
   };
+
+  // Record the composed prompt module ids + per-turn skill ids as a small status
+  // event so per-run prompt drift is diagnosable without persisting prompt text.
+  // Ignored by rebuildRunMessageParts, so it never alters the reattached message.
+  if (input.promptComposition) {
+    persistEvents([{
+      kind: "status",
+      label: "prompt_composition",
+      detail: JSON.stringify(input.promptComposition),
+    }]);
+  }
 
   return {
     runId: run.id,
