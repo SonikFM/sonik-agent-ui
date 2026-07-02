@@ -18,11 +18,11 @@ export interface AgentContextCandidatesInput {
 }
 
 export interface AgentContextCandidates {
-  /** Auto-seeded chips: current page + active document. Subject to authoritative
+  /** Auto-seeded chips: current page, active document, and active entity. Subject to authoritative
    *  removal — the reconcile step drops any the user dismissed. */
   seeds: AgentContextItem[];
   /** Full attachable catalog for the composer plus menu (seeds + manual-only
-   *  sources: active artifact, booking entity, command families, runtime skills). */
+   *  sources: active artifact, command families, runtime skills). */
   sources: AgentContextItem[];
 }
 
@@ -30,6 +30,18 @@ function dedupeById(items: AgentContextItem[]): AgentContextItem[] {
   const map = new Map<string, AgentContextItem>();
   for (const item of items) map.set(item.id, item);
   return [...map.values()];
+}
+
+function activeEntityContextItem(entity: { type: string; id: string; label?: string }, source: "auto" | "manual"): AgentContextItem {
+  return {
+    id: `booking-context:${entity.type}:${entity.id}`,
+    kind: "booking-context",
+    label: entity.label?.trim() || `${entity.type} ${entity.id}`,
+    source,
+    ref: entity.id,
+    detail: `${entity.type} ${entity.id}`,
+    metadata: { entityType: entity.type },
+  };
 }
 
 /**
@@ -63,6 +75,11 @@ export function deriveAgentContextCandidates(input: AgentContextCandidatesInput)
     });
   }
 
+  const entity = page?.activeEntity;
+  if (entity?.id) {
+    seeds.push(activeEntityContextItem(entity, "auto"));
+  }
+
   const sources: AgentContextItem[] = [...seeds];
 
   if (input.activeArtifact?.id) {
@@ -72,18 +89,6 @@ export function deriveAgentContextCandidates(input: AgentContextCandidatesInput)
       label: input.activeArtifact.title?.trim() || "Active artifact",
       source: "manual",
       ref: input.activeArtifact.id,
-    });
-  }
-
-  const entity = page?.activeEntity;
-  if (entity?.id) {
-    sources.push({
-      id: `booking-context:${entity.type}:${entity.id}`,
-      kind: "booking-context",
-      label: entity.label?.trim() || `${entity.type} ${entity.id}`,
-      source: "manual",
-      ref: entity.id,
-      detail: `${entity.type} ${entity.id}`,
     });
   }
 

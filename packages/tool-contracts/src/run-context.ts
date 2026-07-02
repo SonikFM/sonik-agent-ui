@@ -211,6 +211,7 @@ export interface AgentContextSelectionResolution {
   explicit: boolean;
   documentIds: string[];
   artifactIds: string[];
+  activeEntity: { type: string; id: string; label?: string } | null;
   commandFamilies: string[];
   skillFamilies: string[];
   page: { route?: string; title?: string } | null;
@@ -232,10 +233,18 @@ export function resolveAgentContextSelection(
   const byKind = (kind: AgentContextKind) => items.filter((item) => item.kind === kind);
   const documentItems = byKind("document");
   const pageItem = byKind("page")[0];
+  const entityItem = byKind("booking-context")[0];
+  const entityType = typeof entityItem?.metadata?.entityType === "string" && entityItem.metadata.entityType.trim()
+    ? entityItem.metadata.entityType.trim()
+    : "booking-context";
+  const activeEntity = entityItem?.ref
+    ? { type: entityType, id: entityItem.ref, label: entityItem.label }
+    : null;
   return {
     explicit,
     documentIds: documentItems.map((item) => item.ref).filter((ref): ref is string => Boolean(ref)),
     artifactIds: byKind("artifact").map((item) => item.ref).filter((ref): ref is string => Boolean(ref)),
+    activeEntity,
     commandFamilies: dedupeStrings(byKind("command-family").map((item) => item.ref ?? item.label).filter(Boolean)),
     skillFamilies: dedupeStrings(byKind("runtime-skill").map((item) => item.ref ?? item.label).filter(Boolean)),
     page: pageItem ? { route: pageItem.route ?? pageItem.ref, title: pageItem.label } : null,

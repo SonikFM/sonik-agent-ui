@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { deriveAgentContextCandidates } from "../../apps/standalone-sveltekit/src/lib/agent-context/context-sources.ts";
+import { resolveAgentContextSelection } from "../../packages/tool-contracts/src/run-context.ts";
 
-// Auto-seeds: current page + active document only.
+// Auto-seeds: current page + active document + active entity.
 const derived = deriveAgentContextCandidates({
   pageContext: {
     route: "/events/42",
@@ -16,7 +17,7 @@ const derived = deriveAgentContextCandidates({
 });
 
 const seedIds = derived.seeds.map((item) => item.id).sort();
-assert.deepEqual(seedIds, ["document:doc-1", "page:current"], "only current page + active document are auto-seeded");
+assert.deepEqual(seedIds, ["booking-context:event:evt-42", "document:doc-1", "page:current"], "current page, active document, and active entity are auto-seeded");
 for (const seed of derived.seeds) assert.equal(seed.source, "auto", "seeds are auto-sourced");
 
 const doc = derived.seeds.find((item) => item.id === "document:doc-1");
@@ -28,6 +29,13 @@ const page = derived.seeds.find((item) => item.id === "page:current");
 assert.equal(page.kind, "page");
 assert.equal(page.route, "/events/42");
 assert.equal(page.label, "Summer Fest");
+
+const event = derived.seeds.find((item) => item.id === "booking-context:event:evt-42");
+assert.equal(event.kind, "booking-context");
+assert.equal(event.ref, "evt-42", "event chip carries the entity id for injection");
+assert.equal(event.label, "Summer Fest", "event chip carries the entity label");
+assert.equal(event.detail, "event evt-42", "event chip carries a concrete detail line");
+assert.deepEqual(event.metadata, { entityType: "event" }, "event chip preserves the original entity kind");
 
 // Catalog includes seeds plus manual-attachable sources for every Sonik kind.
 const sourceKinds = new Set(derived.sources.map((item) => item.kind));
@@ -42,6 +50,13 @@ assert.ok(derived.sources.some((item) => item.id === "runtime-skill:booking-inta
 for (const item of derived.sources.filter((source) => !seedIds.includes(source.id))) {
   assert.equal(item.source, "manual", `${item.id} should be manual`);
 }
+
+const resolvedEntity = resolveAgentContextSelection({ items: [event], dismissedAutoSeedIds: [] });
+assert.deepEqual(
+  resolvedEntity.activeEntity,
+  { type: "event", id: "evt-42", label: "Summer Fest" },
+  "selected event chip resolves back into active entity context",
+);
 
 // Empty context → no seeds, no sources (stable, no throw).
 const empty = deriveAgentContextCandidates({ pageContext: null, activeDocument: null, activeArtifact: null });

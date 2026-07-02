@@ -144,6 +144,7 @@ function applyRunContextSelectionToPageContext(
   if (selectedDocumentId) next.activeDocumentId = selectedDocumentId;
   const selectedArtifactId = resolution.artifactIds[0];
   if (selectedArtifactId) next.activeArtifactId = selectedArtifactId;
+  if (resolution.activeEntity) next.activeEntity = resolution.activeEntity;
   if (resolution.commandFamilies.length > 0) {
     next.commandFamilies = [...new Set([...(next.commandFamilies ?? []), ...resolution.commandFamilies])].slice(0, PAGE_CONTEXT_LIST_MAX_ITEMS);
   }
