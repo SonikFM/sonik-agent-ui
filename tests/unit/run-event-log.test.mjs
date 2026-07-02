@@ -184,4 +184,37 @@ const port = {
   assert.equal(run.resumable, true, "a canceled/interrupted run stays resumable so it can be continued");
 }
 
+// --- recorder: analytics hints are stamped on the run as a status event ------
+// Analytics-only: recorded so the run is analysable, ignored by the message
+// rebuild (never alters the reattached message), and absent when no hints given.
+{
+  const session = createWorkspaceSession({ id: "run-log-hints", name: "hints", mode: "chat" });
+  const recorder = await startRunRecorder(port, {
+    sessionId: session.id,
+    correlation: { requestId: "req_h", traceId: "0123456789abcdef0123456789abcdef", traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01" },
+    analyticsHints: { entryFrom: "workflow_launcher", turnIndex: 2, isFirstRun: false, hasExistingArtifact: true },
+  });
+  await drain(teeRunEvents(streamOf([{ type: "text-delta", id: "t", delta: "hi" }, { type: "text-end", id: "t" }]), recorder));
+  const events = listWorkspaceRunEvents(recorder.runId);
+  const hintsEvent = events.find((entry) => entry.event.kind === "status" && entry.event.label === "analytics_hints");
+  assert.ok(hintsEvent, "an analytics_hints status event is stamped on the run");
+  assert.deepEqual(JSON.parse(hintsEvent.event.detail), { entryFrom: "workflow_launcher", turnIndex: 2, isFirstRun: false, hasExistingArtifact: true });
+  // status events are provenance only — they never become rebuilt message parts.
+  const parts = rebuildRunMessageParts(events);
+  assert.ok(parts.every((part) => part.type !== "status"), "analytics hints never surface as a rendered message part");
+  assert.equal(parts[0]?.text, "hi");
+}
+
+// --- recorder: no analytics_hints event when hints are absent -----------------
+{
+  const session = createWorkspaceSession({ id: "run-log-no-hints", name: "no hints", mode: "chat" });
+  const recorder = await startRunRecorder(port, {
+    sessionId: session.id,
+    correlation: { requestId: "req_nh", traceId: "0123456789abcdef0123456789abcdef", traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01" },
+  });
+  await drain(teeRunEvents(streamOf([{ type: "text-delta", id: "t", delta: "hi" }, { type: "text-end", id: "t" }]), recorder));
+  const events = listWorkspaceRunEvents(recorder.runId);
+  assert.ok(!events.some((entry) => entry.event.kind === "status" && entry.event.label === "analytics_hints"), "absent hints leave the run event log unchanged");
+}
+
 console.log("run-event-log tests passed");
