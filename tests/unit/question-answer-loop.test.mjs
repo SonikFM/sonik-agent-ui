@@ -97,4 +97,21 @@ assert.ok(intakeSkillPrompt?.body.includes("sonik_question_answer"), "intake ski
 assert.ok(intakeSkillPrompt?.body.includes("ask the next highest-impact missing question"), "intake skill prompt should direct the agent to continue the question loop");
 assert.ok(intakeSkillPrompt?.body.includes("Do not execute commands"), "answer turns must not imply write approval");
 
+// Deterministic routing invariant: every QuestionCard's submit/skip action must
+// read its answer value from the exact state pointer the card binds to.
+// A divergent pointer submits null forever (the "Continue does nothing" bug).
+for (const element of Object.values(created.content.elements)) {
+  if (element?.type !== "QuestionCard") continue;
+  const boundPointer = element.props?.value?.$bindState;
+  assert.ok(typeof boundPointer === "string" && boundPointer.startsWith("/draftAnswers/"), "QuestionCard value must bind a /draftAnswers pointer");
+  for (const trigger of ["submit", "skip"]) {
+    const action = element.on?.[trigger];
+    assert.equal(action?.action, "submitAnswer", `QuestionCard ${trigger} must route to submitAnswer`);
+    assert.equal(action?.params?.value?.$state, boundPointer, `QuestionCard ${trigger} must submit the same pointer the card binds (${boundPointer})`);
+    assert.ok(!("submission" in (action?.params ?? {})), `QuestionCard ${trigger} must not carry dead submission indirection`);
+  }
+  const pointerKey = boundPointer.slice("/draftAnswers/".length);
+  assert.ok(pointerKey in created.content.state.draftAnswers, "bound pointer must resolve into initialized draftAnswers state");
+}
+
 console.log("question-answer loop tests passed");

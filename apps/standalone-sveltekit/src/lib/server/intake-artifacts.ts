@@ -264,24 +264,24 @@ function createIntakeSurfaceSpec(surface: InteractiveSurfaceSpec): Spec {
         skipLabel: "Mark unknown",
       },
       on: {
+        // Submit/skip must read the SAME state pointer QuestionCard binds its
+        // value to (/draftAnswers/<id>); any other path submits null forever.
         submit: {
           action: "submitAnswer",
           params: {
             questionId: question.id,
-            value: { $state: `/answers/${questionIdSegment}` },
+            value: { $state: `/draftAnswers/${questionIdSegment}` },
             skipped: false,
             writesTo: question.writesTo ?? null,
-            submission: { $state: `/questionSubmissions/${questionIdSegment}` },
           },
         },
         skip: {
           action: "submitAnswer",
           params: {
             questionId: question.id,
-            value: { $state: `/answers/${questionIdSegment}` },
+            value: { $state: `/draftAnswers/${questionIdSegment}` },
             skipped: true,
             writesTo: question.writesTo ?? null,
-            submission: { $state: `/questionSubmissions/${questionIdSegment}` },
           },
         },
       },
