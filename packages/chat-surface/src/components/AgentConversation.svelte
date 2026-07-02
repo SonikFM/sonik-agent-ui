@@ -1,6 +1,7 @@
 <script lang="ts" module>
   import type { Spec } from "@json-render/svelte";
   import type { Snippet } from "svelte";
+  import type { AgentContextItem } from "@sonik-agent-ui/tool-contracts/run-context";
   import type { AgentChatMessage } from "./AgentMessage.svelte";
   import type { AgentChatStatus } from "./AgentComposer.svelte";
 
@@ -37,6 +38,14 @@
     /** Recovery affordance for a resumable/failed run, keyed off the run's error code. */
     runRecovery?: AgentRunRecovery | null;
     onContinue?: () => void;
+    /** Composer context chips for the current turn. */
+    contextItems?: AgentContextItem[];
+    /** Attachable context sources shown in the composer plus menu. */
+    contextSources?: AgentContextItem[];
+    onAttachContext?: (item: AgentContextItem) => void;
+    onRemoveContext?: (id: string) => void;
+    /** Resolves the persisted context selection to render as provenance on a past message. */
+    messageContext?: (message: AgentChatMessage) => AgentContextItem[] | undefined;
     actions?: Snippet;
     renderArtifact: Snippet<[Spec, boolean]>;
     shouldRenderArtifact?: (message: AgentChatMessage) => boolean;
@@ -62,6 +71,11 @@
     onClear,
     runRecovery = null,
     onContinue,
+    contextItems = [],
+    contextSources = [],
+    onAttachContext,
+    onRemoveContext,
+    messageContext,
     actions,
     renderArtifact,
     shouldRenderArtifact,
@@ -131,6 +145,7 @@
             isLast={index === messages.length - 1}
             {isStreaming}
             {toolLabels}
+            contextItems={messageContext?.(message)}
             {renderArtifact}
             {shouldRenderArtifact}
           />
@@ -189,5 +204,9 @@
     placeholder={isEmpty ? "Start a chat, create an artifact, or update the active document..." : "Ask a follow-up..."}
     onSubmit={submit}
     {onStop}
+    {contextItems}
+    {contextSources}
+    {onAttachContext}
+    {onRemoveContext}
   />
 </Conversation.Root>

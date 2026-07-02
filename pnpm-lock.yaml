@@ -176,6 +176,9 @@ importers:
       '@json-render/svelte':
         specifier: workspace:*
         version: link:../svelte
+      '@sonik-agent-ui/tool-contracts':
+        specifier: workspace:*
+        version: link:../tool-contracts
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
