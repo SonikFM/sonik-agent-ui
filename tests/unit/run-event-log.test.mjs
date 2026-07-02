@@ -184,6 +184,11 @@ const port = {
   const run = getWorkspaceRun(recorder.runId);
   assert.equal(run.status, "canceled");
   assert.equal(run.resumable, true, "a canceled/interrupted run stays resumable so it can be continued");
+  assert.equal(run.error_code, "AGENT_STREAM_FAILED");
+  const events = listWorkspaceRunEvents(recorder.runId);
+  assert.ok(events.some((entry) => entry.event.kind === "text" && entry.event.text === "hello"), "cancel finalization flushes buffered partial text for reattach");
+  const reattached = buildRunReattachMessage({ run, runCount: 1, messages: [], events });
+  assert.equal(reattached?.content, "hello", "a canceled unpersisted turn can be rebuilt for the Continue panel");
 }
 
 // --- recorder: analytics hints are stamped on the run as a status event ------

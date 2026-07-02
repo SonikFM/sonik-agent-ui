@@ -7,6 +7,8 @@
 //   2. Reloading the session (GET /api/session/:id) reattaches that run: a
 //      rebuilt assistant message from the persisted event log + a resumable run.
 //   3. Continue (a fresh turn) completes a new run that finalizes succeeded.
+//   4. A client-aborted turn persists a canceled + resumable run, then Continue
+//      completes a fresh run.
 //
 // Requires dev mode (dev-smoke stream is gated on `dev`). Start a server first
 // or let this script spawn `pnpm --filter svelte-chat dev`.
@@ -20,6 +22,7 @@ const baseUrl = process.env.AGENT_UI_BASE_URL ?? "http://localhost:5173";
 const startServer = process.env.AGENT_UI_SMOKE_START_SERVER !== "false";
 const runId = process.env.AGENT_UI_SMOKE_RUN_ID ?? `run-reattach-smoke-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const sessionId = `${runId}-session`;
+const abortSessionId = `${runId}-abort-session`;
 const evidencePath = path.join(repoRoot, ".omx", "logs", `${runId}.json`);
 
 const children = [];
@@ -98,28 +101,40 @@ async function drain(response) {
   }
 }
 
-async function postGenerate({ text, fail }) {
+async function postGenerate({ text, fail, sessionId: targetSessionId = sessionId, abortAfterFirstChunk = false }) {
   const headers = { ...SMOKE_HEADERS };
   if (fail) headers["x-sonik-agent-ui-smoke-fail"] = "true";
   const body = JSON.stringify({
     messages: [{ id: `msg-${Date.now()}`, role: "user", parts: [{ type: "text", text }] }],
-    workspace: { sessionId },
+    workspace: { sessionId: targetSessionId },
   });
   const response = await fetch(`${baseUrl}/api/generate`, { method: "POST", headers, body });
   const runIdHeader = response.headers.get("x-sonik-agent-ui-run-id");
+  if (abortAfterFirstChunk) {
+    if (response.body) {
+      const reader = response.body.getReader();
+      try {
+        await reader.read();
+        await reader.cancel("client-abort-smoke");
+      } finally {
+        try { reader.releaseLock(); } catch { /* already released */ }
+      }
+    }
+    return { status: response.status, runIdHeader };
+  }
   await drain(response);
   return { status: response.status, runIdHeader };
 }
 
-async function getSession() {
-  const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(sessionId)}`);
+async function getSession(targetSessionId = sessionId) {
+  const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(targetSessionId)}`);
   if (!response.ok) return null;
   return response.json();
 }
 
-async function pollSession(predicate, { attempts = 30, intervalMs = 200 } = {}) {
+async function pollSession(predicate, { targetSessionId = sessionId, attempts = 30, intervalMs = 200 } = {}) {
   for (let i = 0; i < attempts; i += 1) {
-    const detail = await getSession();
+    const detail = await getSession(targetSessionId);
     if (detail && predicate(detail)) return detail;
     await sleep(intervalMs);
   }
@@ -156,7 +171,34 @@ async function main() {
   if (latest.status !== "succeeded") return finish("FAIL", `Latest run status ${latest.status}, expected succeeded.`);
   step("continue.verified", { note: `${succeededDetail.runs.length} runs; latest succeeded` });
 
-  return finish("PASS", "Interrupted run reattached from persisted events and Continue completed a new run.");
+  // 4. Client abort: cancel the response body mid-stream and assert the run is
+  // canceled + resumable, then Continue completes a fresh run.
+  const clientAbort = await postGenerate({ text: "Start a long answer that I will stop.", fail: false, sessionId: abortSessionId, abortAfterFirstChunk: true });
+  step("client_abort.posted", { note: `status ${clientAbort.status}, runId ${clientAbort.runIdHeader ?? "none"}` });
+  if (!clientAbort.runIdHeader) return finish("FAIL", "Client-abort generate did not return a run id header.");
+
+  const canceledDetail = await pollSession(
+    (detail) => Array.isArray(detail.runs) && detail.runs.some((run) => run.status === "canceled"),
+    { targetSessionId: abortSessionId },
+  );
+  if (!canceledDetail) return finish("FAIL", "Client-aborted run never persisted a canceled status.");
+  const abortedReattach = canceledDetail.reattach;
+  evidence.clientAbort = abortedReattach;
+  if (!abortedReattach?.run || abortedReattach.run.status !== "canceled") return finish("FAIL", "Client-aborted session did not expose a canceled latest run.");
+  if (!abortedReattach.run.resumable) return finish("FAIL", "Client-aborted run was not marked resumable.");
+  if (abortedReattach.run.error_code !== "AGENT_STREAM_FAILED") return finish("FAIL", `Unexpected client-abort error_code ${abortedReattach.run.error_code}.`);
+  step("client_abort.verified", { note: `canceled+resumable run ${abortedReattach.run.id}` });
+
+  const abortContinue = await postGenerate({ text: "Continue the previous turn.", fail: false, sessionId: abortSessionId });
+  step("client_abort_continue.posted", { note: `status ${abortContinue.status}, runId ${abortContinue.runIdHeader ?? "none"}` });
+  const abortContinueDetail = await pollSession(
+    (detail) => Array.isArray(detail.runs) && detail.runs.length >= 2 && detail.runs.at(-1)?.status === "succeeded",
+    { targetSessionId: abortSessionId },
+  );
+  if (!abortContinueDetail) return finish("FAIL", "Continue after client abort did not complete a succeeded run.");
+  step("client_abort_continue.verified", { note: `${abortContinueDetail.runs.length} runs; latest succeeded` });
+
+  return finish("PASS", "Interrupted and client-aborted runs reattached/resumed from persisted events and Continue completed new runs.");
 }
 
 main().catch((error) => {

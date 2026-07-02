@@ -1627,6 +1627,42 @@
     }
   }
 
+  async function refreshActiveSessionRunState(reason: string): Promise<void> {
+    const sessionId = activeSessionId;
+    if (!sessionId) return;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}`);
+        if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+        const detail = (await response.json()) as WorkspaceSessionDetail;
+        if (activeSessionId !== sessionId) return;
+
+        sessions = upsertSessionSummary(sessions, detail.session);
+        reattachRunState(detail);
+        rehydrateRunContextState(detail);
+
+        const latestRun = detail.runs?.at(-1);
+        if (!latestRun || latestRun.status !== "running" || latestRun.resumable) {
+          logSessionTelemetry("session.run.refresh", { sessionId, reason });
+          return;
+        }
+      } catch (error) {
+        logSessionTelemetry("session.run.refresh_error", {
+          sessionId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+          reason,
+        });
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    logSessionTelemetry("session.run.refresh_timeout", { sessionId, ok: false, reason });
+  }
+
   async function archiveSession(sessionId: string): Promise<void> {
     if (isStreaming) {
       sessionRailError = "Stop the current stream before archiving sessions.";
@@ -1774,7 +1810,10 @@
     if (!reattach?.run || reattach.run.status === "succeeded") return;
 
     const rebuilt = reattach.message;
-    if (rebuilt && rebuilt.parts.length > 0 && !persistedMessageIds.has(rebuilt.id)) {
+    const runCount = detail.runs?.length ?? 0;
+    const localAssistantCount = conversation.messages.filter((message) => message.role === "assistant").length;
+    const localAssistantTurnExists = runCount > 0 && localAssistantCount >= runCount;
+    if (rebuilt && rebuilt.parts.length > 0 && !localAssistantTurnExists && !persistedMessageIds.has(rebuilt.id)) {
       conversation.messages = [
         ...conversation.messages,
         { id: rebuilt.id, role: "assistant", parts: snapshotDataParts(rebuilt.parts) },
@@ -2244,6 +2283,7 @@
 
   function handleStop() {
     void conversation.stop();
+    void refreshActiveSessionRunState("chat.stop");
   }
 
   function handleClearArtifact() {

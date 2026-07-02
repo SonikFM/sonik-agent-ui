@@ -118,6 +118,31 @@
   </header>
 
   <Conversation.Content class="px-0 py-0">
+    {#if runRecovery}
+      <div class="max-w-3xl mx-auto px-8 pt-8">
+        <div
+          class="flex flex-col gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm"
+          data-run-recovery
+        >
+          <div class="font-medium text-foreground">{runRecovery.title}</div>
+          <p class="text-muted-foreground">{runRecovery.guidance}</p>
+          {#if runRecovery.canContinue && runRecovery.actionLabel}
+            <div>
+              <button
+                type="button"
+                onclick={() => onContinue?.()}
+                disabled={isStreaming}
+                data-run-recovery-action="continue"
+                class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                {runRecovery.actionLabel}
+              </button>
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
     {#if isEmpty}
       <Conversation.EmptyState class="h-full min-h-full px-6 py-12">
         <div class="max-w-2xl w-full space-y-8">
@@ -172,29 +197,6 @@
         {#if error?.message}
           <div class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error.message}
-          </div>
-        {/if}
-
-        {#if runRecovery}
-          <div
-            class="flex flex-col gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm"
-            data-run-recovery
-          >
-            <div class="font-medium text-foreground">{runRecovery.title}</div>
-            <p class="text-muted-foreground">{runRecovery.guidance}</p>
-            {#if runRecovery.canContinue && runRecovery.actionLabel}
-              <div>
-                <button
-                  type="button"
-                  onclick={() => onContinue?.()}
-                  disabled={isStreaming}
-                  data-run-recovery-action="continue"
-                  class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
-                >
-                  {runRecovery.actionLabel}
-                </button>
-              </div>
-            {/if}
           </div>
         {/if}
       </div>

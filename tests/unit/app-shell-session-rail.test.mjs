@@ -369,6 +369,11 @@ assert.equal(openDocumentEditorSource.includes("const document = await createIni
 assert.equal(openDocumentEditorSource.indexOf("documentEditorOpen = true;") > openDocumentEditorSource.indexOf("const document = await createInitialWorkspaceDocument();"), true, "document iframe should open only after openDocumentEditor has created or selected a document snapshot");
 assert.equal(pageSource.includes("if (/\\b(document|markdown|html|code|editor|workspace)\\b/i.test(trimmed))"), false, "chat submit should not prematurely open the document iframe before a tool-created document exists");
 assert.equal(pageSource.includes("lastPersistStatus"), true, "page assertions should track post-stream persistence state for crash regression gates");
+assert.equal(pageSource.includes("runRecovery={runRecovery}"), true, "chat shell should pass resumable run recovery into the conversation surface");
+assert.equal(pageSource.includes("onContinue={handleContinue}"), true, "chat shell should wire Continue to the canonical resume prompt handler");
+assert.equal(agentConversationSource.includes("data-run-recovery-action=\"continue\""), true, "conversation surface should expose a machine-readable Continue affordance");
+assert.equal(agentConversationSource.indexOf("data-run-recovery") < agentConversationSource.indexOf("{#if isEmpty}"), true, "Continue recovery should render before the empty/non-empty split so embedded sidecars can resume even without rebuilt messages");
+assert.equal(pageSource.includes("refreshActiveSessionRunState(\"chat.stop\")"), true, "client Stop should refresh the active session so a canceled resumable run immediately shows Continue");
 for (const [componentName, componentSource] of Object.entries(boundInputComponentSources)) {
   assert.equal(componentSource.includes("function valueBinding()"), false, `${componentName} must not recreate bound props in handlers because getBoundProp reads Svelte context`);
   assert.equal(componentSource.includes("valueBinding().current"), false, `${componentName} must not call getBoundProp from click/input handlers`);
