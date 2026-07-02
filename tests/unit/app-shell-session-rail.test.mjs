@@ -66,7 +66,14 @@ assert.equal(pageSource.includes("{#snippet rail()}"), true, "top-level app shou
 assert.equal(pageSource.includes("sessionId: activeSessionId"), true, "generate requests should carry active session id");
 assert.equal(pageSource.includes("...createWorkspaceRequestHeaders()"), true, "generate transport must use the same signed host-context headers as workspace persistence calls");
 assert.equal(pageSource.includes("function createWorkspaceRequestHeaders"), true, "workspace request headers should be centralized for generate/session/document/artifact calls");
-assert.equal(pageSource.includes('"createSession", "submitPrompt"'), true, "page context should expose a semantic createSession action before submitPrompt");
+const visibleActionsBlock = pageSource.match(/visibleActions:\s*\[([\s\S]*?)\],\n\s*visibleWarnings:/)?.[1] ?? "";
+assert.equal(visibleActionsBlock.includes('"createSession"'), true, "page context should expose a semantic createSession action");
+assert.equal(visibleActionsBlock.includes('"submitPrompt"'), true, "page context should expose a semantic submitPrompt action");
+assert.equal(
+  visibleActionsBlock.indexOf('"createSession"') < visibleActionsBlock.indexOf('"submitPrompt"'),
+  true,
+  "page context should expose createSession before submitPrompt",
+);
 assert.equal(pageSource.includes("createSession: async () =>"), true, "page-control contract should expose a deterministic fresh-session semantic action for smoke tests");
 assert.equal(pageSource.includes("await createSession({ force: true })"), true, "fresh-session semantic action should route through the same session creation path as the app shell");
 assert.equal(pageSource.includes("function deriveChatTitle"), true, "app shell should derive deterministic first-message chat titles locally");

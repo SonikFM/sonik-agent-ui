@@ -535,6 +535,7 @@ function sanitizeTrustedHostContext(value: AgentTrustedHostContext | null | unde
       organizationId: cleanText(session.organizationId) ?? null,
       authenticated: session.authenticated === true,
       scopes: Array.isArray(session.scopes) ? session.scopes.map(cleanText).filter((scope): scope is string => Boolean(scope)).slice(0, MAX_LIST_ITEMS) : [],
+      theme: cleanText(session.theme) ?? null,
       expiresAt: cleanText(session.expiresAt) ?? null,
       ...(metadata ? { metadata } : {}),
     };

@@ -992,6 +992,7 @@ export type AgentPageContext = {
   surface?: string;
   pageType?: string;
   title?: string;
+  theme?: string;
   activeEntity?: { type: string; id: string; label?: string };
   activeArtifactId?: string;
   activeDocumentId?: string;
