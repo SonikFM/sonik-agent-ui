@@ -312,6 +312,7 @@ export interface RunRecorder {
 export interface RunPromptComposition {
   moduleIds: string[];
   skillIds: string[];
+  implicitSkillIds?: string[];
 }
 
 export async function startRunRecorder(

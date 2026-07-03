@@ -247,6 +247,9 @@ function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
   const commandPath = skill.commandSequence.join(" -> ");
   if (commandPath) lines.push(`Command path: ${commandPath}`);
   const metadata = isRecord(skill.metadata) ? skill.metadata : {};
+  if (metadata.execution === "none") {
+    lines.push("Execution mode: intake/preview only. For matching setup/intake prompts, the first user-visible action must be the deterministic registered intake artifact tool when one is mounted (for booking.context.intake, call createBookingIntakeArtifact exactly once). Do not improvise a generic createJsonArtifact spec for booking.context.intake, and do not answer by calling executeCommand to inspect existing records unless the user explicitly asks to audit existing records.");
+  }
   if (Array.isArray(metadata.workflowSteps) && metadata.workflowSteps.length > 0) {
     lines.push("Workflow steps:");
     for (const step of metadata.workflowSteps.slice(0, 8)) {

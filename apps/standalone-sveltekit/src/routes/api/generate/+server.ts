@@ -27,6 +27,7 @@ import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncReques
 import { resolveEffectiveContextDocument } from "$lib/server/run-context-document";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
+import { resolveImplicitWorkflowSkillIds } from "$lib/runtime-skill-intent";
 import {
   createBookingRuntimeAuthContextFromEnv,
   createBookingRuntimeAuthContextFromTrustedHostHeader,
@@ -66,14 +67,14 @@ const TITLE_GENERATION_BUFFER_MAX_CHARS = 320;
 // EXPLICIT selection (never implicit page-context skill families) so a default
 // turn composes exactly today's monolith-equivalent prompt with no appended
 // skills. Bounded in count and length; resolved through the skill registry.
-function resolveRequestSkillIds(input: { requestSkillIds: unknown; selectedSkillFamilies: string[] }): string[] {
+function resolveRequestSkillIds(input: { requestSkillIds: unknown; selectedSkillFamilies: string[]; implicitSkillIds?: string[] }): string[] {
   const fromRequest = Array.isArray(input.requestSkillIds)
     ? input.requestSkillIds
         .filter((entry): entry is string => typeof entry === "string")
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0 && entry.length <= AGENT_SKILL_ID_MAX_CHARS)
     : [];
-  return [...new Set([...fromRequest, ...input.selectedSkillFamilies])].slice(0, AGENT_SKILL_IDS_MAX_ITEMS);
+  return [...new Set([...fromRequest, ...input.selectedSkillFamilies, ...(input.implicitSkillIds ?? [])])].slice(0, AGENT_SKILL_IDS_MAX_ITEMS);
 }
 
 
@@ -239,6 +240,11 @@ function readUiMessageText(message: UIMessage | undefined): string {
 
 function resolveFirstUserMessage(messages: UIMessage[]): string {
   const userMessage = messages.find((message) => message.role === "user") ?? messages.at(-1);
+  return readUiMessageText(userMessage).trim();
+}
+
+function resolveLatestUserMessage(messages: UIMessage[]): string {
+  const userMessage = [...messages].reverse().find((message) => message.role === "user") ?? messages.at(-1);
   return readUiMessageText(userMessage).trim();
 }
 
@@ -425,18 +431,11 @@ export const POST: RequestHandler = async (event) => {
   });
   const hostSession = createAgentHostSessionEnvelope(event);
   const approvedCommandIds = approvedCommandIdsFromHostSession(hostSession);
-  const skillIds = resolveRequestSkillIds({
-    requestSkillIds: body?.skillIds ?? body?.workspace?.skillIds,
-    selectedSkillFamilies: selectionResolution.skillFamilies,
-  });
   // Analytics-only run hints (entryFrom / turnIndex / isFirstRun /
   // hasExistingArtifact). Sanitized + bounded here and used ONLY for run and
   // telemetry analytics — never passed to createAgent, prompt composition, or
   // tool inputs. Absent/dropped hints reproduce today's behavior.
   const analyticsHints = sanitizeAgentAnalyticsHints(body?.analyticsHints ?? body?.workspace?.analyticsHints);
-  // Compose the per-turn prompt once so the same module/skill ids we record on
-  // the run are the ones createAgent seeds below (deterministic for this context).
-  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl });
   const startedAt = Date.now();
 
   if (!uiMessages || !Array.isArray(uiMessages) || uiMessages.length === 0) {
@@ -451,6 +450,14 @@ export const POST: RequestHandler = async (event) => {
 
   const lastMessage = uiMessages.at(-1);
   const firstUserMessage = resolveFirstUserMessage(uiMessages);
+  const latestUserMessage = resolveLatestUserMessage(uiMessages);
+  const implicitSkillIds = resolveImplicitWorkflowSkillIds({ userMessage: latestUserMessage, pageContext });
+  const skillIds = resolveRequestSkillIds({
+    requestSkillIds: body?.skillIds ?? body?.workspace?.skillIds,
+    selectedSkillFamilies: selectionResolution.skillFamilies,
+    implicitSkillIds,
+  });
+  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl });
   const fallbackConversationTitle = firstUserMessage ? deriveWorkspaceSessionTitle(firstUserMessage) : "";
   const titleSession = workspaceSessionId ? await requestPersistence.getSession(workspaceSessionId).catch(() => null) : null;
   const titleGenerationEnabled = Boolean(
@@ -547,7 +554,7 @@ export const POST: RequestHandler = async (event) => {
         messageId: null,
         correlation,
         contextSelection: runContextSelection ?? null,
-        promptComposition: { moduleIds: promptComposition.moduleIds, skillIds: promptComposition.skillIds },
+        promptComposition: { moduleIds: promptComposition.moduleIds, skillIds: promptComposition.skillIds, implicitSkillIds },
         analyticsHints: analyticsHints ?? null,
       })
     : null;

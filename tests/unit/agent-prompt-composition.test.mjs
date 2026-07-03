@@ -122,6 +122,31 @@ for (const module of capped) {
 assert.deepEqual(resolveRuntimeSkillPromptModules([]), [], "empty request resolves to no skills");
 assert.deepEqual(resolveRuntimeSkillPromptModules(["", "   "]), [], "blank ids resolve to no skills");
 
+// Preview/intake skills must not seed booking command execution conventions.
+// The intake contract is artifact/question-card first; command guidance caused
+// models to inspect existing booking records instead of starting the intake.
+const intakeSkillModules = resolveRuntimeSkillPromptModules(["booking.context.intake"]);
+const composedForIntake = composeAgentSystemPrompt({
+  context: { hasBookingRuntime: true, hasPageContext: true, previewOnlySkillActive: true },
+  skillModules: intakeSkillModules,
+});
+assert.ok(composedForIntake.skillIds.includes("booking.context.intake"), "intake skill must be appended");
+assert.ok(!composedForIntake.moduleIds.includes("booking-commands"), "preview-only intake turns must not seed booking command module");
+assert.ok(!composedForIntake.moduleIds.includes("json-artifact-authoring"), "preview-only intake turns should not seed hidden createJsonArtifact guidance");
+assert.ok(composedForIntake.prompt.includes("call createBookingIntakeArtifact exactly once"), "intake prompt must require deterministic booking-intake artifact behavior");
+assert.ok(
+  !composedForIntake.prompt.includes("The command catalog is CLI-first and context-efficient"),
+  "intake prompt must not include command execution conventions",
+);
+
+const reservationSkillModules = resolveRuntimeSkillPromptModules(["booking.reservation.create"]);
+const composedForReservation = composeAgentSystemPrompt({
+  context: { hasBookingRuntime: true, hasPageContext: true, previewOnlySkillActive: false },
+  skillModules: reservationSkillModules,
+});
+assert.ok(composedForReservation.moduleIds.includes("booking-commands"), "reservation execution turns must keep booking command module");
+assert.ok(composedForReservation.prompt.includes("booking.get.availability -> booking.create.guest -> booking.create.booking"), "reservation prompt must retain command workflow guidance");
+
 console.log(JSON.stringify({
   ok: true,
   checked: "agent-prompt-composition",

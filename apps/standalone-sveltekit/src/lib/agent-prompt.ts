@@ -29,6 +29,8 @@ export interface AgentPromptSeedContext {
   hasDocumentTools?: boolean;
   /** True when host/page context is attached. Reserved; unused today. */
   hasPageContext?: boolean;
+  /** True when an attached preview/intake skill must not see command execution guidance. */
+  previewOnlySkillActive?: boolean;
 }
 
 /** A skill body resolved from the runtime skill registry for this turn only. */
@@ -117,8 +119,8 @@ ${explorerCatalog.prompt({
 const JSON_ARTIFACT_AUTHORING_MODULE: AgentPromptModule = {
   id: "json-artifact-authoring",
   title: "JSON ARTIFACT AUTHORING",
-  // Today: unconditional. createJsonArtifact is always mounted, so this always seeds.
-  seedWhen: ALWAYS_ON,
+  // Do not seed when a preview-only registered skill hides the generic createJsonArtifact tool.
+  seedWhen: (context) => context.previewOnlySkillActive !== true,
   body: `- If the user asks to create a visual artifact, canvas, dashboard, report, page, or workspace, you MUST call createJsonArtifact exactly once after any needed data tools. Do not stop after data tool calls. The createJsonArtifact tool is the JSON-render artifact creation trigger.
 - createJsonArtifact requires a valid flat spec: spec.root MUST be "main" and spec.elements.main MUST exist. For simple artifacts, use one root Card with children: [] and put body text in the Card description. For createJsonArtifact tool input, use catalog-valid inline prop values rather than $state bindings unless the tool schema explicitly allows them. Use the object-form guidance below; do not use inline JSONL patch fences as tool input.
 - Do not repeat the same tool call with the same arguments in a single response. Do not call createJsonArtifact more than once for a single user turn. Use the first result you already have.
@@ -217,7 +219,10 @@ export function composeAgentSystemPrompt(input: {
   skillModules?: AgentPromptSkillModule[];
 } = {}): ComposedAgentPrompt {
   const context = input.context ?? {};
-  const seeded = AGENT_PROMPT_MODULES.filter((module) => module.seedWhen(context));
+  const seeded = AGENT_PROMPT_MODULES.filter((module) => {
+    if (context.previewOnlySkillActive && module.id === "booking-commands") return false;
+    return module.seedWhen(context);
+  });
   const skillModules = (input.skillModules ?? []).filter((module) => module.id && module.body.trim().length > 0);
 
   const sections = [AGENT_PROMPT_CORE, ...seeded.map(renderModule)];

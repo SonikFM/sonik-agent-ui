@@ -409,6 +409,19 @@
     });
   });
 
+
+  function collectToolOutputErrorKeys(messages: typeof conversation.messages): string[] {
+    const keys: string[] = [];
+    for (const message of messages) {
+      if (!message || message.role !== "assistant") continue;
+      for (const part of snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string }>) {
+        if (!part.type?.startsWith("tool-") || part.state !== "output-error") continue;
+        keys.push(`${message.id}:${part.toolCallId ?? part.type}`);
+      }
+    }
+    return keys;
+  }
+
   $effect(() => {
     for (const message of conversation.messages) {
       if (!message || message.role !== "assistant") continue;
@@ -937,7 +950,7 @@
 
   function formatToolActivityDetail(toolType: string): string {
     const slug = toolType.replace(/^tool-/, "");
-    if (slug === "createJsonArtifact") return "Creating artifact";
+    if (slug === "createJsonArtifact" || slug === "createBookingIntakeArtifact") return "Creating artifact";
     if (slug === "updateDocument") return "Updating document";
     if (slug === "createDocument") return "Creating document";
     if (slug === "readDocument") return "Reading document";
@@ -959,7 +972,7 @@
     if (latestTool && latestTool.state !== "output-available" && latestTool.state !== "output-denied") {
       return { label: "Calling tool", detail: formatToolActivityDetail(latestTool.type), tone: "tool" };
     }
-    if (parts.some((part) => part.type === "data-spec" || part.type === "tool-createJsonArtifact")) {
+    if (parts.some((part) => part.type === "data-spec" || part.type === "tool-createJsonArtifact" || part.type === "tool-createBookingIntakeArtifact")) {
       return { label: "Preparing canvas", detail: "Promoting artifact view…", tone: "artifact" };
     }
     if (parts.some((part) => part.type === "text" && typeof part.text === "string" && part.text.trim())) {
@@ -1790,6 +1803,7 @@
     })) as typeof conversation.messages;
     persistedMessageIds = new SvelteSet(detail.messages.map((message) => message.id));
     reattachRunState(detail);
+    reportedToolErrorKeys = new SvelteSet(collectToolOutputErrorKeys(conversation.messages));
     rehydrateRunContextState(detail);
     // Entering a session restarts its per-session analytics turn sequence.
     analyticsTurnIndex = 0;
@@ -2122,6 +2136,7 @@
     getHackerNewsTop: ["Loading Hacker News", "Loaded Hacker News"],
     webSearch: ["Searching the web", "Searched the web"],
     createJsonArtifact: ["Creating artifact", "Created artifact"],
+    createBookingIntakeArtifact: ["Creating booking intake", "Created booking intake"],
     createDocumentArtifact: ["Creating document", "Created document"],
     updateDocumentArtifact: ["Updating document", "Updated document"],
     readActiveDocument: ["Reading document", "Read document"],

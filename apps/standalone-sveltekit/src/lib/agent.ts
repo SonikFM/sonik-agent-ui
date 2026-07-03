@@ -5,6 +5,7 @@ import { getCryptoPrice, getCryptoPriceHistory } from "./tools/crypto";
 import { getHackerNewsTop } from "./tools/hackernews";
 import { webSearch } from "./tools/search";
 import { createJsonArtifact } from "./tools/artifact";
+import { createBookingIntakeArtifact } from "./tools/intake-artifact";
 import { composeAgentSystemPrompt, type ComposedAgentPrompt } from "./agent-prompt";
 import { resolveRuntimeSkillPromptModules } from "./server/skill-registry";
 import { createDocumentTools, type DocumentToolContext } from "./tools/document";
@@ -17,6 +18,35 @@ import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
 
 export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[] };
+
+const PREVIEW_ONLY_RUNTIME_SKILL_IDS = new Set([
+  "booking.context.intake",
+  "booking-context-intake",
+  "booking.event.create",
+  "booking-event",
+  "amplify.campaign.template.create",
+  "amplify-campaign-template",
+]);
+const EXECUTION_RUNTIME_SKILL_IDS = new Set([
+  "booking.reservation.create",
+  "booking-reservation",
+]);
+
+function normalizedSkillIds(skillIds: string[] | undefined): string[] {
+  return (skillIds ?? []).map((id) => String(id).trim()).filter(Boolean);
+}
+
+function hasPreviewOnlyRuntimeSkill(skillIds: string[] | undefined): boolean {
+  const ids = normalizedSkillIds(skillIds);
+  if (ids.some((id) => EXECUTION_RUNTIME_SKILL_IDS.has(id))) return false;
+  return ids.some((id) => PREVIEW_ONLY_RUNTIME_SKILL_IDS.has(id));
+}
+
+function hasBookingContextIntakeSkill(skillIds: string[] | undefined): boolean {
+  const ids = normalizedSkillIds(skillIds);
+  if (ids.some((id) => EXECUTION_RUNTIME_SKILL_IDS.has(id))) return false;
+  return ids.some((id) => id === "booking.context.intake" || id === "booking-context-intake");
+}
 
 /**
  * Composes the per-turn system prompt for a run: the always-on core plus the
@@ -32,6 +62,7 @@ export function resolveAgentPromptComposition(context: AgentRuntimeContext = {})
       hasBookingRuntime: Boolean(context.bookingRuntimeAuth || context.bookingServiceBaseUrl),
       hasDocumentTools: true,
       hasPageContext: Boolean(context.pageContext),
+      previewOnlySkillActive: hasPreviewOnlyRuntimeSkill(context.skillIds),
     },
     skillModules: resolveRuntimeSkillPromptModules(context.skillIds),
   });
@@ -40,7 +71,10 @@ export function resolveAgentPromptComposition(context: AgentRuntimeContext = {})
 export function createAgent(context: AgentRuntimeContext = {}) {
   const documentTools = createDocumentTools(context);
   const toolManifestTools = createToolManifestTools();
-  const commandCatalogTools = createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher });
+  const bookingContextIntakeActive = hasBookingContextIntakeSkill(context.skillIds);
+  const commandCatalogTools = hasPreviewOnlyRuntimeSkill(context.skillIds)
+    ? {}
+    : createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher });
   const skillCatalogTools = createSkillCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   return new ToolLoopAgent({
     model: gateway(MODEL_ID),
@@ -53,7 +87,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
       getCryptoPriceHistory,
       getHackerNewsTop,
       webSearch,
-      createJsonArtifact,
+      ...(bookingContextIntakeActive ? { createBookingIntakeArtifact } : { createJsonArtifact }),
       ...documentTools,
       ...toolManifestTools,
       ...skillCatalogTools,
