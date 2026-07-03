@@ -32,6 +32,7 @@ const themeRuntimeSource = await readFile("apps/standalone-sveltekit/src/lib/the
 const themePickerSource = await readFile("apps/standalone-sveltekit/src/lib/theme/ThemePicker.svelte", "utf8");
 const themeRegistrySource = await readFile("apps/standalone-sveltekit/src/lib/theme/theme-registry.ts", "utf8");
 const daisyThemeSource = await readFile("apps/standalone-sveltekit/src/lib/theme/foundations/themes/daisy.css", "utf8");
+const appThemeSurfacesSource = await readFile("apps/standalone-sveltekit/src/lib/theme/foundations/effects/app-theme-surfaces.css", "utf8");
 
 const boundInputComponents = [
   "QuestionCard",
@@ -190,6 +191,8 @@ assert.equal(daisyThemeSource.includes('themes: all'), true, "DaisyUI should com
 assert.equal(themeRegistrySource.includes('CUSTOM_DOCUMENT_THEME_IDS'), true, "theme registry should include Amplify custom themes");
 assert.equal(themeRegistrySource.includes('"sonik-operator-dark"'), true, "theme registry should include the Booking operator dark theme id");
 assert.equal(appCss.includes('@import "./lib/theme/foundations/themes/custom/sonik-operator-dark.css"'), true, "standalone app should import the Booking operator dark theme");
+assert.equal(appThemeSurfacesSource.includes('[data-theme="sonik-operator-dark"]'), true, "surface projection should include the Booking operator dark theme after generic app surface defaults");
+assert.equal(appThemeSurfacesSource.includes('--app-shell-bg: #0e1013'), true, "operator dark surface projection should preserve the Booking shell token");
 assert.equal(themeRegistrySource.includes('DAISY_BUILTIN_THEME_IDS'), true, "theme registry should expose DaisyUI built-in themes");
 assert.equal(themeRuntimeSource.includes('THEME_STORAGE_KEY = "amplify.documentTheme.v2"'), true, "theme runtime should use the Amplify v2 theme storage key");
 assert.equal(themeRuntimeSource.includes('DEFAULT_THEME_SETTING: ThemeSetting = "system"'), true, "standalone app should not hardcode a gunmetal default and should support system preference");
