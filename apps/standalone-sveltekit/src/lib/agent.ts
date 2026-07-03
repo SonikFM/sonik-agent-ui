@@ -14,6 +14,7 @@ import { createCommandCatalogTools } from "./tools/command-catalog";
 import { createSkillCatalogTools } from "./tools/skill-catalog";
 import { gateway, resolveGatewayModelId } from "./ai-gateway";
 import type { AgentRuntimeSettings } from "./agent-settings";
+import type { SystemModelMessage } from "ai";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
@@ -69,6 +70,21 @@ export function resolveAgentPromptComposition(context: AgentRuntimeContext = {})
   });
 }
 
+
+function createAgentInstructions(context: AgentRuntimeContext): string | SystemModelMessage {
+  const prompt = resolveAgentPromptComposition(context).prompt;
+  if (!context.agentSettings?.requireZdr) return prompt;
+  return {
+    role: "system",
+    content: prompt,
+    providerOptions: {
+      gateway: {
+        zeroDataRetention: true,
+      },
+    },
+  };
+}
+
 export function createAgent(context: AgentRuntimeContext = {}) {
   const documentTools = createDocumentTools(context);
   const toolManifestTools = createToolManifestTools();
@@ -79,7 +95,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
   const skillCatalogTools = createSkillCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   return new ToolLoopAgent({
     model: gateway(resolveGatewayModelId(context.agentSettings?.modelId)),
-    instructions: resolveAgentPromptComposition(context).prompt,
+    instructions: createAgentInstructions(context),
     tools: {
       getWeather,
       getGitHubRepo,

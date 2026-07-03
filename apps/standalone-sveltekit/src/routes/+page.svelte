@@ -72,6 +72,9 @@
     DEFAULT_AGENT_MODEL_ID,
     createDefaultAgentToolPermissionModes,
     sanitizeAgentRuntimeSettings,
+    createAgentCustomSkillId,
+    type AgentCustomSkill,
+    type AgentModelOption,
     type AgentRuntimeSettings,
   } from "$lib/agent-settings";
 
@@ -199,7 +202,13 @@
   let sessionRailError = $state<string | null>(null);
   let resumableRun = $state<WorkspaceRunSummary | null>(null);
   let agentModelId = $state(DEFAULT_AGENT_MODEL_ID);
+  let agentModelOptions = $state<AgentModelOption[]>(AGENT_MODEL_OPTIONS);
+  let agentModelCatalogStatus = $state<"idle" | "loading" | "ready" | "fallback" | "error">("idle");
+  let agentModelCatalogMessage = $state<string | null>(null);
+  let agentRequireZdr = $state(true);
   let enabledAgentSkillIds = $state<string[]>([]);
+  let agentCustomSkills = $state<AgentCustomSkill[]>([]);
+  let agentAdditionalSystemPrompt = $state("");
   let agentToolPermissionModes = $state<Record<string, AgentToolPermissionMode>>(createDefaultAgentToolPermissionModes());
   // Composer context selection for the next turn (chips + authoritative dismissals).
   let runContextSelection = $state<AgentRunContextSelection>(createEmptyAgentRunContextSelection());
@@ -1483,6 +1492,7 @@
         }
       }, 1_500);
     }
+    void refreshAgentModelCatalog();
     return () => {
       stopLongTaskTelemetry?.();
       window.clearInterval(activityTimer);
@@ -2145,6 +2155,9 @@
     return sanitizeAgentRuntimeSettings({
       modelId: agentModelId,
       skillIds: enabledAgentSkillIds,
+      customSkills: agentCustomSkills,
+      additionalSystemPrompt: agentAdditionalSystemPrompt,
+      requireZdr: agentRequireZdr,
       toolPermissionModes: agentToolPermissionModes,
     });
   }
@@ -2154,12 +2167,56 @@
     logArtifactTelemetry({ source: "client", event: "agent_settings.model.change", sessionId: activeSessionId ?? undefined, reason: modelId, ok: true });
   }
 
+  async function refreshAgentModelCatalog(): Promise<void> {
+    agentModelCatalogStatus = "loading";
+    agentModelCatalogMessage = null;
+    try {
+      const response = await fetch("/api/agent-models");
+      if (!response.ok) throw new Error(`model_catalog_http_${response.status}`);
+      const catalog = await response.json() as { models?: AgentModelOption[]; source?: string; error?: string };
+      const models = Array.isArray(catalog.models) && catalog.models.length > 0 ? catalog.models : AGENT_MODEL_OPTIONS;
+      agentModelOptions = models;
+      if (!models.some((model) => model.id === agentModelId)) {
+        agentModelId = models[0]?.id ?? DEFAULT_AGENT_MODEL_ID;
+      }
+      agentModelCatalogStatus = catalog.source === "gateway" ? "ready" : "fallback";
+      agentModelCatalogMessage = catalog.error ?? (catalog.source === "gateway" ? "Vercel AI Gateway catalog loaded." : "Using fallback model list.");
+    } catch (error) {
+      agentModelOptions = AGENT_MODEL_OPTIONS;
+      agentModelCatalogStatus = "error";
+      agentModelCatalogMessage = error instanceof Error ? error.message : "model_catalog_failed";
+    }
+  }
+
+
   function handleAgentSkillToggle(skillId: string, enabled: boolean): void {
     enabledAgentSkillIds = enabled
       ? [...new Set([...enabledAgentSkillIds, skillId])]
       : enabledAgentSkillIds.filter((id) => id !== skillId);
     logArtifactTelemetry({ source: "client", event: "agent_settings.skill.toggle", sessionId: activeSessionId ?? undefined, reason: `${skillId}:${enabled ? "on" : "off"}`, ok: true });
   }
+
+  function handleAgentCustomSkillCreate(payload: { label: string; markdown: string }): void {
+    const id = createAgentCustomSkillId(payload.label, agentCustomSkills.map((skill) => skill.id));
+    agentCustomSkills = [...agentCustomSkills, { id, label: payload.label.trim(), markdown: payload.markdown.trim(), enabled: true }];
+    logArtifactTelemetry({ source: "client", event: "agent_settings.skill.create", sessionId: activeSessionId ?? undefined, reason: id, ok: true });
+  }
+
+  function handleAgentCustomSkillUpdate(skillId: string, patch: Partial<Pick<AgentCustomSkill, "label" | "markdown" | "enabled">>): void {
+    agentCustomSkills = agentCustomSkills.map((skill) => skill.id === skillId ? { ...skill, ...patch } : skill);
+    logArtifactTelemetry({ source: "client", event: "agent_settings.skill.update", sessionId: activeSessionId ?? undefined, reason: skillId, ok: true });
+  }
+
+  function handleAgentPromptChange(prompt: string): void {
+    agentAdditionalSystemPrompt = prompt;
+    logArtifactTelemetry({ source: "client", event: "agent_settings.prompt.change", sessionId: activeSessionId ?? undefined, reason: prompt ? "custom-prompt" : "cleared", ok: true });
+  }
+
+  function handleAgentRequireZdrChange(required: boolean): void {
+    agentRequireZdr = required;
+    logArtifactTelemetry({ source: "client", event: "agent_settings.zdr.change", sessionId: activeSessionId ?? undefined, reason: required ? "required" : "not-required", ok: true });
+  }
+
 
   function handleAgentToolPermissionChange(familyId: string, mode: AgentToolPermissionMode): void {
     agentToolPermissionModes = { ...agentToolPermissionModes, [familyId]: mode };
@@ -2486,15 +2543,25 @@
     >
       {#snippet actions()}
         <AgentSettingsPanel
-          modelOptions={AGENT_MODEL_OPTIONS}
+          modelOptions={agentModelOptions}
           selectedModelId={agentModelId}
+          modelCatalogStatus={agentModelCatalogStatus}
+          modelCatalogMessage={agentModelCatalogMessage}
+          requireZdr={agentRequireZdr}
           skillOptions={AGENT_SKILL_OPTIONS}
           enabledSkillIds={enabledAgentSkillIds}
+          customSkills={agentCustomSkills}
           toolFamilies={agentSettingsToolFamilies}
           contextItems={runContextSelection.items}
+          systemPrompt={agentAdditionalSystemPrompt}
           embedded={isEmbeddedHostContextExpected()}
           onModelChange={handleAgentModelChange}
+          onModelCatalogRefresh={() => void refreshAgentModelCatalog()}
+          onRequireZdrChange={handleAgentRequireZdrChange}
           onSkillToggle={handleAgentSkillToggle}
+          onCustomSkillCreate={handleAgentCustomSkillCreate}
+          onCustomSkillUpdate={handleAgentCustomSkillUpdate}
+          onSystemPromptChange={handleAgentPromptChange}
           onToolPermissionChange={handleAgentToolPermissionChange}
         />
         {#if !isEmbeddedHostContextExpected()}
