@@ -41,6 +41,7 @@ export const GENERATED_BOOKING_TEMPLATES_COMMAND_ID = "booking.list.organizer.te
 export const GENERATED_BOOKING_TEMPLATE_COMMAND_ID = "booking.get.organizer.template";
 export const GENERATED_BOOKING_AVAILABILITY_COMMAND_ID = "booking.get.availability";
 export const GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID = "booking.create.hold";
+export const GENERATED_BOOKING_CREATE_BOOKING_COMMAND_ID = "booking.create.booking";
 export const GENERATED_BOOKING_GET_HOLD_COMMAND_ID = "booking.get.hold";
 export const GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID = "booking.release.hold";
 export const GENERATED_BOOKING_RUNTIME_PROVIDER = "sonik-booking-openapi-runtime";
@@ -325,7 +326,8 @@ function buildOpenApiWriteRequest(baseUrl: string, command: CommandDescriptor, b
 }
 
 function buildGenericOpenApiWriteRequest(baseUrl: string, binding: GeneratedBookingRuntimeBinding, input: Record<string, unknown>, execution: CommandExecutionContext): GeneratedBookingWriteRequest {
-  assertTrustedGeneratedBookingInput(input, execution);
+  const trustedInputOptions = trustedGeneratedBookingInputOptionsForCommand(binding.commandId);
+  assertTrustedGeneratedBookingInput(input, execution, trustedInputOptions);
   const url = buildGeneratedOpenApiUrl(baseUrl, binding, input, { allowBodyKeys: true, omitQueryParams: binding.requestBody.bodyEncoding === "multipart" });
   const routeKeys = binding.requestBody.bodyEncoding === "multipart"
     ? new Set(binding.pathParams.map((parameter) => parameter.name))
@@ -334,7 +336,7 @@ function buildGenericOpenApiWriteRequest(baseUrl: string, binding: GeneratedBook
   const bodySource = explicitBody ?? Object.fromEntries(Object.entries(input).filter(([key, value]) => !routeKeys.has(key) && key !== "body" && value !== undefined));
   const sanitizedBody = isRecord(bodySource) ? redactSecretValue(bodySource, []) as Record<string, unknown> : {};
   if (binding.requestBody.required && Object.keys(sanitizedBody).length === 0) throw new Error(`Generated booking command ${binding.commandId} requires a JSON request body`);
-  assertTrustedGeneratedBookingInput(sanitizedBody, execution);
+  assertTrustedGeneratedBookingInput(sanitizedBody, execution, trustedInputOptions);
   const bodyForReceipt = Object.keys(sanitizedBody).length > 0 || binding.requestBody.required ? sanitizedBody : null;
   const encodedBody = encodeGeneratedBookingRequestBody(binding, bodyForReceipt, input);
   return {
@@ -646,7 +648,14 @@ function validateGeneratedBookingParam(key: string, value: string | number | boo
   return normalized;
 }
 
-function assertTrustedGeneratedBookingInput(input: Record<string, unknown>, execution: CommandExecutionContext): void {
+function trustedGeneratedBookingInputOptionsForCommand(commandId: string): { allowSubjectUserId?: boolean } {
+  // booking.create.booking.userId is the reservation holder/guest identity returned by booking.create.guest,
+  // not the trusted host principal. Trusted actor fields remain derived from host/session headers.
+  if (commandId === GENERATED_BOOKING_CREATE_BOOKING_COMMAND_ID) return { allowSubjectUserId: true };
+  return {};
+}
+
+function assertTrustedGeneratedBookingInput(input: Record<string, unknown>, execution: CommandExecutionContext, options: { allowSubjectUserId?: boolean } = {}): void {
   const trustedOrgId = optionalBoundedString(execution.organizationId, "execution.organizationId", 160);
   for (const key of ["organizationId", "orgId"]) {
     const requestedOrgId = optionalBoundedString(input[key], key, 160);
@@ -655,6 +664,7 @@ function assertTrustedGeneratedBookingInput(input: Record<string, unknown>, exec
   }
   const trustedPrincipalId = optionalBoundedString(execution.principalId, "execution.principalId", 160);
   for (const key of ["userId", "principalId"]) {
+    if (key === "userId" && options.allowSubjectUserId) continue;
     const requestedPrincipalId = optionalBoundedString(input[key], key, 160);
     if (requestedPrincipalId && trustedPrincipalId && requestedPrincipalId !== trustedPrincipalId) throw new Error(`trusted-principal-mismatch: ${key} must match the trusted host principal`);
     if (requestedPrincipalId && !trustedPrincipalId) throw new Error(`trusted-principal-required: ${key} cannot be supplied without a trusted host principal`);

@@ -5,6 +5,7 @@ import { executeHostCatalogCommand } from "../../packages/platform-adapters/src/
 import {
   GENERATED_BOOKING_AVAILABILITY_COMMAND_ID,
   GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
+  GENERATED_BOOKING_CREATE_BOOKING_COMMAND_ID,
   GENERATED_BOOKING_RUNTIME_PROVIDER,
   GENERATED_BOOKING_LIST_CONTEXTS_COMMAND_ID,
   GENERATED_BOOKING_PING_COMMAND_ID,
@@ -25,6 +26,7 @@ const runtimeBindings = JSON.parse(await readFile("tests/fixtures/generated/soni
 const globalCatalog = getGlobalCommandCatalog();
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "user_demo_123";
+const GUEST_USER_ID = "guest_user_456";
 const SESSION_ID = "session_phase3_demo";
 const CONTEXT_ID = "22222222-2222-4222-8222-222222222222";
 const HOLD_ID = "33333333-3333-4333-8333-333333333333";
@@ -86,6 +88,22 @@ const fetcher = async (url, init = {}) => {
   if (String(url).includes("/availability")) {
     return Response.json([{ startsAt: "2026-07-01T18:00:00.000Z", endsAt: "2026-07-01T18:30:00.000Z", capacityRemaining: 4 }]);
   }
+  if (String(url).endsWith("/api/v1/booking/bookings") && init.method === "POST") {
+    return Response.json({
+      id: "booking_123",
+      organizationId: ORG_ID,
+      contextId: body.contextId,
+      userId: body.userId,
+      startsAt: body.startsAt,
+      endsAt: body.endsAt,
+      partySize: body.partySize,
+      source: body.source,
+      clientRequestId: body.clientRequestId,
+      status: "confirmed",
+      createdBy: USER_ID,
+    }, { status: 201 });
+  }
+
   if (String(url).endsWith("/api/v1/booking/holds") && init.method === "POST") {
     return Response.json({
       id: HOLD_ID,
@@ -215,6 +233,51 @@ assert.equal(mismatchedPrincipal.ok, false, "model-supplied userId cannot overri
 assert.equal(mismatchedPrincipal.policy.reasons.includes("host_runtime_error"), true);
 assert.match(mismatchedPrincipal.errors?.[0]?.message ?? "", /trusted-principal-mismatch/);
 assert.equal(calls.length, 0, "mismatched userId fails before calling booking API");
+
+const beforeCreateBooking = calls.length;
+const createBookingWithGuest = await executeHostCatalogCommand({
+  catalog: bundle.catalog,
+  runtimeAdapters: bundle.runtimeAdapters,
+  commandId: GENERATED_BOOKING_CREATE_BOOKING_COMMAND_ID,
+  commandInput: {
+    contextId: CONTEXT_ID,
+    userId: GUEST_USER_ID,
+    startsAt: "2026-07-01T18:00:00.000Z",
+    endsAt: "2026-07-01T18:30:00.000Z",
+    partySize: 2,
+    source: "admin",
+    clientRequestId: "agent-ui-v02-demo-booking-guest-001",
+  },
+  execution: { ...bundle.executionContext, action: "commit", approved: true, requestId: "req_create_booking_guest" },
+});
+assert.equal(createBookingWithGuest.ok, true, "create booking accepts guest userId that differs from trusted host principal");
+const createBookingCall = calls.slice(beforeCreateBooking).find((call) => call.method === "POST" && call.url.endsWith("/api/v1/booking/bookings"));
+assert.ok(createBookingCall, "create booking calls POST /bookings");
+assert.equal(createBookingCall.body.userId, GUEST_USER_ID, "booking.create.booking preserves the resolved guest identity as booking subject");
+assert.equal(createBookingCall.headers["x-sonik-agent-principal-id"], USER_ID, "trusted host principal remains an audit header, not the booking subject");
+
+const spoofedCreateBookingPrincipal = await executeHostCatalogCommand({
+  catalog: bundle.catalog,
+  runtimeAdapters: bundle.runtimeAdapters,
+  commandId: GENERATED_BOOKING_CREATE_BOOKING_COMMAND_ID,
+  commandInput: {
+    contextId: CONTEXT_ID,
+    userId: GUEST_USER_ID,
+    principalId: "malicious-principal",
+    startsAt: "2026-07-01T18:00:00.000Z",
+    endsAt: "2026-07-01T18:30:00.000Z",
+    partySize: 2,
+    source: "admin",
+    clientRequestId: "agent-ui-v02-demo-booking-spoof-001",
+  },
+  execution: { ...bundle.executionContext, action: "commit", approved: true, requestId: "req_create_booking_spoofed_principal" },
+});
+assert.equal(spoofedCreateBookingPrincipal.ok, false, "create booking still rejects model-supplied principalId spoofing");
+assert.match(
+  spoofedCreateBookingPrincipal.errors?.[0]?.message ?? "",
+  /Unsupported command input fields: principalId|trusted-principal-mismatch: principalId/,
+  "principalId spoofing is rejected before any booking API mutation",
+);
 
 const beforeNoUserHold = calls.length;
 const noUserHoldReceipt = await executeHostCatalogCommand({
