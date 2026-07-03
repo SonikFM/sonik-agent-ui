@@ -9,7 +9,7 @@
   import type { DataPart, Spec } from "@json-render/svelte";
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
-  import { AgentConversation, getSpec, getText, snapshotDataParts, type AgentActivityStatus, type AgentChatMessage } from "@sonik-agent-ui/chat-surface";
+  import { AgentConversation, AgentSettingsPanel, getSpec, getText, snapshotDataParts, type AgentActivityStatus, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
@@ -65,6 +65,15 @@
     serializeQuestionAnswerTurnMessage,
   } from "$lib/render/question-answer-loop";
   import { createWorkflowSuggestions } from "$lib/agent-workflows/suggestions";
+  import {
+    AGENT_MODEL_OPTIONS,
+    AGENT_SKILL_OPTIONS,
+    AGENT_TOOL_FAMILY_OPTIONS,
+    DEFAULT_AGENT_MODEL_ID,
+    createDefaultAgentToolPermissionModes,
+    sanitizeAgentRuntimeSettings,
+    type AgentRuntimeSettings,
+  } from "$lib/agent-settings";
 
   interface ActiveDocumentSnapshot {
     id: string;
@@ -189,6 +198,9 @@
   let sessionRailBusy = $state(false);
   let sessionRailError = $state<string | null>(null);
   let resumableRun = $state<WorkspaceRunSummary | null>(null);
+  let agentModelId = $state(DEFAULT_AGENT_MODEL_ID);
+  let enabledAgentSkillIds = $state<string[]>([]);
+  let agentToolPermissionModes = $state<Record<string, AgentToolPermissionMode>>(createDefaultAgentToolPermissionModes());
   // Composer context selection for the next turn (chips + authoritative dismissals).
   let runContextSelection = $state<AgentRunContextSelection>(createEmptyAgentRunContextSelection());
   // Analytics-only run hints, computed client-side at send time. `analyticsTurnIndex`
@@ -254,6 +266,8 @@
             pageContext: createPageContextSnapshot(),
             contextSelection: $state.snapshot(runContextSelection),
             analyticsHints: pendingAnalyticsHints ?? undefined,
+            agentSettings: createAgentSettingsSnapshot(),
+            skillIds: enabledAgentSkillIds,
           },
         };
       },
@@ -2084,6 +2098,10 @@
   // =============================================================================
 
   const workflowSuggestions = $derived(createWorkflowSuggestions(createPageContextSnapshot()));
+  const agentSettingsToolFamilies = $derived(AGENT_TOOL_FAMILY_OPTIONS.map((family) => ({
+    ...family,
+    mode: agentToolPermissionModes[family.id] ?? family.defaultMode,
+  })));
 
   // =============================================================================
   // Composer Context Selection
@@ -2121,6 +2139,31 @@
 
   function messageContextItems(message: AgentChatMessage): AgentContextItem[] | undefined {
     return turnContextByMessageId.get(message.id);
+  }
+
+  function createAgentSettingsSnapshot(): AgentRuntimeSettings {
+    return sanitizeAgentRuntimeSettings({
+      modelId: agentModelId,
+      skillIds: enabledAgentSkillIds,
+      toolPermissionModes: agentToolPermissionModes,
+    });
+  }
+
+  function handleAgentModelChange(modelId: string): void {
+    agentModelId = modelId;
+    logArtifactTelemetry({ source: "client", event: "agent_settings.model.change", sessionId: activeSessionId ?? undefined, reason: modelId, ok: true });
+  }
+
+  function handleAgentSkillToggle(skillId: string, enabled: boolean): void {
+    enabledAgentSkillIds = enabled
+      ? [...new Set([...enabledAgentSkillIds, skillId])]
+      : enabledAgentSkillIds.filter((id) => id !== skillId);
+    logArtifactTelemetry({ source: "client", event: "agent_settings.skill.toggle", sessionId: activeSessionId ?? undefined, reason: `${skillId}:${enabled ? "on" : "off"}`, ok: true });
+  }
+
+  function handleAgentToolPermissionChange(familyId: string, mode: AgentToolPermissionMode): void {
+    agentToolPermissionModes = { ...agentToolPermissionModes, [familyId]: mode };
+    logArtifactTelemetry({ source: "client", event: "agent_settings.tool_permission.change", sessionId: activeSessionId ?? undefined, reason: `${familyId}:${mode}`, ok: true });
   }
 
   // =============================================================================
@@ -2442,6 +2485,18 @@
       shouldRenderArtifact={shouldRenderInlineArtifact}
     >
       {#snippet actions()}
+        <AgentSettingsPanel
+          modelOptions={AGENT_MODEL_OPTIONS}
+          selectedModelId={agentModelId}
+          skillOptions={AGENT_SKILL_OPTIONS}
+          enabledSkillIds={enabledAgentSkillIds}
+          toolFamilies={agentSettingsToolFamilies}
+          contextItems={runContextSelection.items}
+          embedded={isEmbeddedHostContextExpected()}
+          onModelChange={handleAgentModelChange}
+          onSkillToggle={handleAgentSkillToggle}
+          onToolPermissionChange={handleAgentToolPermissionChange}
+        />
         {#if !isEmbeddedHostContextExpected()}
           <ThemePicker />
         {/if}

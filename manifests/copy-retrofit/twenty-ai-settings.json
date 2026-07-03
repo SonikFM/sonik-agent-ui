@@ -1,0 +1,220 @@
+{
+	"name": "twenty-ai-settings-reference",
+	"upstream": {
+		"repoPath": "${TWENTY_REPO_PATH:-/Users/danielletterio/Documents/GitHub/twenty}",
+		"gitRemote": "https://github.com/twentyhq/twenty.git",
+		"revision": "1a85b88d38d62f57c7955fc87d82116f9fc65ce0",
+		"license": "AGPL-3.0-or-later"
+	},
+	"entries": [
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/SettingsAI.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/SettingsAI.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "9aa517c044a022da379dfa5bf96126de196ec351c22791d635777d8d16463373"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/components/SettingsAiModelsTab.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/components/SettingsAiModelsTab.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "8f92e8d938d6e725701f77bba3ddb62d664edd922662d20a6713fc442f6eacf2"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/modules/settings/ai/components/SettingsAiModelsTable.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/modules/settings/ai/components/SettingsAiModelsTable.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "6d8b8b99ae02660972b80d366f9bcfa00628162185f23f004a3f9b182cf74bdd"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/hooks/useSettingsAiModelsActions.ts",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/hooks/useSettingsAiModelsActions.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "ccca29c53657371564f051d86c44c09b6999d3b40d9b872253443378eb996eab"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/components/SettingsAgentSkillsTab.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/components/SettingsAgentSkillsTab.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "3fbe5982b9753f2160aaba0d5d63e1e306da7c5a1029dfc55f7d011051134cfe"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/components/SettingsAgentSkillsTable.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/components/SettingsAgentSkillsTable.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "0d3c9a24783580bcbce1dbdf58fb63c653e92014d8f3e4f5723745afbfee6491"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/constants/SettingsSkillTableMetadata.ts",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/constants/SettingsSkillTableMetadata.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "1636ef3bedd211de70f0e7b7c769de3ab5fa45f4db93cdc6f2ef691d642747f5"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/components/SettingsAgentToolsTab.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/components/SettingsAgentToolsTab.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "444a9fe7611d4427724dba7ea3ebc61ae880be9f2b17237be3ed22e45ce8a1c7"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/components/SettingsAgentToolsTable.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/components/SettingsAgentToolsTable.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "68e710802db0ed87ae22c9e41388ed5efea60eeb8ec3c6eaec92c09e72267e6c"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/ai/types/SettingsAgentToolItem.ts",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/ai/types/SettingsAgentToolItem.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "220ba3a7f916e057bb2438877def6ae51c765105a1108fa746dacdb24817972d"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/modules/marketplace/components/SettingsApplicationInstallPermissionValidationModal.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/modules/marketplace/components/SettingsApplicationInstallPermissionValidationModal.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "95b94b5ffd17cc44d5506da9250af70fcb521ecea3774334a4a401b4c1d7aeda"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/modules/marketplace/utils/buildPermissionSummaryFromRoleManifest.ts",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/modules/marketplace/utils/buildPermissionSummaryFromRoleManifest.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "fbf0dfaddfdc4c42aa33ea38dd9d7b031c6c53f8c6ffb618c998303e23826cfb"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-front/src/pages/settings/applications/components/SettingsApplicationConnectScopePickerModal.tsx",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-front/pages/settings/applications/components/SettingsApplicationConnectScopePickerModal.tsx",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "c03bcad2014b8365f8349b4495a4da5814e54e4092390be3595cf46c6913b9a2"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-codex-plugin/AGENTS.md",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-codex-plugin/AGENTS.md",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "4f202540f2605ebd1456c2af420a2045d7524ee9ab50c217a2910dd44c13eb61"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-codex-plugin/references/use-twenty-mcp/setup.md",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-codex-plugin/references/use-twenty-mcp/setup.md",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "ff64fff22967eb68b0fc4167ef583321e1e78755f043ae0e0cf1075ded4c7569"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/twenty-sdk/docs/logic-function-inputs.md",
+			"destination": "docs/upstream-proofs/twenty-ai-settings/twenty-sdk/docs/logic-function-inputs.md",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "5d82f3419e44766226887bced1287ec1811049431582c6387d5c29c4b68bfabc"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": []
+}

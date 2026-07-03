@@ -27,6 +27,7 @@ import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncReques
 import { resolveEffectiveContextDocument } from "$lib/server/run-context-document";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
+import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
 import { resolveImplicitWorkflowSkillIds } from "$lib/runtime-skill-intent";
 import {
   createBookingRuntimeAuthContextFromEnv,
@@ -452,8 +453,9 @@ export const POST: RequestHandler = async (event) => {
   const firstUserMessage = resolveFirstUserMessage(uiMessages);
   const latestUserMessage = resolveLatestUserMessage(uiMessages);
   const implicitSkillIds = resolveImplicitWorkflowSkillIds({ userMessage: latestUserMessage, pageContext });
+  const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
   const skillIds = resolveRequestSkillIds({
-    requestSkillIds: body?.skillIds ?? body?.workspace?.skillIds,
+    requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
     selectedSkillFamilies: selectionResolution.skillFamilies,
     implicitSkillIds,
   });
@@ -496,7 +498,8 @@ export const POST: RequestHandler = async (event) => {
   const conversationTitlePrompt = titleGenerationEnabled
     ? createConversationTitleGenerationPrompt({ firstUserMessage, fallbackTitle: fallbackConversationTitle })
     : "";
-  const systemContext = [contextSummary, pageContextSummary, conversationTitlePrompt, `CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
+  const agentSettingsSummary = summarizeAgentRuntimeSettings(agentRuntimeSettings);
+  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, conversationTitlePrompt, `CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;
@@ -524,6 +527,7 @@ export const POST: RequestHandler = async (event) => {
       // Analytics-only run hints, stamped onto the run telemetry / Pipe-B so a
       // session's run sequence is queryable. Never influences behavior.
       analyticsHints: analyticsHints ?? null,
+      agentSettings: agentRuntimeSettings,
     },
     ok: true,
   }).catch(() => undefined);
@@ -591,7 +595,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

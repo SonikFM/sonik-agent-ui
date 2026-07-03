@@ -12,12 +12,13 @@ import { createDocumentTools, type DocumentToolContext } from "./tools/document"
 import { createToolManifestTools } from "./tools/tool-manifest";
 import { createCommandCatalogTools } from "./tools/command-catalog";
 import { createSkillCatalogTools } from "./tools/skill-catalog";
-import { MODEL_ID, gateway } from "./ai-gateway";
+import { gateway, resolveGatewayModelId } from "./ai-gateway";
+import type { AgentRuntimeSettings } from "./agent-settings";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[] };
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings };
 
 const PREVIEW_ONLY_RUNTIME_SKILL_IDS = new Set([
   "booking.context.intake",
@@ -74,10 +75,10 @@ export function createAgent(context: AgentRuntimeContext = {}) {
   const bookingContextIntakeActive = hasBookingContextIntakeSkill(context.skillIds);
   const commandCatalogTools = hasPreviewOnlyRuntimeSkill(context.skillIds)
     ? {}
-    : createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher });
+    : createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, toolPermissionModes: context.agentSettings?.toolPermissionModes });
   const skillCatalogTools = createSkillCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   return new ToolLoopAgent({
-    model: gateway(MODEL_ID),
+    model: gateway(resolveGatewayModelId(context.agentSettings?.modelId)),
     instructions: resolveAgentPromptComposition(context).prompt,
     tools: {
       getWeather,
