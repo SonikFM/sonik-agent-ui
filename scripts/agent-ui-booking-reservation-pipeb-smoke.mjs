@@ -19,7 +19,11 @@ const pipeBPath = path.resolve('.omx/logs', `${runId}.pipe-b.jsonl`);
 const pipeBErrPath = path.resolve('.omx/logs', `${runId}.pipe-b.stderr.log`);
 const pipeBRawDir = path.resolve('.omx/logs', `${runId}.r2`);
 const timeoutMs = Number(process.env.AGENT_UI_BOOKING_RESERVATION_TIMEOUT_MS ?? 300_000);
-const prompt = process.env.AGENT_UI_BOOKING_RESERVATION_PROMPT ?? `Use the booking command catalog to prove the reservation flow against the CURRENT HOST/PAGE CONTEXT. First call searchSkillCatalog for the reservation workflow, then call learnSkill for booking.reservation.create. Follow that learned skill exactly. Then learn the command schemas you need. Use inputJson for every executeCommand or commitCommand call. Check availability for the current booking page context from 2026-07-01T18:00:00.000Z to 2026-07-01T19:00:00.000Z for party size 2. Then commit booking.create.guest for Agent UI Smoke Guest with email agent-ui-smoke@example.test. Then commit booking.create.booking for that returned guest/customer id in the same context and time window with source admin, partySize 2, and a unique clientRequestId. Do not call booking.create.hold; this is a reservation workflow, not a hold workflow. Do not invent, edit, or provision the trusted actor userId; trusted host context supplies it. If a preflight receipt says fields are missing or unsupported, learn the command and retry once with corrected direct command inputJson. Reply with the skill id, command ids you successfully used, and the reservation or booking id.`;
+const reservationStartIso =
+  process.env.AGENT_UI_BOOKING_RESERVATION_START ?? nextBookableWindowStartIso();
+const reservationEndIso =
+  process.env.AGENT_UI_BOOKING_RESERVATION_END ?? addMinutesIso(reservationStartIso, 60);
+const prompt = process.env.AGENT_UI_BOOKING_RESERVATION_PROMPT ?? `Use the booking command catalog to prove the reservation flow against the CURRENT HOST/PAGE CONTEXT. First call searchSkillCatalog for the reservation workflow, then call learnSkill for booking.reservation.create. Follow that learned skill exactly. Then learn the command schemas you need. Use inputJson for every executeCommand or commitCommand call. Check availability for the current booking page context from ${reservationStartIso} to ${reservationEndIso} for party size 2. Then commit booking.create.guest for Agent UI Smoke Guest with email agent-ui-smoke@example.test. Then commit booking.create.booking for that returned guest/customer id in the same context and time window with source admin, partySize 2, and a unique clientRequestId. Do not call booking.create.hold; this is a reservation workflow, not a hold workflow. Do not invent, edit, or provision the trusted actor userId; trusted host context supplies it. If a preflight receipt says fields are missing or unsupported, learn the command and retry once with corrected direct command inputJson. Reply with the skill id, command ids you successfully used, and the reservation or booking id.`;
 
 if (!useFakeHost && (!email || !password)) throw new Error('Missing TEST_EMAIL/TEST_PASSWORD for booking reservation smoke.');
 
@@ -29,6 +33,7 @@ const evidence = {
   runId,
   bookingUrl,
   agentOrigin,
+  reservationWindow: { start: reservationStartIso, end: reservationEndIso },
   pipeB: { worker: pipeBWorker, path: pipeBPath, stderrPath: pipeBErrPath, rawDir: pipeBRawDir, status: 'not_started', lineCount: 0, relevantLineCount: 0, rawObjectCount: 0 },
   prompt,
   startedAt: new Date(startedAtMs).toISOString(),
@@ -48,6 +53,17 @@ function redact(value) {
     .replace(/(vck_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{8,}|signature[=:]?[A-Za-z0-9._-]{8,})/gi, '[secret]');
 }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function nextBookableWindowStartIso() {
+  const date = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  date.setUTCHours(18, 0, 0, 0);
+  while (date.getUTCDay() === 0 || date.getUTCDay() === 6) {
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+  return date.toISOString();
+}
+function addMinutesIso(iso, minutes) {
+  return new Date(Date.parse(iso) + minutes * 60 * 1000).toISOString();
+}
 function pushBounded(array, value, max = 500) {
   if (array.length < max) array.push(value);
 }
@@ -137,9 +153,9 @@ async function findAgentFrame(page) {
     if (frame) return frame;
     await page.evaluate(() => {
       if (window.__sonikAgentHost?.openChat) return window.__sonikAgentHost.openChat();
-      const launcher = document.querySelector('[data-sonik-agent-ui-control="launcher"], [data-testid="sonik-agent-ui-launcher"], [aria-label="Open Sonik agent launcher"]');
+      const launcher = document.querySelector('#agent-fab-main, [data-sonik-agent-ui-control="launcher"], [data-testid="sonik-agent-ui-launcher"], [aria-label="Open Sonik agent launcher"], [aria-label="Open Sonik agent"]');
       launcher?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      const chat = document.querySelector('[data-sonik-agent-ui-control="open-chat"], [data-testid="sonik-agent-ui-open-chat"], [aria-label="Open Sonik chat sidecar"]');
+      const chat = document.querySelector('#booking-agent-ui-open-chat, #open-chat, [data-sonik-agent-ui-control="open-chat"], [data-testid="sonik-agent-ui-open-chat"], [aria-label="Open Sonik chat sidecar"], [aria-label="Open Sonik chat"]');
       chat?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     });
     await sleep(1500);
