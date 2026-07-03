@@ -365,7 +365,7 @@
       const agentUi = mountSonikAgentUI({
         agentUrl: "/",
         hostOrigin: window.location.origin,
-        theme: () => url.searchParams.get("theme") ?? "system",
+        theme: () => url.searchParams.get("theme") ?? "sonik-operator-dark",
         smokeMockStream: url.searchParams.get("smokeMockStream") !== "0" ? (url.searchParams.get("smokeMockStream") ?? "1") : null,
         smokeRunId,
         initialMode: ["chat", "canvas"].includes(url.searchParams.get("autoOpen") ?? "") ? url.searchParams.get("autoOpen") : null,

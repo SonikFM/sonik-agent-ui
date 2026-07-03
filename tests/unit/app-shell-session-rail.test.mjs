@@ -334,6 +334,7 @@ assert.equal(fakeBookingHostSource.includes("booking-console"), true, "static fa
 assert.equal(fakeBookingHostSource.includes("Summer Jazz Night"), true, "static fake host should donate active entity label");
 assert.equal(fakeBookingHostSource.includes("org_fake_booking") || fakeBookingHostSource.includes("user_fake_booking"), false, "static fake host should keep browser-donated page context display-only and not carry org/user authority");
 assert.equal(fakeBookingHostSource.includes("mountSonikAgentUI"), true, "static fake host should consume the one-call SDK mount helper instead of handwritten iframe glue");
+assert.equal(fakeBookingHostSource.includes('theme: () => url.searchParams.get("theme") ?? "sonik-operator-dark"'), true, "fake booking host smoke fixture should donate the Booking operator dark theme by default");
 assert.equal(agentEmbedSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "host embed helper should define a stable page-context request message type");
 assert.equal(agentEmbedSource.includes("onRequestPageContext"), true, "host embed helper should respond to page context request messages from the iframe");
 assert.equal(fakeBookingHostSource.includes("openChat: \"#open-chat\""), true, "static fake host should expose a compact chat launcher through the SDK element map");
