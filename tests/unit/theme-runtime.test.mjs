@@ -5,9 +5,9 @@ import {
 } from "../../apps/standalone-sveltekit/src/lib/theme/theme-runtime.ts";
 
 assert.equal(
-  resolveEmbeddedThemeSetting({ hostTheme: "lemonade", storedSetting: "gunmetal-light" }),
-  "lemonade",
-  "embedded theme resolution should prefer a valid host theme over the stored preference",
+  resolveEmbeddedThemeSetting({ hostTheme: "sonik-operator-dark", storedSetting: "gunmetal-light" }),
+  "sonik-operator-dark",
+  "embedded theme resolution should prefer the Booking host operator theme over the stored preference",
 );
 
 assert.equal(
@@ -18,6 +18,6 @@ assert.equal(
 
 assert.equal(
   resolveEmbeddedThemeSetting({ hostTheme: null, storedSetting: null }),
-  DEFAULT_DOCUMENT_THEME_ID,
-  "embedded theme resolution should fall back to the default theme without host or stored preferences",
+  "sonik-operator-dark",
+  "embedded theme resolution should fall back to the operator theme without host or stored preferences",
 );

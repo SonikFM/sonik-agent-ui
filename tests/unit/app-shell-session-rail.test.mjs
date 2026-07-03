@@ -188,8 +188,10 @@ assert.equal(appCss.includes("--sonik-border-color"), true, "standalone app shou
 assert.equal(appCss.includes("--border: color-mix"), false, "standalone app should not overwrite DaisyUI\'s --border width token as a color");
 assert.equal(daisyThemeSource.includes('themes: all'), true, "DaisyUI should compile the full built-in theme library");
 assert.equal(themeRegistrySource.includes('CUSTOM_DOCUMENT_THEME_IDS'), true, "theme registry should include Amplify custom themes");
+assert.equal(themeRegistrySource.includes('"sonik-operator-dark"'), true, "theme registry should include the Booking operator dark theme id");
+assert.equal(appCss.includes('@import "./lib/theme/foundations/themes/custom/sonik-operator-dark.css"'), true, "standalone app should import the Booking operator dark theme");
 assert.equal(themeRegistrySource.includes('DAISY_BUILTIN_THEME_IDS'), true, "theme registry should expose DaisyUI built-in themes");
-assert.equal(themeRuntimeSource.includes('THEME_STORAGE_KEY = "amplify.documentTheme"'), true, "theme runtime should use the Amplify theme storage key");
+assert.equal(themeRuntimeSource.includes('THEME_STORAGE_KEY = "amplify.documentTheme.v2"'), true, "theme runtime should use the Amplify v2 theme storage key");
 assert.equal(themeRuntimeSource.includes('DEFAULT_THEME_SETTING: ThemeSetting = "system"'), true, "standalone app should not hardcode a gunmetal default and should support system preference");
 assert.equal(themeRuntimeSource.includes('THEME_CHANGE_EVENT = "amplify:document-theme-change"'), true, "theme runtime should emit the Amplify theme change event");
 assert.equal(layoutSource.includes("initializeTheme()"), true, "layout should initialize through the shared theme runtime instead of hand-writing data-theme");

@@ -1,0 +1,68 @@
+/* Sonik operator dark — booking/operator parity theme. */
+@plugin "daisyui/theme" {
+	name: "sonik-operator-dark";
+	default: false;
+	prefersdark: true;
+	color-scheme: "dark";
+
+	/* DaisyUI semantic colors */
+	--color-base-100: #121417;
+	--color-base-200: #191c20;
+	--color-base-300: #21252b;
+	--color-base-content: #e7eaee;
+	--color-primary: #4c9df0;
+	--color-primary-content: #0b1220;
+	--color-secondary: #8b95a1;
+	--color-secondary-content: #0f1114;
+	--color-accent: #9aa6b2;
+	--color-accent-content: #0f1114;
+	--color-neutral: #8b95a1;
+	--color-neutral-content: #0f1114;
+	--color-info: #58a6ff;
+	--color-info-content: #0b1626;
+	--color-success: #3fbf7f;
+	--color-success-content: #071a10;
+	--color-warning: #e0a63c;
+	--color-warning-content: #1d1503;
+	--color-error: #ef5a52;
+	--color-error-content: #200705;
+
+	/* Geometry (DaisyUI vars) */
+	--radius-selector: 0.5rem;
+	--radius-field: 0.5rem;
+	--radius-box: 0.75rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 0;
+	--noise: 0;
+
+	/* 4-tier ink ramp (measured contrast on base-100) */
+	--app-ink-heading: #e7eaee;
+	--app-ink-body: #c3c9d1;
+	--app-ink-muted: #99a1ab;
+	--app-ink-faint: #6e757e;
+}
+
+[data-theme="sonik-operator-dark"] {
+	/* Surface projection — flat, border-carried (resting shadows: NONE) */
+	--app-canvas-bg: none;
+	--app-shell-bg: #0e1013;
+	--app-shell-border: rgba(255, 255, 255, 0.08);
+	--app-card-bg: var(--color-base-200);
+	--app-card-border: rgba(255, 255, 255, 0.09);
+	--app-card-shadow: none;
+	--app-card-shadow-elevated:
+		0 8px 24px rgba(0, 0, 0, 0.45),
+		0 0 0 1px rgba(255, 255, 255, 0.06);
+	--app-panel-bg: #191c20;
+	--app-inset-panel-bg: #14171a;
+	--app-muted-panel-bg: #15181c;
+	--app-drawer-bg: #14171a;
+	--app-table-bg: var(--color-base-100);
+	--app-table-header-bg: #171a1e;
+	--app-table-row-bg: transparent;
+	--app-table-row-hover-bg: rgba(255, 255, 255, 0.04);
+	--app-table-row-selected-bg: rgba(76, 157, 240, 0.12);
+	--app-surface-transition: background-color 0.25s ease, border-color 0.25s ease;
+}

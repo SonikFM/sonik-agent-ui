@@ -7,12 +7,12 @@ import {
 
 export type ThemeSetting = DocumentThemeId | "system";
 
-export const THEME_STORAGE_KEY = "amplify.documentTheme";
+export const THEME_STORAGE_KEY = "amplify.documentTheme.v2";
 export const THEME_CHANGE_EVENT = "amplify:document-theme-change";
 export const LEGACY_THEME_CHANGE_EVENT = "sonik-agent-ui:theme-change";
 export const DEFAULT_THEME_SETTING: ThemeSetting = "system";
 
-const SYSTEM_DARK_THEME: DocumentThemeId = "dark";
+const SYSTEM_DARK_THEME: DocumentThemeId = "sonik-operator-dark";
 const SYSTEM_LIGHT_THEME: DocumentThemeId = "light";
 
 export function normalizeThemeSetting(value: string | null | undefined): ThemeSetting {
