@@ -307,6 +307,8 @@ try {
 ${pipeText}`;
   const successfulGenerate = evidence.responses.filter((entry) => entry.origin === agentOrigin && entry.path === '/api/generate' && entry.status === 200).length;
   const agentFailures = evidence.responses.filter((entry) => entry.origin === agentOrigin && entry.status >= 400).map((entry) => `${entry.status} ${entry.path}`);
+  const trustedHostResponses = evidence.responses.filter((entry) => entry.origin === agentOrigin && ['/api/session', '/api/sessions'].includes(entry.path));
+  const serverTrustedHostBoundary = trustedHostResponses.some((entry) => entry.status < 400 && entry.hostAuthenticated === 'true' && entry.hostOrg === 'present' && entry.hostUser === 'present' && entry.cloudError == null);
   const failedRuntimeFetch = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'booking.runtime.fetch.end', false);
   const failedCommit = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'tool.commitCommand', false);
   const successfulRuntimeFetch = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'booking.runtime.fetch.end', true);
@@ -337,6 +339,7 @@ ${pipeText}`;
     activeSessionStable: before.context?.activeSessionId !== evidence.sessionId && after.context?.activeSessionId === evidence.sessionId,
     successfulGenerate: successfulGenerate >= 1,
     noAgentApiFailures: agentFailures.length === 0,
+    serverTrustedHostBoundary,
     mentionsAvailability: /booking\.get\.availability|get availability|availability/i.test(responseText),
     mentionsGuestCreate: /booking\.create\.guest|create guest|created guest/i.test(responseText),
     mentionsBookingCreate: /booking\.create\.booking|create booking|created booking|reservation/i.test(responseText),

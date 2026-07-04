@@ -18,13 +18,28 @@ function isRelevantText(value, relevantMarkers = DEFAULT_RELEVANT_MARKERS) {
   return relevantMarkers.some((marker) => value.includes(marker));
 }
 
+function compactValue(value) {
+  try { return JSON.stringify(value); } catch { return String(value ?? ''); }
+}
+
 function objectContainsMarker(value, markers) {
   if (markers.length === 0) return true;
-  try {
-    return markers.some((marker) => JSON.stringify(value).includes(marker));
-  } catch {
-    return markers.some((marker) => String(value ?? '').includes(marker));
-  }
+  const compact = compactValue(value);
+  return markers.some((marker) => compact.includes(marker));
+}
+
+function hasGenerateCorrelationAnchor(value) {
+  const compact = compactValue(value);
+  return compact.includes('/api/generate')
+    && (compact.includes('\"event\":\"api.generate.start\"')
+      || compact.includes('\"event\":\"api.generate.skill_index_context\"')
+      || compact.includes('"event":"api.generate.start"')
+      || compact.includes('"event":"api.generate.skill_index_context"'));
+}
+
+function isCorrelatedGenerateRecord(value, markers) {
+  if (markers.length === 0) return true;
+  return objectContainsMarker(value, markers) && hasGenerateCorrelationAnchor(value);
 }
 
 function splitJsonishRecords(text) {
@@ -59,16 +74,23 @@ function collectRelevantStrings(value, events, relevantMarkers = DEFAULT_RELEVAN
 export function extractPipeBToolEvents(text, { markers = [], relevantMarkers = DEFAULT_RELEVANT_MARKERS } = {}) {
   const requiredMarkers = normalizeMarkers(markers);
   const events = [];
+  const considerParsed = (value) => {
+    if (value && typeof value === 'object' && Array.isArray(value.events)) {
+      for (const event of value.events) considerParsed(event);
+      return;
+    }
+    if (!isCorrelatedGenerateRecord(value, requiredMarkers)) return;
+    collectRelevantStrings(value, events, relevantMarkers);
+  };
   for (const record of splitJsonishRecords(text)) {
     let parsed;
     try {
       parsed = JSON.parse(record);
     } catch {
-      if (objectContainsMarker(record, requiredMarkers)) collectRelevantStrings(record, events, relevantMarkers);
+      if (isCorrelatedGenerateRecord(record, requiredMarkers)) collectRelevantStrings(record, events, relevantMarkers);
       continue;
     }
-    if (!objectContainsMarker(parsed, requiredMarkers)) continue;
-    collectRelevantStrings(parsed, events, relevantMarkers);
+    considerParsed(parsed);
   }
   return unique(events);
 }

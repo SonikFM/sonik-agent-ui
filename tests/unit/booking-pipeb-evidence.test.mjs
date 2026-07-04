@@ -5,6 +5,7 @@ const matchingRecord = JSON.stringify({
   objectKey: 'workers/sonik-agent-ui/current-run.json',
   request: { url: '/api/generate?smokeRunId=run-123', body: { prompt: 'clientRequestId agent-ui-smoke-reservation-run-123' } },
   logs: [
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'api.generate.start', ok: true, sessionId: 'workspace-session-current' } }] },
     { message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.searchSkillCatalog', ok: true, query: 'booking.reservation.create' } }] },
     { message: ['sonik_agent_ui_telemetry', { payload: { event: 'booking.runtime.fetch.end', ok: true, toolCallId: 'booking.create.booking' } }] },
     { message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.commitCommand', ok: true, toolCallId: 'booking.create.booking' } }] },
@@ -21,10 +22,33 @@ const unrelatedRecord = JSON.stringify({
   ],
 });
 
+
+const sameRequestWithoutGenerateAnchor = JSON.stringify({
+  request: { url: '/api/generate?smokeRunId=run-123', body: { prompt: 'clientRequestId agent-ui-smoke-reservation-run-123' } },
+  logs: [
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.commitCommand', ok: true, toolCallId: 'booking.create.booking', note: 'unanchored same-record telemetry must not prove this smoke' } }] },
+  ],
+});
+
+const mixedBatchRecord = JSON.stringify({
+  kind: 'normalized_tail_batch',
+  events: [
+    {
+      request: { path: '/api/generate', url: '/api/generate?smokeRunId=run-123' },
+      logs: [{ message: ['sonik_agent_ui_telemetry', { payload: { event: 'api.generate.start', ok: true, sessionId: 'workspace-session-current' } }] }],
+    },
+    {
+      request: { path: '/api/generate', url: '/api/generate?smokeRunId=other-run' },
+      logs: [{ message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.commitCommand', ok: true, toolCallId: 'booking.create.booking' } }] }],
+    },
+  ],
+});
+
 const unrelatedSearchRecord = JSON.stringify({
   objectKey: 'workers/sonik-agent-ui/current-run-unrelated-search.json',
   request: { url: '/api/generate?smokeRunId=run-123' },
   logs: [
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'api.generate.start', ok: true, sessionId: 'workspace-session-current' } }] },
     { message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.searchSkillCatalog', ok: true, query: 'weather.dashboard' } }] },
   ],
 });
@@ -38,6 +62,12 @@ assert.equal(hasEventName(correlated, 'tool.searchSkillCatalog', true), true, 'e
 
 const unrelatedOnly = extractPipeBToolEvents(unrelatedRecord, { markers: ['run-123'] });
 assert.equal(unrelatedOnly.length, 0, 'unrelated successful tool calls must not satisfy a smoke run');
+
+const unanchoredSameRequest = extractPipeBToolEvents(sameRequestWithoutGenerateAnchor, { markers: ['run-123', 'workspace-session-current', 'agent-ui-smoke-reservation-run-123'] });
+assert.equal(hasTelemetryEvent(unanchoredSameRequest, 'booking.create.booking', 'tool.commitCommand', true), false, 'a marker-bearing record without an api.generate anchor must not donate booking commits');
+
+const mixedBatch = extractPipeBToolEvents(mixedBatchRecord, { markers: ['run-123', 'workspace-session-current'] });
+assert.equal(hasTelemetryEvent(mixedBatch, 'booking.create.booking', 'tool.commitCommand', true), false, 'a normalized batch marker must not admit unrelated event objects in the same batch');
 
 const wrongSearch = extractPipeBToolEvents(unrelatedSearchRecord, { markers: ['run-123'] });
 assert.equal(hasEventName(wrongSearch, 'tool.searchSkillCatalog', true), true, 'generic search event is present');

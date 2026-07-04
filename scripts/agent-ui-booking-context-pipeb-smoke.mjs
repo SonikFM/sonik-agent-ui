@@ -317,6 +317,8 @@ try {
   evidence.pipeB.correlatedRelevantLineCount = countRelevantPipeBLines(pipeText, pipeBMarkers);
   evidence.pipeB.toolEventSample = toolEvents.slice(-80).map((line) => redact(line).slice(0, 2000));
   const agentFailures = evidence.responses.filter((entry) => entry.origin === agentOrigin && entry.status >= 400).map((entry) => `${entry.status} ${entry.path}`);
+  const trustedHostResponses = evidence.responses.filter((entry) => entry.origin === agentOrigin && ['/api/session', '/api/sessions'].includes(entry.path));
+  const serverTrustedHostBoundary = trustedHostResponses.some((entry) => entry.status < 400 && entry.hostAuthenticated === 'true' && entry.hostOrg === 'present' && entry.hostUser === 'present' && entry.cloudError == null);
   const text = `${after.text}\n${pipeText}`;
   evidence.pipeB.requiredEvidence = {
     skillIndexContextOk: hasEventName(toolEvents, 'api.generate.skill_index_context', true) && toolEvents.some((line) => line.includes('booking.context.create')),
@@ -337,6 +339,7 @@ try {
     activeArtifactHydrated: afterReload.context?.activeArtifactId === artifactId,
     submitOk: submit?.ok === true,
     noAgentApiFailures: agentFailures.length === 0,
+    serverTrustedHostBoundary,
     mentionsContextCreate: /booking\.create\.context|created booking context|context id|created context/i.test(text),
     pipeBToolEvidence: evidence.pipeB.requiredEvidence.skillIndexContextOk === true
       && evidence.pipeB.requiredEvidence.skillSearchOk === true
