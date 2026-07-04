@@ -64,6 +64,7 @@ export interface AgentUiPageControl {
     stop: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     clearChat: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     clearArtifact: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    reloadSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     openWorkspaceDocument: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
   };
 }

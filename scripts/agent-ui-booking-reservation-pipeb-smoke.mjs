@@ -44,6 +44,9 @@ const evidence = {
   checks: {},
 };
 const children = [];
+let pipeBTailStopping = false;
+let pipeBTailStdout = null;
+let pipeBTailStderr = null;
 const watchdog = setTimeout(() => void save('FAIL', 'Booking reservation smoke timed out.'), timeoutMs);
 
 function redact(value) {
@@ -68,6 +71,7 @@ function pushBounded(array, value, max = 500) {
   if (array.length < max) array.push(value);
 }
 async function stopChildren() {
+  pipeBTailStopping = true;
   for (const child of children.reverse()) {
     if (child.exitCode !== null || child.signalCode) continue;
     child.kill('SIGTERM');
@@ -87,20 +91,35 @@ async function refreshPipeBStats() {
   const err = await stat(pipeBErrPath).catch(() => null);
   evidence.pipeB.stderrBytes = err?.size ?? 0;
 }
-async function startPipeBTail() {
-  await mkdir(path.dirname(pipeBPath), { recursive: true });
-  const stdout = createWriteStream(pipeBPath, { flags: 'a' });
-  const stderr = createWriteStream(pipeBErrPath, { flags: 'a' });
+function spawnPipeBTailChild(reason = 'start') {
   const child = spawn('pnpm', ['-C', 'apps/standalone-sveltekit', 'exec', 'wrangler', 'tail', pipeBWorker, '--format', 'json'], {
     cwd: process.cwd(),
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   children.push(child);
-  evidence.pipeB.status = 'started';
-  child.stdout.on('data', (chunk) => stdout.write(chunk));
-  child.stderr.on('data', (chunk) => stderr.write(chunk));
-  child.on('exit', (code, signal) => { evidence.pipeB.exit = { code, signal }; });
+  evidence.pipeB.status = evidence.pipeB.status === 'started_no_events' ? 'restarted' : 'started';
+  evidence.pipeB.tailStarts = (evidence.pipeB.tailStarts ?? 0) + 1;
+  evidence.pipeB.tailStartReasons ??= [];
+  evidence.pipeB.tailStartReasons.push({ at: new Date().toISOString(), reason });
+  child.stdout.on('data', (chunk) => pipeBTailStdout?.write(chunk));
+  child.stderr.on('data', (chunk) => pipeBTailStderr?.write(chunk));
+  child.on('exit', (code, signal) => {
+    evidence.pipeB.exit = { code, signal };
+    if (pipeBTailStopping) return;
+    evidence.pipeB.tailDisconnects = (evidence.pipeB.tailDisconnects ?? 0) + 1;
+    setTimeout(() => {
+      if (!pipeBTailStopping && Date.now() - startedAtMs < timeoutMs - 10_000) spawnPipeBTailChild('restart_after_disconnect');
+    }, 1_000).unref?.();
+  });
+}
+
+async function startPipeBTail() {
+  await mkdir(path.dirname(pipeBPath), { recursive: true });
+  pipeBTailStopping = false;
+  pipeBTailStdout = createWriteStream(pipeBPath, { flags: 'a' });
+  pipeBTailStderr = createWriteStream(pipeBErrPath, { flags: 'a' });
+  spawnPipeBTailChild();
   await sleep(Number(process.env.AGENT_UI_PIPE_B_WARMUP_MS ?? 2500));
   await refreshPipeBStats();
 }
@@ -189,10 +208,8 @@ function extractPipeBToolEvents(text) {
 
 function parseTailSummaries(text) {
   const summaries = [];
-  for (const chunk of text.split(/\n(?=\{)/).filter(Boolean)) {
-    let record;
-    try { record = JSON.parse(chunk); } catch { continue; }
-    for (const log of record.logs ?? []) {
+  const visit = (record) => {
+    for (const log of record?.logs ?? []) {
       for (const message of log.message ?? []) {
         if (typeof message !== 'string') continue;
         try {
@@ -201,8 +218,18 @@ function parseTailSummaries(text) {
         } catch {}
       }
     }
+  };
+  for (const chunk of text.split(/\n(?=\{)/).filter(Boolean)) {
+    try { visit(JSON.parse(chunk)); } catch {}
   }
-  return summaries;
+  for (const match of text.matchAll(/"(\{\\"event\\":\\"sonik_dev_tail_batch\\".*?\})"/gs)) {
+    try {
+      const decoded = JSON.parse(`"${match[1]}"`);
+      const parsed = JSON.parse(decoded);
+      if (parsed?.event === 'sonik_dev_tail_batch') summaries.push(parsed);
+    } catch {}
+  }
+  return [...new Map(summaries.map((summary) => [summary.objectKey ?? JSON.stringify(summary), summary])).values()];
 }
 
 async function collectRawPipeBText() {
@@ -212,12 +239,12 @@ async function collectRawPipeBText() {
   const relevant = summaries.filter((summary) => {
     const services = summary.services ?? [];
     const paths = summary.paths ?? [];
-    const isAgentGenerate = services.includes('sonik-agent-ui') && paths.some((entry) => entry === '/api/generate' || entry === '/api/telemetry');
+    const isAgentGenerate = services.includes('sonik-agent-ui') && paths.some((entry) => entry === '/api/generate' || entry === '/api/[redacted]');
     const isBookingRuntime = services.some((service) => /sonik-booking-(app|service)-pipe-b/.test(service))
       && paths.some((entry) => entry.startsWith('/api/v1/booking/'));
     return Boolean(summary.objectKey) && (isAgentGenerate || isBookingRuntime);
   });
-  const maxRawObjects = Math.max(1, Number(process.env.AGENT_UI_PIPE_B_MAX_RAW_OBJECTS ?? 24));
+  const maxRawObjects = Math.max(1, Number(process.env.AGENT_UI_PIPE_B_MAX_RAW_OBJECTS ?? 48));
   const cappedRelevant = relevant.slice(-maxRawObjects);
   if (relevant.length > cappedRelevant.length) {
     evidence.pipeB.rawObjectScanTruncated = { totalRelevantSummaries: relevant.length, fetchedLatest: cappedRelevant.length };
@@ -235,7 +262,7 @@ async function collectRawPipeBText() {
       rawTexts.push(existing);
       continue;
     }
-    const result = spawnSync('pnpm', ['-C', 'apps/standalone-sveltekit', 'exec', 'wrangler', 'r2', 'object', 'get', `sonik-dev-observability-events/${summary.objectKey}`, '--file', filePath, '--remote'], {
+    const result = spawnSync('pnpm', ['-C', 'apps/standalone-sveltekit', 'exec', 'wrangler', 'r2', 'object', 'get', `sonik-dev-observability-events/${summary.objectKey}`, '--file', filePath, '--remote', '--config', 'wrangler.jsonc'], {
       cwd: process.cwd(),
       env: process.env,
       encoding: 'utf8',

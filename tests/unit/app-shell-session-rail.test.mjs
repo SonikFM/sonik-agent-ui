@@ -27,6 +27,7 @@ const chatTextParserSource = await readFile("packages/chat-surface/src/chat-text
 const chatSurfaceIndexSource = await readFile("packages/chat-surface/src/index.ts", "utf8");
 const chatMessagePartsSource = await readFile("packages/chat-surface/src/message-parts.ts", "utf8");
 const agentObservabilitySource = await readFile("packages/agent-observability/src/index.ts", "utf8");
+const bookingContextSmokeSource = await readFile("scripts/agent-ui-booking-context-pipeb-smoke.mjs", "utf8");
 const canvasViewportSource = await readFile("packages/workspace-core/src/components/CanvasViewport.svelte", "utf8");
 const themeRuntimeSource = await readFile("apps/standalone-sveltekit/src/lib/theme/theme-runtime.ts", "utf8");
 const themePickerSource = await readFile("apps/standalone-sveltekit/src/lib/theme/ThemePicker.svelte", "utf8");
@@ -59,6 +60,7 @@ assert.equal(rootSource.includes("--workspace-pane-split"), true, "WorkspaceRoot
 assert.equal(agentObservabilitySource.includes("createSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the fresh-session semantic action");
 assert.equal(agentObservabilitySource.includes("sessionId?: string | null"), true, "agent page-control submit type should accept an expected session id");
 assert.equal(agentObservabilitySource.includes("expectedSessionId?: string | null"), true, "semantic action results should report the expected session id selected by createSession");
+assert.equal(agentObservabilitySource.includes("reloadSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the active-session reload action used by artifact persistence smokes");
 
 assert.equal(pageSource.includes("let sessions = $state<WorkspaceSessionSummary[]>([])"), true, "app shell should keep a visible session list state");
 assert.equal(pageSource.includes("let archivedSessionCount = $state(0)"), true, "app shell should make archived chat behavior visible");
@@ -72,12 +74,15 @@ assert.equal(pageSource.includes("function createWorkspaceRequestHeaders"), true
 const visibleActionsBlock = pageSource.match(/visibleActions:\s*\[([\s\S]*?)\],\n\s*visibleWarnings:/)?.[1] ?? "";
 assert.equal(visibleActionsBlock.includes('"createSession"'), true, "page context should expose a semantic createSession action");
 assert.equal(visibleActionsBlock.includes('"submitPrompt"'), true, "page context should expose a semantic submitPrompt action");
+assert.equal(visibleActionsBlock.includes('"reloadSession"'), true, "page context should expose a semantic reloadSession action for persisted artifact hydration");
 assert.equal(
   visibleActionsBlock.indexOf('"createSession"') < visibleActionsBlock.indexOf('"submitPrompt"'),
   true,
   "page context should expose createSession before submitPrompt",
 );
 assert.equal(pageSource.includes("createSession: async () =>"), true, "page-control contract should expose a deterministic fresh-session semantic action for smoke tests");
+assert.equal(pageSource.includes("reloadSession: async () =>"), true, "page-control contract should expose a safe active-session reload action");
+assert.equal(pageSource.includes("if (!force && sessionId === activeSessionId"), true, "forced session reloads must bypass the same-session short-circuit and hydrate server-side active artifacts");
 assert.equal(pageSource.includes("const session = await createSession({ force: true })"), true, "fresh-session semantic action should route through the same session creation path as the app shell and capture the selected id");
 assert.equal(pageSource.includes("expectedSessionId: sessionId"), true, "fresh-session semantic action should return the created session id for deterministic smoke tests");
 assert.equal(pageSource.includes("submitPrompt: async ({ prompt, sessionId }) =>"), true, "page-control submit should accept an expected session id to prevent stale persisted-chat drift");
@@ -411,6 +416,12 @@ assert.equal(smokeHarnessSource.includes("x-sonik-request-id"), true, "smoke har
 assert.equal(smokeHarnessSource.includes("window.__sonikAgentUI"), true, "smoke harness should require canonical page-control state/actions instead of DOM synthesis");
 assert.equal(bookingReservationSmokeSource.includes("activeSessionStable"), true, "booking reservation smoke should fail when a fresh session drifts into an old persisted chat");
 assert.equal(bookingReservationSmokeSource.includes("sessionId: evidence.sessionId"), true, "booking reservation smoke should pass the expected fresh session id into submitPrompt");
+assert.equal(bookingReservationSmokeSource.includes("restart_after_disconnect"), true, "booking reservation smoke should restart wrangler tail after transient disconnects");
+assert.equal(bookingReservationSmokeSource.includes("wrangler.jsonc"), true, "booking reservation smoke R2 fetches should use the app wrangler config deterministically");
+assert.equal(bookingContextSmokeSource.includes("reloadSession"), true, "booking context smoke should reload the active session after signed artifact persistence");
+assert.equal(bookingContextSmokeSource.includes("commitActiveIntakeCommand"), true, "booking context smoke should prove the dedicated intake commit tool instead of generic commitCommand");
+assert.equal(bookingContextSmokeSource.includes("booking.create.context"), true, "booking context smoke should require Pipe-B evidence for booking.create.context");
+assert.equal(packageSource.includes("smoke:agent-ui:booking-pipeb:context"), true, "package scripts should expose the booking context Pipe-B smoke lane");
 assert.equal(smokeHarnessSource.includes("api.generate.stream_finished"), true, "smoke harness should require server stream completion telemetry");
 assert.equal(smokeHarnessSource.includes("api.generate.dev_smoke_stream"), true, "smoke harness should prove deterministic smoke mode was actually used");
 assert.equal(smokeHarnessSource.includes("serverDevSmokeStream"), true, "smoke harness should classify deterministic smoke telemetry separately from stream finish");

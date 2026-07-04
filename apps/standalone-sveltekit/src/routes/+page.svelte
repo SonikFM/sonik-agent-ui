@@ -1298,6 +1298,7 @@
         "stop",
         "clearChat",
         "clearArtifact",
+        "reloadSession",
         "openWorkspaceDocument",
       ],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
@@ -1407,6 +1408,16 @@
         clearArtifact: () => {
           handleClearArtifact();
           return semanticActionResult(true, "Artifact cleared.");
+        },
+        reloadSession: async () => {
+          if (isStreaming) return semanticActionResult(false, "Stop the current stream before reloading the active session.", "streaming");
+          if (!activeSessionId) return semanticActionResult(false, "No active session is available to reload.", "missing_session");
+          const expectedSessionId = activeSessionId;
+          const reloaded = await switchSession(expectedSessionId, { force: true });
+          if (!reloaded || activeSessionId !== expectedSessionId) {
+            return semanticActionResult(false, `Active session reload drifted: expected ${expectedSessionId}, got ${activeSessionId ?? "none"}.`, "active_session_mismatch", { expectedSessionId });
+          }
+          return semanticActionResult(true, "Active session reloaded.", undefined, { expectedSessionId });
         },
         openWorkspaceDocument: async () => {
           await openDocumentEditor();
@@ -1703,7 +1714,7 @@
       sessionRailError = "Stop the current stream before switching sessions.";
       return false;
     }
-    if (sessionId === activeSessionId && conversation.messages.length > 0) return true;
+    if (!force && sessionId === activeSessionId && conversation.messages.length > 0) return true;
     if (sessionRailBusy && !force) return false;
     const selectionRevision = ++sessionSelectionRevision;
     sessionRailBusy = true;

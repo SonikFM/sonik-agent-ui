@@ -32,7 +32,8 @@
     "smoke:agent-ui:booking-pipeb:reservation": "node scripts/agent-ui-booking-reservation-pipeb-smoke.mjs",
     "check:copy-retrofit:open-design-intake": "node scripts/verify-source-drift.mjs manifests/copy-retrofit/open-design-intake.json && pnpm test:open-design-intake",
     "test:open-design-intake": "node --experimental-strip-types scripts/run-open-design-question-form-tests.mjs",
-    "check:copy-retrofit:twenty-ai-settings": "node scripts/verify-source-drift.mjs manifests/copy-retrofit/twenty-ai-settings.json"
+    "check:copy-retrofit:twenty-ai-settings": "node scripts/verify-source-drift.mjs manifests/copy-retrofit/twenty-ai-settings.json",
+    "smoke:agent-ui:booking-pipeb:context": "node scripts/agent-ui-booking-context-pipeb-smoke.mjs"
   },
   "packageManager": "pnpm@11.1.3",
   "engines": {
