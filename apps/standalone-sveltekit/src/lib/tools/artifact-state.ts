@@ -276,7 +276,19 @@ export function createArtifactStateTools(context: ArtifactStateToolContext = {})
         const manifest = readManifest(artifact);
         if (!manifest) return { ok: false, error: "missing_manifest", message: "The active artifact has no manifest draft in state." };
         const validation = validateManifestContract(manifest);
-        if (!validation.ok || validation.manifestType !== "venue_schedule") {
+        if (validation.ok && validation.manifestType !== "venue_schedule") {
+          return {
+            ok: false,
+            error: "unsupported_manifest_type",
+            kind: "intake-command-commit" as const,
+            artifact: { id: artifact.id, title: artifact.title, version: artifact.version },
+            manifest,
+            validation,
+            command: null,
+            message: "This artifact validates, but it is not a venue_schedule manifest. Use the matching event/campaign export path instead of booking.create.context.",
+          };
+        }
+        if (!validation.ok) {
           return { ok: false, error: "invalid_manifest", validation, message: "The manifest must validate as a venue_schedule before booking.create.context can commit." };
         }
         const command = createBookingContextCommandInput(artifact, manifest);

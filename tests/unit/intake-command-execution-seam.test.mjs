@@ -90,6 +90,7 @@ const activeArtifactBeforeScopePoison = getWorkspaceArtifact(artifactId);
 assert.ok(activeArtifactBeforeScopePoison, "active intake artifact should be persisted for scope poisoning regression");
 const poisonedContent = structuredClone(activeArtifactBeforeScopePoison.content);
 poisonedContent.state.manifest.organizationId = "model_org_should_not_send";
+poisonedContent.state.manifest.currentOrgId = "model_current_org_short_should_not_send";
 poisonedContent.state.manifest.currentOrganizationId = "model_current_org_should_not_send";
 poisonedContent.state.manifest["current-organization-id"] = "kebab_current_org_should_not_send";
 poisonedContent.state.manifest.business = { ...poisonedContent.state.manifest.business, principalId: "model_principal_should_not_send", principal_id: "snake_principal_should_not_send", current_org_id: "snake_current_org_should_not_send" };
@@ -99,6 +100,7 @@ assert.ok(poisonedArtifact, "scope poisoning fixture should update active artifa
 const sanitizedPreview = await previewOnlyTools.previewActiveIntakeCommand.execute({});
 assert.equal(sanitizedPreview.ok, true);
 assert.equal("organizationId" in sanitizedPreview.command.input.config.manifest, false, "trusted org scope must be stripped from nested manifest payload before command preview");
+assert.equal("currentOrgId" in sanitizedPreview.command.input.config.manifest, false, "trusted current org short scope must be stripped from nested manifest payload before command preview");
 assert.equal("currentOrganizationId" in sanitizedPreview.command.input.config.manifest, false, "trusted current org scope must be stripped from nested manifest payload before command preview");
 assert.equal("current-organization-id" in sanitizedPreview.command.input.config.manifest, false, "trusted kebab current org scope must be stripped from nested manifest payload before command preview");
 assert.equal("principalId" in sanitizedPreview.command.input.config.manifest.business, false, "trusted principal scope must be stripped from nested manifest payload before command preview");
@@ -129,6 +131,25 @@ const unsupportedPreview = await unsupportedPreviewTools.previewActiveIntakeComm
 assert.equal(unsupportedPreview.ok, false, "valid non-venue manifests must not return an approvable booking.create.context preview");
 assert.equal(unsupportedPreview.error, "unsupported_manifest_type");
 assert.equal(unsupportedPreview.command, null);
+
+const unsupportedCommitFetchCalls = [];
+const unsupportedCommitTools = createArtifactStateTools({
+  sessionId,
+  pageContext: { ...pageContext, activeArtifactId: eventArtifactId },
+  allowIntakeCommandCommit: true,
+  approvedCommandIds: ["booking.create.context"],
+  bookingServiceBaseUrl: "https://booking.example.test",
+  bookingRuntimeAuth: { mode: "service-token", token: "test-service-token", source: "test" },
+  bookingRuntimeFetcher: async (input, init = {}) => {
+    unsupportedCommitFetchCalls.push({ url: String(input), method: init.method });
+    return new Response("{}", { status: 500, headers: { "content-type": "application/json" } });
+  },
+});
+const unsupportedCommit = await unsupportedCommitTools.commitActiveIntakeCommand.execute({ confirmation: "APPROVE_AND_RUN" });
+assert.equal(unsupportedCommit.ok, false, "valid non-venue manifests must fail closed before runtime commit");
+assert.equal(unsupportedCommit.error, "unsupported_manifest_type");
+assert.equal(unsupportedCommit.command, null);
+assert.equal(unsupportedCommitFetchCalls.length, 0, "unsupported manifests must not reach the booking runtime");
 
 const fetchCalls = [];
 const fetcher = async (input, init = {}) => {
@@ -170,6 +191,7 @@ assert.equal(fetchCalls[0].body.kind, "venue_schedule");
 assert.equal(fetchCalls[0].body.config.manifest.inventory.coreDescription, "Restaurant reservations with 20 two-top tables");
 assert.equal("organizationId" in fetchCalls[0].body, false, "org scope must remain host-derived, never model-sent");
 assert.equal("organizationId" in fetchCalls[0].body.config.manifest, false, "org scope must also be stripped from nested manifest payloads");
+assert.equal("currentOrgId" in fetchCalls[0].body.config.manifest, false, "short current org scope must also be stripped from nested manifest payloads");
 assert.equal("currentOrganizationId" in fetchCalls[0].body.config.manifest, false, "current org scope must also be stripped from nested manifest payloads");
 assert.equal("current-organization-id" in fetchCalls[0].body.config.manifest, false, "kebab current org scope must also be stripped from nested manifest payloads");
 assert.equal("principalId" in fetchCalls[0].body.config.manifest.business, false, "principal scope must be stripped from nested manifest payloads");
