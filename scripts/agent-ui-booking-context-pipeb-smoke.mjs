@@ -337,6 +337,7 @@ try {
     artifactPersisted: artifactUpsert.ok === true && artifactUpsert.body.includes('workspace-session-'),
     reloadSessionOk: reload?.ok === true,
     activeArtifactHydrated: afterReload.context?.activeArtifactId === artifactId,
+    activeSessionStable: before.context?.activeSessionId !== evidence.sessionId && after.context?.activeSessionId === evidence.sessionId,
     submitOk: submit?.ok === true,
     noAgentApiFailures: agentFailures.length === 0,
     serverTrustedHostBoundary,

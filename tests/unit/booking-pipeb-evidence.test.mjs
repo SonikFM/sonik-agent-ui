@@ -55,6 +55,15 @@ const redactedSessionRecord = JSON.stringify({
   ],
 });
 
+const staleSameWindowRecord = JSON.stringify({
+  request: { path: '/api/generate', url: '/api/generate?smokeRunId=other-run', body: { prompt: 'Check availability from 2026-07-08T18:00:00.000Z to 2026-07-08T19:00:00.000Z' } },
+  logs: [
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'api.generate.start', ok: true } }] },
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'booking.runtime.fetch.end', ok: true, toolCallId: 'booking.create.booking' } }] },
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.commitCommand', ok: true, toolCallId: 'booking.create.booking' } }] },
+  ],
+});
+
 const mixedBatchRecord = JSON.stringify({
   kind: 'normalized_tail_batch',
   events: [
@@ -102,6 +111,9 @@ assert.equal(hasTelemetryEvent(sameObjectMixedLogUnrelated, 'booking.create.book
 
 const redactedSession = extractPipeBToolEvents(redactedSessionRecord, { markers: ['run-123', 'workspace-session-current'] });
 assert.equal(hasTelemetryEvent(redactedSession, 'booking.create.booking', 'tool.commitCommand', true), true, 'redacted correlation values from Pipe-B must not block same-record direct logs');
+
+const staleSameWindow = extractPipeBToolEvents(staleSameWindowRecord, { markers: ['current-run', 'workspace-session-current', 'client-current', '2026-07-08T18:00:00.000Z', '2026-07-08T19:00:00.000Z'] });
+assert.equal(hasTelemetryEvent(staleSameWindow, 'booking.create.booking', 'tool.commitCommand', true), false, 'matching reservation time markers alone must not prove current-run booking commits');
 
 const wrongSearch = extractPipeBToolEvents(unrelatedSearchRecord, { markers: ['run-123'] });
 assert.equal(hasEventName(wrongSearch, 'tool.searchSkillCatalog', true), true, 'generic search event is present');

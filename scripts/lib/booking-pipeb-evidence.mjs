@@ -35,10 +35,20 @@ function directCorrelationScope(value) {
   };
 }
 
+function isContextOnlyMarker(marker) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(marker);
+}
+
+function getAnchorMarkers(markers) {
+  return markers.filter((marker) => !isContextOnlyMarker(marker));
+}
+
 function objectContainsMarker(value, markers) {
   if (markers.length === 0) return true;
+  const anchorMarkers = getAnchorMarkers(markers);
+  if (anchorMarkers.length === 0) return false;
   const compact = compactValue(directCorrelationScope(value));
-  return markers.some((marker) => compact.includes(marker));
+  return anchorMarkers.some((marker) => compact.includes(marker));
 }
 
 function hasGenerateCorrelationAnchor(value) {
