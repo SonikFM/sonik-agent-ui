@@ -39,6 +39,22 @@ const sameObjectNestedUnrelatedRecord = JSON.stringify({
   },
 });
 
+const sameObjectMixedLogUnrelatedRecord = JSON.stringify({
+  request: { path: '/api/generate', url: '/api/generate?smokeRunId=run-123' },
+  logs: [
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'api.generate.start', ok: true, sessionId: 'workspace-session-current' } }] },
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.commitCommand', ok: true, toolCallId: 'booking.create.booking', runId: 'other-run' } }] },
+  ],
+});
+
+const redactedSessionRecord = JSON.stringify({
+  request: { path: '/api/generate', url: '/api/generate?smokeRunId=run-123' },
+  logs: [
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'api.generate.start', ok: true, sessionId: '[redacted]' } }] },
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.commitCommand', ok: true, toolCallId: 'booking.create.booking', sessionId: '[redacted]' } }] },
+  ],
+});
+
 const mixedBatchRecord = JSON.stringify({
   kind: 'normalized_tail_batch',
   events: [
@@ -80,6 +96,12 @@ assert.equal(hasTelemetryEvent(mixedBatch, 'booking.create.booking', 'tool.commi
 
 const sameObjectNestedUnrelated = extractPipeBToolEvents(sameObjectNestedUnrelatedRecord, { markers: ['run-123', 'workspace-session-current'] });
 assert.equal(hasTelemetryEvent(sameObjectNestedUnrelated, 'booking.create.booking', 'tool.commitCommand', true), false, 'a correlated top-level generate record must not donate relevant telemetry from unrelated nested siblings');
+
+const sameObjectMixedLogUnrelated = extractPipeBToolEvents(sameObjectMixedLogUnrelatedRecord, { markers: ['run-123', 'workspace-session-current'] });
+assert.equal(hasTelemetryEvent(sameObjectMixedLogUnrelated, 'booking.create.booking', 'tool.commitCommand', true), false, 'a correlated top-level generate record must not donate logs with explicit conflicting run ids');
+
+const redactedSession = extractPipeBToolEvents(redactedSessionRecord, { markers: ['run-123', 'workspace-session-current'] });
+assert.equal(hasTelemetryEvent(redactedSession, 'booking.create.booking', 'tool.commitCommand', true), true, 'redacted correlation values from Pipe-B must not block same-record direct logs');
 
 const wrongSearch = extractPipeBToolEvents(unrelatedSearchRecord, { markers: ['run-123'] });
 assert.equal(hasEventName(wrongSearch, 'tool.searchSkillCatalog', true), true, 'generic search event is present');

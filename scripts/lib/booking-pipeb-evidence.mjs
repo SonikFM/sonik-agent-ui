@@ -55,13 +55,37 @@ function isCorrelatedGenerateRecord(value, markers) {
   return objectContainsMarker(value, markers) && hasGenerateCorrelationAnchor(value);
 }
 
-function collectCorrelatedStrings(value, events, relevantMarkers) {
+function collectCorrelationValues(value, values = []) {
+  if (!value || typeof value !== 'object') return values;
+  if (Array.isArray(value)) {
+    for (const item of value) collectCorrelationValues(item, values);
+    return values;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (['runId', 'smokeRunId', 'clientRequestId', 'sessionId', 'activeSessionId'].includes(key) && typeof item === 'string' && item.length > 0) {
+      values.push(item);
+    }
+    if (item && typeof item === 'object') collectCorrelationValues(item, values);
+  }
+  return values;
+}
+
+function hasConflictingCorrelationValue(value, markers) {
+  if (markers.length === 0) return false;
+  return collectCorrelationValues(value).some((candidate) => !candidate.startsWith('[') && !markers.includes(candidate));
+}
+
+function collectCorrelatedStrings(value, events, relevantMarkers, markers = []) {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     if (Array.isArray(value.logs)) {
-      collectRelevantStrings(value.logs, events, relevantMarkers);
+      for (const log of value.logs) {
+        if (hasConflictingCorrelationValue(log, markers)) continue;
+        collectRelevantStrings(log, events, relevantMarkers);
+      }
       return;
     }
     if ('message' in value || 'payload' in value || 'event' in value) {
+      if (hasConflictingCorrelationValue(value, markers)) return;
       collectRelevantStrings(value, events, relevantMarkers);
       return;
     }
@@ -107,7 +131,7 @@ export function extractPipeBToolEvents(text, { markers = [], relevantMarkers = D
       return;
     }
     if (!isCorrelatedGenerateRecord(value, requiredMarkers)) return;
-    collectCorrelatedStrings(value, events, relevantMarkers);
+    collectCorrelatedStrings(value, events, relevantMarkers, requiredMarkers);
   };
   for (const record of splitJsonishRecords(text)) {
     let parsed;
