@@ -19,7 +19,7 @@ const pipeBRawDir = path.resolve('.omx/logs', `${runId}.r2`);
 const timeoutMs = Number(process.env.AGENT_UI_BOOKING_CONTEXT_TIMEOUT_MS ?? 300_000);
 const artifactId = `booking-context-intake-smoke-${runId.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
 const contextName = `Agent UI Smoke Cafe ${Date.now()}`;
-const prompt = process.env.AGENT_UI_BOOKING_CONTEXT_PROMPT ?? `Approve this active booking intake manifest and create the context. Use searchSkillCatalog for booking.context.create, then learnSkill for workflow, policy, context, and commands. Follow the skill exactly: call readActiveArtifactState, then previewActiveIntakeCommand, then commitActiveIntakeCommand with confirmation APPROVE_AND_RUN. Do not use generic commitCommand and do not search repeatedly. Report the created booking context id and name.`;
+const prompt = process.env.AGENT_UI_BOOKING_CONTEXT_PROMPT ?? `Approve this active booking intake manifest and create the context. You MUST call searchSkillCatalog as a separate visible tool call for booking.context.create before learnSkill. Then call learnSkill for workflow, policy, context, and commands. Follow the skill exactly: call readActiveArtifactState, then previewActiveIntakeCommand, then commitActiveIntakeCommand with confirmation APPROVE_AND_RUN. Do not use generic commitCommand and do not search repeatedly. Report the created booking context id and name.`;
 
 if (!email || !password) throw new Error('Missing TEST_EMAIL/TEST_PASSWORD for booking context smoke.');
 
@@ -366,6 +366,7 @@ try {
     noAgentApiFailures: agentFailures.length === 0,
     mentionsContextCreate: /booking\.create\.context|created booking context|context id|created context/i.test(text),
     pipeBToolEvidence: evidence.pipeB.requiredEvidence.skillIndexContextOk === true
+      && evidence.pipeB.requiredEvidence.skillSearchOk === true
       && evidence.pipeB.requiredEvidence.skillLearnOk === true
       && evidence.pipeB.requiredEvidence.readActiveArtifactOk === true
       && evidence.pipeB.requiredEvidence.previewActiveIntakeOk === true

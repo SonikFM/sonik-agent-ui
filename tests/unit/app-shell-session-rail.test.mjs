@@ -419,6 +419,7 @@ assert.equal(bookingReservationSmokeSource.includes("sessionId: evidence.session
 assert.equal(bookingReservationSmokeSource.includes("restart_after_disconnect"), true, "booking reservation smoke should restart wrangler tail after transient disconnects");
 assert.equal(bookingReservationSmokeSource.includes("wrangler.jsonc"), true, "booking reservation smoke R2 fetches should use the app wrangler config deterministically");
 assert.equal(bookingContextSmokeSource.includes("reloadSession"), true, "booking context smoke should reload the active session after signed artifact persistence");
+assert.equal(bookingContextSmokeSource.includes("&& evidence.pipeB.requiredEvidence.skillSearchOk === true"), true, "booking context smoke should fail unless the agent proves searchSkillCatalog before learning the context-create skill");
 assert.equal(bookingContextSmokeSource.includes("commitActiveIntakeCommand"), true, "booking context smoke should prove the dedicated intake commit tool instead of generic commitCommand");
 assert.equal(bookingContextSmokeSource.includes("booking.create.context"), true, "booking context smoke should require Pipe-B evidence for booking.create.context");
 assert.equal(packageSource.includes("smoke:agent-ui:booking-pipeb:context"), true, "package scripts should expose the booking context Pipe-B smoke lane");
