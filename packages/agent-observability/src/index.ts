@@ -43,6 +43,10 @@ export interface AgentUiSemanticActionResult<TState = AgentUiPageAssertions> {
   state: TState;
   message?: string;
   disabledReason?: string;
+  /** Current active session at the time the semantic action returns. */
+  activeSessionId?: string | null;
+  /** Session that the caller requested or that createSession selected. */
+  expectedSessionId?: string | null;
 }
 
 /**
@@ -56,7 +60,7 @@ export interface AgentUiPageControl {
   getAssertions: () => AgentUiPageAssertions;
   actions: {
     createSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
-    submitPrompt: (input: { prompt?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    submitPrompt: (input: { prompt?: string; sessionId?: string | null }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     stop: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     clearChat: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     clearArtifact: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;

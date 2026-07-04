@@ -17,9 +17,10 @@ export const BOOKING_CONTEXT_CREATE_RECIPE = {
   requiredCommands: ["booking.create.context"],
   forbiddenUnlessExplicit: ["booking.create.booking", "booking.create.hold", "booking.release.hold"],
   workflowSteps: [
-    "Read the active JSON-render intake artifact state; never rely on stale chat summaries.",
-    "Validate the latest persisted manifest and produce the booking.create.context command input preview.",
-    "Only commit after the user explicitly asks to approve/run and the trusted host session grants booking.create.context.",
+    "If no active JSON-render intake artifact is selected, stop and ask the user to create/fill the intake artifact first; do not synthesize a new generic artifact and then commit in the same turn.",
+    "When an active artifact exists and the user says approve/commit/run it, call readActiveArtifactState first; never rely on stale chat summaries.",
+    "Then call previewActiveIntakeCommand and show/inspect the concrete booking.create.context input.",
+    "Only after preview succeeds and the user explicitly asked to approve/run, call commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN. Do not call searchSkillCatalog repeatedly and do not use generic commitCommand for this path.",
     "After commit, report the created booking context id/name and any schedule/resource follow-up still required.",
   ],
   ontologyRules: [

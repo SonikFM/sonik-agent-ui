@@ -57,6 +57,8 @@ assert.equal(rootSource.includes("layoutMode?: WorkspaceLayoutMode"), true, "Wor
 assert.equal(rootSource.includes("railMode?: WorkspaceRailMode"), true, "WorkspaceRoot should expose an embeddable rail mode seam");
 assert.equal(rootSource.includes("--workspace-pane-split"), true, "WorkspaceRoot should expose a CSS-variable seam for future pane resizing");
 assert.equal(agentObservabilitySource.includes("createSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the fresh-session semantic action");
+assert.equal(agentObservabilitySource.includes("sessionId?: string | null"), true, "agent page-control submit type should accept an expected session id");
+assert.equal(agentObservabilitySource.includes("expectedSessionId?: string | null"), true, "semantic action results should report the expected session id selected by createSession");
 
 assert.equal(pageSource.includes("let sessions = $state<WorkspaceSessionSummary[]>([])"), true, "app shell should keep a visible session list state");
 assert.equal(pageSource.includes("let archivedSessionCount = $state(0)"), true, "app shell should make archived chat behavior visible");
@@ -76,7 +78,14 @@ assert.equal(
   "page context should expose createSession before submitPrompt",
 );
 assert.equal(pageSource.includes("createSession: async () =>"), true, "page-control contract should expose a deterministic fresh-session semantic action for smoke tests");
-assert.equal(pageSource.includes("await createSession({ force: true })"), true, "fresh-session semantic action should route through the same session creation path as the app shell");
+assert.equal(pageSource.includes("const session = await createSession({ force: true })"), true, "fresh-session semantic action should route through the same session creation path as the app shell and capture the selected id");
+assert.equal(pageSource.includes("expectedSessionId: sessionId"), true, "fresh-session semantic action should return the created session id for deterministic smoke tests");
+assert.equal(pageSource.includes("submitPrompt: async ({ prompt, sessionId }) =>"), true, "page-control submit should accept an expected session id to prevent stale persisted-chat drift");
+assert.equal(pageSource.includes("active_session_mismatch"), true, "page-control submit should fail closed if the active session does not match the expected session");
+assert.equal(pageSource.includes("submit_not_appended"), true, "page-control submit should fail closed if the semantic action does not append a user turn");
+assert.equal(pageSource.includes("await tick()"), true, "page-control submit should wait one Svelte turn before claiming append success");
+assert.equal(pageSource.includes("let sessionSelectionRevision = 0"), true, "app shell should version session selection so bootstrap cannot overwrite explicit test/user selection");
+assert.equal(pageSource.includes("session.bootstrap.superseded"), true, "bootstrap selection races should be observable and non-destructive");
 assert.equal(pageSource.includes("function deriveChatTitle"), true, "app shell should derive deterministic first-message chat titles locally");
 assert.equal(pageSource.includes("maybeNameNewChat(trimmed)"), true, "app shell should name new chats before sending the first message");
 assert.equal(pageSource.includes('method: "PATCH"'), true, "app shell should call the session rename route");
@@ -276,6 +285,7 @@ const sessionsRouteSource = await readFile("apps/standalone-sveltekit/src/routes
 const observabilityPackageSource = await readFile("packages/agent-observability/src/index.ts", "utf8");
 const evidenceServerSource = await readFile("scripts/agent-ui-dev-evidence-server.mjs", "utf8");
 const smokeHarnessSource = await readFile("scripts/agent-ui-smoke.mjs", "utf8");
+const bookingReservationSmokeSource = await readFile("scripts/agent-ui-booking-reservation-pipeb-smoke.mjs", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const agentEmbedSource = await readFile("packages/agent-embed/src/index.ts", "utf8");
 const agentEmbedPackageSource = await readFile("packages/agent-embed/package.json", "utf8");
@@ -399,6 +409,8 @@ assert.equal(evidenceServerSource.includes("/stream"), true, "local evidence ser
 assert.equal(smokeHarnessSource.includes('page.on("crash"'), true, "smoke harness should explicitly catch browser page crashes");
 assert.equal(smokeHarnessSource.includes("x-sonik-request-id"), true, "smoke harness should verify generate correlation headers");
 assert.equal(smokeHarnessSource.includes("window.__sonikAgentUI"), true, "smoke harness should require canonical page-control state/actions instead of DOM synthesis");
+assert.equal(bookingReservationSmokeSource.includes("activeSessionStable"), true, "booking reservation smoke should fail when a fresh session drifts into an old persisted chat");
+assert.equal(bookingReservationSmokeSource.includes("sessionId: evidence.sessionId"), true, "booking reservation smoke should pass the expected fresh session id into submitPrompt");
 assert.equal(smokeHarnessSource.includes("api.generate.stream_finished"), true, "smoke harness should require server stream completion telemetry");
 assert.equal(smokeHarnessSource.includes("api.generate.dev_smoke_stream"), true, "smoke harness should prove deterministic smoke mode was actually used");
 assert.equal(smokeHarnessSource.includes("serverDevSmokeStream"), true, "smoke harness should classify deterministic smoke telemetry separately from stream finish");

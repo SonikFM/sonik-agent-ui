@@ -24,9 +24,27 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({ userMessage: "commit", pageContext: { ...bookingPage, activeArtifactId: "artifact-1", artifactType: "json-render" } }),
+  ["booking.context.create"],
+  "short approval/commit turns over an active artifact must seed the trusted context-create workflow",
+);
+
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({ userMessage: "Create a booking context for a restaurant named Smoke Test Cafe with 8 tables", pageContext: bookingPage }),
+  ["booking.context.intake"],
+  "initial create-context setup without an active artifact must seed intake instead of trusted commit tools",
+);
+
+assert.deepEqual(
   resolveImplicitWorkflowSkillIds({ firstUserMessage: "Create a reservation for Dan at 1pm", pageContext: bookingPage }),
   ["booking.reservation.create"],
   "reservation execution intent should still seed reservation workflow, not intake",
+);
+
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({ userMessage: "Use the booking command catalog to prove the reservation flow, check availability, create a guest, and commit booking.create.booking.", pageContext: bookingPage }),
+  ["booking.reservation.create"],
+  "Pipe-B reservation smoke phrasing must seed the executable reservation workflow so command tools mount",
 );
 
 assert.deepEqual(

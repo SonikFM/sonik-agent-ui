@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { dev } from "$app/environment";
   import { env as publicEnv } from "$env/dynamic/public";
   import type { PageData } from "./$types";
@@ -198,6 +198,7 @@
   let sessions = $state<WorkspaceSessionSummary[]>([]);
   let archivedSessionCount = $state(0);
   let activeSessionId = $state<string | null>(null);
+  let sessionSelectionRevision = 0;
   let sessionRailBusy = $state(false);
   let sessionRailError = $state<string | null>(null);
   let resumableRun = $state<WorkspaceRunSummary | null>(null);
@@ -1341,12 +1342,14 @@
     return $state.snapshot(pageAssertions) as AgentUiPageAssertions;
   }
 
-  function semanticActionResult(ok: boolean, message?: string, disabledReason?: string): AgentUiSemanticActionResult {
+  function semanticActionResult(ok: boolean, message?: string, disabledReason?: string, extras: Partial<AgentUiSemanticActionResult> = {}): AgentUiSemanticActionResult {
     return {
       ok,
       state: snapshotAssertions(),
       message,
       disabledReason,
+      activeSessionId,
+      ...extras,
     };
   }
 
@@ -1363,17 +1366,35 @@
       actions: {
         createSession: async () => {
           if (isStreaming) return semanticActionResult(false, "Stop the current stream before creating a new session.", "streaming");
-          await createSession({ force: true });
-          if (!activeSessionId) return semanticActionResult(false, sessionRailError || "Session was not created.", "session_unavailable");
-          if (sessionRailError) return semanticActionResult(false, sessionRailError, "session_error");
-          return semanticActionResult(true, "New session created.");
+          const session = await createSession({ force: true });
+          const sessionId = session?.id ?? activeSessionId;
+          if (!sessionId) return semanticActionResult(false, sessionRailError || "Session was not created.", "session_unavailable");
+          if (activeSessionId !== sessionId) return semanticActionResult(false, `Fresh session selection drifted to ${activeSessionId ?? "none"}.`, "session_selection_drift", { expectedSessionId: sessionId });
+          if (sessionRailError) return semanticActionResult(false, sessionRailError, "session_error", { expectedSessionId: sessionId });
+          return semanticActionResult(true, "New session created.", undefined, { expectedSessionId: sessionId });
         },
-        submitPrompt: ({ prompt }) => {
+        submitPrompt: async ({ prompt, sessionId }) => {
+          const expectedSessionId = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : undefined;
+          if (expectedSessionId && activeSessionId !== expectedSessionId) {
+            const switched = await switchSession(expectedSessionId, { force: true });
+            if (!switched || activeSessionId !== expectedSessionId) {
+              return semanticActionResult(false, `Active session mismatch: expected ${expectedSessionId}, got ${activeSessionId ?? "none"}.`, "active_session_mismatch", { expectedSessionId });
+            }
+          }
           const message = typeof prompt === "string" ? prompt : "";
           const disabledReason = getSubmitDisabledReason(message);
-          if (disabledReason) return semanticActionResult(false, `Prompt cannot be submitted: ${disabledReason}.`, disabledReason);
+          if (disabledReason) return semanticActionResult(false, `Prompt cannot be submitted: ${disabledReason}.`, disabledReason, { expectedSessionId });
+          const beforeMessageCount = conversation.messages.length;
           handleSubmit(message);
-          return semanticActionResult(true, "Prompt submitted.");
+          await tick();
+          await new Promise((resolve) => window.setTimeout(resolve, 0));
+          if (conversation.messages.length <= beforeMessageCount) {
+            return semanticActionResult(false, "Prompt was accepted by page control but did not append a user turn.", "submit_not_appended", { expectedSessionId });
+          }
+          if (expectedSessionId && activeSessionId !== expectedSessionId) {
+            return semanticActionResult(false, `Prompt submitted to unstable session: expected ${expectedSessionId}, got ${activeSessionId ?? "none"}.`, "active_session_mismatch", { expectedSessionId });
+          }
+          return semanticActionResult(true, "Prompt submitted.", undefined, { expectedSessionId });
         },
         stop: () => {
           handleStop();
@@ -1561,11 +1582,20 @@
   }
 
   async function initializeSessions(reason = "manual"): Promise<void> {
+    const bootstrapRevision = sessionSelectionRevision;
     await loadSessions();
+    if (sessionSelectionRevision !== bootstrapRevision || activeSessionId) {
+      logSessionTelemetry("session.bootstrap.superseded", { sessionId: activeSessionId, reason });
+      return;
+    }
     const firstSession = sessions[0];
     if (firstSession) {
       await switchSession(firstSession.id, { force: true });
       logSessionTelemetry("session.bootstrap.success", { sessionId: firstSession.id, reason });
+      return;
+    }
+    if (sessionSelectionRevision !== bootstrapRevision || activeSessionId) {
+      logSessionTelemetry("session.bootstrap.superseded", { sessionId: activeSessionId, reason });
       return;
     }
     await createSession({ force: true });
@@ -1623,18 +1653,19 @@
     });
   }
 
-  async function createSession({ force = false }: { force?: boolean } = {}): Promise<void> {
+  async function createSession({ force = false }: { force?: boolean } = {}): Promise<WorkspaceSessionSummary | null> {
     if (isStreaming) {
       sessionRailError = "Stop the current stream before creating a new session.";
-      return;
+      return null;
     }
     if (!isWorkspaceHostContextReady()) {
       sessionRailError = "Waiting for signed host context from the embedded page.";
       requestHostPageContext("session_create_waiting_for_signed_host_context");
       logSessionTelemetry("session.create.waiting_for_signed_host_context", { ok: false, reason: "missing_signed_host_context" });
-      return;
+      return null;
     }
-    if (sessionRailBusy && !force) return;
+    if (sessionRailBusy && !force) return null;
+    const selectionRevision = ++sessionSelectionRevision;
     sessionRailBusy = true;
     sessionRailError = null;
     try {
@@ -1647,23 +1678,34 @@
       if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
       const session = (await response.json()) as WorkspaceSessionSummary;
       await loadSessions();
-      await switchSession(session.id, { force: true });
+      if (selectionRevision !== sessionSelectionRevision) {
+        logSessionTelemetry("session.create.superseded", { sessionId: session.id, mode: session.mode });
+        return null;
+      }
+      const switched = await switchSession(session.id, { force: true });
+      if (!switched || activeSessionId !== session.id) {
+        logSessionTelemetry("session.create.selection_error", { sessionId: session.id, ok: false, reason: activeSessionId ?? "none" });
+        return null;
+      }
       logSessionTelemetry("session.create.success", { sessionId: session.id, mode: session.mode });
+      return session;
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
       logSessionTelemetry("session.create.error", { ok: false, error: sessionRailError });
+      return null;
     } finally {
       sessionRailBusy = false;
     }
   }
 
-  async function switchSession(sessionId: string, { force = false }: { force?: boolean } = {}): Promise<void> {
+  async function switchSession(sessionId: string, { force = false }: { force?: boolean } = {}): Promise<boolean> {
     if (isStreaming) {
       sessionRailError = "Stop the current stream before switching sessions.";
-      return;
+      return false;
     }
-    if (sessionId === activeSessionId && conversation.messages.length > 0) return;
-    if (sessionRailBusy && !force) return;
+    if (sessionId === activeSessionId && conversation.messages.length > 0) return true;
+    if (sessionRailBusy && !force) return false;
+    const selectionRevision = ++sessionSelectionRevision;
     sessionRailBusy = true;
     sessionRailError = null;
     try {
@@ -1671,13 +1713,19 @@
       const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}`);
       if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
       const detail = (await response.json()) as WorkspaceSessionDetail;
+      if (selectionRevision !== sessionSelectionRevision) {
+        logSessionTelemetry("session.switch.superseded", { sessionId, mode: detail.session.mode });
+        return false;
+      }
       activeSessionId = detail.session.id;
       sessions = upsertSessionSummary(sessions, detail.session);
       hydrateWorkspaceSession(detail);
       logSessionTelemetry("session.switch.success", { sessionId: detail.session.id, mode: detail.session.mode });
+      return true;
     } catch (error) {
       sessionRailError = error instanceof Error ? error.message : String(error);
       logSessionTelemetry("session.switch.error", { sessionId, ok: false, error: sessionRailError });
+      return false;
     } finally {
       sessionRailBusy = false;
     }

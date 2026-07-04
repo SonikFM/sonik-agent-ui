@@ -53,11 +53,14 @@ export function resolveImplicitWorkflowSkillIds(input: { userMessage?: string | 
     "reservations setup",
   ]);
   const bookingContextCommitIntent = includesAny(message, [
+    "approve",
+    "approved",
     "approve and create",
     "approve & create",
     "approve and run",
     "approve this manifest",
     "commit",
+    "run it",
     "create it",
     "create the context",
     "create this context",
@@ -67,17 +70,29 @@ export function resolveImplicitWorkflowSkillIds(input: { userMessage?: string | 
   const reservationExecutionIntent = includesAny(message, [
     "make a reservation",
     "create a reservation",
+    "reservation flow",
+    "booking reservation",
+    "booking.reservation.create",
+    "booking.create.booking",
+    "create booking",
+    "commit booking",
     "book a table",
     "book tee time",
     "reserve for",
     "reservation for",
   ]);
 
-  if (bookingContextCommitIntent && includesAny(`${message} ${context}`, ["booking", "context", "manifest", "venue", "restaurant", "artifact"])) {
+  const hasActiveArtifact = typeof input.pageContext?.activeArtifactId === "string" && input.pageContext.activeArtifactId.trim().length > 0;
+  const commitContext = `${message} ${context}`;
+  const canCommitActiveBookingArtifact = !reservationExecutionIntent
+    && bookingContextCommitIntent
+    && (hasActiveArtifact || includesAny(commitContext, ["manifest", "artifact", "approved intake", "active intake"]));
+
+  if (canCommitActiveBookingArtifact) {
     skills.push("booking.context.create");
   }
 
-  if (setupIntent && venueIntakeObject && !reservationExecutionIntent && !bookingContextCommitIntent) {
+  if (setupIntent && venueIntakeObject && !reservationExecutionIntent && !canCommitActiveBookingArtifact) {
     skills.push("booking.context.intake");
   }
 

@@ -217,10 +217,15 @@ async function collectRawPipeBText() {
       && paths.some((entry) => entry.startsWith('/api/v1/booking/'));
     return Boolean(summary.objectKey) && (isAgentGenerate || isBookingRuntime);
   });
+  const maxRawObjects = Math.max(1, Number(process.env.AGENT_UI_PIPE_B_MAX_RAW_OBJECTS ?? 24));
+  const cappedRelevant = relevant.slice(-maxRawObjects);
+  if (relevant.length > cappedRelevant.length) {
+    evidence.pipeB.rawObjectScanTruncated = { totalRelevantSummaries: relevant.length, fetchedLatest: cappedRelevant.length };
+  }
   await mkdir(pipeBRawDir, { recursive: true });
   const rawTexts = [];
   const seen = new Set();
-  for (const summary of relevant) {
+  for (const summary of cappedRelevant) {
     if (seen.has(summary.objectKey)) continue;
     seen.add(summary.objectKey);
     const fileName = summary.objectKey.replace(/[^a-zA-Z0-9_.-]+/g, '_');
@@ -230,11 +235,12 @@ async function collectRawPipeBText() {
       rawTexts.push(existing);
       continue;
     }
-    const result = spawnSync('wrangler', ['r2', 'object', 'get', `sonik-dev-observability-events/${summary.objectKey}`, '--file', filePath, '--remote'], {
+    const result = spawnSync('pnpm', ['-C', 'apps/standalone-sveltekit', 'exec', 'wrangler', 'r2', 'object', 'get', `sonik-dev-observability-events/${summary.objectKey}`, '--file', filePath, '--remote'], {
       cwd: process.cwd(),
       env: process.env,
       encoding: 'utf8',
       maxBuffer: 2_000_000,
+      timeout: Number(process.env.AGENT_UI_PIPE_B_R2_FETCH_TIMEOUT_MS ?? 15_000),
     });
     if (result.status === 0) {
       rawTexts.push(await readFile(filePath, 'utf8').catch(() => ''));
@@ -275,8 +281,8 @@ try {
   evidence.createSession = createSession;
   if (!createSession?.ok) throw new Error(`createSession failed: ${JSON.stringify(createSession)}`);
   await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().hasActiveSession === true && Boolean(window.__sonikAgentUI.getPageContext().activeSessionId), undefined, { timeout: 60000 });
-  evidence.sessionId = await frame.evaluate(() => window.__sonikAgentUI.getPageContext().activeSessionId);
-  const submit = await frame.evaluate(async (prompt) => window.__sonikAgentUI.actions.submitPrompt({ prompt }), prompt);
+  evidence.sessionId = createSession.expectedSessionId ?? createSession.activeSessionId ?? await frame.evaluate(() => window.__sonikAgentUI.getPageContext().activeSessionId);
+  const submit = await frame.evaluate(async ({ prompt, sessionId }) => window.__sonikAgentUI.actions.submitPrompt({ prompt, sessionId }), { prompt, sessionId: evidence.sessionId });
   evidence.submit = submit;
   if (!submit?.ok) throw new Error(`submitPrompt failed: ${JSON.stringify(submit)}`);
   await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === true, undefined, { timeout: 45000 }).catch(() => undefined);
@@ -330,6 +336,7 @@ ${pipeText}`;
     hostAuthenticated: before.context?.hostSession?.authenticated === true,
     createSessionOk: createSession?.ok === true,
     submitOk: submit?.ok === true,
+    activeSessionStable: before.context?.activeSessionId !== evidence.sessionId && after.context?.activeSessionId === evidence.sessionId,
     successfulGenerate: successfulGenerate >= 1,
     noAgentApiFailures: agentFailures.length === 0,
     mentionsAvailability: /booking\.get\.availability|get availability|availability/i.test(responseText),
