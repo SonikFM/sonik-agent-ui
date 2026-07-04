@@ -22,14 +22,27 @@ function compactValue(value) {
   try { return JSON.stringify(value); } catch { return String(value ?? ''); }
 }
 
+function directCorrelationScope(value) {
+  if (!value || typeof value !== 'object') return value;
+  return {
+    request: value.request,
+    url: value.url,
+    path: value.path,
+    logs: value.logs,
+    message: value.message,
+    payload: value.payload,
+    event: value.event,
+  };
+}
+
 function objectContainsMarker(value, markers) {
   if (markers.length === 0) return true;
-  const compact = compactValue(value);
+  const compact = compactValue(directCorrelationScope(value));
   return markers.some((marker) => compact.includes(marker));
 }
 
 function hasGenerateCorrelationAnchor(value) {
-  const compact = compactValue(value);
+  const compact = compactValue(directCorrelationScope(value));
   return compact.includes('/api/generate')
     && (compact.includes('\"event\":\"api.generate.start\"')
       || compact.includes('\"event\":\"api.generate.skill_index_context\"')
@@ -40,6 +53,20 @@ function hasGenerateCorrelationAnchor(value) {
 function isCorrelatedGenerateRecord(value, markers) {
   if (markers.length === 0) return true;
   return objectContainsMarker(value, markers) && hasGenerateCorrelationAnchor(value);
+}
+
+function collectCorrelatedStrings(value, events, relevantMarkers) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (Array.isArray(value.logs)) {
+      collectRelevantStrings(value.logs, events, relevantMarkers);
+      return;
+    }
+    if ('message' in value || 'payload' in value || 'event' in value) {
+      collectRelevantStrings(value, events, relevantMarkers);
+      return;
+    }
+  }
+  collectRelevantStrings(value, events, relevantMarkers);
 }
 
 function splitJsonishRecords(text) {
@@ -80,7 +107,7 @@ export function extractPipeBToolEvents(text, { markers = [], relevantMarkers = D
       return;
     }
     if (!isCorrelatedGenerateRecord(value, requiredMarkers)) return;
-    collectRelevantStrings(value, events, relevantMarkers);
+    collectCorrelatedStrings(value, events, relevantMarkers);
   };
   for (const record of splitJsonishRecords(text)) {
     let parsed;

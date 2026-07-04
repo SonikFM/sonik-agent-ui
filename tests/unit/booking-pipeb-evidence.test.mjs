@@ -30,6 +30,15 @@ const sameRequestWithoutGenerateAnchor = JSON.stringify({
   ],
 });
 
+
+const sameObjectNestedUnrelatedRecord = JSON.stringify({
+  request: { path: '/api/generate', url: '/api/generate?smokeRunId=run-123' },
+  logs: [{ message: ['sonik_agent_ui_telemetry', { payload: { event: 'api.generate.start', ok: true, sessionId: 'workspace-session-current' } }] }],
+  unrelated: {
+    logs: [{ message: ['sonik_agent_ui_telemetry', { payload: { event: 'tool.commitCommand', ok: true, toolCallId: 'booking.create.booking' } }] }],
+  },
+});
+
 const mixedBatchRecord = JSON.stringify({
   kind: 'normalized_tail_batch',
   events: [
@@ -68,6 +77,9 @@ assert.equal(hasTelemetryEvent(unanchoredSameRequest, 'booking.create.booking', 
 
 const mixedBatch = extractPipeBToolEvents(mixedBatchRecord, { markers: ['run-123', 'workspace-session-current'] });
 assert.equal(hasTelemetryEvent(mixedBatch, 'booking.create.booking', 'tool.commitCommand', true), false, 'a normalized batch marker must not admit unrelated event objects in the same batch');
+
+const sameObjectNestedUnrelated = extractPipeBToolEvents(sameObjectNestedUnrelatedRecord, { markers: ['run-123', 'workspace-session-current'] });
+assert.equal(hasTelemetryEvent(sameObjectNestedUnrelated, 'booking.create.booking', 'tool.commitCommand', true), false, 'a correlated top-level generate record must not donate relevant telemetry from unrelated nested siblings');
 
 const wrongSearch = extractPipeBToolEvents(unrelatedSearchRecord, { markers: ['run-123'] });
 assert.equal(hasEventName(wrongSearch, 'tool.searchSkillCatalog', true), true, 'generic search event is present');
