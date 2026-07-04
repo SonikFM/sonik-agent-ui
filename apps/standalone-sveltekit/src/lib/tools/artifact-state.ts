@@ -16,6 +16,8 @@ const artifactIdSchema = z.object({
 
 const FORBIDDEN_TRUSTED_SCOPE_KEYS = new Set([
   "actorid",
+  "currentorgid",
+  "currentorganizationid",
   "currentuserid",
   "hostprincipalid",
   "orgid",
