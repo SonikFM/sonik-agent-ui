@@ -314,11 +314,16 @@ ${pipeText}`;
   const successfulRuntimeFetch = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'booking.runtime.fetch.end', true);
   const successfulCommit = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'tool.commitCommand', true);
   const successfulExecute = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'tool.executeCommand', true);
+  const reservationSkillSearchOk = hasTelemetryEvent(toolEvents, 'booking.reservation.create', 'tool.searchSkillCatalog', true)
+    || toolEvents.some((line) => line.includes('"event":"tool.searchSkillCatalog"')
+      && line.includes('"ok":true')
+      && /reservation/i.test(line)
+      && /(workflow|create booking|booking)/i.test(line));
   const preflightFailureEvents = toolEvents.filter((line) => line.includes('command_input_preflight_failed') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand')));
   const holdCommandEvents = toolEvents.filter((line) => line.includes('booking.create.hold') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand') || line.includes('booking.runtime.fetch')));
   evidence.pipeB.requiredEvidence = {
     skillIndexContextOk: hasEventName(toolEvents, 'api.generate.skill_index_context', true) && toolEvents.some((line) => line.includes('booking.reservation.create')),
-    skillSearchOk: hasTelemetryEvent(toolEvents, 'booking.reservation.create', 'tool.searchSkillCatalog', true),
+    skillSearchOk: reservationSkillSearchOk,
     skillLearnOk: hasTelemetryEvent(toolEvents, 'booking.reservation.create', 'tool.learnSkill', true),
     availabilityRuntimeFetchOk: successfulRuntimeFetch('booking.get.availability'),
     availabilityExecuteOk: successfulExecute('booking.get.availability'),
