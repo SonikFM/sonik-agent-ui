@@ -4,6 +4,7 @@ import { createWriteStream } from 'node:fs';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import { countRelevantPipeBLines, extractPipeBToolEvents, hasEventName, hasTelemetryEvent } from './lib/booking-pipeb-evidence.mjs';
 
 const agentOrigin = process.env.AGENT_UI_BASE_URL ?? 'https://sonik-agent-ui.liam-trampota.workers.dev';
 const bookingUrl = process.env.BOOKING_URL ?? 'https://sonik-booking-app-pipe-b.liam-trampota.workers.dev';
@@ -169,27 +170,6 @@ function parseTailSummaries(text) {
   }
   return [...new Map(summaries.map((summary) => [summary.objectKey ?? JSON.stringify(summary), summary])).values()];
 }
-function extractPipeBToolEvents(text) {
-  const events = [];
-  const visit = (value) => {
-    if (value == null) return;
-    if (typeof value === 'string') {
-      if (value.includes('booking.') || value.includes('tool.') || value.includes('api.generate.skill_index_context')) events.push(value);
-      try { visit(JSON.parse(value)); } catch {}
-      return;
-    }
-    if (Array.isArray(value)) { for (const item of value) visit(item); return; }
-    if (typeof value === 'object') {
-      const compact = JSON.stringify(value);
-      if (compact.includes('booking.') || compact.includes('tool.') || compact.includes('api.generate.skill_index_context')) events.push(compact);
-      for (const item of Object.values(value)) visit(item);
-    }
-  };
-  for (const chunk of text.split(/\n(?=\{)/).filter(Boolean)) {
-    try { visit(JSON.parse(chunk)); } catch { visit(chunk); }
-  }
-  return [...new Set(events)];
-}
 async function collectRawPipeBText() {
   await refreshPipeBStats();
   const tailText = await readFile(pipeBPath, 'utf8').catch(() => '');
@@ -331,29 +311,22 @@ try {
   evidence.after = after;
   await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
   const pipeText = await collectRawPipeBText();
-  const toolEvents = extractPipeBToolEvents(pipeText);
+  const pipeBMarkers = [runId, evidence.sessionId, artifactId, contextName];
+  const toolEvents = extractPipeBToolEvents(pipeText, { markers: pipeBMarkers });
+  evidence.pipeB.correlationMarkers = pipeBMarkers;
+  evidence.pipeB.correlatedRelevantLineCount = countRelevantPipeBLines(pipeText, pipeBMarkers);
   evidence.pipeB.toolEventSample = toolEvents.slice(-80).map((line) => redact(line).slice(0, 2000));
-  const hasTelemetryEvent = (identifier, eventName, ok) => toolEvents.some((line) => {
-    if (!line.includes(identifier) || !line.includes(`"event":"${eventName}"`)) return false;
-    if (ok === undefined) return true;
-    return line.includes(`"ok":${ok ? 'true' : 'false'}`);
-  });
-  const hasEventName = (eventName, ok) => toolEvents.some((line) => {
-    if (!line.includes(`"event":"${eventName}"`)) return false;
-    if (ok === undefined) return true;
-    return line.includes(`"ok":${ok ? 'true' : 'false'}`);
-  });
   const agentFailures = evidence.responses.filter((entry) => entry.origin === agentOrigin && entry.status >= 400).map((entry) => `${entry.status} ${entry.path}`);
   const text = `${after.text}\n${pipeText}`;
   evidence.pipeB.requiredEvidence = {
-    skillIndexContextOk: hasEventName('api.generate.skill_index_context', true) && toolEvents.some((line) => line.includes('booking.context.create')),
-    skillSearchOk: hasTelemetryEvent('booking.context.create', 'tool.searchSkillCatalog', true) || hasEventName('tool.searchSkillCatalog', true),
-    skillLearnOk: hasTelemetryEvent('booking.context.create', 'tool.learnSkill', true),
-    readActiveArtifactOk: hasEventName('tool.readActiveArtifactState', true),
-    previewActiveIntakeOk: hasEventName('tool.previewActiveIntakeCommand', true),
-    commitActiveIntakeOk: hasEventName('tool.commitActiveIntakeCommand', true),
-    contextRuntimeFetchOk: hasTelemetryEvent('booking.create.context', 'booking.runtime.fetch.end', true),
-    contextRuntimeFetchFailed: hasTelemetryEvent('booking.create.context', 'booking.runtime.fetch.end', false),
+    skillIndexContextOk: hasEventName(toolEvents, 'api.generate.skill_index_context', true) && toolEvents.some((line) => line.includes('booking.context.create')),
+    skillSearchOk: hasTelemetryEvent(toolEvents, 'booking.context.create', 'tool.searchSkillCatalog', true),
+    skillLearnOk: hasTelemetryEvent(toolEvents, 'booking.context.create', 'tool.learnSkill', true),
+    readActiveArtifactOk: hasEventName(toolEvents, 'tool.readActiveArtifactState', true),
+    previewActiveIntakeOk: hasEventName(toolEvents, 'tool.previewActiveIntakeCommand', true),
+    commitActiveIntakeOk: hasEventName(toolEvents, 'tool.commitActiveIntakeCommand', true),
+    contextRuntimeFetchOk: hasTelemetryEvent(toolEvents, 'booking.create.context', 'booking.runtime.fetch.end', true),
+    contextRuntimeFetchFailed: hasTelemetryEvent(toolEvents, 'booking.create.context', 'booking.runtime.fetch.end', false),
   };
   evidence.checks = {
     loginOk: evidence.loginStatus < 400,
