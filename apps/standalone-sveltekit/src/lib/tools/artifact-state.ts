@@ -24,6 +24,10 @@ const FORBIDDEN_TRUSTED_SCOPE_KEYS = new Set([
   "userid",
 ]);
 
+function normalizeTrustedScopeKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 const commitSchema = artifactIdSchema.extend({
   confirmation: z.literal("APPROVE_AND_RUN").describe("Literal confirmation that the user requested trusted execution after preview."),
 });
@@ -116,7 +120,7 @@ function stripTrustedScopeKeys(value: unknown): unknown {
   if (!isRecord(value)) return value;
   return Object.fromEntries(
     Object.entries(value)
-      .filter(([key]) => !FORBIDDEN_TRUSTED_SCOPE_KEYS.has(key.toLowerCase()))
+      .filter(([key]) => !FORBIDDEN_TRUSTED_SCOPE_KEYS.has(normalizeTrustedScopeKey(key)))
       .map(([key, entry]) => [key, stripTrustedScopeKeys(entry)]),
   );
 }

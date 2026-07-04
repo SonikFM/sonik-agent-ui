@@ -90,18 +90,26 @@ const activeArtifactBeforeScopePoison = getWorkspaceArtifact(artifactId);
 assert.ok(activeArtifactBeforeScopePoison, "active intake artifact should be persisted for scope poisoning regression");
 const poisonedContent = structuredClone(activeArtifactBeforeScopePoison.content);
 poisonedContent.state.manifest.organizationId = "model_org_should_not_send";
-poisonedContent.state.manifest.business = { ...poisonedContent.state.manifest.business, principalId: "model_principal_should_not_send" };
-poisonedContent.state.manifest.inventory = { ...poisonedContent.state.manifest.inventory, nested: { userId: "model_user_should_not_send" } };
+poisonedContent.state.manifest.business = { ...poisonedContent.state.manifest.business, principalId: "model_principal_should_not_send", principal_id: "snake_principal_should_not_send" };
+poisonedContent.state.manifest.inventory = { ...poisonedContent.state.manifest.inventory, nested: { userId: "model_user_should_not_send", "current-user-id": "kebab_user_should_not_send" } };
 const poisonedArtifact = updateWorkspaceArtifact(artifactId, { content: poisonedContent });
 assert.ok(poisonedArtifact, "scope poisoning fixture should update active artifact");
 const sanitizedPreview = await previewOnlyTools.previewActiveIntakeCommand.execute({});
 assert.equal(sanitizedPreview.ok, true);
 assert.equal("organizationId" in sanitizedPreview.command.input.config.manifest, false, "trusted org scope must be stripped from nested manifest payload before command preview");
 assert.equal("principalId" in sanitizedPreview.command.input.config.manifest.business, false, "trusted principal scope must be stripped from nested manifest payload before command preview");
+assert.equal("principal_id" in sanitizedPreview.command.input.config.manifest.business, false, "trusted snake_case principal scope must be stripped from nested manifest payload before command preview");
 assert.equal("userId" in sanitizedPreview.command.input.config.manifest.inventory.nested, false, "trusted user scope must be stripped recursively before command preview");
+assert.equal("current-user-id" in sanitizedPreview.command.input.config.manifest.inventory.nested, false, "trusted kebab-case user scope must be stripped recursively before command preview");
 
 const eventContent = structuredClone(poisonedArtifact.content);
-eventContent.state.manifest.intakeMode = "event";
+eventContent.state.manifest = {
+  manifestType: "event",
+  status: "draft",
+  source: { createdBy: "agent" },
+  event: { title: "Sunday Brunch Launch", startsAt: "2026-07-12T14:00:00.000Z" },
+  inventory: { coreDescription: "Prix fixe brunch tickets" },
+};
 const eventArtifactId = `${artifactId}-event`;
 await createIntakeArtifact(null, {
   sessionId,
@@ -132,6 +140,7 @@ const commitTools = createArtifactStateTools({
   allowIntakeCommandCommit: true,
   approvedCommandIds: ["booking.create.context"],
   bookingServiceBaseUrl: "https://booking.example.test",
+  bookingRuntimeAuth: { mode: "service-token", token: "test-service-token", source: "test" },
   bookingRuntimeFetcher: fetcher,
   hostSession: {
     source: "amplify-embedded",
@@ -157,7 +166,9 @@ assert.equal(fetchCalls[0].body.config.manifest.inventory.coreDescription, "Rest
 assert.equal("organizationId" in fetchCalls[0].body, false, "org scope must remain host-derived, never model-sent");
 assert.equal("organizationId" in fetchCalls[0].body.config.manifest, false, "org scope must also be stripped from nested manifest payloads");
 assert.equal("principalId" in fetchCalls[0].body.config.manifest.business, false, "principal scope must be stripped from nested manifest payloads");
+assert.equal("principal_id" in fetchCalls[0].body.config.manifest.business, false, "snake_case principal scope must be stripped from nested manifest payloads");
 assert.equal("userId" in fetchCalls[0].body.config.manifest.inventory.nested, false, "user scope must be stripped recursively from nested manifest payloads");
+assert.equal("current-user-id" in fetchCalls[0].body.config.manifest.inventory.nested, false, "kebab-case user scope must be stripped recursively from nested manifest payloads");
 
 const unapprovedTools = createArtifactStateTools({
   sessionId,
@@ -165,6 +176,7 @@ const unapprovedTools = createArtifactStateTools({
   allowIntakeCommandCommit: true,
   approvedCommandIds: [],
   bookingServiceBaseUrl: "https://booking.example.test",
+  bookingRuntimeAuth: { mode: "service-token", token: "test-service-token", source: "test" },
   bookingRuntimeFetcher: fetcher,
   hostSession: {
     source: "amplify-embedded",
