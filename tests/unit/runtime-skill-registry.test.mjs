@@ -71,8 +71,8 @@ const campaignPageContext = {
 const catalog = getRuntimeSkillCatalog();
 assert.equal(catalog.version, "sonik-agent-ui.skill-catalog.v1");
 assert.equal(catalog.provider, "sonik-agent-ui-runtime");
-assert.equal(catalog.skills.length, 4, "runtime registry includes reservation execution guidance plus all Phase 4 intake skills");
-assert.deepEqual([...RUNTIME_SKILL_FAMILIES].sort(), ["amplify-campaign-template", "booking-context-intake", "booking-event", "booking-reservation"]);
+assert.equal(catalog.skills.length, 5, "runtime registry includes reservation execution guidance, Phase 4 intake skills, and the booking context execution seam");
+assert.deepEqual([...RUNTIME_SKILL_FAMILIES].sort(), ["amplify-campaign-template", "booking-context-create", "booking-context-intake", "booking-event", "booking-reservation"]);
 for (const skill of catalog.skills) {
   assert.ok(RUNTIME_SKILL_FAMILIES.includes(skill.familyId), `${skill.id} must use a centralized runtime skill family`);
 }
@@ -106,6 +106,18 @@ assert.ok(reservationSkill.forbiddenUnlessExplicit.includes("booking.create.hold
 assert.ok(reservationSkill.contextHints.skillFamilies.includes("booking-reservation"), "skill can be selected by donated page skill family");
 assert.ok(reservationSkill.contextHints.requiredScopes.includes("booking:write"), "skill keeps write scope requirement visible");
 assert.ok(reservationSkill.metadata.successEvidence.some((line) => /Pipe B telemetry/i.test(line)), "skill requires telemetry proof");
+
+
+const contextCreateSkill = catalog.skills.find((entry) => entry.id === "booking.context.create");
+assert.ok(contextCreateSkill, "booking context execution seam is registered");
+assert.equal(contextCreateSkill.familyId, "booking-context-create");
+assert.deepEqual(contextCreateSkill.commandSequence, ["readActiveArtifactState", "previewActiveIntakeCommand", "commitActiveIntakeCommand"]);
+assert.deepEqual(contextCreateSkill.requiredCommands, ["booking.create.context"]);
+assert.ok(contextCreateSkill.contextHints.requiredScopes.includes("booking:write"), "execution seam requires trusted write scope");
+assert.equal(contextCreateSkill.metadata.execution, "trusted_command");
+assert.equal(contextCreateSkill.metadata.approval, "host_required");
+assert.ok(contextCreateSkill.metadata.ontologyRules.some((rule) => /Resource\/table = inventory/i.test(rule)), "execution seam teaches table ontology");
+assert.ok(contextCreateSkill.metadata.trustedActorRules.some((rule) => /never put orgId/i.test(rule)), "execution seam prevents actor-context leakage");
 
 const intakeSkill = catalog.skills.find((entry) => entry.id === "booking.context.intake");
 assertNonExecutingIntakeSkill(intakeSkill, {
@@ -145,6 +157,7 @@ assert.equal(index.skills.some((entry) => entry.id === "booking.context.intake")
 const intakeIndex = createRuntimeSkillIndex(intakePageContext);
 assert.equal(intakeIndex.skills[0].id, "booking.context.intake", "booking context pages surface-eager-load the intake workflow skill");
 assert.equal(intakeIndex.skills[0].commandSequence.length, 0, "loaded intake summary remains non-executable");
+assert.equal(intakeIndex.skills.some((entry) => entry.id === "booking.context.create"), false, "execution seam stays hidden until approval intent/active artifact with write scope");
 
 const eventIndex = createRuntimeSkillIndex(eventPageContext);
 assert.equal(eventIndex.skills[0].id, "booking.event.create", "event setup pages surface-eager-load the event workflow skill first");
@@ -181,6 +194,17 @@ assert.equal(intakeSearch.skills[0].id, "booking.context.intake", "booking conte
 const lazyIntakeSearch = searchRuntimeSkillCatalog({ query: "create booking context", context: { authenticated: true, organizationId, scopes: ["booking:read"] } });
 assert.equal(lazyIntakeSearch.skills[0].id, "booking.context.intake", "intake can still be discovered lazily outside matching page surfaces");
 
+const approvalSearch = searchRuntimeSkillCatalog({
+  query: "approve this manifest and create the context",
+  context: {
+    ...intakePageContext,
+    activeArtifactId: "artifact_booking_context_intake",
+    artifactType: "booking-context-intake",
+    scopes: ["booking:read", "booking:write"],
+  },
+});
+assert.equal(approvalSearch.skills[0].id, "booking.context.create", "approval intent over an active intake artifact finds the execution seam first");
+
 const eventSearch = searchRuntimeSkillCatalog({ query: "create event", context: eventPageContext });
 assert.equal(eventSearch.skills[0].id, "booking.event.create", "event creation intent finds event workflow skill");
 
@@ -199,6 +223,14 @@ assert.equal(learned.workflowRecipe.id, "booking.reservation.create");
 assert.deepEqual(learned.commandSequence, ["booking.get.availability", "booking.create.guest", "booking.create.booking"]);
 assert.ok(learned.forbiddenUnlessExplicit.includes("booking.create.hold"));
 assert.ok(learned.negativeExamples[0].failIfCommandIds.includes("booking.create.hold"));
+
+const learnedContextCreate = learnRuntimeSkill({ skillId: "booking.context.create", aspects: ["description", "workflow", "examples", "policy", "context", "commands"] });
+assert.equal(learnedContextCreate.ok, true);
+assert.deepEqual(learnedContextCreate.commandSequence, ["readActiveArtifactState", "previewActiveIntakeCommand", "commitActiveIntakeCommand"]);
+assert.deepEqual(learnedContextCreate.requiredCommands, ["booking.create.context"]);
+assert.ok(learnedContextCreate.forbiddenUnlessExplicit.includes("booking.create.booking"));
+assert.ok(learnedContextCreate.metadata.ontologyRules.some((rule) => /Menu = offer\/content metadata/i.test(rule)));
+assert.ok(learnedContextCreate.metadata.trustedActorRules.some((rule) => /trusted host approvedCommandIds/i.test(rule)));
 
 const learnedIntake = learnRuntimeSkill({ skillId: "booking.context.intake", aspects: ["description", "examples", "policy", "context", "commands"] });
 assert.equal(learnedIntake.ok, true);

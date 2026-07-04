@@ -12,6 +12,7 @@ import {
 } from "@sonik-agent-ui/tool-contracts";
 import { AMPLIFY_CAMPAIGN_TEMPLATE_CREATE_SURFACE_TEMPLATE, AMPLIFY_CAMPAIGN_TEMPLATE_CREATE_WORKFLOW } from "./amplify-workflows/campaign-template-create.ts";
 import { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE, BOOKING_CONTEXT_INTAKE_WORKFLOW } from "./booking-workflows/context-intake.ts";
+import { BOOKING_CONTEXT_CREATE_RECIPE } from "./booking-workflows/context-create.ts";
 import { BOOKING_EVENT_CREATE_SURFACE_TEMPLATE, BOOKING_EVENT_CREATE_WORKFLOW } from "./booking-workflows/event-create.ts";
 import { BOOKING_RESERVATION_CREATE_RECIPE } from "./booking-workflows/reservation-create.ts";
 
@@ -26,6 +27,7 @@ const generatedAt = "2026-06-30T00:00:00.000Z";
 export const RUNTIME_SKILL_FAMILIES = [
   "amplify-campaign-template",
   "booking-context-intake",
+  "booking-context-create",
   "booking-event",
   "booking-reservation",
 ] as const;
@@ -173,6 +175,50 @@ const catalog = createSkillCatalog("sonik-agent-ui-runtime", [
     },
   },
   {
+    id: BOOKING_CONTEXT_CREATE_RECIPE.id,
+    title: BOOKING_CONTEXT_CREATE_RECIPE.title,
+    description: BOOKING_CONTEXT_CREATE_RECIPE.description,
+    familyId: "booking-context-create",
+    loadPolicy: { mode: "surface-eager", priority: 99, profile: "booking" },
+    contextHints: {
+      routes: [],
+      surfaces: [],
+      pageTypes: [],
+      artifactTypes: ["booking-context-intake", "booking-context-manifest"],
+      skillFamilies: ["booking-context-create", "booking-ops"],
+      commandFamilies: ["booking"],
+      requiredScopes: ["booking:read", "booking:write"],
+    },
+    intentAliases: [...BOOKING_CONTEXT_CREATE_RECIPE.intentAliases],
+    commandSequence: [...BOOKING_CONTEXT_CREATE_RECIPE.commandSequence],
+    requiredCommands: [...BOOKING_CONTEXT_CREATE_RECIPE.requiredCommands],
+    forbiddenUnlessExplicit: [...BOOKING_CONTEXT_CREATE_RECIPE.forbiddenUnlessExplicit],
+    examples: [
+      {
+        title: "Approve and create the active booking context intake",
+        prompt: "Approve this manifest and create the booking context.",
+        expectedCommandPath: [...BOOKING_CONTEXT_CREATE_RECIPE.commandSequence],
+      },
+    ],
+    negativeExamples: [
+      {
+        title: "Do not create reservations while creating a context",
+        prompt: "Approve this venue manifest and book Dan for 1pm too.",
+        failIfCommandIds: ["booking.create.booking", "booking.create.hold"],
+        expectedCommandPath: [...BOOKING_CONTEXT_CREATE_RECIPE.commandSequence],
+      },
+    ],
+    metadata: {
+      workflowSteps: [...BOOKING_CONTEXT_CREATE_RECIPE.workflowSteps],
+      ontologyRules: [...BOOKING_CONTEXT_CREATE_RECIPE.ontologyRules],
+      trustedActorRules: [...BOOKING_CONTEXT_CREATE_RECIPE.trustedActorRules],
+      successEvidence: [...BOOKING_CONTEXT_CREATE_RECIPE.successEvidence],
+      execution: "trusted_command",
+      approval: "host_required",
+      telemetryEvents: ["tool.readActiveArtifactState", "tool.previewActiveIntakeCommand", "tool.commitActiveIntakeCommand"],
+    },
+  },
+  {
     id: "booking.reservation.create",
     title: BOOKING_RESERVATION_CREATE_RECIPE.title,
     description: BOOKING_RESERVATION_CREATE_RECIPE.description,
@@ -256,6 +302,18 @@ function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
       if (typeof step === "string" && step.trim()) lines.push(`- ${step.trim()}`);
     }
   }
+  if (Array.isArray(metadata.ontologyRules) && metadata.ontologyRules.length > 0) {
+    lines.push("Booking ontology rules:");
+    for (const rule of metadata.ontologyRules.slice(0, 8)) {
+      if (typeof rule === "string" && rule.trim()) lines.push(`- ${rule.trim()}`);
+    }
+  }
+  if (Array.isArray(metadata.trustedActorRules) && metadata.trustedActorRules.length > 0) {
+    lines.push("Trusted execution rules:");
+    for (const rule of metadata.trustedActorRules.slice(0, 6)) {
+      if (typeof rule === "string" && rule.trim()) lines.push(`- ${rule.trim()}`);
+    }
+  }
   if (isRecord(metadata.questionPolicy)) {
     lines.push(`Question policy: ${JSON.stringify(metadata.questionPolicy)}`);
   }
@@ -263,7 +321,7 @@ function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
     lines.push([
       "Question-answer turns arrive as a fenced ```sonik_question_answer JSON block with version sonik-agent-ui.question-answer-turn.v1 and entryFrom=question_answer.",
       "Consume the block as user input only: read submission.questionId, answer.value, answer.writesTo, artifact.id, and artifact.version; then ask the next highest-impact missing question for this same intake artifact.",
-      "Do not execute commands, do not call commitCommand, and do not treat the answer as approval.",
+      "Do not execute commands, do not call commitCommand, and do not treat the answer as approval. If the user later approves a validated manifest, switch to booking.context.create so the agent can readActiveArtifactState, previewActiveIntakeCommand, and run only host-approved booking.create.context.",
     ].join(" "));
   }
   if (skill.forbiddenUnlessExplicit.length > 0) {

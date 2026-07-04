@@ -41,6 +41,7 @@
   let lastTelemetryKey = $state<string | null>(null);
 
   let error = $state<string | null>(null);
+  let submitStatus = $state<"idle" | "sent" | "skipped" | "error">("idle");
 
   $effect(() => {
     const telemetry = normalized.telemetry;
@@ -67,6 +68,7 @@
   function choose(choiceValue: Choice["value"], disabled?: boolean | null) {
     if (disabled) return;
     error = null;
+    submitStatus = "idle";
     if (isMulti) {
       const current = Array.isArray(valueBinding.current) ? [...valueBinding.current] : [];
       valueBinding.current = current.includes(choiceValue) ? current.filter((item) => item !== choiceValue) : [...current, choiceValue];
@@ -77,6 +79,7 @@
 
   function handleText(e: Event) {
     error = null;
+    submitStatus = "idle";
     const raw = (e.target as HTMLInputElement | HTMLTextAreaElement).value;
     valueBinding.current = safeProps.answerType === "number" && raw !== "" ? Number(raw) : raw;
   }
@@ -110,10 +113,12 @@
       });
       stateContext.update(updates);
       error = null;
+      submitStatus = skipped ? "skipped" : "sent";
       emit(skipped ? "skip" : "submit");
     } catch (err) {
       const formatted = formatQuestionSubmitError(err);
       error = formatted.message;
+      submitStatus = "error";
       emitComponentPropValidationTelemetry(formatted.telemetry);
       stateContext.set(`/questionErrors/${safeProps.questionId}`, error);
     }
@@ -180,11 +185,17 @@
     {/if}
 
     <div class="flex flex-wrap items-center gap-2">
-      <Button type="button" onclick={() => submit(false)}>{safeProps.submitLabel ?? "Save answer"}</Button>
+      <Button type="button" onclick={() => submit(false)}>{safeProps.submitLabel ?? "Submit answer"}</Button>
       {#if safeProps.allowSkip !== false}
         <Button type="button" variant="outline" onclick={() => submit(true)}>{safeProps.skipLabel ?? "Mark unknown"}</Button>
       {/if}
-      {#if safeProps.writesTo}
+      {#if submitStatus === "sent"}
+        <span class="text-xs font-medium text-primary">Answer sent to agent</span>
+      {:else if submitStatus === "skipped"}
+        <span class="text-xs font-medium text-muted-foreground">Marked unknown and sent to agent</span>
+      {:else if submitStatus === "error"}
+        <span class="text-xs font-medium text-destructive">Answer not sent</span>
+      {:else if safeProps.writesTo}
         <span class="text-xs text-muted-foreground">Writes to {safeProps.writesTo}</span>
       {/if}
     </div>

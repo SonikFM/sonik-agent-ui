@@ -52,6 +52,18 @@ export function resolveImplicitWorkflowSkillIds(input: { userMessage?: string | 
     "restaurant",
     "reservations setup",
   ]);
+  const bookingContextCommitIntent = includesAny(message, [
+    "approve and create",
+    "approve & create",
+    "approve and run",
+    "approve this manifest",
+    "commit",
+    "create it",
+    "create the context",
+    "create this context",
+    "create booking context",
+  ]);
+
   const reservationExecutionIntent = includesAny(message, [
     "make a reservation",
     "create a reservation",
@@ -61,7 +73,11 @@ export function resolveImplicitWorkflowSkillIds(input: { userMessage?: string | 
     "reservation for",
   ]);
 
-  if (setupIntent && venueIntakeObject && !reservationExecutionIntent) {
+  if (bookingContextCommitIntent && includesAny(`${message} ${context}`, ["booking", "context", "manifest", "venue", "restaurant", "artifact"])) {
+    skills.push("booking.context.create");
+  }
+
+  if (setupIntent && venueIntakeObject && !reservationExecutionIntent && !bookingContextCommitIntent) {
     skills.push("booking.context.intake");
   }
 

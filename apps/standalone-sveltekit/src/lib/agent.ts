@@ -11,6 +11,7 @@ import { resolveRuntimeSkillPromptModules } from "./server/skill-registry";
 import { createDocumentTools, type DocumentToolContext } from "./tools/document";
 import { createToolManifestTools } from "./tools/tool-manifest";
 import { createCommandCatalogTools } from "./tools/command-catalog";
+import { createArtifactStateTools } from "./tools/artifact-state";
 import { createSkillCatalogTools } from "./tools/skill-catalog";
 import { gateway, resolveGatewayModelId } from "./ai-gateway";
 import type { AgentRuntimeSettings } from "./agent-settings";
@@ -32,6 +33,8 @@ const PREVIEW_ONLY_RUNTIME_SKILL_IDS = new Set([
 const EXECUTION_RUNTIME_SKILL_IDS = new Set([
   "booking.reservation.create",
   "booking-reservation",
+  "booking.context.create",
+  "booking-context-create",
 ]);
 
 function normalizedSkillIds(skillIds: string[] | undefined): string[] {
@@ -89,9 +92,11 @@ export function createAgent(context: AgentRuntimeContext = {}) {
   const documentTools = createDocumentTools(context);
   const toolManifestTools = createToolManifestTools();
   const bookingContextIntakeActive = hasBookingContextIntakeSkill(context.skillIds);
-  const commandCatalogTools = hasPreviewOnlyRuntimeSkill(context.skillIds)
+  const previewOnlyRuntimeActive = hasPreviewOnlyRuntimeSkill(context.skillIds);
+  const commandCatalogTools = previewOnlyRuntimeActive
     ? {}
     : createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, toolPermissionModes: context.agentSettings?.toolPermissionModes });
+  const artifactStateTools = createArtifactStateTools({ sessionId: context.sessionId, pageContext: context.pageContext, persistence: context.persistence, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, allowIntakeCommandCommit: !previewOnlyRuntimeActive });
   const skillCatalogTools = createSkillCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   return new ToolLoopAgent({
     model: gateway(resolveGatewayModelId(context.agentSettings?.modelId)),
@@ -106,6 +111,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
       webSearch,
       ...(bookingContextIntakeActive ? { createBookingIntakeArtifact } : { createJsonArtifact }),
       ...documentTools,
+      ...artifactStateTools,
       ...toolManifestTools,
       ...skillCatalogTools,
       ...commandCatalogTools,

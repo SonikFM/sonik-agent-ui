@@ -16,6 +16,13 @@ assert.deepEqual(
   "venue setup must seed booking.context.intake rather than leaving the model to drift into command reads",
 );
 
+
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({ userMessage: "approve this manifest and create the context", pageContext: { ...bookingPage, activeArtifactId: "artifact-1", artifactType: "json-render" } }),
+  ["booking.context.create"],
+  "approval/commit turns over an active artifact should seed the trusted booking context create workflow",
+);
+
 assert.deepEqual(
   resolveImplicitWorkflowSkillIds({ firstUserMessage: "Create a reservation for Dan at 1pm", pageContext: bookingPage }),
   ["booking.reservation.create"],
