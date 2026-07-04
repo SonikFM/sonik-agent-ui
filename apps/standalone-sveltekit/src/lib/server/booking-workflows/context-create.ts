@@ -36,6 +36,6 @@ export const BOOKING_CONTEXT_CREATE_RECIPE = {
   successEvidence: [
     "readActiveArtifactState returns the latest active artifact state and manifest draft.",
     "previewActiveIntakeCommand returns booking.create.context with concrete input.",
-    "commitActiveIntakeCommand or commitCommand returns an approved command receipt from the mounted booking runtime.",
+    "commitActiveIntakeCommand returns an approved command receipt from the mounted booking runtime.",
   ],
 } as const;

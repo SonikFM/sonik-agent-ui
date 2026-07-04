@@ -53,6 +53,10 @@ function hasBookingContextIntakeSkill(skillIds: string[] | undefined): boolean {
   return ids.some((id) => id === "booking.context.intake" || id === "booking-context-intake");
 }
 
+function hasBookingContextCreateSkill(skillIds: string[] | undefined): boolean {
+  return normalizedSkillIds(skillIds).some((id) => id === "booking.context.create" || id === "booking-context-create");
+}
+
 /**
  * Composes the per-turn system prompt for a run: the always-on core plus the
  * modules that seed for this context, plus any runtime skill bodies selected for
@@ -92,11 +96,12 @@ export function createAgent(context: AgentRuntimeContext = {}) {
   const documentTools = createDocumentTools(context);
   const toolManifestTools = createToolManifestTools();
   const bookingContextIntakeActive = hasBookingContextIntakeSkill(context.skillIds);
+  const bookingContextCreateActive = hasBookingContextCreateSkill(context.skillIds);
   const previewOnlyRuntimeActive = hasPreviewOnlyRuntimeSkill(context.skillIds);
-  const commandCatalogTools = previewOnlyRuntimeActive
+  const commandCatalogTools = previewOnlyRuntimeActive || bookingContextCreateActive
     ? {}
     : createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, toolPermissionModes: context.agentSettings?.toolPermissionModes });
-  const artifactStateTools = createArtifactStateTools({ sessionId: context.sessionId, pageContext: context.pageContext, persistence: context.persistence, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, allowIntakeCommandCommit: !previewOnlyRuntimeActive });
+  const artifactStateTools = createArtifactStateTools({ sessionId: context.sessionId, pageContext: context.pageContext, persistence: context.persistence, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, allowIntakeCommandCommit: bookingContextCreateActive });
   const skillCatalogTools = createSkillCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   return new ToolLoopAgent({
     model: gateway(resolveGatewayModelId(context.agentSettings?.modelId)),
