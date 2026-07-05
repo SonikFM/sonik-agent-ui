@@ -1,30 +1,21 @@
 <script lang="ts" module>
   import type { ToolInfo } from "../message-parts.js";
+  import { resolveToolActivity, type ToolActivityLabelOverrides } from "../tool-activity.js";
 
   export interface ToolCallBlockProps {
     tool: ToolInfo;
-    labels?: Record<string, [string, string]>;
+    labels?: ToolActivityLabelOverrides;
   }
 </script>
 
 <script lang="ts">
   let { tool, labels = {} }: ToolCallBlockProps = $props();
 
-  const isLoading = $derived(
-    tool.state !== "output-available" &&
-      tool.state !== "output-error" &&
-      tool.state !== "output-denied",
-  );
-  const isError = $derived(tool.state === "output-error" || tool.state === "output-denied");
-  const label = $derived.by(() => {
-    const known = labels[tool.toolName];
-    if (isError) {
-      const base = known?.[0] ?? tool.toolName;
-      return `${base.replace(/ing\b/i, "").trim()} failed`;
-    }
-    if (!known) return tool.toolName;
-    return isLoading ? known[0] : known[1];
-  });
+  const activity = $derived(resolveToolActivity(tool.toolName, tool.state, labels));
+  const isLoading = $derived(activity.isLoading);
+  const isError = $derived(activity.isError);
+  const label = $derived(activity.label);
+  const title = $derived(tool.errorText ? `${activity.technicalLabel}: ${tool.errorText}` : activity.technicalLabel);
 </script>
 
 <div class="text-sm group">
@@ -32,7 +23,8 @@
     class:text-muted-foreground={!isError}
     class:text-error={isError}
     class:animate-shimmer={isLoading}
-    title={tool.errorText}
+    title={title}
+    data-tool-phase={activity.phase}
   >
     {label}
   </span>

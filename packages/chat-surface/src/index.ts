@@ -17,3 +17,17 @@ export type { ChatSegment, ChatSegmentsResult, ToolInfo } from "./message-parts.
 export { getSegments, getSpec, getText, hasSpec, snapshotDataParts } from "./message-parts.js";
 export { renderChatText, parseInline, parseTable } from "./chat-text.js";
 export type { ChatTextBlock, InlineToken } from "./chat-text.js";
+export {
+  TOOL_ACTIVITY_REGISTRY,
+  normalizeToolName,
+  resolveToolActivity,
+  isToolActivityError,
+  isToolActivityLoading,
+} from "./tool-activity.js";
+export type {
+  ToolActivityDescriptor,
+  ToolActivityLabelOverride,
+  ToolActivityLabelOverrides,
+  ToolActivityPhase,
+  ToolActivityPresentation,
+} from "./tool-activity.js";

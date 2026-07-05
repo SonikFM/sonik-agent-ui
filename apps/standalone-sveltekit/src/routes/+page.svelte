@@ -9,7 +9,7 @@
   import type { DataPart, Spec } from "@json-render/svelte";
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
-  import { AgentConversation, AgentSettingsPanel, getSpec, getText, snapshotDataParts, type AgentActivityStatus, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
+  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
@@ -972,19 +972,6 @@
   }
 
 
-  function formatToolActivityDetail(toolType: string): string {
-    const slug = toolType.replace(/^tool-/, "");
-    if (slug === "createJsonArtifact" || slug === "createBookingIntakeArtifact") return "Creating artifact";
-    if (slug === "updateDocument") return "Updating document";
-    if (slug === "createDocument") return "Creating document";
-    if (slug === "readDocument") return "Reading document";
-    return slug
-      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-      .replace(/[-_]+/g, " ")
-      .trim()
-      .replace(/^./, (char) => char.toUpperCase()) || "Running tool";
-  }
-
   function createAgentActivityStatus(): AgentActivityStatus | null {
     if (!isStreaming) return null;
     const elapsedSeconds = streamStartedAt ? Math.max(0, Math.floor((activityClock - streamStartedAt) / 1000)) : 0;
@@ -992,9 +979,13 @@
     const parts = snapshotDataParts(lastAssistant?.parts as DataPart[]);
     const latestTool = [...parts].reverse().find((part) => part.type?.startsWith("tool-")) as (DataPart & { state?: string }) | undefined;
 
-    if (latestTool?.state === "output-error") return { label: "Tool failed", detail: "Inspecting recovery path…", tone: "error" };
-    if (latestTool && latestTool.state !== "output-available" && latestTool.state !== "output-denied") {
-      return { label: "Calling tool", detail: formatToolActivityDetail(latestTool.type), tone: "tool" };
+    if (latestTool?.state === "output-error" || latestTool?.state === "output-denied") {
+      const activity = resolveToolActivity(latestTool.type, latestTool.state);
+      return { label: activity.label, detail: "Checking recovery path…", tone: "error" };
+    }
+    if (latestTool && latestTool.state !== "output-available") {
+      const activity = resolveToolActivity(latestTool.type, latestTool.state);
+      return { label: "Working", detail: activity.label, tone: "tool" };
     }
     if (parts.some((part) => part.type === "data-spec" || part.type === "tool-createJsonArtifact" || part.type === "tool-createBookingIntakeArtifact")) {
       return { label: "Preparing canvas", detail: "Promoting artifact view…", tone: "artifact" };
@@ -1024,7 +1015,7 @@
       sessionId: activeSessionId ?? undefined,
       runtimeStatus: conversation.status,
       mode: activity.tone ?? "neutral",
-      reason: activity.label,
+      reason: `${activity.tone ?? "neutral"}:${conversation.status}`,
       ok: true,
     });
   }
@@ -2283,27 +2274,6 @@
   }
 
   // =============================================================================
-  // Tool Labels
-  // =============================================================================
-
-  const TOOL_LABELS: Record<string, [string, string]> = {
-    getWeather: ["Getting weather data", "Got weather data"],
-    getGitHubRepo: ["Fetching GitHub repo", "Fetched GitHub repo"],
-    getGitHubPullRequests: ["Fetching pull requests", "Fetched pull requests"],
-    getCryptoPrice: ["Looking up crypto price", "Looked up crypto price"],
-    getCryptoPriceHistory: ["Fetching price history", "Fetched price history"],
-    getHackerNewsTop: ["Loading Hacker News", "Loaded Hacker News"],
-    webSearch: ["Searching the web", "Searched the web"],
-    createJsonArtifact: ["Creating artifact", "Created artifact"],
-    createBookingIntakeArtifact: ["Creating booking intake", "Created booking intake"],
-    createDocumentArtifact: ["Creating document", "Created document"],
-    updateDocumentArtifact: ["Updating document", "Updated document"],
-    readActiveDocument: ["Reading document", "Read document"],
-    readDocumentArtifact: ["Reading document", "Read document"],
-    listAvailableTools: ["Reading tool manifest", "Read tool manifest"],
-  };
-
-  // =============================================================================
   // Message Handling
   // =============================================================================
 
@@ -2707,7 +2677,6 @@
       status={conversation.status}
       error={conversation.error}
       suggestions={workflowSuggestions}
-      toolLabels={TOOL_LABELS}
       activity={agentActivity}
       bind:input
       onSubmit={handleSubmit}

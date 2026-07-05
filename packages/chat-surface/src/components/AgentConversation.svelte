@@ -4,6 +4,7 @@
   import type { AgentContextItem } from "@sonik-agent-ui/tool-contracts/run-context";
   import type { AgentChatMessage } from "./AgentMessage.svelte";
   import type { AgentChatStatus } from "./AgentComposer.svelte";
+  import type { ToolActivityLabelOverrides } from "../tool-activity.js";
 
   export interface AgentSuggestion {
     label: string;
@@ -30,7 +31,7 @@
     status?: AgentChatStatus;
     error?: { message?: string } | null;
     suggestions?: AgentSuggestion[];
-    toolLabels?: Record<string, [string, string]>;
+    toolLabels?: ToolActivityLabelOverrides;
     activity?: AgentActivityStatus | null;
     onSubmit: (text: string) => void;
     /** Fires when a workflow launcher suggestion chip is chosen, before the

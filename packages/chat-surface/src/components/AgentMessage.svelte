@@ -2,6 +2,7 @@
   import type { DataPart, Spec } from "@json-render/svelte";
   import type { Snippet } from "svelte";
   import type { AgentContextItem } from "@sonik-agent-ui/tool-contracts/run-context";
+  import type { ToolActivityLabelOverrides } from "../tool-activity.js";
 
   export interface AgentChatMessage {
     id: string;
@@ -13,7 +14,7 @@
     message: AgentChatMessage;
     isLast?: boolean;
     isStreaming?: boolean;
-    toolLabels?: Record<string, [string, string]>;
+    toolLabels?: ToolActivityLabelOverrides;
     /** Persisted context selection to render as read-only provenance on this turn. */
     contextItems?: AgentContextItem[];
     renderArtifact: Snippet<[Spec, boolean]>;

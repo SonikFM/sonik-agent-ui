@@ -249,7 +249,7 @@ assert.equal(pageSource.includes("chat.activity.status"), true, "client should e
 assert.equal(pageSource.includes("Waiting for model response"), true, "chat UI should show a sanitized wait status for long silent model spans");
 assert.equal(pageSource.includes("client.performance.long_task"), true, "dev browser long tasks should emit telemetry for page-unresponsive triage");
 assert.equal(pageSource.includes("browser_main_thread_blocked"), true, "long-task telemetry should classify main-thread stalls without raw browser internals");
-assert.equal(pageSource.includes("formatToolActivityDetail"), true, "tool activity details should be human labels instead of raw tool slugs");
+assert.equal(pageSource.includes("resolveToolActivity(latestTool.type, latestTool.state)"), true, "tool activity details should use the shared friendly projection resolver instead of raw tool slugs");
 assert.equal(pageSource.includes("detail: activity.detail,"), false, "activity telemetry signature should not emit every second during long waits");
 assert.equal(pageSource.includes("activity={agentActivity}"), true, "top-level app should pass activity status into the chat surface");
 assert.equal(agentConversationSource.includes("AgentActivityStatus"), true, "chat surface should define a reusable activity status contract");
