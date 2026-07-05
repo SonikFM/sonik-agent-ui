@@ -212,6 +212,118 @@ export async function exportIntakeManifest(event: RequestWorkspaceEvent | null |
   return { ...validationReceipt, exportPayload };
 }
 
+
+function createTrustedIntakeControllerActionElements(elements: Spec["elements"]): string[] {
+  elements["action-rail"] = {
+    type: "ActionRail",
+    props: {
+      title: "Trusted workflow actions",
+      emptyMessage: null,
+      actions: [
+        {
+          id: "saveDraft",
+          label: "Save draft",
+          description: "Persist the current artifact state without running tools.",
+          status: "ready",
+          commandId: null,
+          effect: "artifact_state",
+          approval: "not_required",
+        },
+        {
+          id: "editDraft",
+          label: "Edit draft",
+          description: "Return to draft editing; no command preview or write is requested.",
+          status: "ready",
+          commandId: null,
+          effect: "renderer_state",
+          approval: "not_required",
+        },
+        {
+          id: "submitToAgent",
+          label: "Submit to agent",
+          description: "Send the saved artifact state back into chat for the next step.",
+          status: "ready",
+          commandId: null,
+          effect: "chat_turn",
+          approval: "not_required",
+        },
+        {
+          id: "reviseWithAgent",
+          label: "Revise with agent",
+          description: "Ask the agent to propose targeted changes from the saved draft state.",
+          status: "ready",
+          commandId: null,
+          effect: "chat_turn",
+          approval: "not_required",
+        },
+        {
+          id: "requestApproval",
+          label: "Request approval",
+          description: "Ask the agent to validate and show a typed command preview before any write.",
+          status: "requires_confirmation",
+          commandId: "booking.create.context",
+          effect: "preview_write",
+          approval: "required",
+        },
+        {
+          id: "cancelApproval",
+          label: "Cancel approval",
+          description: "Cancel the pending approval path and keep the manifest as a saved draft.",
+          status: "ready",
+          commandId: "booking.create.context",
+          effect: "approval_cancelled",
+          approval: "not_required",
+        },
+        {
+          id: "approveAndRun",
+          label: "Approve & run",
+          description: "Submit an explicit approval turn; execution still requires trusted host/session approval.",
+          status: "requires_confirmation",
+          commandId: "booking.create.context",
+          effect: "trusted_write_request",
+          approval: "host_required",
+        },
+      ],
+    },
+    children: [],
+  };
+
+  const buttons = [
+    { id: "action-save-draft", label: "Save draft", variant: "secondary", action: "saveDraft", commandId: null },
+    { id: "action-edit-draft", label: "Edit draft", variant: "secondary", action: "editDraft", commandId: null },
+    { id: "action-submit-to-agent", label: "Submit to agent", variant: "default", action: "submitToAgent", commandId: null },
+    { id: "action-revise-agent", label: "Revise", variant: "outline", action: "reviseWithAgent", commandId: null },
+    { id: "action-request-approval", label: "Request approval", variant: "outline", action: "requestApproval", commandId: "booking.create.context" },
+    { id: "action-cancel-approval", label: "Cancel", variant: "secondary", action: "cancelApproval", commandId: "booking.create.context" },
+    { id: "action-approve-run", label: "Approve & run", variant: "default", action: "approveAndRun", commandId: "booking.create.context" },
+  ] as const;
+
+  for (const button of buttons) {
+    elements[button.id] = {
+      type: "Button",
+      props: { label: button.label, variant: button.variant, size: "sm", disabled: false },
+      on: {
+        press: {
+          action: button.action,
+          params: {
+            source: "intake_action_rail",
+            commandId: button.commandId ?? null,
+          },
+        },
+      },
+      children: [],
+    };
+  }
+
+  elements["action-buttons"] = {
+    type: "Stack",
+    props: { direction: "horizontal", gap: "sm", wrap: true },
+    children: buttons.map((button) => button.id),
+  };
+
+  return ["action-rail", "action-buttons"];
+}
+
 function createIntakeSurfaceSpec(surface: InteractiveSurfaceSpec): Spec {
   const questionIds = surface.questions.map((question, index) => `question-${index}-${escapeJsonPointerSegment(question.id).replace(/[^a-zA-Z0-9_~.-]/g, "-")}`);
   const elements: Spec["elements"] = {
@@ -228,7 +340,8 @@ function createIntakeSurfaceSpec(surface: InteractiveSurfaceSpec): Spec {
   };
 
   if (surface.state.manifest && typeof surface.state.manifest === "object") {
-    elements.main.children = [...(elements.main.children ?? []), "manifest-preview"];
+    const actionElementIds = createTrustedIntakeControllerActionElements(elements);
+    elements.main.children = [...(elements.main.children ?? []), "manifest-preview", ...actionElementIds];
     elements["manifest-preview"] = {
       type: "ManifestPreview",
       props: { title: "Manifest draft", manifest: { $bindState: "/manifest" }, emptyMessage: "No manifest draft yet." },

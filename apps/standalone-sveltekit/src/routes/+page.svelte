@@ -2366,6 +2366,10 @@
       await handleSubmitAnswerAction(params ?? {});
       return;
     }
+    if (isTrustedIntakeControllerAction(actionName)) {
+      await handleTrustedIntakeControllerAction(actionName, params ?? {});
+      return;
+    }
     logArtifactTelemetry({
       source: "client",
       event: "json_render.action.ignored",
@@ -2376,6 +2380,125 @@
       ok: false,
       error: "No trusted host action handler is registered for this action.",
     });
+  }
+
+  type TrustedIntakeControllerAction =
+    | "saveDraft"
+    | "editDraft"
+    | "submitToAgent"
+    | "reviseWithAgent"
+    | "requestApproval"
+    | "cancelApproval"
+    | "approveAndRun";
+
+  const trustedIntakeControllerActions = new Set<string>([
+    "saveDraft",
+    "editDraft",
+    "submitToAgent",
+    "reviseWithAgent",
+    "requestApproval",
+    "cancelApproval",
+    "approveAndRun",
+  ]);
+
+  function isTrustedIntakeControllerAction(actionName: string): actionName is TrustedIntakeControllerAction {
+    return trustedIntakeControllerActions.has(actionName);
+  }
+
+  async function handleTrustedIntakeControllerAction(actionName: TrustedIntakeControllerAction, params: Record<string, unknown>): Promise<void> {
+    const artifactBeforePersist = activeArtifact;
+    if (!artifactBeforePersist) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "intake.controller_action.blocked",
+        sessionId: activeSessionId ?? undefined,
+        reason: actionName,
+        ok: false,
+        error: "Controller actions require an active intake artifact.",
+      });
+      return;
+    }
+
+    if (pendingActiveArtifactStateChanges.length > 0) {
+      const persisted = await persistActiveArtifactStatePatch();
+      if (!persisted) {
+        logArtifactTelemetry({
+          source: "client",
+          event: "intake.controller_action.blocked",
+          sessionId: activeSessionId ?? undefined,
+          artifactId: artifactBeforePersist.id,
+          artifactVersion: artifactBeforePersist.version,
+          reason: actionName,
+          ok: false,
+          error: "Artifact state was not persisted; controller action was not sent.",
+        });
+        return;
+      }
+    }
+
+    const artifact = activeArtifact ?? artifactBeforePersist;
+    const commandId = typeof params.commandId === "string" && params.commandId.trim() ? params.commandId.trim() : "booking.create.context";
+    logArtifactTelemetry({
+      source: "client",
+      event: "intake.controller_action.accepted",
+      sessionId: activeSessionId ?? undefined,
+      artifactId: artifact.id,
+      artifactVersion: artifact.version,
+      reason: actionName,
+      toolCallId: commandId,
+      ok: true,
+    });
+
+    if (actionName === "saveDraft" || actionName === "editDraft") return;
+
+    const prompt = createTrustedIntakeControllerPrompt(actionName, {
+      artifactId: artifact.id,
+      artifactVersion: artifact.version,
+      commandId,
+    });
+    sendUserTurnWithEntryFrom(prompt, "workflow_launcher");
+  }
+
+  function createTrustedIntakeControllerPrompt(
+    actionName: Exclude<TrustedIntakeControllerAction, "saveDraft" | "editDraft">,
+    input: { artifactId: string; artifactVersion: number; commandId: string },
+  ): string {
+    const artifactLine = `Active artifact: ${input.artifactId} v${input.artifactVersion}.`;
+    if (actionName === "submitToAgent") {
+      return [
+        "Review the saved active intake artifact state and continue the workflow from the next highest-impact missing field.",
+        artifactLine,
+        "Call readActiveArtifactState before summarizing. Do not execute booking mutations or treat this as approval.",
+      ].join(" ");
+    }
+    if (actionName === "reviseWithAgent") {
+      return [
+        "Review the saved active intake artifact state and help revise it before approval.",
+        artifactLine,
+        "Call readActiveArtifactState, identify the smallest useful edits or missing fields, and ask one focused follow-up. Do not execute booking mutations or treat this as approval.",
+      ].join(" ");
+    }
+    if (actionName === "requestApproval") {
+      return [
+        "Validate the saved active intake artifact and show a typed command preview for approval.",
+        artifactLine,
+        `Target command: ${input.commandId}.`,
+        "Call readActiveArtifactState, then previewActiveIntakeCommand. Do not call commitActiveIntakeCommand yet.",
+      ].join(" ");
+    }
+    if (actionName === "cancelApproval") {
+      return [
+        "Cancel the pending approval path and keep the active intake artifact as a saved draft.",
+        artifactLine,
+        "Call readActiveArtifactState and summarize that no booking mutation was executed. Ask what the user wants to revise next.",
+      ].join(" ");
+    }
+    return [
+      "Approve this manifest and create the booking context from the active intake artifact.",
+      artifactLine,
+      `Target command: ${input.commandId}.`,
+      "Use booking.context.create: call readActiveArtifactState, previewActiveIntakeCommand, then commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN. If trusted host approval is missing, report that blocker instead of searching repeatedly.",
+    ].join(" ");
   }
 
   async function handleSubmitAnswerAction(params: Record<string, unknown>): Promise<void> {

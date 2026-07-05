@@ -2,7 +2,15 @@
   import type { BaseComponentProps } from "@json-render/svelte";
   import { Badge } from "$lib/components/ui/badge";
 
-  type ActionItem = { id: string; label: string; description?: string | null; status?: "ready" | "blocked" | "preview" | "requires_confirmation" | null; commandId?: string | null };
+  type ActionItem = {
+    id: string;
+    label: string;
+    description?: string | null;
+    status?: "ready" | "blocked" | "preview" | "requires_confirmation" | null;
+    commandId?: string | null;
+    effect?: string | null;
+    approval?: string | null;
+  };
 
   interface Props extends BaseComponentProps<{
     title?: string | null;
@@ -27,6 +35,10 @@
               <p class="text-sm font-medium">{action.label}</p>
               {#if action.description}<p class="text-xs text-muted-foreground">{action.description}</p>{/if}
               {#if action.commandId}<p class="mt-1 font-mono text-[11px] text-muted-foreground">{action.commandId}</p>{/if}
+              <div class="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                {#if action.effect}<span class="rounded bg-muted px-1.5 py-0.5">{action.effect}</span>{/if}
+                {#if action.approval}<span class="rounded bg-muted px-1.5 py-0.5">approval: {action.approval}</span>{/if}
+              </div>
             </div>
             <Badge variant={action.status === "blocked" ? "destructive" : "secondary"}>{action.status ?? "preview"}</Badge>
           </div>

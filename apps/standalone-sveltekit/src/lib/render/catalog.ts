@@ -473,10 +473,12 @@ export const explorerCatalog = schema.createCatalog({
           description: z.string().nullable(),
           status: z.enum(["ready", "blocked", "preview", "requires_confirmation"]).nullable(),
           commandId: z.string().nullable(),
+          effect: z.string().nullable().optional(),
+          approval: z.string().nullable().optional(),
         })).nullable(),
         emptyMessage: z.string().nullable().optional(),
       }),
-      description: 'Read-only action preview rail. Commands are never executed from this renderer component.',
+      description: 'Read-only action/command preview rail. Paired buttons may dispatch whitelisted controller actions, but commands are never executed from this renderer component.',
     },
 
 
