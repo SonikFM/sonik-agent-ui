@@ -15,17 +15,57 @@
   const isLoading = $derived(activity.isLoading);
   const isError = $derived(activity.isError);
   const label = $derived(activity.label);
-  const title = $derived(tool.errorText ? `${activity.technicalLabel}: ${tool.errorText}` : activity.technicalLabel);
+  const stateLabel = $derived(tool.state ?? "unknown");
 </script>
 
-<div class="text-sm group">
-  <span
-    class:text-muted-foreground={!isError}
-    class:text-error={isError}
-    class:animate-shimmer={isLoading}
-    title={title}
-    data-tool-phase={activity.phase}
+<details
+  class="tool-call-block group rounded-lg border border-transparent text-sm open:border-border open:bg-muted/30 open:px-3 open:py-2"
+  data-tool-phase={activity.phase}
+  data-tool-state={stateLabel}
+>
+  <summary
+    class="flex cursor-pointer list-none items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
   >
-    {label}
-  </span>
-</div>
+    <span
+      class="h-1.5 w-1.5 rounded-full bg-current opacity-70"
+      class:animate-pulse={isLoading}
+      class:text-error={isError}
+      aria-hidden="true"
+    ></span>
+    <span
+      class:text-muted-foreground={!isError}
+      class:text-error={isError}
+      class:animate-shimmer={isLoading}
+    >
+      {label}
+    </span>
+    <span class="ml-auto hidden text-[11px] uppercase tracking-[0.12em] text-muted-foreground/70 group-open:inline">Details</span>
+  </summary>
+
+  <dl class="mt-2 grid gap-1 border-t border-border pt-2 text-xs text-muted-foreground" aria-label="Technical tool receipt">
+    <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
+      <dt>Tool</dt>
+      <dd class="break-all font-mono">{activity.technicalLabel}</dd>
+    </div>
+    <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
+      <dt>Phase</dt>
+      <dd>{activity.phase}</dd>
+    </div>
+    <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
+      <dt>State</dt>
+      <dd>{stateLabel}</dd>
+    </div>
+    {#if tool.toolCallId}
+      <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
+        <dt>Call id</dt>
+        <dd class="break-all font-mono">{tool.toolCallId}</dd>
+      </div>
+    {/if}
+    {#if tool.errorText}
+      <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2 text-error">
+        <dt>Error</dt>
+        <dd>{tool.errorText}</dd>
+      </div>
+    {/if}
+  </dl>
+</details>

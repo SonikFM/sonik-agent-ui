@@ -5,6 +5,8 @@ export interface AgentWorkflowSuggestion {
   familyId: "booking-context-intake" | "booking-event" | "booking-reservation" | "amplify-campaign-template";
   kind: "intake" | "command-workflow";
   description: string;
+  readiness: "ready" | "needs_context" | "approval_required" | "draft_only";
+  readinessLabel: string;
 }
 
 export interface AgentWorkflowSuggestionContext {
@@ -23,7 +25,9 @@ const WORKFLOW_SUGGESTIONS: Record<AgentWorkflowSuggestion["skillId"], AgentWork
     skillId: "booking.context.intake",
     familyId: "booking-context-intake",
     kind: "intake",
-    description: "Create a bookable venue, schedule, or inventory manifest.",
+    description: "Guided intake for venue schedules, inventory, policies, and manifest drafts.",
+    readiness: "draft_only",
+    readinessLabel: "Draft",
     prompt: [
       "Use searchSkillCatalog to find booking.context.intake, then learnSkill for workflow, policy, context, and commands.",
       "Start a booking context intake for setting up a venue schedule or bookable inventory.",
@@ -36,7 +40,9 @@ const WORKFLOW_SUGGESTIONS: Record<AgentWorkflowSuggestion["skillId"], AgentWork
     skillId: "booking.event.create",
     familyId: "booking-event",
     kind: "intake",
-    description: "Draft an event manifest with tickets, access, timing, and policy details.",
+    description: "Draft event timing, inventory, access, payment, and policy details.",
+    readiness: "draft_only",
+    readinessLabel: "Draft",
     prompt: [
       "Use searchSkillCatalog to find booking.event.create, then learnSkill for workflow, policy, context, and commands.",
       "Start an event creation intake artifact in the canvas.",
@@ -49,7 +55,9 @@ const WORKFLOW_SUGGESTIONS: Record<AgentWorkflowSuggestion["skillId"], AgentWork
     skillId: "booking.reservation.create",
     familyId: "booking-reservation",
     kind: "command-workflow",
-    description: "Use availability, guest creation, and booking creation commands.",
+    description: "Run the canonical availability → guest → booking path with host approval.",
+    readiness: "needs_context",
+    readinessLabel: "Needs page",
     prompt: [
       "Use searchSkillCatalog to find booking.reservation.create, then learnSkill before using commands.",
       "Use the canonical reservation path: learnCommand booking.get.availability, booking.create.guest, and booking.create.booking.",
@@ -62,7 +70,9 @@ const WORKFLOW_SUGGESTIONS: Record<AgentWorkflowSuggestion["skillId"], AgentWork
     skillId: "amplify.campaign.template.create",
     familyId: "amplify-campaign-template",
     kind: "intake",
-    description: "Draft an Amplify campaign wizard template from offer, audience, and channel context.",
+    description: "Draft offer, audience, channel, compliance, and campaign wizard template state.",
+    readiness: "draft_only",
+    readinessLabel: "Draft",
     prompt: [
       "Use searchSkillCatalog to find amplify.campaign.template.create, then learnSkill for workflow, policy, context, and commands.",
       "Start an Amplify campaign template intake artifact in the canvas.",

@@ -17,6 +17,8 @@ assert.deepEqual(defaultSuggestions.map((entry) => entry.skillId), [
 for (const suggestion of defaultSuggestions) {
   assert.match(suggestion.prompt, /searchSkillCatalog/);
   assert.match(suggestion.prompt, /learnSkill/);
+  assert.ok(suggestion.description.length > 20);
+  assert.ok(suggestion.readinessLabel.length > 0);
   assert.equal(suggestion.prompt.includes("Weather"), false);
   assert.equal(suggestion.prompt.includes("GitHub"), false);
   assert.equal(suggestion.prompt.includes("Crypto"), false);
@@ -30,6 +32,7 @@ const bookingDetailSuggestions = createWorkflowSuggestions({
   commandFamilies: ["booking-reservations"],
 });
 assert.equal(bookingDetailSuggestions[0].skillId, "booking.reservation.create");
+assert.equal(bookingDetailSuggestions[0].readiness, "needs_context");
 assert.match(bookingDetailSuggestions[0].prompt, /booking\.get\.availability/);
 assert.match(bookingDetailSuggestions[0].prompt, /booking\.create\.guest/);
 assert.match(bookingDetailSuggestions[0].prompt, /booking\.create\.booking/);
@@ -57,6 +60,7 @@ const venueSuggestions = createWorkflowSuggestions({
   skillFamilies: ["booking-context-intake"],
 });
 assert.equal(venueSuggestions[0].skillId, "booking.context.intake");
+assert.equal(venueSuggestions[0].readiness, "draft_only");
 assert.match(venueSuggestions[0].prompt, /Do not execute booking mutations/);
 
 const filteredBookingSuggestions = createWorkflowSuggestions({

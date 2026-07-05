@@ -59,7 +59,10 @@ assert.equal(normalizeToolName("executeCommand"), "executeCommand");
 const toolCallBlockSource = await import("node:fs/promises")
   .then((fs) => fs.readFile(new URL("../../packages/chat-surface/src/components/ToolCallBlock.svelte", import.meta.url), "utf8"));
 assert.match(toolCallBlockSource, /resolveToolActivity\(tool\.toolName, tool\.state, labels\)/);
-assert.match(toolCallBlockSource, /title=\{title\}/);
+assert.doesNotMatch(toolCallBlockSource, /title=\{.*technicalLabel/);
+assert.doesNotMatch(toolCallBlockSource, /title=\{title\}/);
+assert.match(toolCallBlockSource, /<details/);
+assert.match(toolCallBlockSource, /Technical tool receipt/);
 assert.doesNotMatch(toolCallBlockSource, /return\s+tool\.toolName/);
 assert.doesNotMatch(toolCallBlockSource, /\?\?\s*tool\.toolName/);
 

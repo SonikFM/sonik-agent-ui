@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import { dev } from "$app/environment";
+  import { browser, dev } from "$app/environment";
   import { env as publicEnv } from "$env/dynamic/public";
   import type { PageData } from "./$types";
   import { SvelteSet, SvelteMap } from "svelte/reactivity";
@@ -244,7 +244,7 @@
   let sessionBootstrapPromise: Promise<void> | null = null;
   let hostContextWaitTimer: number | null = null;
   let hostPageContext = $state<AgentHostMergedPageContext | null>(null);
-  let embeddedHostContextExpected = $state(false);
+  let embeddedHostContextExpected = $state(browser && new URLSearchParams(window.location.search).has("agentUiHostOrigin"));
   let embeddedUrlTheme: string | null = null;
   let embedMode = $state<AgentEmbedMode>(getInitialEmbedIntent().mode);
   let embedRailMode = $state<AgentEmbedRailMode>(getInitialEmbedIntent().railMode);
@@ -314,6 +314,7 @@
         ? true
         : Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen),
   );
+  const showCanvasDeveloperPanels = $derived(dev || !isEmbeddedHostContextExpected());
   const agentActivity = $derived<AgentActivityStatus | null>(createAgentActivityStatus());
   const pageAssertions = $derived<AgentUiPageAssertions>({
     schemaVersion: "sonik.agent_ui.assertions.v1",
@@ -2745,6 +2746,7 @@
       activeArtifactVersion={activeArtifactVersionNumber}
       onArtifactVersionChange={handleArtifactVersionChange}
       documentAvailable={documentEditorOpen}
+      showDeveloperPanels={showCanvasDeveloperPanels}
       documentTitle={documentFrameTitle}
       documentSubtitle={documentFrameSubtitle}
     >

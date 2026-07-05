@@ -9,6 +9,11 @@
   export interface AgentSuggestion {
     label: string;
     prompt: string;
+    description?: string;
+    familyId?: string;
+    kind?: string;
+    readiness?: "ready" | "needs_context" | "approval_required" | "draft_only";
+    readinessLabel?: string;
   }
 
   export interface AgentActivityStatus {
@@ -157,12 +162,29 @@
             </p>
           </div>
 
-          <div class="flex flex-wrap gap-2 justify-center">
+          <div class="grid gap-3 sm:grid-cols-2" aria-label="Suggested agent workflows">
             {#each suggestions as suggestion (suggestion.label)}
               <button
+                type="button"
                 onclick={() => { onSelectSuggestion?.(suggestion); submit(suggestion.prompt); }}
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
-                {suggestion.label}
+                class="group rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                data-workflow-suggestion={suggestion.familyId ?? suggestion.label}
+                data-workflow-readiness={suggestion.readiness ?? "ready"}
+              >
+                <span class="flex items-start justify-between gap-3">
+                  <span class="min-w-0">
+                    <span class="block text-sm font-semibold text-foreground">{suggestion.label}</span>
+                    {#if suggestion.description}
+                      <span class="mt-1 block text-xs leading-5 text-muted-foreground">{suggestion.description}</span>
+                    {/if}
+                  </span>
+                  <span class="rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    {suggestion.readinessLabel ?? (suggestion.readiness === "needs_context" ? "Context" : suggestion.readiness === "approval_required" ? "Approval" : suggestion.readiness === "draft_only" ? "Draft" : "Ready")}
+                  </span>
+                </span>
+                {#if suggestion.familyId}
+                  <span class="mt-3 block font-mono text-[11px] text-muted-foreground/80">{suggestion.familyId}</span>
+                {/if}
               </button>
             {/each}
           </div>
