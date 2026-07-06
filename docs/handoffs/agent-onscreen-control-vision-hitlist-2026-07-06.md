@@ -106,7 +106,7 @@ Housekeeping: **`ui-dojo/` is a verbatim unmodified Mastra demo clone — delete
 | 9 | `editAndApprove` verb + diff-based state sync confirmation | eng | S–M | Light |
 | 10 | Install-review page → editor read path → listing → builder canvas (sequence per §6) | UI program | L | Yes (all) |
 | 11 | Delete `ui-dojo/`; decide json-render vendor strategy after devtools/no-ai port | hygiene | S | No |
-| 12 | Write the marketplace-term convergence decision (template marketplace vs commerce marketplace) | docs | S | Dan decision |
+| 12 | ~~Write the marketplace-term convergence decision~~ **DECIDED (Dan, 2026-07-06):** the current work is the **agent marketplace** (workflows / templates / workspaces / agents / skills) — a deliberate primer for the future full B2B/B2C commerce marketplace PRD. One strong marketplace model for all things comes later; the agent marketplace establishes the patterns first. Refer to them as "agent marketplace" vs "commerce marketplace" in docs. | docs | done | — |
 
 ---
 Full agent reports (capability matrix with URLs, complete adoption table, full critique) live in the session transcript of 2026-07-06; this doc is the durable synthesis.
