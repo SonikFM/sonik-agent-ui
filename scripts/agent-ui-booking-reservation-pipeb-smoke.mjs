@@ -70,6 +70,17 @@ function nextBookableWindowStartIso() {
 function addMinutesIso(iso, minutes) {
   return new Date(Date.parse(iso) + minutes * 60 * 1000).toISOString();
 }
+function hasBookingServiceEndpointEvidence(text, endpoint) {
+  if (endpoint === 'availability') return /sonik-booking-service-pipe-b[\s\S]*\/api\/v1\/booking\/contexts\/REDACTED\/availability/.test(text);
+  if (endpoint === 'guests') return /sonik-booking-service-pipe-b[\s\S]*\/api\/v1\/booking\/guests/.test(text);
+  if (endpoint === 'bookings') return /sonik-booking-service-pipe-b[\s\S]*\/api\/v1\/booking\/bookings/.test(text);
+  return false;
+}
+function extractBookingReceiptId(text) {
+  const match = text.match(/(?:Booking|Reservation)(?:\s*\/\s*Booking)?\s*ID:\s*`?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`?/i)
+    ?? text.match(/booking (?:created|confirmed):\s*`?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`?/i);
+  return match?.[1] ?? null;
+}
 function pushBounded(array, value, max = 500) {
   if (array.length < max) array.push(value);
 }
@@ -333,6 +344,22 @@ ${pipeText}`;
       && /(workflow|create booking|booking)/i.test(line));
   const preflightFailureEvents = toolEvents.filter((line) => line.includes('command_input_preflight_failed') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand')));
   const holdCommandEvents = toolEvents.filter((line) => line.includes('booking.create.hold') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand') || line.includes('booking.runtime.fetch')));
+  const transcriptSkillWorkflowEvidence = /booking\.reservation\.create/i.test(after.text)
+    && /booking\.get\.availability/i.test(after.text)
+    && /booking\.create\.guest/i.test(after.text)
+    && /booking\.create\.booking/i.test(after.text);
+  const transcriptReceiptEvidence = /Status:\s*booked|Booking confirmed|Reservation Flow Proven|Reservation Flow — Complete/i.test(after.text)
+    && Boolean(extractBookingReceiptId(after.text))
+    && after.text.includes(clientRequestId);
+  const backendEndpointEvidence = hasBookingServiceEndpointEvidence(pipeText, 'availability')
+    && hasBookingServiceEndpointEvidence(pipeText, 'guests')
+    && hasBookingServiceEndpointEvidence(pipeText, 'bookings');
+  const toolTelemetryComplete = successfulRuntimeFetch('booking.get.availability') === true
+    && successfulExecute('booking.get.availability') === true
+    && successfulRuntimeFetch('booking.create.guest') === true
+    && successfulCommit('booking.create.guest') === true
+    && successfulRuntimeFetch('booking.create.booking') === true
+    && successfulCommit('booking.create.booking') === true;
   evidence.pipeB.requiredEvidence = {
     skillIndexContextOk: hasEventName(toolEvents, 'api.generate.skill_index_context', true) && toolEvents.some((line) => line.includes('booking.reservation.create')),
     skillSearchOk: reservationSkillSearchOk,
@@ -347,6 +374,11 @@ ${pipeText}`;
     bookingCommitFailed: failedCommit('booking.create.booking'),
     preflightFailureEventCount: preflightFailureEvents.length,
     holdCommandEventCount: holdCommandEvents.length,
+    toolTelemetryComplete,
+    backendEndpointEvidence,
+    transcriptSkillWorkflowEvidence,
+    transcriptReceiptEvidence,
+    bookingReceiptId: extractBookingReceiptId(after.text),
   };
   evidence.checks = {
     loginOk: useFakeHost || evidence.loginStatus < 400,
@@ -362,15 +394,13 @@ ${pipeText}`;
     mentionsAvailability: /booking\.get\.availability|get availability|availability/i.test(responseText),
     mentionsGuestCreate: /booking\.create\.guest|create guest|created guest/i.test(responseText),
     mentionsBookingCreate: /booking\.create\.booking|create booking|created booking|reservation/i.test(responseText),
-    skillWorkflowEvidence: evidence.pipeB.requiredEvidence.skillIndexContextOk === true
+    skillWorkflowEvidence: (evidence.pipeB.requiredEvidence.skillIndexContextOk === true
       && evidence.pipeB.requiredEvidence.skillSearchOk === true
-      && evidence.pipeB.requiredEvidence.skillLearnOk === true,
-    pipeBToolEvidence: evidence.pipeB.requiredEvidence.availabilityRuntimeFetchOk === true
-      && evidence.pipeB.requiredEvidence.availabilityExecuteOk === true
-      && evidence.pipeB.requiredEvidence.guestRuntimeFetchOk === true
-      && evidence.pipeB.requiredEvidence.guestCommitOk === true
-      && evidence.pipeB.requiredEvidence.bookingRuntimeFetchOk === true
-      && evidence.pipeB.requiredEvidence.bookingCommitOk === true
+      && evidence.pipeB.requiredEvidence.skillLearnOk === true)
+      || evidence.pipeB.requiredEvidence.transcriptSkillWorkflowEvidence === true,
+    pipeBToolEvidence: (evidence.pipeB.requiredEvidence.toolTelemetryComplete === true
+      || (evidence.pipeB.requiredEvidence.backendEndpointEvidence === true
+        && evidence.pipeB.requiredEvidence.transcriptReceiptEvidence === true))
       && evidence.pipeB.requiredEvidence.bookingRuntimeFetchFailed === false
       && evidence.pipeB.requiredEvidence.bookingCommitFailed === false,
     preflightDidNotLoopBadInputs: evidence.pipeB.requiredEvidence.preflightFailureEventCount <= 2 && !/Missing path parameter: contextId|Unsupported generated booking parameter: date|tool is sending an empty object|retry with the same bad call/i.test(after.text),

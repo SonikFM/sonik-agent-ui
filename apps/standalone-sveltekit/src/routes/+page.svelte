@@ -72,6 +72,11 @@
     createQuestionAnswerStateChanges,
   } from "$lib/agent-workflows/page-control-workflow";
   import {
+    decideTrustedIntakeControllerAction,
+    isTrustedIntakeControllerAction,
+    type TrustedIntakeControllerAction,
+  } from "$lib/agent-workflows/trusted-intake-controller";
+  import {
     AGENT_MODEL_OPTIONS,
     AGENT_SKILL_OPTIONS,
     AGENT_TOOL_FAMILY_OPTIONS,
@@ -192,6 +197,7 @@
   let activeArtifactStateStore = $state<StateStore | undefined>();
   let activeArtifactStateStoreKey = $state<string | null>(null);
   let activeArtifactStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let activeArtifactPersistence = $state<{ artifactId: string; promise: Promise<boolean> } | null>(null);
   let pendingActiveArtifactStateChanges: JsonRenderStateChange[] = [];
   let pendingArtifactIntent = $state<string | null>(null);
   let documentEditorOpen = $state(false);
@@ -711,10 +717,10 @@
     activeArtifactVersions = snapshot.versions;
   }
 
-  function persistJsonRenderArtifactSnapshot(snapshot: ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }, source: "agent" | "user-edit" | "system" = "agent"): void {
+  function persistJsonRenderArtifactSnapshot(snapshot: ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }, source: "agent" | "user-edit" | "system" = "agent"): Promise<boolean> {
     const sessionId = activeSessionId ?? snapshot.record.sessionId;
-    if (!sessionId) return;
-    void workspaceFetch("/api/artifact", {
+    if (!sessionId) return Promise.resolve(false);
+    const persistence = workspaceFetch("/api/artifact", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -737,13 +743,17 @@
         reason: source,
         ok: true,
       });
+      return true;
     }).catch((error) => {
       reportClientEffectError("artifact.persistence.error", error, {
         sessionId,
         root: snapshot.artifact.content.root,
         elementCount: Object.keys(snapshot.artifact.content.elements ?? {}).length,
       });
+      return false;
     });
+    activeArtifactPersistence = { artifactId: snapshot.artifact.id, promise: persistence };
+    return persistence;
   }
 
 
@@ -2484,30 +2494,7 @@
     }
   }
 
-  type TrustedIntakeControllerAction =
-    | "saveDraft"
-    | "editDraft"
-    | "submitToAgent"
-    | "reviseWithAgent"
-    | "requestApproval"
-    | "cancelApproval"
-    | "approveAndRun";
-
-  const trustedIntakeControllerActions = new Set<string>([
-    "saveDraft",
-    "editDraft",
-    "submitToAgent",
-    "reviseWithAgent",
-    "requestApproval",
-    "cancelApproval",
-    "approveAndRun",
-  ]);
-
-  function isTrustedIntakeControllerAction(actionName: string): actionName is TrustedIntakeControllerAction {
-    return trustedIntakeControllerActions.has(actionName);
-  }
-
-  async function handleTrustedIntakeControllerAction(actionName: TrustedIntakeControllerAction, params: Record<string, unknown>): Promise<boolean> {
+  async function handleTrustedIntakeControllerAction(actionName: TrustedIntakeControllerAction, _params: Record<string, unknown>): Promise<boolean> {
     const artifactBeforePersist = activeArtifact;
     if (!artifactBeforePersist) {
       logArtifactTelemetry({
@@ -2517,6 +2504,25 @@
         reason: actionName,
         ok: false,
         error: "Controller actions require an active intake artifact.",
+      });
+      return false;
+    }
+    const decision = decideTrustedIntakeControllerAction({
+      actionName,
+      isBookingIntakeArtifact: isActiveBookingIntakeArtifact(),
+      readiness: getActiveIntakeApprovalReadiness(),
+    });
+    if (!decision.ok) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "intake.controller_action.blocked",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: artifactBeforePersist.id,
+        artifactVersion: artifactBeforePersist.version,
+        reason: actionName,
+        toolCallId: decision.commandId,
+        ok: false,
+        error: decision.reason ?? decision.code,
       });
       return false;
     }
@@ -2537,9 +2543,25 @@
         return false;
       }
     }
+    if (activeArtifactPersistence?.artifactId === artifactBeforePersist.id) {
+      const persisted = await activeArtifactPersistence.promise;
+      if (!persisted) {
+        logArtifactTelemetry({
+          source: "client",
+          event: "intake.controller_action.blocked",
+          sessionId: activeSessionId ?? undefined,
+          artifactId: artifactBeforePersist.id,
+          artifactVersion: artifactBeforePersist.version,
+          reason: actionName,
+          toolCallId: decision.commandId,
+          ok: false,
+          error: "Artifact was not persisted; controller action was not sent.",
+        });
+        return false;
+      }
+    }
 
     const artifact = activeArtifact ?? artifactBeforePersist;
-    const commandId = typeof params.commandId === "string" && params.commandId.trim() ? params.commandId.trim() : "booking.create.context";
     logArtifactTelemetry({
       source: "client",
       event: "intake.controller_action.accepted",
@@ -2547,7 +2569,7 @@
       artifactId: artifact.id,
       artifactVersion: artifact.version,
       reason: actionName,
-      toolCallId: commandId,
+      toolCallId: decision.commandId,
       ok: true,
     });
 
@@ -2556,7 +2578,7 @@
     const prompt = createTrustedIntakeControllerPrompt(actionName, {
       artifactId: artifact.id,
       artifactVersion: artifact.version,
-      commandId,
+      commandId: decision.commandId,
     });
     sendUserTurnWithEntryFrom(prompt, "workflow_launcher");
     return true;

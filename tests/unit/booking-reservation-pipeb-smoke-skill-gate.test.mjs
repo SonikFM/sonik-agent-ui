@@ -12,5 +12,8 @@ assert.match(script, /tool\.learnSkill/, 'reservation smoke must collect skill l
 assert.match(script, /booking\.create\.hold/, 'reservation smoke must explicitly guard against the hold command regression');
 assert.match(script, /noHoldCommandUsed/, 'reservation smoke must fail if hold command is used');
 assert.match(script, /skillWorkflowEvidence/, 'reservation smoke must expose a single skill workflow evidence check');
+assert.match(script, /backendEndpointEvidence/, 'reservation smoke must preserve Pipe-B backend endpoint evidence when tool telemetry is redacted');
+assert.match(script, /transcriptReceiptEvidence/, 'reservation smoke must require transcript receipt evidence for redacted telemetry fallback');
+assert.match(script, /toolTelemetryComplete/, 'reservation smoke must keep first-class Agent UI tool telemetry evidence separate from fallback evidence');
 
 console.log(JSON.stringify({ ok: true, checked: 'booking-reservation-pipeb-smoke-skill-gate' }));
