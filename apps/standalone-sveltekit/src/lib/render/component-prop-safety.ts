@@ -122,7 +122,7 @@ export function sanitizeQuestionCardProps(input: Partial<QuestionCardProps> | Re
       confidence: typeof raw.confidence === "number" && Number.isFinite(raw.confidence) ? raw.confidence : null,
       reviewRequired: raw.reviewRequired === true,
       submitLabel: typeof raw.submitLabel === "string" && raw.submitLabel.trim() ? raw.submitLabel : "Save answer",
-      skipLabel: typeof raw.skipLabel === "string" && raw.skipLabel.trim() ? raw.skipLabel : "Mark unknown",
+      skipLabel: typeof raw.skipLabel === "string" && raw.skipLabel.trim() ? raw.skipLabel : "Skip for now",
     },
     telemetry: degraded ? createTelemetry("QuestionCard", issues) : null,
   };

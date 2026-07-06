@@ -375,10 +375,10 @@
           {:else}
             <section class="space-y-3" aria-labelledby="agent-addons-heading">
               <div>
-                <h3 id="agent-addons-heading" class="font-semibold text-foreground">MCP add-ons</h3>
-                <p class="text-sm text-muted-foreground">Placeholder only. Add-ons will use the same off/ask/allow model plus host-controlled OAuth/session scope.</p>
+                <h3 id="agent-addons-heading" class="font-semibold text-foreground">Add-ons</h3>
+                <p class="text-sm text-muted-foreground">Coming soon. Add-ons will use the same off/ask/allow permission model, with connection scopes controlled by your workspace.</p>
               </div>
-              {#each (addons.length ? addons : [{ id: 'mcp-placeholder', label: 'MCP add-ons', status: 'disabled', description: 'Connector installation is not enabled in this build.', disabledReason: 'MCP add-on registry is not mounted yet.' }]) as addon (addon.id)}
+              {#each (addons.length ? addons : [{ id: 'mcp-placeholder', label: 'Connectors', status: 'pending', description: 'Connector installation is coming soon to this workspace.', disabledReason: 'Add-ons are not available yet.' }]) as addon (addon.id)}
                 <article class="rounded-xl border border-border bg-background/60 p-4">
                   <div class="flex items-center justify-between gap-3">
                     <h4 class="font-medium text-foreground">{addon.label}</h4>

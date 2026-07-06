@@ -3,15 +3,38 @@
   import { Badge } from "$lib/components/ui/badge";
 
   type MissingField = string | { field?: string | null; label?: string | null; reason?: string | null; severity?: "blocking" | "warning" | "optional" | null };
+  type QuestionRef = { id: string; label?: string | null; required?: boolean | null };
 
   interface Props extends BaseComponentProps<{
     title?: string | null;
     items?: MissingField[] | null;
+    questions?: QuestionRef[] | null;
+    questionStates?: Record<string, unknown> | null;
     emptyMessage?: string | null;
   }> {}
 
   let { props }: Props = $props();
-  const items = $derived(props.items ?? []);
+
+  const SEVERITY_LABELS: Record<string, string> = { blocking: "Required", warning: "Review", optional: "Optional" };
+
+  function deriveFromQuestions(questions: QuestionRef[], states: Record<string, unknown>): MissingField[] {
+    const missing: MissingField[] = [];
+    for (const question of questions) {
+      const state = typeof states[question.id] === "string" ? (states[question.id] as string) : "draft";
+      if (state === "answered") continue;
+      missing.push({
+        field: question.id,
+        label: question.label ?? question.id,
+        reason: state === "skipped" ? "Skipped for now" : null,
+        severity: question.required === true && state !== "skipped" ? "blocking" : "optional",
+      });
+    }
+    return missing;
+  }
+
+  const items = $derived(
+    props.items ?? (Array.isArray(props.questions) ? deriveFromQuestions(props.questions, props.questionStates ?? {}) : []),
+  );
 
   function fieldLabel(item: MissingField) {
     return typeof item === "string" ? item : item.label ?? item.field ?? "Missing field";
@@ -36,7 +59,7 @@
             <p class="text-sm font-medium">{fieldLabel(item)}</p>
             {#if reason(item)}<p class="text-xs text-muted-foreground">{reason(item)}</p>{/if}
           </div>
-          <Badge variant={severity(item) === "blocking" ? "destructive" : "secondary"}>{severity(item)}</Badge>
+          <Badge variant={severity(item) === "blocking" ? "destructive" : "secondary"}>{SEVERITY_LABELS[severity(item)] ?? severity(item)}</Badge>
         </li>
       {/each}
     </ul>

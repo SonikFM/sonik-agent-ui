@@ -31,6 +31,7 @@
   import { createInMemoryArtifactWarehouse, type ArtifactWarehouseSnapshot, type ArtifactWarehouseVersion } from "$lib/artifacts/artifact-warehouse";
   import ArtifactInspector from "$lib/artifacts/ArtifactInspector.svelte";
   import SessionRail from "$lib/session/SessionRail.svelte";
+  import { friendlySessionError } from "$lib/session/friendly-errors";
   import ThemePicker from "$lib/theme/ThemePicker.svelte";
   import { applyEmbeddedThemeSetting } from "$lib/theme/theme-runtime";
   import {
@@ -209,6 +210,7 @@
   let lastDocumentPromotionKey = $state<string | null>(null);
   let sessions = $state<WorkspaceSessionSummary[]>([]);
   let archivedSessionCount = $state(0);
+  let archivedSessions = $state<WorkspaceSessionSummary[]>([]);
   let activeSessionId = $state<string | null>(null);
   let sessionSelectionRevision = 0;
   let sessionRailBusy = $state(false);
@@ -1690,7 +1692,7 @@
     logSessionTelemetry("session.bootstrap.start", { reason, mode: hostPageKey ? "embedded-page-context" : "standalone" });
     sessionBootstrapPromise = initializeSessions(reason)
       .catch((error) => {
-        sessionRailError = error instanceof Error ? error.message : String(error);
+        sessionRailError = friendlySessionError("We couldn't load your chats.", error);
         logSessionTelemetry("session.bootstrap.error", { ok: false, error: sessionRailError, reason });
       })
       .finally(() => {
@@ -1731,7 +1733,7 @@
       sessions = (await response.json()) as WorkspaceSessionSummary[];
       void loadArchivedSessionCount();
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't load your chats.", error);
     }
   }
 
@@ -1739,7 +1741,8 @@
     try {
       const response = await workspaceFetch("/api/sessions?archived=true");
       if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
-      archivedSessionCount = ((await response.json()) as WorkspaceSessionSummary[]).length;
+      archivedSessions = (await response.json()) as WorkspaceSessionSummary[];
+      archivedSessionCount = archivedSessions.length;
     } catch (error) {
       logSessionTelemetry("session.archive_count.error", {
         ok: false,
@@ -1815,7 +1818,7 @@
       logSessionTelemetry("session.create.success", { sessionId: session.id, mode: session.mode });
       return session;
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't start a new chat.", error);
       logSessionTelemetry("session.create.error", { ok: false, error: sessionRailError });
       return null;
     } finally {
@@ -1848,7 +1851,7 @@
       logSessionTelemetry("session.switch.success", { sessionId: detail.session.id, mode: detail.session.mode });
       return true;
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't open that chat.", error);
       logSessionTelemetry("session.switch.error", { sessionId, ok: false, error: sessionRailError });
       return false;
     } finally {
@@ -1915,7 +1918,7 @@
       }
       logSessionTelemetry("session.archive.success", { sessionId, reason: "hidden_from_active_recents" });
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't archive that chat.", error);
       logSessionTelemetry("session.archive.error", { sessionId, ok: false, error: sessionRailError });
     } finally {
       sessionRailBusy = false;
@@ -1949,8 +1952,46 @@
       }
       logSessionTelemetry("session.delete.success", { sessionId });
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't delete that chat.", error);
       logSessionTelemetry("session.delete.error", { sessionId, ok: false, error: sessionRailError });
+    } finally {
+      sessionRailBusy = false;
+    }
+  }
+
+  async function toggleSessionImportant(sessionId: string, important: boolean): Promise<void> {
+    if (sessionRailBusy) return;
+    sessionRailBusy = true;
+    sessionRailError = null;
+    try {
+      const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}/important`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ important }),
+      });
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      await loadSessions();
+      logSessionTelemetry("session.important.success", { sessionId, reason: important ? "pinned" : "unpinned" });
+    } catch (error) {
+      sessionRailError = friendlySessionError(important ? "We couldn't pin that chat." : "We couldn't unpin that chat.", error);
+      logSessionTelemetry("session.important.error", { sessionId, ok: false, error: sessionRailError });
+    } finally {
+      sessionRailBusy = false;
+    }
+  }
+
+  async function restoreSession(sessionId: string): Promise<void> {
+    if (sessionRailBusy) return;
+    sessionRailBusy = true;
+    sessionRailError = null;
+    try {
+      const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}/unarchive`, { method: "POST" });
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      await loadSessions();
+      logSessionTelemetry("session.unarchive.success", { sessionId });
+    } catch (error) {
+      sessionRailError = friendlySessionError("We couldn't restore that chat.", error);
+      logSessionTelemetry("session.unarchive.error", { sessionId, ok: false, error: sessionRailError });
     } finally {
       sessionRailBusy = false;
     }
@@ -1970,7 +2011,7 @@
       sessions = upsertSessionSummary(sessions, session);
       logSessionTelemetry("session.rename.success", { sessionId: session.id });
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't rename that chat.", error);
       logSessionTelemetry("session.rename.error", { sessionId, ok: false, error: sessionRailError });
     }
   }
@@ -2166,7 +2207,7 @@
       lastPersistStatus = "success";
       logSessionTelemetry("session.messages.persist_success", { sessionId, reason: `${messagesToPersist.length} message(s)` });
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't save your latest messages.", error);
       lastPersistStatus = "error";
       logSessionTelemetry("session.messages.persist_error", {
         sessionId,
@@ -2193,7 +2234,7 @@
         await persistPendingDocumentSnapshots();
       } catch (error) {
         failed = true;
-        sessionRailError = error instanceof Error ? error.message : String(error);
+        sessionRailError = friendlySessionError("We couldn't save your document changes.", error);
         throw error;
       } finally {
         documentPersistPromise = null;
@@ -2208,7 +2249,7 @@
       await flushPendingDocumentPersistence();
       return true;
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't save your document changes.", error);
       return false;
     }
   }
@@ -2357,7 +2398,7 @@
     } catch (error) {
       agentModelOptions = AGENT_MODEL_OPTIONS;
       agentModelCatalogStatus = "error";
-      agentModelCatalogMessage = error instanceof Error ? error.message : "model_catalog_failed";
+      agentModelCatalogMessage = friendlySessionError("We couldn't load the model list — using the default models.", error);
     }
   }
 
@@ -2773,7 +2814,7 @@
         documentPreferredView = inferPreferredDocumentView(document.language);
         lastPersistedDocumentSignature = createDocumentSnapshotSignature(document);
       } catch (error) {
-        sessionRailError = error instanceof Error ? error.message : String(error);
+        sessionRailError = friendlySessionError("We couldn't open the workspace document.", error);
         reportClientEffectError("document_frame.open_error", error, { sessionId: activeSessionId });
         return;
       }
@@ -2868,6 +2909,7 @@
       {currentSession}
       {activeSessionId}
       archivedCount={archivedSessionCount}
+      {archivedSessions}
       busy={sessionRailBusy}
       error={sessionRailError}
       collapsed={workspaceRailMode === "collapsed"}
@@ -2875,6 +2917,8 @@
       onSwitch={(sessionId) => void switchSession(sessionId)}
       onArchive={(sessionId) => void archiveSession(sessionId)}
       onDelete={(sessionId) => void deleteSession(sessionId)}
+      onToggleImportant={(sessionId, important) => void toggleSessionImportant(sessionId, important)}
+      onRestore={(sessionId) => void restoreSession(sessionId)}
     />
   {/snippet}
 

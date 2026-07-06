@@ -16,7 +16,26 @@
   const isError = $derived(activity.isError);
   const label = $derived(activity.label);
   const stateLabel = $derived(tool.state ?? "unknown");
+
+  const commitSuccess = $derived.by(() => {
+    const output = tool.output as { kind?: string; ok?: boolean; command?: { input?: { name?: unknown } } } | null | undefined;
+    if (!output || output.kind !== "intake-command-commit" || output.ok !== true) return null;
+    const name = typeof output.command?.input?.name === "string" && output.command.input.name.trim() ? output.command.input.name.trim() : null;
+    return { name };
+  });
 </script>
+
+{#if commitSuccess}
+  <p
+    class="mt-1 flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-medium text-primary"
+    role="status"
+    data-commit-receipt="success"
+  >
+    <span aria-hidden="true">✓</span>
+    {commitSuccess.name ? `“${commitSuccess.name}” was created.` : "Setup created."}
+    <span class="font-normal text-primary/80">Approved by your workspace and saved.</span>
+  </p>
+{/if}
 
 <details
   class="tool-call-block group rounded-lg border border-transparent text-sm open:border-border open:bg-muted/30 open:px-3 open:py-2"

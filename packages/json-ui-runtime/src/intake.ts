@@ -192,7 +192,7 @@ export function createInteractiveSurfaceJsonRenderSpec(surfaceInput: unknown): J
         confidence: question.confidence ?? null,
         reviewRequired: question.reviewRequired,
         submitLabel: "Save answer",
-        skipLabel: "Mark unknown",
+        skipLabel: "Skip for now",
       },
       on: {
         submit: {

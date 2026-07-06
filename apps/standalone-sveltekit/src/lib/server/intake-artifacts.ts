@@ -330,11 +330,21 @@ function createIntakeSurfaceSpec(surface: InteractiveSurfaceSpec): Spec {
     main: {
       type: "Stack",
       props: { direction: "vertical", gap: "md", wrap: null },
-      children: ["surface-header", ...questionIds],
+      children: ["surface-header", ...questionIds, "missing-fields"],
     },
     "surface-header": {
       type: "Card",
       props: { title: surface.title, description: surface.description || null },
+      children: [],
+    },
+    "missing-fields": {
+      type: "MissingFieldsList",
+      props: {
+        title: "Still needed",
+        questions: surface.questions.map((question) => ({ id: question.id, label: question.title, required: question.required === true })),
+        questionStates: { $bindState: "/questionStates" },
+        emptyMessage: "All required details are filled in.",
+      },
       children: [],
     },
   };
@@ -376,7 +386,7 @@ function createIntakeSurfaceSpec(surface: InteractiveSurfaceSpec): Spec {
         confidence: question.confidence ?? null,
         reviewRequired: question.reviewRequired,
         submitLabel: "Continue",
-        skipLabel: "Mark unknown",
+        skipLabel: "Skip for now",
       },
       on: {
         // Submit/skip must read the SAME state pointer QuestionCard binds its

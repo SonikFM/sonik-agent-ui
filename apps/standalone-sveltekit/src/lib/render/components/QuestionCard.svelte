@@ -241,18 +241,16 @@
     <div class="flex flex-wrap items-center gap-2">
       <Button type="button" onclick={() => submit(false)} data-question-action="submit" data-question-card-id={safeProps.questionId}>{safeProps.submitLabel ?? "Submit answer"}</Button>
       {#if safeProps.allowSkip !== false}
-        <Button type="button" variant="outline" onclick={() => submit(true)} data-question-action="skip" data-question-card-id={safeProps.questionId}>{safeProps.skipLabel ?? "Mark unknown"}</Button>
+        <Button type="button" variant="outline" onclick={() => submit(true)} data-question-action="skip" data-question-card-id={safeProps.questionId}>{safeProps.skipLabel ?? "Skip for now"}</Button>
       {/if}
       {#if visibleState === "saving"}
         <span class="text-xs font-medium text-primary">Saving answer and asking the next question…</span>
       {:else if visibleState === "answered"}
         <span class="text-xs font-medium text-primary">Answer saved</span>
       {:else if visibleState === "skipped"}
-        <span class="text-xs font-medium text-muted-foreground">Marked unknown</span>
+        <span class="text-xs font-medium text-muted-foreground">Skipped for now</span>
       {:else if visibleState === "failed" || visibleState === "error" || visibleState === "errored" || visibleState === "invalid"}
         <span class="text-xs font-medium text-destructive">Answer not saved. Retry this question before continuing.</span>
-      {:else if safeProps.writesTo}
-        <span class="text-xs text-muted-foreground">Writes to {safeProps.writesTo}</span>
       {/if}
     </div>
   </div>

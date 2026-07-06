@@ -204,7 +204,7 @@ async function findAgentFrame(page) {
       return frame;
     }
   }
-  throw new Error('Booking reservation embed did not open through the host controller or fallback controls');
+  throw new Error('Booking reservation embed did not open through window.__sonikAgentHost or fallback controls');
 }
 
 function parseTailSummaries(text) {

@@ -173,7 +173,7 @@
               What are we working on?
             </h2>
             <p class="text-muted-foreground">
-              Ask a question, launch a guided workflow, create a JSON-render artifact,
+              Ask a question, launch a guided workflow, build a live draft,
               or update the active document.
             </p>
           </div>
@@ -198,9 +198,6 @@
                     {suggestion.readinessLabel ?? (suggestion.readiness === "needs_context" ? "Context" : suggestion.readiness === "approval_required" ? "Approval" : suggestion.readiness === "draft_only" ? "Draft" : "Ready")}
                   </span>
                 </span>
-                {#if suggestion.familyId}
-                  <span class="mt-3 block font-mono text-[11px] text-muted-foreground/80">{suggestion.familyId}</span>
-                {/if}
               </button>
             {/each}
           </div>
@@ -303,7 +300,7 @@
   <AgentComposer
     bind:value={input}
     {status}
-    placeholder={isEmpty ? "Start a chat, create an artifact, or update the active document..." : "Ask a follow-up..."}
+    placeholder={isEmpty ? "Start a chat, build a live draft, or update the active document..." : "Ask a follow-up..."}
     onSubmit={submit}
     {onStop}
     {contextItems}

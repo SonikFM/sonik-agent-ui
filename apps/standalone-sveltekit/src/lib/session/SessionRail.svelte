@@ -5,6 +5,7 @@
     id: string;
     name: string;
     mode: "chat" | "artifact" | "document" | "research";
+    is_important?: boolean;
     message_count: number;
     updated_at: string;
     last_message_at: string | null;
@@ -15,6 +16,7 @@
     currentSession: WorkspaceSessionSummary | null;
     activeSessionId: string | null;
     archivedCount?: number;
+    archivedSessions?: WorkspaceSessionSummary[];
     busy?: boolean;
     error?: string | null;
     collapsed?: boolean;
@@ -22,6 +24,8 @@
     onSwitch: (sessionId: string) => void;
     onArchive: (sessionId: string) => void;
     onDelete: (sessionId: string) => void;
+    onToggleImportant?: (sessionId: string, important: boolean) => void;
+    onRestore?: (sessionId: string) => void;
   }
 
   let {
@@ -29,6 +33,7 @@
     currentSession,
     activeSessionId,
     archivedCount = 0,
+    archivedSessions = [],
     busy = false,
     error = null,
     collapsed = false,
@@ -36,9 +41,13 @@
     onSwitch,
     onArchive,
     onDelete,
+    onToggleImportant,
+    onRestore,
   }: Props = $props();
 
-  let contextMenu = $state<{ sessionId: string; sessionName: string; x: number; y: number } | null>(null);
+  const orderedSessions = $derived([...sessions].sort((a, b) => Number(b.is_important === true) - Number(a.is_important === true)));
+  let showArchived = $state(false);
+  let contextMenu = $state<{ sessionId: string; sessionName: string; important: boolean; x: number; y: number } | null>(null);
   let contextMenuElement = $state<HTMLDivElement | null>(null);
   let contextMenuTrigger: HTMLElement | null = null;
 
@@ -87,6 +96,7 @@
     contextMenu = {
       sessionId: session.id,
       sessionName: displaySessionName(session),
+      important: session.is_important === true,
       x: event.clientX,
       y: event.clientY,
     };
@@ -103,6 +113,7 @@
     contextMenu = {
       sessionId: session.id,
       sessionName: displaySessionName(session),
+      important: session.is_important === true,
       x: rect ? rect.right - 190 : event.clientX,
       y: rect ? rect.bottom + 4 : event.clientY,
     };
@@ -133,6 +144,13 @@
     closeContextMenu(true);
     onDelete(sessionId);
   }
+
+  function toggleImportantContextSession(): void {
+    if (!contextMenu) return;
+    const { sessionId, important } = contextMenu;
+    closeContextMenu(true);
+    onToggleImportant?.(sessionId, !important);
+  }
 </script>
 
 <div class="session-rail-shell" class:session-rail-shell--collapsed={collapsed} onclick={() => closeContextMenu()} role="presentation">
@@ -153,16 +171,16 @@
   {/if}
 
   <div class="session-rail-list" aria-busy={busy}>
-    {#each sessions as session (session.id)}
+    {#each orderedSessions as session (session.id)}
       <article class:active-session={session.id === activeSessionId} oncontextmenu={(event) => openContextMenu(event, session)}>
         <button
           type="button"
           class="session-select"
           onclick={() => onSwitch(session.id)}
           disabled={busy || session.id === activeSessionId}
-          aria-label={collapsed ? `${displaySessionName(session)} · ${sessionKind(session)}` : undefined}
+          aria-label={collapsed ? `${displaySessionName(session)} · ${sessionKind(session)}${session.is_important ? " · Pinned" : ""}` : undefined}
         >
-          <span>{collapsed ? compactSessionLabel(session) : displaySessionName(session)}</span>
+          <span>{#if session.is_important}<span class="session-pin" aria-hidden="true">★</span>{/if}{collapsed ? compactSessionLabel(session) : displaySessionName(session)}</span>
           {#if collapsed}
             <small>{sessionKindShort(session)}</small>
           {:else}
@@ -205,7 +223,28 @@
       <span>Current chat</span>
       <strong>{displaySessionName(currentSession)}</strong>
       {#if archivedCount > 0}
-        <small>{archivedCount} archived</small>
+        <button
+          type="button"
+          class="archived-toggle"
+          onclick={() => (showArchived = !showArchived)}
+          aria-expanded={showArchived}
+        >
+          {archivedCount} archived {showArchived ? "▾" : "▸"}
+        </button>
+        {#if showArchived}
+          <ul class="archived-list" aria-label="Archived chats">
+            {#each archivedSessions as archived (archived.id)}
+              <li>
+                <span class="archived-name">{displaySessionName(archived)}</span>
+                {#if onRestore}
+                  <button type="button" class="archived-restore" onclick={() => onRestore(archived.id)} disabled={busy}>Restore</button>
+                {/if}
+              </li>
+            {:else}
+              <li class="archived-name">Loading archived chats…</li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     </footer>
   {/if}
@@ -224,6 +263,9 @@
       }}
     >
       <p>{contextMenu.sessionName}</p>
+      {#if onToggleImportant}
+        <button type="button" role="menuitem" onclick={toggleImportantContextSession} disabled={busy}>{contextMenu.important ? "Unpin chat" : "Pin chat"}</button>
+      {/if}
       <button type="button" role="menuitem" onclick={archiveContextSession} disabled={busy}>Archive chat</button>
       <button type="button" role="menuitem" class="danger-action" onclick={deleteContextSession} disabled={busy}>Delete chat</button>
     </div>
@@ -485,9 +527,62 @@
     white-space: nowrap;
   }
 
-  footer small {
+  .session-pin {
+    margin-right: 0.3rem;
+    color: var(--primary, var(--foreground));
+    font-size: 0.75rem;
+  }
+
+  .archived-toggle {
+    justify-self: start;
+    border: none;
+    padding: 0;
+    background: none;
     color: var(--muted-foreground);
-    font-size: 0.68rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .archived-toggle:hover {
+    color: var(--foreground);
+  }
+
+  .archived-list {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0.35rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .archived-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .archived-name {
+    overflow: hidden;
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .archived-restore {
+    flex-shrink: 0;
+    border: 1px solid var(--sonik-border-color);
+    border-radius: 0.5rem;
+    padding: 0.1rem 0.5rem;
+    background: none;
+    color: var(--foreground);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .archived-restore:hover:not(:disabled) {
+    background: var(--app-control-bg, var(--card));
   }
 
   .session-context-menu {
