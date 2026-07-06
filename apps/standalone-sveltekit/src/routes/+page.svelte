@@ -68,6 +68,10 @@
   } from "$lib/render/question-answer-loop";
   import { createWorkflowSuggestions } from "$lib/agent-workflows/suggestions";
   import {
+    createAgentWorkflowSnapshot,
+    createQuestionAnswerStateChanges,
+  } from "$lib/agent-workflows/page-control-workflow";
+  import {
     AGENT_MODEL_OPTIONS,
     AGENT_SKILL_OPTIONS,
     AGENT_TOOL_FAMILY_OPTIONS,
@@ -1288,6 +1292,13 @@
   }
 
   function createPageContextSnapshot(): AgentUiPageContextSnapshot {
+    const workflow = createAgentWorkflowSnapshot({
+      activeArtifact,
+      pendingChangeCount: pendingActiveArtifactStateChanges.length,
+      isStreaming,
+      approvalReadiness: getActiveIntakeApprovalReadiness(),
+    });
+    const workflowVisibleErrors = workflow.visibleErrors.map((error) => error.message);
     const localContext: AgentUiPageContextSnapshot = {
       route: "/",
       surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
@@ -1312,8 +1323,16 @@
         "clearArtifact",
         "reloadSession",
         "openWorkspaceDocument",
+        "submitAnswer",
+        "markUnknown",
+        "saveDraft",
+        "requestApproval",
+        "approveAndRun",
+        "cancelApproval",
       ],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
+      visibleErrors: workflowVisibleErrors.length > 0 ? workflowVisibleErrors : undefined,
+      workflow,
       commandFamilies: documentEditorOpen ? ["local-ui", "document", "artifact"] : activeArtifact ? ["local-ui", "artifact"] : ["local-ui", "discovery"],
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
       at: new Date().toISOString(),
@@ -1364,6 +1383,53 @@
       activeSessionId,
       ...extras,
     };
+  }
+
+  async function submitPageControlQuestionAnswer(input: { questionId?: string; value?: unknown; skipped?: boolean }): Promise<AgentUiSemanticActionResult> {
+    if (isStreaming) return semanticActionResult(false, "Wait for the current assistant response to finish before answering.", "streaming");
+    if (!activeArtifact || activeArtifact.kind !== "json-render") {
+      return semanticActionResult(false, "Open a workflow artifact before answering a question.", "missing_active_artifact");
+    }
+    const questionId = typeof input.questionId === "string" && input.questionId.trim() ? input.questionId.trim() : undefined;
+    if (!questionId) return semanticActionResult(false, "Question id is required.", "missing_question_id");
+    let staged: ReturnType<typeof createQuestionAnswerStateChanges>;
+    try {
+      staged = createQuestionAnswerStateChanges({
+        artifact: activeArtifact,
+        questionId,
+        value: input.value,
+        skipped: input.skipped === true,
+        sessionId: activeSessionId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return semanticActionResult(false, message, "invalid_question_answer");
+    }
+    activeArtifact = {
+      ...activeArtifact,
+      content: applyJsonRenderStateChanges(activeArtifact.content, staged.changes),
+      updatedAt: new Date().toISOString(),
+    };
+    pendingActiveArtifactStateChanges = mergeStateChanges(pendingActiveArtifactStateChanges, staged.changes);
+    const submitted = await handleSubmitAnswerAction(staged.actionParams);
+    await tick();
+    if (!submitted) return semanticActionResult(false, "Question answer state could not be saved or submitted.", "question_answer_not_saved");
+    return semanticActionResult(true, input.skipped ? "Question marked unknown." : "Question answer submitted.");
+  }
+
+  async function runPageControlIntakeAction(actionName: TrustedIntakeControllerAction, successMessage: string): Promise<AgentUiSemanticActionResult> {
+    if (isStreaming) return semanticActionResult(false, "Wait for the current assistant response to finish first.", "streaming");
+    if (!activeArtifact || activeArtifact.kind !== "json-render") {
+      return semanticActionResult(false, "Open a workflow artifact first.", "missing_active_artifact");
+    }
+    const beforeMessageCount = conversation.messages.length;
+    const accepted = await handleTrustedIntakeControllerAction(actionName, { source: "page_control", commandId: "booking.create.context" });
+    await tick();
+    if (!accepted) return semanticActionResult(false, "The workflow action could not save the active artifact state.", "controller_action_not_saved");
+    if (!["saveDraft", "editDraft"].includes(actionName) && conversation.messages.length <= beforeMessageCount) {
+      return semanticActionResult(false, "The workflow action was accepted but did not append a trusted controller turn.", "controller_turn_not_appended");
+    }
+    return semanticActionResult(true, successMessage);
   }
 
   /** Runtime-safe host/page automation seam: snapshot reads + semantic actions only. */
@@ -1434,6 +1500,24 @@
         openWorkspaceDocument: async () => {
           await openDocumentEditor();
           return semanticActionResult(true, "Workspace document opened.");
+        },
+        submitAnswer: async ({ questionId, value }) => {
+          return submitPageControlQuestionAnswer({ questionId, value, skipped: false });
+        },
+        markUnknown: async ({ questionId }) => {
+          return submitPageControlQuestionAnswer({ questionId, skipped: true });
+        },
+        saveDraft: async () => {
+          return runPageControlIntakeAction("saveDraft", "Draft saved.");
+        },
+        requestApproval: async () => {
+          return runPageControlIntakeAction("requestApproval", "Approval preview requested.");
+        },
+        approveAndRun: async () => {
+          return runPageControlIntakeAction("approveAndRun", "Approval run requested through trusted host workflow.");
+        },
+        cancelApproval: async () => {
+          return runPageControlIntakeAction("cancelApproval", "Approval request cancelled.");
         },
       },
     };
@@ -2423,7 +2507,7 @@
     return trustedIntakeControllerActions.has(actionName);
   }
 
-  async function handleTrustedIntakeControllerAction(actionName: TrustedIntakeControllerAction, params: Record<string, unknown>): Promise<void> {
+  async function handleTrustedIntakeControllerAction(actionName: TrustedIntakeControllerAction, params: Record<string, unknown>): Promise<boolean> {
     const artifactBeforePersist = activeArtifact;
     if (!artifactBeforePersist) {
       logArtifactTelemetry({
@@ -2434,7 +2518,7 @@
         ok: false,
         error: "Controller actions require an active intake artifact.",
       });
-      return;
+      return false;
     }
 
     if (pendingActiveArtifactStateChanges.length > 0) {
@@ -2450,7 +2534,7 @@
           ok: false,
           error: "Artifact state was not persisted; controller action was not sent.",
         });
-        return;
+        return false;
       }
     }
 
@@ -2467,7 +2551,7 @@
       ok: true,
     });
 
-    if (actionName === "saveDraft" || actionName === "editDraft") return;
+    if (actionName === "saveDraft" || actionName === "editDraft") return true;
 
     const prompt = createTrustedIntakeControllerPrompt(actionName, {
       artifactId: artifact.id,
@@ -2475,6 +2559,7 @@
       commandId,
     });
     sendUserTurnWithEntryFrom(prompt, "workflow_launcher");
+    return true;
   }
 
   function createTrustedIntakeControllerPrompt(
@@ -2519,7 +2604,7 @@
     ].join(" ");
   }
 
-  async function handleSubmitAnswerAction(params: Record<string, unknown>): Promise<void> {
+  async function handleSubmitAnswerAction(params: Record<string, unknown>): Promise<boolean> {
     const artifactBeforePersist = activeArtifact;
     if (!artifactBeforePersist) {
       logArtifactTelemetry({
@@ -2530,7 +2615,7 @@
         ok: false,
         error: "Question answers require an active persisted artifact.",
       });
-      return;
+      return false;
     }
 
     const persisted = await persistActiveArtifactStatePatch();
@@ -2547,7 +2632,7 @@
         ok: false,
         error: "Question answer state was not persisted; generate turn was not sent.",
       });
-      return;
+      return false;
     }
 
     const payload = createQuestionAnswerTurnPayload({
@@ -2567,6 +2652,7 @@
       ok: true,
     });
     sendUserTurnWithEntryFrom(message, "question_answer");
+    return true;
   }
 
   // Continue a resumable failed/interrupted run. Distinct from retry-from-scratch:

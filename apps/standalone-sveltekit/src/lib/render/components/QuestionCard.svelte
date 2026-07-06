@@ -87,6 +87,22 @@
     valueBinding.current = choiceValue;
   }
 
+  function selectAllChoices() {
+    if (!isMulti) return;
+    error = null;
+    submitStatus = "idle";
+    stateContext.set(questionErrorPath, null);
+    valueBinding.current = choices.filter((choice) => choice.disabled !== true).map((choice) => choice.value);
+  }
+
+  function clearChoices() {
+    if (!isMulti) return;
+    error = null;
+    submitStatus = "idle";
+    stateContext.set(questionErrorPath, null);
+    valueBinding.current = [];
+  }
+
   function handleText(e: Event) {
     error = null;
     submitStatus = "idle";
@@ -174,6 +190,12 @@
     </div>
 
     {#if isChoice || isMulti}
+      {#if isMulti}
+        <div class="flex flex-wrap gap-2" data-question-multi-controls data-question-card-id={safeProps.questionId}>
+          <Button type="button" variant="outline" onclick={selectAllChoices} data-question-action="select-all" data-question-card-id={safeProps.questionId}>Select all</Button>
+          <Button type="button" variant="ghost" onclick={clearChoices} data-question-action="clear" data-question-card-id={safeProps.questionId}>Clear</Button>
+        </div>
+      {/if}
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         {#each choices as choice (choice.value)}
           <button

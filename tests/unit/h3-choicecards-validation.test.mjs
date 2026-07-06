@@ -23,6 +23,8 @@ assert.equal(questionCardSource.includes('data-question-action="skip"'), true, "
 assert.equal(questionCardSource.includes("Saving answer and asking the next question"), true, "QuestionCard must show a pending-save state instead of pretending persistence already succeeded");
 assert.equal(questionCardSource.includes("Answer not saved. Retry this question before continuing."), true, "QuestionCard must expose a retryable failed-save state");
 assert.equal(questionCardSource.includes("createQuestionErrorStatePath"), true, "QuestionCard state paths should use the shared JSON Pointer-safe question error helper");
+assert.equal(questionCardSource.includes('data-question-action="select-all"'), true, "multi-choice QuestionCards should expose a deterministic select-all control for day/menu selection");
+assert.equal(questionCardSource.includes('data-question-action="clear"'), true, "multi-choice QuestionCards should expose a deterministic clear control for day/menu selection");
 assert.equal(questionCardSource.includes("stateContext.set(questionErrorPath"), true, "QuestionCard should clear/set escaped question error paths through one derived path");
 
 const unsafeQuestionId = "q/open~days";
