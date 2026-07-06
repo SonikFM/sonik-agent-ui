@@ -230,6 +230,10 @@ try {
   await frame.waitForFunction(() => window.__sonikAgentUI.getPageContext()?.hostSession?.authenticated === true, undefined, { timeout: 60000 });
   const before = await frame.evaluate(() => ({ context: window.__sonikAgentUI.getPageContext(), assertions: window.__sonikAgentUI.getAssertions(), text: document.body.innerText.slice(0, 2000), actions: Object.keys(window.__sonikAgentUI.actions ?? {}).sort() }));
   evidence.before = before;
+  const contractVersions = await frame.evaluate(() => ({ pageControl: window.__sonikAgentUI?.schemaVersion ?? null, assertions: window.__sonikAgentUI?.getAssertions?.()?.schemaVersion ?? null }));
+  evidence.contractVersions = contractVersions;
+  evidence.checks.pageControlSchemaVersion = contractVersions.pageControl === 'sonik.agent_ui.page_control.v1';
+  evidence.checks.assertionsSchemaVersion = contractVersions.assertions === 'sonik.agent_ui.assertions.v1';
   const createSession = await frame.evaluate(async () => window.__sonikAgentUI.actions.createSession());
   evidence.createSession = createSession;
   if (!createSession?.ok) throw new Error(`createSession failed: ${JSON.stringify(createSession)}`);
@@ -311,6 +315,9 @@ try {
   await frame.waitForFunction((artifactId) => window.__sonikAgentUI.getPageContext().activeArtifactId === artifactId, artifactId, { timeout: 60000 });
   const afterReload = await frame.evaluate(() => ({ context: window.__sonikAgentUI.getPageContext(), assertions: window.__sonikAgentUI.getAssertions(), text: document.body.innerText.slice(0, 4000) }));
   evidence.afterReload = afterReload;
+  // With a workflow artifact active, the page context must report a machine-readable workflow snapshot (58db4f9).
+  evidence.workflowSnapshot = afterReload.context?.workflow ?? null;
+  evidence.checks.workflowPhaseReported = typeof evidence.workflowSnapshot?.phase === 'string';
   const submit = await frame.evaluate(async ({ prompt, sessionId }) => window.__sonikAgentUI.actions.submitPrompt({ prompt, sessionId }), { prompt, sessionId: evidence.sessionId });
   evidence.submit = submit;
   if (!submit?.ok) throw new Error(`submitPrompt failed: ${JSON.stringify(submit)}`);

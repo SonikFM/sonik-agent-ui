@@ -244,6 +244,9 @@ try {
 
   evidence.pageContext = await frame.evaluate(() => window.__sonikAgentUI.getPageContext());
   evidence.assertions = await frame.evaluate(() => window.__sonikAgentUI.getAssertions());
+  evidence.contractVersions = await frame.evaluate(() => ({ pageControl: window.__sonikAgentUI?.schemaVersion ?? null, assertions: window.__sonikAgentUI?.getAssertions?.()?.schemaVersion ?? null }));
+  if (evidence.contractVersions.pageControl !== "sonik.agent_ui.page_control.v1") throw new Error(`Unexpected page-control schemaVersion: ${evidence.contractVersions.pageControl}`);
+  if (evidence.contractVersions.assertions !== "sonik.agent_ui.assertions.v1") throw new Error(`Unexpected assertions schemaVersion: ${evidence.contractVersions.assertions}`);
   if (evidence.pageContext?.surface !== "booking-console") throw new Error("Iframe page context did not reflect host booking surface before submit.");
   if (!evidence.pageContext?.activeEntity?.label) throw new Error("Iframe page context did not include a host active entity label before submit.");
   if (!evidence.pageContext?.commandFamilies?.includes("booking")) throw new Error("Iframe page context did not include booking command family before submit.");
