@@ -27,8 +27,8 @@ node scripts/agent-eval-gate.mjs renderer-no-ai
 | `HEADLESS` | `true` | set to `false` to watch the browser locally |
 | `AGENT_EVAL_SCENARIO_TIMEOUT_MS` | `120000` | per-scenario timeout budget |
 
-`renderer-no-ai` needs no env — it's a pure node-level conformance check with
-no network access at all.
+`renderer-no-ai` needs no env — it serves itself over a local-only Vite dev
+server (no external network access at all).
 
 ## Modes
 
@@ -82,74 +82,86 @@ with real content is ever submitted, so no LLM is invoked. Asserts:
 - `getAssertions()` returns the documented field shape with correct value
   types.
 
-It also records — as a **diagnostic note, not a pass/fail check** — whether
-the sidecar was opened via the documented `window.__sonikAgentHost.openChat()`
-seam or via DOM-control fallback. That's a separate contract (the outer
-host-embedding integration) from the page-control surface this scenario
-exists to verify; see "Contract violations discovered" below.
+It also records — as **evidence, not a pass/fail check** — which path opened
+the sidecar (`diagnostics.sidecarOpenPath.openPath`, one of `"dom-control"` /
+`"host-controller"`). See "Sidecar open path" below for why that's not a
+contract check here.
 
 ### `scenarios/renderer-no-ai.eval.mjs`
 
-Node-level conformance check for the json-render fork's spec-resolution APIs
-(`packages/core/src/{props,visibility,types}.ts`), in the spirit of
-`json-render/examples/no-ai` — a static spec fixture (modeled on that
-example's "Registration Form"/"Cascading Selects" patterns) resolved against
-hand-authored state, no AI involved.
+Browser-mounted conformance check for `packages/svelte`'s actual renderer, in
+the spirit of `json-render/examples/no-ai` — a static spec fixture (modeled
+on that example's "Registration Form"/"Cascading Selects" patterns) resolved
+against hand-authored state, driven by real DOM input events, no AI involved.
 
-**Choice made:** this exercises `resolveElementProps` / `resolveBindings` /
-`evaluateVisibility` directly rather than mounting `packages/svelte`'s
-`Renderer.svelte` in a browser. Browser-mounting a Svelte 5 component tree
-standalone (outside the standalone-sveltekit app's own build pipeline) would
-require a throwaway Vite/SvelteKit harness just for this eval bundle;
-`resolveElementProps` et al. are the actual "no AI" contract surface — what
-turns a static JSON spec + state object into resolved props, independent of
-any renderer — so exercising them directly is deterministic, fast, and needs
-no new dependency.
+This mounts the real `RendererWithProvider.test.svelte` (the same
+`StateProvider → VisibilityProvider → ValidationProvider → ActionProvider →
+Renderer` stack `packages/svelte/src/renderer.test.ts` itself uses) inside an
+actual Chromium page via Playwright. `lib/svelte-mount-harness.mjs` boots a
+Vite dev server programmatically, rooted at a fresh directory under
+`tests/agent-eval/.tmp/` (removed after each run), and serves a small entry
+module that imports `packages/svelte/dist` directly by relative filesystem
+path — no reimplementation of prop/visibility resolution; the rendered DOM is
+whatever the shipped renderer actually produces. `vite` and
+`@sveltejs/vite-plugin-svelte` aren't declared as new dependencies — they're
+resolved from where the workspace already has them installed
+(`apps/standalone-sveltekit`), the same way that app's own `vite dev` would
+find them.
 
-Covers: `$bindState` resolving the current value and exposing a write-back
-path, `$state`-based `visible` conditions flipping as bound state changes,
-`$template` interpolating both absolute state paths and bare names (falling
-back from repeat-item scope to state), and `$cond`/`$then`/`$else` picking
-branches based on nested/initially-null state.
+Drives real `<input>` elements and reads real rendered DOM (no reaching into
+internal state) to prove:
 
-Imports `packages/core/src/*.ts` directly (mirroring the pattern the repo's
-own `tests/unit/*.test.mjs` already use for this package) and reuses the
-repo's existing `tests/unit/ts-extension-loader.mjs` loader to resolve that
-package's extensionless internal imports — `scripts/agent-eval-gate.mjs`
-passes it automatically; if you run the scenario file directly, pass it too:
+- **`$bindState`**: typing into an input round-trips through the real state
+  store and back into a `$template`-bound preview.
+- **`$cond` as a `visible` gate**: a section only renders once a bound field
+  matches a condition (business-only fields staying absent from the DOM
+  entirely until `accountType` is set to `"business"`).
+- **`$cond`/`$then`/`$else` in a prop value**: two elements bound to
+  different, independently-seeded state paths render their `then` vs. `else`
+  branch correctly.
+
+Run directly:
 
 ```sh
-node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs \
-  tests/agent-eval/scenarios/renderer-no-ai.eval.mjs
+node --experimental-strip-types tests/agent-eval/scenarios/renderer-no-ai.eval.mjs
 ```
 
 ## Lib
 
 - `lib/page-control-driver.mjs` — the "fake agent": login, open-sidecar
-  (host-controller-first with DOM fallback), iframe location, and a thin
-  remote-invocation client for `window.__sonikAgentUI` that keeps every
-  assertion structural (`ok`/`state`/`disabledReason`), never DOM-scraping,
-  never screenshots-as-assertions (screenshots are written to `.omx/logs/` as
+  (DOM controls, with a forward-compat host-controller probe — see "Sidecar
+  open path" below), iframe location, and a thin remote-invocation client for
+  `window.__sonikAgentUI` that keeps every assertion structural
+  (`ok`/`state`/`disabledReason`), never DOM-scraping, never
+  screenshots-as-assertions (screenshots are written to `.omx/logs/` as
   artifacts only).
 - `lib/mock-factory.mjs` — route-level network mocks for offline mode. See
   the file header for the exact limitation around the trusted host-context
   boundary.
+- `lib/svelte-mount-harness.mjs` — the programmatic Vite dev server used by
+  `renderer-no-ai` to browser-mount `packages/svelte`'s real renderer. See its
+  file header for how it resolves `svelte`/`@json-render/core` without adding
+  dependencies or symlink-guessing subpath exports.
 
-## Contract violations discovered while building this harness
+## Sidecar open path
 
-Running `page-control-contract` against the live deployed booking app
-(`https://sonik-booking-app-pipe-b.liam-trampota.workers.dev/dashboard`) with
-real credentials, `window.__sonikAgentHost` was not present on `window` across
-6 polling attempts (~9s) — the harness fell back to DOM controls
-(`#booking-agent-ui-open-chat` etc.) to open the sidecar, which succeeded. The
-existing, unmodified `scripts/agent-ui-booking-context-pipeb-smoke.mjs` fails
-outright on this exact symptom (`"Booking embed did not open through
-window.__sonikAgentHost"`) against the same deployment. This is NOT a
-regression: the host controller was never implemented on the booking side —
-`@sonikfm/sonik-sdk` has zero `__sonikAgentHost` references in its history.
-See `docs/handoffs/booking-host-controller-e2e-gap-evidence-2026-07-06.md`
-for the root cause and the pending sonik-sdk port that will close it. It does
-not affect `window.__sonikAgentUI` itself — every page-control
-assertion (schemaVersion, all 13 actions, typed refusals including the exact
-`empty_prompt` reason) passed cleanly once the iframe was located by either
-path.
+`window.__sonikAgentHost` does not exist on the deployed booking app today —
+it was added to `packages/agent-embed` during the Jul 5 determinism
+hardening but was never ported into `@sonikfm/sonik-sdk`'s embed code, which
+is what the booking app actually uses to mount the sidecar (confirmed via
+`git log -S "__sonikAgentHost"` against `sonik-booking-service`: zero hits,
+any branch, any time — this was never built, not a regression). Full
+evidence and timeline:
+`docs/handoffs/booking-host-controller-e2e-gap-evidence-2026-07-06.md`.
+
+Given that, `lib/page-control-driver.mjs`'s `openAgentSidecar` treats the
+open-chat **DOM controls** (the same selector list
+`scripts/agent-ui-booking-context-pipeb-smoke.mjs` uses) as the one
+first-class open path, with a single explicit forward-compat check ahead of
+it: if `window.__sonikAgentHost?.openChat` exists (e.g. once the sonik-sdk
+port lands), it's used instead. Either way, `findAgentFrame` returns which
+path was actually taken (`"dom-control"` or `"host-controller"`), and
+`page-control-contract` records it as `diagnostics.sidecarOpenPath` evidence
+rather than folding it into pass/fail — the DOM path is expected and correct
+today, and even a currently-missing host controller must never mask whether
+`window.__sonikAgentUI` itself is conformant underneath it.

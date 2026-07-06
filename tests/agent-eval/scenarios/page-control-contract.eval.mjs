@@ -93,23 +93,31 @@ async function run() {
     });
     await page.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => undefined);
 
-    // Getting to the iframe via window.__sonikAgentHost.openChat() vs. the DOM
-    // fallback is a separate contract from window.__sonikAgentUI (the actual
-    // subject of this scenario) — the task brief explicitly allows the
-    // fallback as a means to reach the iframe. We don't want a degraded outer
-    // host-embedding integration to mask a fully-conformant page-control
-    // surface, so this is tracked as a diagnostic, not a pass/fail check: it's
-    // surfaced in `diagnostics` and, when the fallback was needed, as a note.
-    const { frame, usedHostController, openAttempts } = await findAgentFrame(page, { attempts: 6, delayMs: 1500 });
-    diagnostics.usedDeterministicHostController = { ok: usedHostController, openAttempts };
-    if (!usedHostController) {
-      notes.push(
-        "window.__sonikAgentHost was not found on the booking dashboard within 6 attempts (9s); opened the sidecar via DOM controls instead. " +
-          "Known gap, not a regression: the host controller was never implemented in @sonikfm/sonik-sdk — " +
-          "see docs/handoffs/booking-host-controller-e2e-gap-evidence-2026-07-06.md. Not a page-control contract violation.",
-      );
-    }
+    // How the sidecar was opened is a separate contract from
+    // window.__sonikAgentUI (the actual subject of this scenario): the DOM
+    // open-chat controls are the canonical path today (see
+    // lib/page-control-driver.mjs `openAgentSidecar` and
+    // docs/handoffs/booking-host-controller-e2e-gap-evidence-2026-07-06.md —
+    // window.__sonikAgentHost was never ported into @sonikfm/sonik-sdk, so it
+    // doesn't exist on the booking app yet). `openPath` is recorded as
+    // evidence, not a pass/fail check, so a degraded/not-yet-built
+    // host-controller probe never masks a fully-conformant page-control
+    // surface underneath it.
+    const { frame, openPath, openAttempts } = await findAgentFrame(page, { attempts: 6, delayMs: 1500 });
+    diagnostics.sidecarOpenPath = { openPath, openAttempts };
+    notes.push(
+      openPath === "host-controller"
+        ? "Opened via window.__sonikAgentHost.openChat() (host-controller forward-compat probe succeeded)."
+        : "Opened via DOM open-chat controls (the canonical path today — window.__sonikAgentHost isn't ported into @sonikfm/sonik-sdk yet; see docs/handoffs/booking-host-controller-e2e-gap-evidence-2026-07-06.md).",
+    );
     await waitForPageControlReady(frame, { timeoutMs });
+    // The embedded page needs a signed host-context handshake with its parent
+    // (postMessage round trip) before session-dependent actions like
+    // createSession will succeed — without this wait, createSession can race
+    // that handshake and spuriously return "missing_host_context".
+    await frame
+      .waitForFunction(() => window.__sonikAgentUI.getPageContext()?.hostSession?.authenticated === true, undefined, { timeout: timeoutMs })
+      .catch(() => undefined);
 
     const client = createPageControlClient(frame);
 

@@ -34,11 +34,7 @@ const SCENARIOS = [
   {
     id: "renderer-no-ai",
     file: "tests/agent-eval/scenarios/renderer-no-ai.eval.mjs",
-    // Imports packages/core/src/*.ts directly; those files use extensionless
-    // relative imports (e.g. `from "./types"`), which Node's native TS
-    // stripping doesn't resolve on its own. Reuse the repo's existing loader
-    // (tests/unit/ts-extension-loader.mjs) rather than duplicating it.
-    loader: "./tests/unit/ts-extension-loader.mjs",
+    loader: null,
   },
 ];
 

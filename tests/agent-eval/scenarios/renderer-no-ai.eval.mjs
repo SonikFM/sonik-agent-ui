@@ -1,154 +1,237 @@
 #!/usr/bin/env node
-// Node-level conformance check for the json-render fork's spec-resolution
-// APIs, in the spirit of json-render/examples/no-ai (a static spec fixture
-// with no AI generation involved — just $bindState/$cond/$template resolved
-// against hand-authored state).
+// Browser-mounted conformance check for packages/svelte's actual renderer, in
+// the spirit of json-render/examples/no-ai (a static spec fixture with no AI
+// generation — just $bindState/$cond/$template resolved against
+// hand-authored state, driven purely by user interaction).
 //
-// CHOICE: this scenario exercises `resolveElementProps` / `resolveBindings` /
-// `evaluateVisibility` directly (packages/core/src/{props,visibility}.ts)
-// rather than mounting packages/svelte's Renderer.svelte in a browser.
-// Browser-mounting a Svelte 5 component tree standalone (outside the
-// standalone-sveltekit app's own build/route pipeline) would require a
-// throwaway Vite/SvelteKit harness just for this eval bundle — infrastructure
-// this task's file-scope constraints don't include, and which would be
-// redundant with the app's own component tests
-// (packages/svelte/src/renderer.test.ts). The core spec-resolution functions
-// are the actual "no AI" contract surface: they're what turns a static JSON
-// spec + state object into resolved props, independent of any renderer.
-// Exercising them directly at the node level is deterministic, fast, and
-// requires no new dependency (uses Node's --experimental-strip-types to
-// import the package's .ts source directly, the same pattern the repo's own
-// tests/unit/*.test.mjs already use for packages/core).
+// This mounts the REAL `RendererWithProvider.test.svelte` (the same
+// StateProvider → VisibilityProvider → ValidationProvider → ActionProvider →
+// Renderer stack packages/svelte/src/renderer.test.ts uses) via Playwright
+// against a real, running Svelte 5 app, served by a Vite dev server started
+// programmatically for this one page (lib/svelte-mount-harness.mjs). No
+// custom reimplementation of prop/visibility resolution — the rendered DOM is
+// whatever the shipped renderer actually produces.
+//
+// Fixture proves, by driving real DOM input events and reading real DOM
+// output (no shortcuts through internal state):
+//   - $bindState: typing into an input round-trips through the real state
+//     store and back into a $template-bound preview.
+//   - $cond as a `visible` gate: a section only renders once a bound field
+//     matches a condition.
+//   - $cond/$then/$else in a prop value: two elements bound to different
+//     fixed initial state paths render their `then` vs. `else` branch.
 //
 // Run directly: node --experimental-strip-types scenarios/renderer-no-ai.eval.mjs
 // (normally invoked by scripts/agent-eval-gate.mjs)
 
-import assert from "node:assert/strict";
-import { getByPath, setByPath } from "../../../packages/core/src/types.ts";
-import { resolveElementProps, resolveBindings, resolvePropValue } from "../../../packages/core/src/props.ts";
-import { evaluateVisibility } from "../../../packages/core/src/visibility.ts";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright";
+import { createSvelteMountWorkspace } from "../lib/svelte-mount-harness.mjs";
 
 const NAME = "renderer-no-ai";
-const checks = {};
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "../../..");
 
-function record(name, fn) {
+const checks = {};
+function record(name, ok, detail) {
+  checks[name] = { ok, detail };
+}
+
+// Relative-to-`svelteDistDir` posix paths the generated main.js will import.
+// All are plain filesystem paths (not bare "@json-render/svelte" specifiers),
+// so they aren't subject to that package's public `exports` map — see
+// lib/svelte-mount-harness.mjs header for why.
+function distImport(svelteDistDir, tmpMainJsDir, ...segments) {
+  const abs = path.join(svelteDistDir, ...segments);
+  let rel = path.relative(tmpMainJsDir, abs).split(path.sep).join("/");
+  if (!rel.startsWith(".")) rel = `./${rel}`;
+  return rel;
+}
+
+const INPUT_COMPONENT = `<script>
+  import { getBoundProp } from "%STATE_PROVIDER%";
+  let { props, bindings } = $props();
+  let bound = getBoundProp(() => props.value, () => bindings?.value);
+</script>
+
+<input data-testid={props.testId} value={bound.current ?? ""} oninput={(e) => (bound.current = e.currentTarget.value)} />
+`;
+
+// packages/svelte/dist/TestText.svelte doesn't forward a `data-testid`
+// attribute (it only renders `props.text`), so it can't be located by
+// Playwright. Reimplementing that one attribute here — rather than editing
+// the existing component — keeps this scenario read-only against the
+// package under test.
+const TEXT_COMPONENT = `<script>
+  let { props } = $props();
+</script>
+
+<span data-testid={props.testId} class="test-text">{props.text ?? ""}</span>
+`;
+
+function buildFixtureSpec() {
+  return {
+    root: "root",
+    state: {
+      form: { name: "", email: "", accountType: "personal" },
+      resultPending: { valid: false },
+      resultValid: { valid: true },
+    },
+    elements: {
+      root: { type: "Container", props: {}, children: ["nameInput", "emailInput", "preview", "accountInput", "companyGate", "statusPending", "statusValid"] },
+      nameInput: { type: "Input", props: { testId: "name-input", value: { $bindState: "/form/name" } } },
+      emailInput: { type: "Input", props: { testId: "email-input", value: { $bindState: "/form/email" } } },
+      preview: {
+        type: "Text",
+        props: { testId: "preview", text: { $template: "Welcome, ${/form/name}! Your email: ${/form/email}" } },
+        visible: { $state: "/form/name", neq: "" },
+      },
+      accountInput: { type: "Input", props: { testId: "account-input", value: { $bindState: "/form/accountType" } } },
+      companyGate: {
+        type: "Text",
+        props: { testId: "company-gate", text: "Business fields visible" },
+        visible: { $state: "/form/accountType", eq: "business" },
+      },
+      statusPending: {
+        type: "Text",
+        props: {
+          testId: "status-pending",
+          text: { $cond: { $state: "/resultPending/valid", eq: true }, $then: "valid", $else: "invalid" },
+        },
+      },
+      statusValid: {
+        type: "Text",
+        props: {
+          testId: "status-valid",
+          text: { $cond: { $state: "/resultValid/valid", eq: true }, $then: "valid", $else: "invalid" },
+        },
+      },
+    },
+  };
+}
+
+function buildMainJs(svelteDistDir, tmpDir) {
+  const rendererWithProviderRel = distImport(svelteDistDir, tmpDir, "RendererWithProvider.test.svelte");
+  const rendererJsRel = distImport(svelteDistDir, tmpDir, "renderer.js");
+  const testContainerRel = distImport(svelteDistDir, tmpDir, "TestContainer.svelte");
+  const spec = buildFixtureSpec();
+
+  return `import { mount } from "svelte";
+import RendererWithProvider from "${rendererWithProviderRel}";
+import { defineRegistry } from "${rendererJsRel}";
+import TestContainer from "${testContainerRel}";
+import Text from "./Text.svelte";
+import Input from "./Input.svelte";
+
+const spec = ${JSON.stringify(spec)};
+
+const { registry } = defineRegistry(null, {
+  components: { Container: TestContainer, Text, Input },
+});
+
+mount(RendererWithProvider, {
+  target: document.getElementById("app"),
+  props: { spec, registry, initialState: spec.state },
+});
+
+window.__rendererEvalMounted = true;
+`;
+}
+
+async function run() {
+  const workspace = await createSvelteMountWorkspace({ repoRoot });
+  let devServer;
+  let browser;
   try {
-    fn();
-    checks[name] = { ok: true };
-  } catch (error) {
-    checks[name] = { ok: false, detail: error?.message ?? String(error) };
+    const inputComponent = INPUT_COMPONENT.replace(
+      "%STATE_PROVIDER%",
+      distImport(workspace.svelteDistDir, workspace.tmpDir, "contexts/StateProvider.svelte"),
+    );
+    await workspace.writeFile("Input.svelte", inputComponent);
+    await workspace.writeFile("Text.svelte", TEXT_COMPONENT);
+    await workspace.writeFile("main.js", buildMainJs(workspace.svelteDistDir, workspace.tmpDir));
+    await workspace.writeFile(
+      "index.html",
+      `<!doctype html>\n<html><body><div id="app"></div><script type="module" src="/main.js"></script></body></html>\n`,
+    );
+
+    devServer = await workspace.start();
+    record("viteServerStarted", true, { url: devServer.url });
+
+    browser = await chromium.launch({ headless: process.env.HEADLESS !== "false", args: ["--disable-gpu", "--no-sandbox"] });
+    const page = await browser.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(String(error?.message ?? error)));
+    page.on("console", (msg) => { if (msg.type() === "error") pageErrors.push(msg.text()); });
+
+    await page.goto(devServer.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForFunction(() => window.__rendererEvalMounted === true, undefined, { timeout: 15_000 });
+    record("mounted", true, {});
+
+    // --- $bindState + $template: empty state renders inputs, preview hidden ---
+    await page.waitForSelector('[data-testid="name-input"]', { timeout: 10_000 });
+    record("previewHiddenWhenNameEmpty", (await page.locator('[data-testid="preview"]').count()) === 0, {});
+    record("companyGateHiddenForPersonal", (await page.locator('[data-testid="company-gate"]').count()) === 0, {});
+
+    // --- $cond/$then/$else: two independently-seeded state paths pick correct branch ---
+    record("condElseForPendingResult", (await page.locator('[data-testid="status-pending"]').innerText()) === "invalid", {});
+    record("condThenForValidResult", (await page.locator('[data-testid="status-valid"]').innerText()) === "valid", {});
+
+    // --- Drive real input events: $bindState round-trips through the real state store ---
+    await page.locator('[data-testid="name-input"]').fill("Ada Lovelace");
+    await page.waitForSelector('[data-testid="preview"]', { timeout: 5_000 });
+    record("previewVisibleAfterNameFilled", true, {});
+    record(
+      "templateInterpolatesNameBeforeEmail",
+      (await page.locator('[data-testid="preview"]').innerText()) === "Welcome, Ada Lovelace! Your email: ",
+      {},
+    );
+
+    await page.locator('[data-testid="email-input"]').fill("ada@example.com");
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="preview"]')?.textContent === "Welcome, Ada Lovelace! Your email: ada@example.com",
+      undefined,
+      { timeout: 5_000 },
+    );
+    record("templateInterpolatesBothPaths", true, {});
+
+    // --- $cond as a `visible` gate reacts to a bound field changing ---
+    await page.locator('[data-testid="account-input"]').fill("business");
+    await page.waitForSelector('[data-testid="company-gate"]', { timeout: 5_000 });
+    record("companyGateVisibleAfterAccountTypeBusiness", true, {});
+
+    record("noPageErrors", pageErrors.length === 0, pageErrors);
+  } finally {
+    await browser?.close().catch(() => undefined);
+    await devServer?.close().catch(() => undefined);
+    await workspace.cleanup().catch(() => undefined);
   }
 }
 
-// A static spec fixture in the shape of json-render/examples/no-ai's
-// "Registration Form" / "Cascading Selects" examples: a $bindState-driven
-// input, a $cond-driven alert, and a $template preview string. No `elements`
-// tree traversal or renderer is involved — this fixture only needs the
-// `props` + `visible` blocks a renderer would resolve per element.
-const state = {
-  form: { name: "", email: "", accountType: "personal" },
-  result: null,
-};
-
-const nameInputProps = {
-  label: "Full Name",
-  value: { $bindState: "/form/name" },
-};
-
-const previewProps = {
-  text: { $template: "Welcome, ${/form/name}! Your email: ${/form/email}" },
-};
-const previewVisible = { $state: "/form/name", neq: "" };
-
-const companyInputVisible = { $state: "/form/accountType", eq: "business" };
-
-const statusTextProps = {
-  message: {
-    $cond: { $state: "/result/valid", eq: true },
-    $then: "All fields are valid -- ready to submit!",
-    $else: "Please fix the errors above before submitting.",
-  },
-  type: {
-    $cond: { $state: "/result/valid", eq: true },
-    $then: "success",
-    $else: "error",
-  },
-};
-
-// --- 1. $bindState resolves the current value AND exposes a write-back path ---
-record("bindState_resolves_empty_value", () => {
-  const resolved = resolveElementProps(nameInputProps, { stateModel: state });
-  assert.equal(resolved.value, "");
-});
-record("bindState_exposes_writeback_path", () => {
-  const bindings = resolveBindings(nameInputProps, { stateModel: state });
-  assert.deepEqual(bindings, { value: "/form/name" });
-});
-
-// --- 2. $state visibility is hidden when the bound field is empty ---
-record("cond_visibility_hidden_when_empty", () => {
-  assert.equal(evaluateVisibility(previewVisible, { stateModel: state }), false);
-});
-record("cond_visibility_hidden_for_business_gate_when_personal", () => {
-  assert.equal(evaluateVisibility(companyInputVisible, { stateModel: state }), false);
-});
-
-// --- 3. Simulate user input via setByPath (what a real `$bindState` write-back does) ---
-record("state_mutation_round_trip", () => {
-  setByPath(state, "/form/name", "Ada Lovelace");
-  setByPath(state, "/form/email", "ada@example.com");
-  setByPath(state, "/form/accountType", "business");
-  assert.equal(getByPath(state, "/form/name"), "Ada Lovelace");
-});
-
-// --- 4. Same expressions now resolve differently against the mutated state ---
-record("bindState_resolves_updated_value", () => {
-  const resolved = resolveElementProps(nameInputProps, { stateModel: state });
-  assert.equal(resolved.value, "Ada Lovelace");
-});
-record("cond_visibility_shown_when_filled", () => {
-  assert.equal(evaluateVisibility(previewVisible, { stateModel: state }), true);
-});
-record("cond_visibility_shown_for_business", () => {
-  assert.equal(evaluateVisibility(companyInputVisible, { stateModel: state }), true);
-});
-record("template_interpolates_multiple_paths", () => {
-  const resolved = resolveElementProps(previewProps, { stateModel: state });
-  assert.equal(resolved.text, "Welcome, Ada Lovelace! Your email: ada@example.com");
-});
-
-// --- 5. $cond/$then/$else picks branches based on a nested, initially-null path ---
-record("cond_then_else_picks_else_when_null", () => {
-  const resolved = resolveElementProps(statusTextProps, { stateModel: state });
-  assert.equal(resolved.type, "error");
-  assert.equal(resolved.message, "Please fix the errors above before submitting.");
-});
-record("cond_then_else_picks_then_when_true", () => {
-  setByPath(state, "/result", { valid: true });
-  const resolved = resolveElementProps(statusTextProps, { stateModel: state });
-  assert.equal(resolved.type, "success");
-  assert.equal(resolved.message, "All fields are valid -- ready to submit!");
-});
-
-// --- 6. Bare-name $template interpolation resolves against a repeat item, not just absolute state paths ---
-record("template_bare_name_resolves_against_repeat_item", () => {
-  const resolved = resolvePropValue(
-    { $template: "${name} <${/form/email}>" },
-    { stateModel: state, repeatItem: { name: "Item Name" } },
-  );
-  assert.equal(resolved, "Item Name <ada@example.com>");
-});
-
 const startedAt = Date.now();
-const failing = Object.entries(checks).filter(([, v]) => v.ok !== true);
-const status = failing.length === 0 ? "PASS" : "FAIL";
-const result = {
-  name: NAME,
-  status,
-  durationMs: Date.now() - startedAt,
-  checks,
-  failingChecks: failing.map(([k]) => k),
-  approach: "node-level spec-resolution conformance (resolveElementProps/resolveBindings/evaluateVisibility) against packages/core/src, not a mounted Svelte renderer",
-};
-console.log(JSON.stringify(result));
-process.exit(status === "FAIL" ? 1 : 0);
+try {
+  await run();
+  const failing = Object.entries(checks).filter(([, v]) => v.ok !== true);
+  const status = failing.length === 0 ? "PASS" : "FAIL";
+  const result = {
+    name: NAME,
+    status,
+    durationMs: Date.now() - startedAt,
+    checks,
+    failingChecks: failing.map(([k]) => k),
+    approach: "browser-mounted: real packages/svelte RendererWithProvider.test.svelte served by a programmatic Vite dev server, driven by Playwright",
+  };
+  console.log(JSON.stringify(result));
+  process.exit(status === "FAIL" ? 1 : 0);
+} catch (error) {
+  const result = {
+    name: NAME,
+    status: "FAIL",
+    durationMs: Date.now() - startedAt,
+    checks,
+    error: error?.stack || error?.message || String(error),
+  };
+  console.log(JSON.stringify(result));
+  process.exit(1);
+}

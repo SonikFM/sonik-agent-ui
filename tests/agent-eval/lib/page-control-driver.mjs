@@ -64,19 +64,24 @@ async function loginWithEmailPassword(context, { baseUrl, email, password, callb
 }
 
 /**
- * Open the agent sidecar the same way a real host page would: prefer the
- * deterministic `window.__sonikAgentHost` controller, falling back to
- * clicking DOM launcher/open-chat controls only if the host controller is
- * unavailable. Returns a diagnostic record — callers should treat
- * `usedHostController: false` as a signal the embed's documented seam
- * regressed, even if the DOM fallback happened to work.
+ * Open the agent sidecar via its one first-class path: the open-chat DOM
+ * controls (the same selector list `scripts/agent-ui-booking-context-pipeb-smoke.mjs`
+ * uses). `window.__sonikAgentHost` does not exist on the booking app today —
+ * it was added to `packages/agent-embed` during the Jul 5 determinism
+ * hardening but never ported into `@sonikfm/sonik-sdk`'s embed code, which is
+ * what the booking app actually uses (see
+ * docs/handoffs/booking-host-controller-e2e-gap-evidence-2026-07-06.md). This
+ * still runs one explicit forward-compat check ahead of the DOM path — if
+ * `window.__sonikAgentHost?.openChat` exists (e.g. once that SDK port lands),
+ * it's used instead, and either path is recorded as `openPath` evidence
+ * rather than a silent fallback.
  */
 async function openAgentSidecar(page) {
   return page.evaluate(() => {
     const host = window.__sonikAgentHost;
     if (host?.schemaVersion === "sonik.agent_ui.host_controller.v1" && typeof host.openChat === "function") {
       host.openChat();
-      return { usedHostController: true, hostSchemaVersion: host.schemaVersion };
+      return { openPath: "host-controller", hostSchemaVersion: host.schemaVersion };
     }
     const launcher = document.querySelector(
       '#agent-fab-main, [data-sonik-agent-ui-control="launcher"], [data-testid="sonik-agent-ui-launcher"], [aria-label="Open Sonik agent launcher"], [aria-label="Open Sonik agent"]',
@@ -87,8 +92,8 @@ async function openAgentSidecar(page) {
     );
     chat?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
     return {
-      usedHostController: false,
-      hasHost: Boolean(host),
+      openPath: "dom-control",
+      hasHostControllerProbe: Boolean(host),
       hostSchemaVersion: host?.schemaVersion ?? null,
       launcherFound: Boolean(launcher),
       chatFound: Boolean(chat),
@@ -98,7 +103,7 @@ async function openAgentSidecar(page) {
 
 /**
  * Poll for the embedded agent iframe. Re-invokes `openAgentSidecar` on each
- * attempt since the launcher can be mounted after initial page load.
+ * attempt since the DOM controls can be mounted after initial page load.
  */
 async function findAgentFrame(page, { attempts = 6, delayMs = 1500 } = {}) {
   const openAttempts = [];
@@ -110,17 +115,11 @@ async function findAgentFrame(page, { attempts = 6, delayMs = 1500 } = {}) {
       const url = candidate.url();
       return url.includes("embedMode=") || url.includes("agentUiHostOrigin=");
     });
-    if (frame && openResult.usedHostController) {
-      return { frame, openAttempts, usedHostController: true };
-    }
-    if (frame && attempt === attempts - 1) {
-      // Last attempt: return whatever we found rather than failing outright,
-      // but callers should treat usedHostController === false as a contract
-      // violation worth surfacing (the host controller seam regressed).
-      return { frame, openAttempts, usedHostController: false };
+    if (frame) {
+      return { frame, openAttempts, openPath: openResult.openPath };
     }
   }
-  throw new Error(`Agent sidecar iframe did not appear after ${attempts} attempts via window.__sonikAgentHost.openChat(). Attempts: ${JSON.stringify(openAttempts)}`);
+  throw new Error(`Agent sidecar iframe did not appear after ${attempts} attempts. Attempts: ${JSON.stringify(openAttempts)}`);
 }
 
 /**
