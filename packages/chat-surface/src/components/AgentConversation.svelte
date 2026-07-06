@@ -29,6 +29,18 @@
     canContinue: boolean;
   }
 
+  export interface AgentApprovalAffordance {
+    title: string;
+    description: string;
+    commandId: string;
+    artifactTitle?: string | null;
+    status?: "draft" | "preview" | "approval_required" | "blocked";
+    disabled?: boolean;
+    onRequestPreview: () => void;
+    onApprove: () => void;
+    onCancel: () => void;
+  }
+
   export interface AgentConversationProps {
     title?: string;
     messages: AgentChatMessage[];
@@ -48,6 +60,8 @@
     /** Recovery affordance for a resumable/failed run, keyed off the run's error code. */
     runRecovery?: AgentRunRecovery | null;
     onContinue?: () => void;
+    /** First-class trusted command approval affordance for active intake/workflow artifacts. */
+    approvalAffordance?: AgentApprovalAffordance | null;
     /** Composer context chips for the current turn. */
     contextItems?: AgentContextItem[];
     /** Attachable context sources shown in the composer plus menu. */
@@ -82,6 +96,7 @@
     onClear,
     runRecovery = null,
     onContinue,
+    approvalAffordance = null,
     contextItems = [],
     contextSources = [],
     onAttachContext,
@@ -203,6 +218,59 @@
             {shouldRenderArtifact}
           />
         {/each}
+
+        {#if approvalAffordance}
+          <div
+            class="rounded-2xl border border-primary/35 bg-primary/10 p-4 shadow-sm"
+            data-chat-approval-card
+            data-command-id={approvalAffordance.commandId}
+            data-status={approvalAffordance.status ?? "draft"}
+          >
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0 space-y-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-sm font-semibold text-foreground">{approvalAffordance.title}</p>
+                  <span class="rounded-full border border-primary/30 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+                    {approvalAffordance.commandId}
+                  </span>
+                </div>
+                <p class="text-sm text-muted-foreground">{approvalAffordance.description}</p>
+                {#if approvalAffordance.artifactTitle}
+                  <p class="text-xs text-muted-foreground">Active draft: {approvalAffordance.artifactTitle}</p>
+                {/if}
+              </div>
+              <div class="flex shrink-0 flex-wrap gap-2">
+                <button
+                  type="button"
+                  class="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  onclick={approvalAffordance.onRequestPreview}
+                  disabled={isStreaming || approvalAffordance.disabled}
+                  data-approval-action="preview"
+                >
+                  Preview command
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  onclick={approvalAffordance.onApprove}
+                  disabled={isStreaming || approvalAffordance.disabled}
+                  data-approval-action="approve"
+                >
+                  Approve & run
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full px-3 py-1.5 text-xs font-semibold text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  onclick={approvalAffordance.onCancel}
+                  disabled={isStreaming || approvalAffordance.disabled}
+                  data-approval-action="cancel"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        {/if}
 
         {#if activity}
           <div

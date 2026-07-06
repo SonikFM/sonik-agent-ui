@@ -32,6 +32,7 @@ const created = await createIntakeArtifact(null, {
 for (const [questionId, value] of [
   ["q_intake_mode", "venue_schedule"],
   ["q_inventory_core", "Restaurant reservations with 20 two-top tables"],
+  ["q_business_name", "Dan's Club"],
   ["q_confirmation_mode", "instant_confirm"],
 ]) {
   await updateIntakeArtifactState(null, {
@@ -85,6 +86,8 @@ assert.equal(preview.command.commandId, "booking.create.context");
 assert.equal(preview.command.input.kind, "venue_schedule");
 assert.equal(preview.command.input.timezone, "America/New_York");
 assert.equal(preview.command.input.config.manifest.inventory.confirmationMode, "instant_confirm");
+assert.equal(preview.command.input.name, "Dan's Club", "business name should drive deterministic booking context preview name");
+assert.equal(preview.command.input.slug, "dan-s-club", "business name should drive deterministic booking context slug");
 
 const activeArtifactBeforeScopePoison = getWorkspaceArtifact(artifactId);
 assert.ok(activeArtifactBeforeScopePoison, "active intake artifact should be persisted for scope poisoning regression");
@@ -108,6 +111,38 @@ assert.equal("current_org_id" in sanitizedPreview.command.input.config.manifest.
 assert.equal("principal_id" in sanitizedPreview.command.input.config.manifest.business, false, "trusted snake_case principal scope must be stripped from nested manifest payload before command preview");
 assert.equal("userId" in sanitizedPreview.command.input.config.manifest.inventory.nested, false, "trusted user scope must be stripped recursively before command preview");
 assert.equal("current-user-id" in sanitizedPreview.command.input.config.manifest.inventory.nested, false, "trusted kebab-case user scope must be stripped recursively before command preview");
+
+const blockedArtifactId = `${artifactId}-blocked-errors`;
+await createIntakeArtifact(null, {
+  sessionId,
+  artifactId: blockedArtifactId,
+  title: "Blocked Intake",
+  surface: { ...BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE, artifactId: blockedArtifactId },
+  requestId: "req-blocked-intake-command-create",
+});
+for (const [questionId, value] of [
+  ["q_intake_mode", "venue_schedule"],
+  ["q_business_name", "Dan's Club"],
+  ["q_inventory_core", "Restaurant reservations"],
+  ["q_confirmation_mode", "instant_confirm"],
+]) {
+  await updateIntakeArtifactState(null, {
+    artifactId: blockedArtifactId,
+    submission: { questionId, value, artifactId: blockedArtifactId, sessionId },
+    requestId: `req-blocked-answer-${questionId}`,
+  });
+}
+const blockedArtifact = getWorkspaceArtifact(blockedArtifactId);
+assert.ok(blockedArtifact, "blocked artifact should exist");
+const blockedContent = structuredClone(blockedArtifact.content);
+blockedContent.state.questionErrors = { q_open_days: "Answer could not be saved." };
+blockedContent.state.questionStates = { ...blockedContent.state.questionStates, q_open_days: "errored" };
+updateWorkspaceArtifact(blockedArtifactId, { content: blockedContent });
+const blockedTools = createArtifactStateTools({ sessionId, pageContext: { ...pageContext, activeArtifactId: blockedArtifactId }, allowIntakeCommandCommit: false });
+const blockedPreview = await blockedTools.previewActiveIntakeCommand.execute({});
+assert.equal(blockedPreview.ok, false, "intake previews must block unresolved QuestionCard save errors");
+assert.equal(blockedPreview.command, null, "blocked intake previews must not return an approvable command");
+assert.equal(blockedPreview.validation.blockingItems.some((issue) => issue.code === "question_answer_error"), true, "blocking items must name unresolved question save errors");
 
 const eventContent = structuredClone(poisonedArtifact.content);
 eventContent.state.manifest = {
@@ -188,6 +223,8 @@ assert.equal(commit.command.commandId, "booking.create.context");
 assert.equal(fetchCalls.length, 1);
 assert.equal(fetchCalls[0].method, "POST");
 assert.equal(fetchCalls[0].body.kind, "venue_schedule");
+assert.equal(fetchCalls[0].body.name, "Dan's Club", "commit should preserve the approved business/context name");
+assert.equal(fetchCalls[0].body.slug, "dan-s-club", "commit should preserve the approved business/context slug");
 assert.equal(fetchCalls[0].body.config.manifest.inventory.coreDescription, "Restaurant reservations with 20 two-top tables");
 assert.equal("organizationId" in fetchCalls[0].body, false, "org scope must remain host-derived, never model-sent");
 assert.equal("organizationId" in fetchCalls[0].body.config.manifest, false, "org scope must also be stripped from nested manifest payloads");

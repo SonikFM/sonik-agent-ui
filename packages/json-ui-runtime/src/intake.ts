@@ -172,6 +172,7 @@ export function createInteractiveSurfaceJsonRenderSpec(surfaceInput: unknown): J
     const questionIdSegment = escapeJsonPointerSegment(question.id);
     draftAnswers[question.id] = question.defaultValue ?? null;
     questionStates[question.id] = "draft";
+    const boundAnswerPointer = `/draftAnswers/${questionIdSegment}`;
     elements[stableQuestionElementId(question.id, index)] = {
       type: "QuestionCard",
       props: {
@@ -181,7 +182,7 @@ export function createInteractiveSurfaceJsonRenderSpec(surfaceInput: unknown): J
         whyThisMatters: question.whyThisMatters ?? null,
         answerType: question.answerType,
         choices: question.choices,
-        value: { $bindState: `/draftAnswers/${questionIdSegment}` },
+        value: { $bindState: boundAnswerPointer },
         required: question.required,
         allowSkip: question.allowSkip,
         skipValue: question.skipValue,
@@ -192,6 +193,26 @@ export function createInteractiveSurfaceJsonRenderSpec(surfaceInput: unknown): J
         reviewRequired: question.reviewRequired,
         submitLabel: "Save answer",
         skipLabel: "Mark unknown",
+      },
+      on: {
+        submit: {
+          action: "submitAnswer",
+          params: {
+            questionId: question.id,
+            value: { $state: boundAnswerPointer },
+            skipped: false,
+            writesTo: question.writesTo ?? null,
+          },
+        },
+        skip: {
+          action: "submitAnswer",
+          params: {
+            questionId: question.id,
+            value: { $state: boundAnswerPointer },
+            skipped: true,
+            writesTo: question.writesTo ?? null,
+          },
+        },
       },
       children: [],
     };

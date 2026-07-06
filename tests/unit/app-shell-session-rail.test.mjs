@@ -112,7 +112,11 @@ assert.equal(sessionRailSource.includes("onclick={deleteContextSession}"), true,
 assert.equal(sessionRailSource.includes("disabled={busy}"), true, "session rail should disable context menu actions during busy/streaming transitions");
 assert.equal(sessionRailSource.includes("collapsed?: boolean"), true, "session rail should expose a collapsed mode for embedded canvas layouts");
 assert.equal(sessionRailSource.includes("session-rail-shell--collapsed"), true, "session rail should render a compact rail variant instead of forcing full chat navigation into embeds");
-assert.equal(sessionRailSource.includes("session-actions-button--collapsed"), true, "collapsed rail should keep a visible keyboard-accessible overflow affordance");
+assert.equal(sessionRailSource.includes("function compactSessionLabel"), true, "collapsed rail should derive compact readable labels instead of one-letter rows");
+assert.equal(sessionRailSource.includes("sessionKindShort(session)"), true, "collapsed rail should show short semantic session kind labels");
+assert.equal(sessionRailSource.includes("session-actions-button--compact"), true, "collapsed rail should keep a keyboard-accessible compact Menu action affordance");
+assert.equal(sessionRailSource.includes(">\n            Menu\n          </button>"), true, "collapsed rail action should use an explicit Menu label instead of ambiguous spinner-like dots");
+assert.equal(sessionRailSource.includes("session-actions-button--collapsed"), false, "collapsed rail should not keep the old confusing ellipsis affordance class");
 assert.equal(sessionRailSource.includes("session-meta"), false, "session rail rows should stay slim and avoid card-style metadata clutter");
 assert.equal(sessionRailSource.includes("{archivedCount} archived"), true, "session rail should show archived chat count instead of silently losing archived records");
 assert.equal(sessionRailSource.includes("formatSessionTime"), true, "session rail should own session timestamp formatting");

@@ -389,4 +389,15 @@ const deterministicIntakeArtifact = await createBookingIntakeArtifact.execute({ 
 assert.equal(deterministicIntakeArtifact.kind, "json-render-artifact", "booking intake tool should return a promotable JSON-render artifact");
 assert.equal(deterministicIntakeArtifact.spec.root, "main");
 assert.ok(Object.values(deterministicIntakeArtifact.spec.elements).some((element) => element.type === "QuestionCard"), "booking intake tool should use registered QuestionCard spec");
+const deterministicQuestions = Object.values(deterministicIntakeArtifact.spec.elements).filter((element) => element.type === "QuestionCard");
+const openDaysQuestion = deterministicQuestions.find((element) => element.props?.questionId === "q_open_days");
+assert.ok(openDaysQuestion, "deterministic intake artifact should include the open-days question");
+assert.equal(openDaysQuestion.props.answerType, "multi_choice", "open-days question must stay multi-select");
+assert.equal(openDaysQuestion.on?.submit?.action, "submitAnswer", "deterministic intake QuestionCards must wire submit to the controller");
+assert.equal(openDaysQuestion.on?.skip?.action, "submitAnswer", "deterministic intake QuestionCards must wire skip to the controller");
+assert.equal(openDaysQuestion.on?.submit?.params?.value?.$state, openDaysQuestion.props.value?.$bindState, "submit must read from the exact bound draft answer pointer");
+assert.equal(openDaysQuestion.on?.skip?.params?.value?.$state, openDaysQuestion.props.value?.$bindState, "skip must read from the exact bound draft answer pointer");
+const businessNameQuestion = deterministicQuestions.find((element) => element.props?.questionId === "q_business_name");
+assert.ok(businessNameQuestion, "deterministic intake should include a first-class venue/context name question");
+assert.equal(businessNameQuestion.props.writesTo, "/manifest/business/name", "context names should have a deterministic manifest path for command previews");
 assert.equal(explorerCatalog.validate(deterministicIntakeArtifact.spec).success, true, "booking intake tool output should pass catalog validation");

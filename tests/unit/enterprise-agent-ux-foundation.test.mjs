@@ -20,6 +20,12 @@ assert.match(agentConversation, /data-workflow-suggestion=\{suggestion\.familyId
 assert.match(agentConversation, /data-workflow-readiness=\{suggestion\.readiness/);
 assert.match(agentConversation, /grid gap-3 sm:grid-cols-2/);
 assert.match(agentConversation, /readinessLabel/);
+assert.match(agentConversation, /AgentApprovalAffordance/);
+assert.match(agentConversation, /data-chat-approval-card/);
+assert.match(agentConversation, /data-approval-action="approve"/);
+assert.match(appPage, /createActiveIntakeApprovalAffordance/);
+assert.match(appPage, /handleTrustedIntakeControllerAction\("approveAndRun"/);
+assert.match(appPage, /json_render\.action\.error/);
 
 const suggestions = createWorkflowSuggestions(null);
 assert.equal(suggestions.length, 4);
@@ -41,5 +47,6 @@ assert.match(appPage, /import \{ browser, dev \} from "\$app\/environment"/);
 assert.match(appPage, /let embeddedHostContextExpected = \$state\(browser && new URLSearchParams\(window\.location\.search\)\.has\("agentUiHostOrigin"\)\)/);
 assert.match(appPage, /const showCanvasDeveloperPanels = \$derived\(dev \|\| !isEmbeddedHostContextExpected\(\)\)/);
 assert.match(appPage, /showDeveloperPanels=\{showCanvasDeveloperPanels\}/);
+assert.match(appPage, /approvalAffordance=\{createActiveIntakeApprovalAffordance\(\)\}/);
 
 console.log("enterprise-agent-ux-foundation tests passed");

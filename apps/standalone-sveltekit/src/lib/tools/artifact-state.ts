@@ -96,6 +96,59 @@ function readManifest(artifact: JsonRenderArtifact): Record<string, unknown> | n
   return isRecord(manifest) ? manifest : null;
 }
 
+type IntakeStateBlockingIssue = {
+  code: string;
+  message: string;
+  path: string;
+  severity: "blocking";
+};
+
+function collectArtifactStateBlockingIssues(artifact: JsonRenderArtifact): IntakeStateBlockingIssue[] {
+  const state = artifact.content.state;
+  if (!isRecord(state)) return [];
+  const issues: IntakeStateBlockingIssue[] = [];
+
+  const questionErrors = isRecord(state.questionErrors) ? state.questionErrors : {};
+  for (const [questionId, error] of Object.entries(questionErrors)) {
+    if (error === undefined || error === null || error === false || error === "") continue;
+    issues.push({
+      code: "question_answer_error",
+      message: `Question ${questionId} has an unresolved save error: ${typeof error === "string" ? error : "answer was not saved"}.`,
+      path: `/questionErrors/${questionId.replace(/~/g, "~0").replace(/\//g, "~1")}`,
+      severity: "blocking",
+    });
+  }
+
+  const questionStates = isRecord(state.questionStates) ? state.questionStates : {};
+  for (const [questionId, value] of Object.entries(questionStates)) {
+    const normalized = typeof value === "string" ? value.toLowerCase() : "";
+    if (normalized !== "error" && normalized !== "errored" && normalized !== "invalid") continue;
+    issues.push({
+      code: "question_answer_invalid_state",
+      message: `Question ${questionId} is still marked ${normalized}; save a valid answer or mark it unknown before approval.`,
+      path: `/questionStates/${questionId.replace(/~/g, "~0").replace(/\//g, "~1")}`,
+      severity: "blocking",
+    });
+  }
+
+  return issues;
+}
+
+function addArtifactStateBlockersToValidation<T extends { ok: boolean; status: "valid" | "invalid"; issues: unknown[]; blockingItems: unknown[]; warnings: unknown[] }>(
+  validation: T,
+  artifact: JsonRenderArtifact,
+): T {
+  const blockers = collectArtifactStateBlockingIssues(artifact);
+  if (blockers.length === 0) return validation;
+  return {
+    ...validation,
+    ok: false,
+    status: "invalid",
+    blockingItems: [...validation.blockingItems, ...blockers],
+    issues: [...validation.issues, ...blockers],
+  };
+}
+
 function titleCaseFromSlug(value: string): string {
   return value
     .replace(/[-_]+/g, " ")
@@ -110,7 +163,10 @@ function stringAt(record: Record<string, unknown>, path: string[]): string | und
     if (!isRecord(cursor)) return undefined;
     cursor = cursor[segment];
   }
-  return typeof cursor === "string" && cursor.trim() ? cursor.trim() : undefined;
+  if (typeof cursor !== "string") return undefined;
+  const trimmed = cursor.trim();
+  if (!trimmed || trimmed.toLowerCase() === "unknown") return undefined;
+  return trimmed;
 }
 
 function createSlug(name: string): string {
@@ -134,14 +190,14 @@ function sanitizedManifestForCommand(manifest: Record<string, unknown>): Record<
 
 function createBookingContextCommandInput(artifact: JsonRenderArtifact, manifest: Record<string, unknown>) {
   const commandManifest = sanitizedManifestForCommand(manifest);
-  const manifestTitle = stringAt(commandManifest, ["business", "name"])
+  const explicitName = stringAt(commandManifest, ["business", "name"])
     ?? stringAt(commandManifest, ["bookableContext", "contextName"])
     ?? stringAt(commandManifest, ["context", "name"])
-    ?? stringAt(commandManifest, ["inventory", "name"])
-    ?? (artifact.title && !/intake|manifest|create booking context/i.test(artifact.title) ? artifact.title : undefined)
+    ?? stringAt(commandManifest, ["inventory", "name"]);
+  const fallbackTitle = (artifact.title && !/intake|manifest|create booking context/i.test(artifact.title) ? artifact.title : undefined)
     ?? stringAt(manifest, ["inventory", "coreDescription"])?.split(/[.;\n]/)[0]
     ?? "Booking Context";
-  const name = titleCaseFromSlug(manifestTitle).slice(0, 96);
+  const name = (explicitName ?? titleCaseFromSlug(fallbackTitle)).slice(0, 96);
   const timezone = stringAt(commandManifest, ["schedule", "timezone"]) ?? "America/New_York";
   const intakeMode = stringAt(commandManifest, ["intakeMode"]);
   const kind = intakeMode === "event" ? "event" : intakeMode === "resource" ? "resource" : "venue_schedule";
@@ -215,7 +271,7 @@ export function createArtifactStateTools(context: ArtifactStateToolContext = {})
       const artifact = loaded.artifact;
       const manifest = readManifest(artifact);
       if (!manifest) return { ok: false, error: "missing_manifest", message: "The active artifact has no manifest draft in state." };
-      const validation = validateManifestContract(manifest);
+      const validation = addArtifactStateBlockersToValidation(validateManifestContract(manifest), artifact);
       if (validation.ok && validation.manifestType !== "venue_schedule") {
         await writeAgentTelemetry({
           source: "server",
@@ -257,7 +313,7 @@ export function createArtifactStateTools(context: ArtifactStateToolContext = {})
         command,
         nextAction: validation.ok
           ? "Show the command input to the user. If they explicitly approve, call commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN. Do not use generic commitCommand for booking.context.create."
-          : "Ask the next highest-impact missing intake question before requesting approval.",
+          : "Resolve blocking intake errors or ask the next highest-impact missing intake question before requesting approval.",
       };
     },
   });
@@ -275,7 +331,7 @@ export function createArtifactStateTools(context: ArtifactStateToolContext = {})
         const artifact = loaded.artifact;
         const manifest = readManifest(artifact);
         if (!manifest) return { ok: false, error: "missing_manifest", message: "The active artifact has no manifest draft in state." };
-        const validation = validateManifestContract(manifest);
+        const validation = addArtifactStateBlockersToValidation(validateManifestContract(manifest), artifact);
         if (validation.ok && validation.manifestType !== "venue_schedule") {
           return {
             ok: false,

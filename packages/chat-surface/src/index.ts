@@ -10,7 +10,7 @@ export type { ContextChipProps } from "./components/ContextChip.svelte";
 export type { ComposerContextMenuProps } from "./components/ComposerContextMenu.svelte";
 export type { AgentSettingsPanelProps, AgentSettingsModelOption, AgentSettingsSkillOption, AgentSettingsToolFamily, AgentSettingsAddon, AgentToolPermissionMode } from "./components/AgentSettingsPanel.svelte";
 export type { AgentChatStatus, AgentComposerProps } from "./components/AgentComposer.svelte";
-export type { AgentActivityStatus, AgentConversationProps, AgentSuggestion } from "./components/AgentConversation.svelte";
+export type { AgentActivityStatus, AgentApprovalAffordance, AgentConversationProps, AgentSuggestion } from "./components/AgentConversation.svelte";
 export type { AgentChatMessage, AgentMessageProps } from "./components/AgentMessage.svelte";
 export type { ToolCallBlockProps } from "./components/ToolCallBlock.svelte";
 export type { ChatSegment, ChatSegmentsResult, ToolInfo } from "./message-parts.js";

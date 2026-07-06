@@ -54,6 +54,22 @@
     return "Chat";
   }
 
+  function sessionKindShort(session: WorkspaceSessionSummary): string {
+    if (session.mode === "artifact") return "Art";
+    if (session.mode === "document") return "Doc";
+    if (session.mode === "research") return "R&D";
+    return "Chat";
+  }
+
+  function compactSessionLabel(session: WorkspaceSessionSummary): string {
+    const name = displaySessionName(session).replace(/[•·|]/g, " ").replace(/\s+/g, " ").trim();
+    if (!name || isDefaultWorkspaceSessionName(name)) return sessionKindShort(session);
+    const words = name.split(" ").filter(Boolean);
+    const useful = words.filter((word) => !/^(the|and|for|with|from|into|live|artifact|draft|intake)$/i.test(word));
+    const selected = (useful.length > 0 ? useful : words).slice(0, 2);
+    return selected.map((word) => word.slice(0, 4)).join(" ");
+  }
+
   function formatSessionTime(value: string | null): string {
     if (!value) return "No messages yet";
     return new Intl.DateTimeFormat(undefined, {
@@ -147,23 +163,39 @@
           title={`${displaySessionName(session)} · ${sessionKind(session)}`}
           aria-label={collapsed ? `${displaySessionName(session)} · ${sessionKind(session)}` : undefined}
         >
-          <span>{collapsed ? displaySessionName(session).slice(0, 1).toUpperCase() : displaySessionName(session)}</span>
-          {#if !collapsed}
+          <span>{collapsed ? compactSessionLabel(session) : displaySessionName(session)}</span>
+          {#if collapsed}
+            <small>{sessionKindShort(session)}</small>
+          {:else}
             <small>{formatSessionTime(session.last_message_at ?? session.updated_at)}</small>
           {/if}
         </button>
-        <button
-          type="button"
-          class="session-actions-button"
-          class:session-actions-button--collapsed={collapsed}
-          aria-haspopup="menu"
-          aria-expanded={contextMenu?.sessionId === session.id}
-          aria-label={`Actions for ${displaySessionName(session)}`}
-          onclick={(event) => openActionMenu(event, session)}
-          disabled={busy}
-        >
-          ⋯
-        </button>
+        {#if collapsed}
+          <button
+            type="button"
+            class="session-actions-button session-actions-button--compact"
+            aria-haspopup="menu"
+            aria-expanded={contextMenu?.sessionId === session.id}
+            aria-label={`Actions for ${displaySessionName(session)}`}
+            title={`Actions for ${displaySessionName(session)}`}
+            onclick={(event) => openActionMenu(event, session)}
+            disabled={busy}
+          >
+            Menu
+          </button>
+        {:else}
+          <button
+            type="button"
+            class="session-actions-button"
+            aria-haspopup="menu"
+            aria-expanded={contextMenu?.sessionId === session.id}
+            aria-label={`Actions for ${displaySessionName(session)}`}
+            onclick={(event) => openActionMenu(event, session)}
+            disabled={busy}
+          >
+            ⋯
+          </button>
+        {/if}
       </article>
     {:else}
       <p class="session-empty">No chats yet. Start one when you are ready.</p>
@@ -351,12 +383,14 @@
 
   .session-rail-shell--collapsed .session-select {
     display: inline-grid;
-    width: 2.35rem;
-    height: 2.35rem;
+    width: 3.4rem;
+    min-height: 3.1rem;
     grid-template-columns: 1fr;
     justify-content: center;
-    padding: 0;
-    border-radius: 999px;
+    align-content: center;
+    gap: 0.18rem;
+    padding: 0.3rem 0.24rem;
+    border-radius: 1rem;
     text-align: center;
   }
 
@@ -370,8 +404,24 @@
   }
 
   .session-rail-shell--collapsed .session-select span {
-    max-width: none;
+    max-width: 3rem;
     text-align: center;
+    font-size: 0.66rem;
+    line-height: 1.05;
+    white-space: normal;
+  }
+
+  .session-rail-shell--collapsed .session-select small {
+    overflow: hidden;
+    max-width: 3rem;
+    color: var(--muted-foreground);
+    font-size: 0.52rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .session-actions-button {
@@ -389,11 +439,17 @@
     opacity: 0.75;
   }
 
-  .session-actions-button--collapsed {
-    width: 2.35rem;
-    height: 1.6rem;
-    margin: -0.25rem auto 0.18rem;
-    font-size: 0.95rem;
+
+  .session-actions-button--compact {
+    width: 3.4rem;
+    height: auto;
+    min-height: 1.35rem;
+    margin: -0.1rem 0 0;
+    border-radius: 0.7rem;
+    font-size: 0.5rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .session-actions-button:hover,

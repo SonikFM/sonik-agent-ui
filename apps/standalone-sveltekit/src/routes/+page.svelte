@@ -9,7 +9,7 @@
   import type { DataPart, Spec } from "@json-render/svelte";
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
-  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
+  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
@@ -1641,7 +1641,7 @@
     });
   }
 
-  function reportClientEffectError(event: string, error: unknown, input: { sessionId?: string | null; messageId?: string; documentId?: string; documentVersion?: number; root?: string; elementCount?: number } = {}): void {
+  function reportClientEffectError(event: string, error: unknown, input: { sessionId?: string | null; messageId?: string; documentId?: string; documentVersion?: number; root?: string; elementCount?: number; artifactId?: string; artifactVersion?: number; actionName?: string } = {}): void {
     logArtifactTelemetry({
       source: "client",
       event,
@@ -1649,6 +1649,9 @@
       messageId: input.messageId,
       documentId: input.documentId,
       documentVersion: input.documentVersion,
+      artifactId: input.artifactId,
+      artifactVersion: input.artifactVersion,
+      reason: input.actionName,
       root: input.root,
       elementCount: input.elementCount,
       ok: false,
@@ -2333,24 +2336,43 @@
   }
 
   async function handleJsonRenderAction(actionName: string, params?: Record<string, unknown>): Promise<void> {
-    if (actionName === "submitAnswer") {
-      await handleSubmitAnswerAction(params ?? {});
-      return;
+    try {
+      if (actionName === "submitAnswer") {
+        await handleSubmitAnswerAction(params ?? {});
+        return;
+      }
+      if (isTrustedIntakeControllerAction(actionName)) {
+        await handleTrustedIntakeControllerAction(actionName, params ?? {});
+        return;
+      }
+      logArtifactTelemetry({
+        source: "client",
+        event: "json_render.action.ignored",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: activeArtifact?.id,
+        artifactVersion: activeArtifact?.version,
+        reason: actionName,
+        ok: false,
+        error: "No trusted host action handler is registered for this action.",
+      });
+    } catch (error) {
+      reportClientEffectError("json_render.action.error", error, {
+        sessionId: activeSessionId,
+        artifactId: activeArtifact?.id,
+        artifactVersion: activeArtifact?.version,
+        actionName,
+      });
+      logArtifactTelemetry({
+        source: "client",
+        event: "json_render.action.error",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: activeArtifact?.id,
+        artifactVersion: activeArtifact?.version,
+        reason: actionName,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-    if (isTrustedIntakeControllerAction(actionName)) {
-      await handleTrustedIntakeControllerAction(actionName, params ?? {});
-      return;
-    }
-    logArtifactTelemetry({
-      source: "client",
-      event: "json_render.action.ignored",
-      sessionId: activeSessionId ?? undefined,
-      artifactId: activeArtifact?.id,
-      artifactVersion: activeArtifact?.version,
-      reason: actionName,
-      ok: false,
-      error: "No trusted host action handler is registered for this action.",
-    });
   }
 
   type TrustedIntakeControllerAction =
@@ -2652,6 +2674,36 @@
   function inferPreferredDocumentView(language?: string): PreferredDocumentView {
     return /^(markdown|md|html|htm|svg|xml)$/i.test(language ?? "") ? "preview" : "edit";
   }
+
+
+  function isActiveBookingIntakeArtifact(): boolean {
+    if (!activeArtifact || activeArtifact.kind !== "json-render") return false;
+    const state = activeArtifact.content?.state;
+    if (!state || typeof state !== "object" || Array.isArray(state)) return false;
+    const surface = (state as Record<string, unknown>).surface;
+    const manifest = (state as Record<string, unknown>).manifest;
+    if (surface && typeof surface === "object" && !Array.isArray(surface) && (surface as Record<string, unknown>).skillId === "booking.context.intake") return true;
+    if (manifest && typeof manifest === "object" && !Array.isArray(manifest)) {
+      const source = (manifest as Record<string, unknown>).source;
+      return Boolean(source && typeof source === "object" && !Array.isArray(source) && (source as Record<string, unknown>).skill === "booking.context.intake");
+    }
+    return false;
+  }
+
+  function createActiveIntakeApprovalAffordance(): AgentApprovalAffordance | null {
+    if (!isActiveBookingIntakeArtifact()) return null;
+    return {
+      title: "Ready to create this booking context?",
+      description: "Preview the typed booking.create.context payload, then approve the trusted host-gated write when the draft looks right.",
+      commandId: "booking.create.context",
+      artifactTitle: activeArtifact?.title ?? null,
+      status: "approval_required",
+      disabled: !activeArtifact,
+      onRequestPreview: () => void handleTrustedIntakeControllerAction("requestApproval", { source: "chat_approval_card", commandId: "booking.create.context" }),
+      onApprove: () => void handleTrustedIntakeControllerAction("approveAndRun", { source: "chat_approval_card", commandId: "booking.create.context" }),
+      onCancel: () => void handleTrustedIntakeControllerAction("cancelApproval", { source: "chat_approval_card", commandId: "booking.create.context" }),
+    };
+  }
 </script>
 
 <WorkspaceRoot title="Sonik Chat" {artifactOpen} layoutMode={workspaceLayoutMode} railMode={workspaceRailMode}>
@@ -2686,6 +2738,7 @@
       onClear={handleClear}
       runRecovery={runRecovery}
       onContinue={handleContinue}
+      approvalAffordance={createActiveIntakeApprovalAffordance()}
       contextItems={runContextSelection.items}
       contextSources={contextCandidates.sources}
       onAttachContext={handleAttachContext}
