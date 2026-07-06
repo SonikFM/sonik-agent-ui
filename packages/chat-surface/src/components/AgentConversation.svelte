@@ -36,6 +36,7 @@
     artifactTitle?: string | null;
     status?: "draft" | "preview" | "approval_required" | "blocked";
     disabled?: boolean;
+    disabledReason?: string | null;
     onRequestPreview: () => void;
     onApprove: () => void;
     onCancel: () => void;
@@ -132,7 +133,7 @@
         <button
           onclick={clear}
           class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
-          Start Over
+          New chat
         </button>
       {/if}
     </div>
@@ -238,6 +239,9 @@
                 {#if approvalAffordance.artifactTitle}
                   <p class="text-xs text-muted-foreground">Active draft: {approvalAffordance.artifactTitle}</p>
                 {/if}
+                {#if approvalAffordance.disabled && approvalAffordance.disabledReason}
+                  <p class="text-xs font-medium text-destructive" data-approval-disabled-reason>{approvalAffordance.disabledReason}</p>
+                {/if}
               </div>
               <div class="flex shrink-0 flex-wrap gap-2">
                 <button
@@ -247,7 +251,7 @@
                   disabled={isStreaming || approvalAffordance.disabled}
                   data-approval-action="preview"
                 >
-                  Preview command
+                  Preview setup
                 </button>
                 <button
                   type="button"
@@ -256,7 +260,7 @@
                   disabled={isStreaming || approvalAffordance.disabled}
                   data-approval-action="approve"
                 >
-                  Approve & run
+                  Approve and create
                 </button>
                 <button
                   type="button"

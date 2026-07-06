@@ -53,6 +53,8 @@
     type AgentEmbedMode,
     type AgentEmbedRailMode,
   } from "@sonik-agent-ui/agent-embed";
+  import { nextSignedWorkspaceHostContextCache, selectSignedWorkspaceHostContext } from "$lib/host-context-authority";
+  import { createQuestionErrorStatePath, createQuestionLifecycleStatePath } from "$lib/render/question-card-state";
   import { registry } from "$lib/render/registry";
   import {
     applyJsonRenderStateChanges,
@@ -244,6 +246,7 @@
   let sessionBootstrapPromise: Promise<void> | null = null;
   let hostContextWaitTimer: number | null = null;
   let hostPageContext = $state<AgentHostMergedPageContext | null>(null);
+  let lastSignedHostPageContext = $state<AgentHostMergedPageContext | null>(null);
   let embeddedHostContextExpected = $state(browser && new URLSearchParams(window.location.search).has("agentUiHostOrigin"));
   let embeddedUrlTheme: string | null = null;
   let embedMode = $state<AgentEmbedMode>(getInitialEmbedIntent().mode);
@@ -800,6 +803,21 @@
     return Array.from(map.values());
   }
 
+  function markQuestionAnswerPersistFailure(params: Record<string, unknown>, message: string): void {
+    const questionId = typeof params.questionId === "string" && params.questionId.trim() ? params.questionId.trim() : null;
+    if (!questionId || !activeArtifact || activeArtifact.kind !== "json-render") return;
+    const changes: JsonRenderStateChange[] = [
+      { path: createQuestionErrorStatePath(questionId), value: message },
+      { path: createQuestionLifecycleStatePath(questionId), value: "error" },
+    ];
+    pendingActiveArtifactStateChanges = mergeStateChanges(pendingActiveArtifactStateChanges, changes);
+    activeArtifact = {
+      ...activeArtifact,
+      content: applyJsonRenderStateChanges(activeArtifact.content, changes),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
   function scheduleActiveArtifactStatePersistence(): void {
     clearActiveArtifactStateSaveTimer();
     activeArtifactStateSaveTimer = setTimeout(() => {
@@ -1024,6 +1042,7 @@
   function getSubmitDisabledReason(message: string): AgentUiPageAssertions["submitDisabledReason"] {
     if (isStreaming) return "streaming";
     if (sessionRailBusy) return "session_loading";
+    if (!isWorkspaceHostContextReady()) return "missing_host_context";
     if (!activeSessionId) return "missing_session";
     if (!message.trim()) return "empty_prompt";
     return undefined;
@@ -1044,6 +1063,12 @@
   }
 
   async function workspaceFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+    if (!isWorkspaceHostContextReady()) {
+      sessionRailError = "Reconnect the embedded page so Sonik Chat can receive signed workspace context.";
+      requestHostPageContext("workspace_fetch_missing_signed_host_context");
+      logSessionTelemetry("workspace.fetch.blocked_missing_host_context", { ok: false, reason: "missing_signed_host_context" });
+      throw new Error("Workspace cloud runtime is not available. (missing-host-context)");
+    }
     const response = await fetch(input, {
       ...init,
       headers: {
@@ -1083,21 +1108,21 @@
   }
 
   function createWorkspaceRequestHeaders(): Record<string, string> {
-    const hostSession = hostPageContext?.hostSession;
-    const organizationId = hostSession?.organizationId ?? hostPageContext?.organizationId;
-    const authenticated = hostSession?.authenticated === true || hostPageContext?.authenticated === true;
+    const context = getSignedWorkspaceHostContext();
+    const hostSession = context?.hostSession;
+    const organizationId = hostSession?.organizationId ?? context?.organizationId;
+    const authenticated = hostSession?.authenticated === true || context?.authenticated === true;
     const userId = hostSession?.userId ?? hostSession?.principalId;
     if (!authenticated || !organizationId || !userId || !hostSession) return {};
-    if (isEmbeddedHostContextExpected() && !hasSignedHostContext(hostPageContext)) return {};
     return {
       "x-sonik-agent-ui-host-context": encodeWorkspaceHostContextHeader({
         authenticated,
         organizationId,
-        scopes: hostPageContext?.scopes ?? hostSession.scopes ?? [],
-        signatureVersion: hostPageContext?.signatureVersion ?? null,
-        issuedAt: hostPageContext?.issuedAt ?? null,
-        expiresAt: hostPageContext?.expiresAt ?? null,
-        signature: hostPageContext?.signature ?? null,
+        scopes: context?.scopes ?? hostSession.scopes ?? [],
+        signatureVersion: context?.signatureVersion ?? null,
+        issuedAt: context?.issuedAt ?? null,
+        expiresAt: context?.expiresAt ?? null,
+        signature: context?.signature ?? null,
         hostSession: createSignedWorkspaceHostSession(hostSession, {
           authenticated,
           organizationId,
@@ -1128,21 +1153,13 @@
     };
   }
 
-  function hasSignedHostContext(context: AgentHostMergedPageContext | null): boolean {
-    return Boolean(
-      context?.hostSession
-        && context.authenticated === true
-        && context.organizationId
-        && context.signatureVersion
-        && context.issuedAt
-        && context.expiresAt
-        && context.signature,
-    );
+  function getSignedWorkspaceHostContext(): AgentHostMergedPageContext | null {
+    return selectSignedWorkspaceHostContext({ current: hostPageContext, cached: lastSignedHostPageContext });
   }
 
   function isWorkspaceHostContextReady(): boolean {
     if (!isEmbeddedHostContextExpected()) return true;
-    return hasSignedHostContext(hostPageContext);
+    return Boolean(getSignedWorkspaceHostContext());
   }
 
   function encodeWorkspaceHostContextHeader(value: unknown): string {
@@ -1254,6 +1271,7 @@
       return;
     }
     hostPageContext = nextContext;
+    lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext });
     applyEmbeddedThemeFromHost(nextContext.theme ?? embeddedUrlTheme);
     logArtifactTelemetry({
       source: "client",
@@ -1591,6 +1609,11 @@
     await loadSessions();
     if (sessionSelectionRevision !== bootstrapRevision || activeSessionId) {
       logSessionTelemetry("session.bootstrap.superseded", { sessionId: activeSessionId, reason });
+      return;
+    }
+    if (isEmbeddedHostContextExpected()) {
+      logSessionTelemetry("session.bootstrap.embedded_fresh_session", { reason, mode: "embedded_new_chat" });
+      await createSession({ force: true });
       return;
     }
     const firstSession = sessions[0];
@@ -2325,7 +2348,7 @@
 
   function sendUserTurnWithEntryFrom(message: string, entryFrom: AgentAnalyticsEntryFrom): void {
     const trimmed = message.trim();
-    if (!trimmed || isStreaming) return;
+    if (!trimmed || isStreaming || getSubmitDisabledReason(trimmed)) return;
     resumableRun = null;
     stampAnalyticsHints(entryFrom);
     pendingAnalyticsEntryFrom = "composer";
@@ -2512,6 +2535,8 @@
 
     const persisted = await persistActiveArtifactStatePatch();
     if (!persisted) {
+      const message = "Answer could not be saved. Retry this question before continuing.";
+      markQuestionAnswerPersistFailure(params, message);
       logArtifactTelemetry({
         source: "client",
         event: "question_answer.submit.blocked",
@@ -2692,15 +2717,35 @@
     return false;
   }
 
+  function getActiveIntakeApprovalReadiness(): { ready: boolean; visible: boolean; reason: string | null } {
+    const state = activeArtifact?.content?.state;
+    if (!isRecord(state)) return { ready: false, visible: false, reason: "Open a saved booking intake first." };
+    const manifest = isRecord(state.manifest) ? state.manifest : {};
+    const inventory = isRecord(manifest.inventory) ? manifest.inventory : {};
+    const questionErrors = isRecord(state.questionErrors) ? state.questionErrors : {};
+    const questionStates = isRecord(state.questionStates) ? state.questionStates : {};
+    const unresolvedError = Object.entries(questionErrors).find(([, value]) => value !== undefined && value !== null && value !== false && value !== "");
+    if (unresolvedError) return { ready: false, visible: false, reason: `Fix the saved answer for ${unresolvedError[0]} before previewing.` };
+    const erroredState = Object.entries(questionStates).find(([, value]) => ["error", "errored", "invalid"].includes(String(value).toLowerCase()));
+    if (erroredState) return { ready: false, visible: false, reason: `Fix the saved answer for ${erroredState[0]} before previewing.` };
+    const hasKind = typeof manifest.intakeMode === "string" && manifest.intakeMode.trim().length > 0;
+    const hasInventory = typeof inventory.coreDescription === "string" && inventory.coreDescription.trim().length > 0;
+    if (!hasKind || !hasInventory) return { ready: false, visible: false, reason: "Answer setup type and inventory before previewing." };
+    return { ready: true, visible: true, reason: null };
+  }
+
   function createActiveIntakeApprovalAffordance(): AgentApprovalAffordance | null {
     if (!isActiveBookingIntakeArtifact()) return null;
+    const readiness = getActiveIntakeApprovalReadiness();
+    if (!readiness.visible) return null;
     return {
-      title: "Ready to create this booking context?",
-      description: "Preview the typed booking.create.context payload, then approve the trusted host-gated write when the draft looks right.",
+      title: "Create this booking setup?",
+      description: "Preview the booking setup that will be sent to the trusted host. Chat approval is not enough; the host still gates the write.",
       commandId: "booking.create.context",
       artifactTitle: activeArtifact?.title ?? null,
-      status: "approval_required",
-      disabled: !activeArtifact,
+      status: readiness.ready ? "approval_required" : "blocked",
+      disabled: !activeArtifact || !readiness.ready,
+      disabledReason: readiness.reason,
       onRequestPreview: () => void handleTrustedIntakeControllerAction("requestApproval", { source: "chat_approval_card", commandId: "booking.create.context" }),
       onApprove: () => void handleTrustedIntakeControllerAction("approveAndRun", { source: "chat_approval_card", commandId: "booking.create.context" }),
       onCancel: () => void handleTrustedIntakeControllerAction("cancelApproval", { source: "chat_approval_card", commandId: "booking.create.context" }),
@@ -2715,7 +2760,7 @@
       {currentSession}
       {activeSessionId}
       archivedCount={archivedSessionCount}
-      busy={sessionRailBusy || isStreaming}
+      busy={sessionRailBusy}
       error={sessionRailError}
       collapsed={workspaceRailMode === "collapsed"}
       onCreate={() => void createSession()}
@@ -2778,8 +2823,9 @@
           type="button"
           onclick={openDocumentEditor}
           class="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          aria-label="Open workspace documents"
         >
-          Workspace Docs
+          Documents
         </button>
       {/snippet}
 

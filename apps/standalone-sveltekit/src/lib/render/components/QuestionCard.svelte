@@ -11,6 +11,7 @@
     sanitizeQuestionCardProps,
     type Choice,
   } from "../component-prop-safety";
+  import { createQuestionErrorStatePath } from "../question-card-state";
 
   type AnswerValue = string | number | boolean | Array<string | number | boolean> | null;
 
@@ -22,6 +23,8 @@
     answerType: string;
     choices?: Choice[] | null;
     value?: AnswerValue;
+    lifecycleState?: string | null;
+    errorMessage?: string | null;
     required?: boolean | null;
     allowSkip?: boolean | null;
     skipValue?: unknown;
@@ -41,7 +44,7 @@
   let lastTelemetryKey = $state<string | null>(null);
 
   let error = $state<string | null>(null);
-  let submitStatus = $state<"idle" | "sent" | "skipped" | "error">("idle");
+  let submitStatus = $state<"idle" | "saving" | "failed">("idle");
 
   $effect(() => {
     const telemetry = normalized.telemetry;
@@ -57,9 +60,15 @@
 
   let value = $derived(valueBinding.current ?? null);
   const choices = $derived(safeProps.choices ?? []);
+  const lifecycleState = $derived(safeProps.lifecycleState ?? "draft");
+  const persistedError = $derived(safeProps.errorMessage ?? null);
+  const visibleError = $derived(error ?? persistedError);
+  const visibleState = $derived(visibleError ? "failed" : submitStatus === "saving" ? "saving" : lifecycleState);
   const isChoice = $derived(["single_choice", "choice_cards", "confirmation"].includes(safeProps.answerType));
   const isMulti = $derived(safeProps.answerType === "multi_choice");
   const isLongText = $derived(["long_text", "textarea", "weekly_schedule"].includes(safeProps.answerType));
+
+  const questionErrorPath = $derived(createQuestionErrorStatePath(safeProps.questionId));
 
   function isSelected(choiceValue: Choice["value"]) {
     return Array.isArray(value) ? value.includes(choiceValue) : value === choiceValue;
@@ -69,6 +78,7 @@
     if (disabled) return;
     error = null;
     submitStatus = "idle";
+    stateContext.set(questionErrorPath, null);
     if (isMulti) {
       const current = Array.isArray(valueBinding.current) ? [...valueBinding.current] : [];
       valueBinding.current = current.includes(choiceValue) ? current.filter((item) => item !== choiceValue) : [...current, choiceValue];
@@ -80,6 +90,7 @@
   function handleText(e: Event) {
     error = null;
     submitStatus = "idle";
+    stateContext.set(questionErrorPath, null);
     const raw = (e.target as HTMLInputElement | HTMLTextAreaElement).value;
     valueBinding.current = safeProps.answerType === "number" && raw !== "" ? Number(raw) : raw;
   }
@@ -111,16 +122,24 @@
         skipped,
         writesTo: safeProps.writesTo,
       });
-      stateContext.update(updates);
+      stateContext.update({
+        ...updates,
+        [questionErrorPath]: null,
+      });
       error = null;
-      submitStatus = skipped ? "skipped" : "sent";
+      submitStatus = "saving";
       emit(skipped ? "skip" : "submit");
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => {
+          if (submitStatus === "saving") submitStatus = "idle";
+        }, 1_200);
+      }
     } catch (err) {
       const formatted = formatQuestionSubmitError(err);
       error = formatted.message;
-      submitStatus = "error";
+      submitStatus = "failed";
       emitComponentPropValidationTelemetry(formatted.telemetry);
-      stateContext.set(`/questionErrors/${safeProps.questionId}`, error);
+      stateContext.set(questionErrorPath, error);
     }
   }
 </script>
@@ -130,7 +149,7 @@
   data-question-card
   data-question-card-id={safeProps.questionId}
   data-question-answer-type={safeProps.answerType}
-  data-question-state={submitStatus}
+  data-question-state={visibleState}
 >
   <div class="flex flex-col gap-4">
     <div class="flex items-start justify-between gap-4">
@@ -193,8 +212,8 @@
       />
     {/if}
 
-    {#if error}
-      <p class="text-sm text-destructive">{error}</p>
+    {#if visibleError}
+      <p class="text-sm text-destructive">{visibleError}</p>
     {/if}
 
     <div class="flex flex-wrap items-center gap-2">
@@ -202,12 +221,14 @@
       {#if safeProps.allowSkip !== false}
         <Button type="button" variant="outline" onclick={() => submit(true)} data-question-action="skip" data-question-card-id={safeProps.questionId}>{safeProps.skipLabel ?? "Mark unknown"}</Button>
       {/if}
-      {#if submitStatus === "sent"}
-        <span class="text-xs font-medium text-primary">Answer sent to agent</span>
-      {:else if submitStatus === "skipped"}
-        <span class="text-xs font-medium text-muted-foreground">Marked unknown and sent to agent</span>
-      {:else if submitStatus === "error"}
-        <span class="text-xs font-medium text-destructive">Answer not sent</span>
+      {#if visibleState === "saving"}
+        <span class="text-xs font-medium text-primary">Saving answer and asking the next question…</span>
+      {:else if visibleState === "answered"}
+        <span class="text-xs font-medium text-primary">Answer saved</span>
+      {:else if visibleState === "skipped"}
+        <span class="text-xs font-medium text-muted-foreground">Marked unknown</span>
+      {:else if visibleState === "failed" || visibleState === "error" || visibleState === "errored" || visibleState === "invalid"}
+        <span class="text-xs font-medium text-destructive">Answer not saved. Retry this question before continuing.</span>
       {:else if safeProps.writesTo}
         <span class="text-xs text-muted-foreground">Writes to {safeProps.writesTo}</span>
       {/if}

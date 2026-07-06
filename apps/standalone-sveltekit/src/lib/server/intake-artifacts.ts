@@ -365,6 +365,8 @@ function createIntakeSurfaceSpec(surface: InteractiveSurfaceSpec): Spec {
         answerType: question.answerType,
         choices: question.choices,
         value: { $bindState: `/draftAnswers/${questionIdSegment}` },
+        lifecycleState: { $bindState: `/questionStates/${questionIdSegment}` },
+        errorMessage: { $bindState: `/questionErrors/${questionIdSegment}` },
         required: question.required,
         allowSkip: question.allowSkip,
         skipValue: question.skipValue,

@@ -160,7 +160,6 @@
           class="session-select"
           onclick={() => onSwitch(session.id)}
           disabled={busy || session.id === activeSessionId}
-          title={`${displaySessionName(session)} · ${sessionKind(session)}`}
           aria-label={collapsed ? `${displaySessionName(session)} · ${sessionKind(session)}` : undefined}
         >
           <span>{collapsed ? compactSessionLabel(session) : displaySessionName(session)}</span>
@@ -177,7 +176,6 @@
             aria-haspopup="menu"
             aria-expanded={contextMenu?.sessionId === session.id}
             aria-label={`Actions for ${displaySessionName(session)}`}
-            title={`Actions for ${displaySessionName(session)}`}
             onclick={(event) => openActionMenu(event, session)}
             disabled={busy}
           >
@@ -310,7 +308,7 @@
   .session-select:disabled,
   .session-actions-button:disabled,
   .session-context-menu button:disabled {
-    cursor: wait;
+    cursor: not-allowed;
     opacity: 0.55;
   }
 
@@ -383,14 +381,14 @@
 
   .session-rail-shell--collapsed .session-select {
     display: inline-grid;
-    width: 3.4rem;
-    min-height: 3.1rem;
+    width: 3.8rem;
+    min-height: 2.45rem;
     grid-template-columns: 1fr;
     justify-content: center;
     align-content: center;
     gap: 0.18rem;
     padding: 0.3rem 0.24rem;
-    border-radius: 1rem;
+    border-radius: 0.75rem;
     text-align: center;
   }
 
@@ -404,16 +402,16 @@
   }
 
   .session-rail-shell--collapsed .session-select span {
-    max-width: 3rem;
+    max-width: 3.45rem;
     text-align: center;
-    font-size: 0.66rem;
+    font-size: 0.68rem;
     line-height: 1.05;
     white-space: normal;
   }
 
   .session-rail-shell--collapsed .session-select small {
     overflow: hidden;
-    max-width: 3rem;
+    max-width: 3.45rem;
     color: var(--muted-foreground);
     font-size: 0.52rem;
     font-weight: 800;
@@ -441,7 +439,7 @@
 
 
   .session-actions-button--compact {
-    width: 3.4rem;
+    width: 3.8rem;
     height: auto;
     min-height: 1.35rem;
     margin: -0.1rem 0 0;

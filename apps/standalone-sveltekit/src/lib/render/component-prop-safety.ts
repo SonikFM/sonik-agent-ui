@@ -18,6 +18,8 @@ export type QuestionCardProps = {
   answerType: string;
   choices?: Choice[] | null;
   value?: ChoiceValue | ChoiceValue[] | null;
+  lifecycleState?: string | null;
+  errorMessage?: string | null;
   required?: boolean | null;
   allowSkip?: boolean | null;
   skipValue?: unknown;
@@ -109,6 +111,8 @@ export function sanitizeQuestionCardProps(input: Partial<QuestionCardProps> | Re
       answerType: effectiveAnswerType,
       choices,
       value: sanitizeChoiceValue(raw.value, effectiveAnswerType === "multi_choice" ? "multiple" : "single"),
+      lifecycleState: normalizeLifecycleState(raw.lifecycleState),
+      errorMessage: typeof raw.errorMessage === "string" && raw.errorMessage.trim() ? raw.errorMessage : null,
       required: raw.required === true,
       allowSkip: raw.allowSkip === false ? false : true,
       skipValue: raw.skipValue ?? "unknown",
@@ -173,6 +177,13 @@ function sanitizeChoiceValue(value: unknown, mode: "single" | "multiple"): Choic
   if (mode === "multiple") return Array.isArray(value) ? value.filter(isChoiceValue) : [];
   if (Array.isArray(value)) return value.find(isChoiceValue) ?? null;
   return isChoiceValue(value) ? value : null;
+}
+
+function normalizeLifecycleState(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  return ["draft", "saving", "answered", "skipped", "invalid", "error", "errored"].includes(normalized) ? normalized : null;
 }
 
 function normalizeNonnegativeInteger(value: unknown, path: string, issues: string[]): number {

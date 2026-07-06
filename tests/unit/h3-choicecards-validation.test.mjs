@@ -13,11 +13,27 @@ const [
   import("../../apps/standalone-sveltekit/src/lib/server/workspace-request-store.ts"),
 ]);
 
+const { createQuestionErrorStatePath, createQuestionLifecycleStatePath } = await import("../../apps/standalone-sveltekit/src/lib/render/question-card-state.ts");
+const { applyJsonRenderStateChanges } = await import("../../apps/standalone-sveltekit/src/lib/render/json-render-state-controller.ts");
 const questionCardSource = await readFile("apps/standalone-sveltekit/src/lib/render/components/QuestionCard.svelte", "utf8");
 assert.equal(questionCardSource.includes("data-question-card"), true, "QuestionCard root should expose a deterministic selector for ultratest");
 assert.equal(questionCardSource.includes("data-question-option-value"), true, "QuestionCard options should expose deterministic answer values for ultratest");
 assert.equal(questionCardSource.includes('data-question-action="submit"'), true, "QuestionCard submit button should expose a deterministic action selector");
 assert.equal(questionCardSource.includes('data-question-action="skip"'), true, "QuestionCard skip button should expose a deterministic action selector");
+assert.equal(questionCardSource.includes("Saving answer and asking the next question"), true, "QuestionCard must show a pending-save state instead of pretending persistence already succeeded");
+assert.equal(questionCardSource.includes("Answer not saved. Retry this question before continuing."), true, "QuestionCard must expose a retryable failed-save state");
+assert.equal(questionCardSource.includes("createQuestionErrorStatePath"), true, "QuestionCard state paths should use the shared JSON Pointer-safe question error helper");
+assert.equal(questionCardSource.includes("stateContext.set(questionErrorPath"), true, "QuestionCard should clear/set escaped question error paths through one derived path");
+
+const unsafeQuestionId = "q/open~days";
+assert.equal(createQuestionErrorStatePath(unsafeQuestionId), "/questionErrors/q~1open~0days", "question error state paths should JSON Pointer-escape slash and tilde");
+assert.equal(createQuestionLifecycleStatePath(unsafeQuestionId), "/questionStates/q~1open~0days", "question lifecycle state paths should JSON Pointer-escape slash and tilde");
+const escapedStateSpec = applyJsonRenderStateChanges({ root: "root", elements: {}, state: {} }, [
+  { path: createQuestionErrorStatePath(unsafeQuestionId), value: "Answer could not be saved." },
+  { path: createQuestionLifecycleStatePath(unsafeQuestionId), value: "error" },
+]);
+assert.equal(escapedStateSpec.state.questionErrors[unsafeQuestionId], "Answer could not be saved.", "escaped question error path should write to the original question id key");
+assert.equal(escapedStateSpec.state.questionStates[unsafeQuestionId], "error", "escaped question lifecycle path should write to the original question id key");
 
 const { sanitizeChoiceCardsProps, sanitizeQuestionCardProps, formatQuestionSubmitError } = propSafety;
 const { createIntakeArtifact, updateIntakeArtifactState } = intakeModule;

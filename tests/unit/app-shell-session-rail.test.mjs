@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
+const hostAuthorityModule = await import("../../apps/standalone-sveltekit/src/lib/host-context-authority.ts");
 const pageLoadSource = await readFile("apps/standalone-sveltekit/src/routes/+page.ts", "utf8");
 const rootSource = await readFile("packages/workspace-core/src/components/WorkspaceRoot.svelte", "utf8");
 const generateRoute = await readFile("apps/standalone-sveltekit/src/routes/api/generate/+server.ts", "utf8");
@@ -328,7 +329,12 @@ assert.equal(pageSource.includes("host.page_context.requested"), true, "embedded
 assert.equal(pageSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "embedded app should use a stable page-context request message type");
 assert.equal(pageSource.includes("sessionBootstrapPromise"), true, "embedded session bootstrap should guard repeated host page-context messages while initialization is in flight");
 assert.equal(pageSource.includes("if (!authenticated || !organizationId || !userId || !hostSession) return {}"), true, "workspace authority headers should require an authenticated donated hostSession, not display-only page context");
-assert.equal(pageSource.includes("signature: hostPageContext?.signature ?? null"), true, "workspace authority headers should forward signed host-context proof into cloud API requests");
+assert.equal(pageSource.includes("signature: context?.signature ?? null"), true, "workspace authority headers should forward signed host-context proof into cloud API requests");
+assert.equal(pageSource.includes("lastSignedHostPageContext"), true, "embedded workspace requests should cache the last valid signed host context until it expires");
+assert.equal(pageSource.includes("selectSignedWorkspaceHostContext({ current: hostPageContext, cached: lastSignedHostPageContext })"), true, "embedded workspace requests should delegate signed-context selection to the fail-closed authority helper");
+assert.equal(pageSource.includes("lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext })"), true, "host-context updates must refresh or clear the signed-context cache through the authority helper");
+assert.equal(pageSource.includes("workspace.fetch.blocked_missing_host_context"), true, "workspace calls should fail closed before reaching cloud APIs without signed host context");
+assert.equal(pageSource.includes("session.bootstrap.embedded_fresh_session"), true, "embedded bootstrap should start a fresh chat instead of silently jumping into the latest persisted session");
 assert.equal(pageSource.includes("function createSignedWorkspaceHostSession"), true, "workspace authority headers should canonicalize the signed hostSession envelope before re-encoding it");
 assert.equal(pageSource.includes("...hostSession,"), false, "workspace authority headers must not spread sanitized display-only hostSession fields into the HMAC-covered envelope");
 assert.equal(pageSource.includes("hostSession.theme"), true, "the regression guard should document that display-only hostSession.theme exists outside the signed workspace header");
@@ -355,6 +361,24 @@ assert.equal(fakeBookingHostSource.includes("fake booking host") || fakeBookingH
 assert.equal(fakeBookingHostSource.includes("postMessage"), true, "static fake host should donate page context through postMessage");
 assert.equal(fakeBookingHostSource.includes("booking-console"), true, "static fake host should donate booking surface context");
 assert.equal(fakeBookingHostSource.includes("Summer Jazz Night"), true, "static fake host should donate active entity label");
+
+const { selectSignedWorkspaceHostContext, nextSignedWorkspaceHostContextCache } = hostAuthorityModule;
+const signedContext = {
+  authenticated: true,
+  organizationId: "org_1",
+  signatureVersion: "v1",
+  issuedAt: "2026-07-06T00:00:00.000Z",
+  expiresAt: "2026-07-06T01:00:00.000Z",
+  signature: "sig_1",
+  hostSession: { source: "amplify-embedded", authenticated: true, organizationId: "org_1", scopes: ["booking"], expiresAt: "2026-07-06T01:00:00.000Z" },
+};
+const unsignedContext = { authenticated: true, organizationId: "org_2", route: "/different" };
+const nowMs = Date.parse("2026-07-06T00:30:00.000Z");
+assert.equal(selectSignedWorkspaceHostContext({ current: null, cached: signedContext, nowMs }), signedContext, "a cached signed context is usable only while no current host context exists");
+assert.equal(selectSignedWorkspaceHostContext({ current: unsignedContext, cached: signedContext, nowMs }), null, "a current unsigned host context must fail closed instead of reusing stale signed context");
+assert.equal(nextSignedWorkspaceHostContextCache({ next: unsignedContext, nowMs }), null, "unsigned host-context updates must clear signed-context cache");
+assert.equal(nextSignedWorkspaceHostContextCache({ next: signedContext, nowMs }), signedContext, "signed host-context updates should refresh signed-context cache");
+assert.equal(selectSignedWorkspaceHostContext({ current: null, cached: signedContext, nowMs: Date.parse("2026-07-06T00:59:56.000Z") }), null, "near-expired signed host contexts should be rejected before workspace calls");
 assert.equal(fakeBookingHostSource.includes("org_fake_booking") || fakeBookingHostSource.includes("user_fake_booking"), false, "static fake host should keep browser-donated page context display-only and not carry org/user authority");
 assert.equal(fakeBookingHostSource.includes("mountSonikAgentUI"), true, "static fake host should consume the one-call SDK mount helper instead of handwritten iframe glue");
 assert.equal(fakeBookingHostSource.includes('theme: () => url.searchParams.get("theme") ?? "sonik-operator-dark"'), true, "fake booking host smoke fixture should donate the Booking operator dark theme by default");
