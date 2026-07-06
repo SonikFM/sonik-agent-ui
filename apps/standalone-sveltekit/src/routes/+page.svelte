@@ -1038,6 +1038,7 @@
     return {
       "x-sonik-agent-ui-smoke-stream": "true",
       "x-sonik-agent-ui-smoke-run-id": smokeRunId,
+      "x-sonik-agent-ui-smoke-persistence-mode": "auto",
       ...(smokeScenario ? { "x-sonik-agent-ui-smoke-scenario": smokeScenario } : {}),
     };
   }
@@ -1046,6 +1047,7 @@
     const response = await fetch(input, {
       ...init,
       headers: {
+        ...createDevSmokeHeaders(),
         ...createWorkspaceRequestHeaders(),
         ...headersToRecord(init.headers),
       },

@@ -125,7 +125,13 @@
   }
 </script>
 
-<section class="rounded-xl border bg-card p-5 shadow-sm">
+<section
+  class="rounded-xl border bg-card p-5 shadow-sm"
+  data-question-card
+  data-question-card-id={safeProps.questionId}
+  data-question-answer-type={safeProps.answerType}
+  data-question-state={submitStatus}
+>
   <div class="flex flex-col gap-4">
     <div class="flex items-start justify-between gap-4">
       <div class="min-w-0">
@@ -157,6 +163,9 @@
             disabled={choice.disabled === true}
             aria-pressed={isSelected(choice.value)}
             onclick={() => choose(choice.value, choice.disabled)}
+            data-question-option
+            data-question-card-id={safeProps.questionId}
+            data-question-option-value={String(choice.value)}
           >
             <p class="font-medium">{choice.label ?? String(choice.value)}</p>
             {#if choice.description}
@@ -170,6 +179,8 @@
         class="min-h-28 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
         value={String(value ?? "")}
         oninput={handleText}
+        data-question-input
+        data-question-card-id={safeProps.questionId}
       ></textarea>
     {:else}
       <input
@@ -177,6 +188,8 @@
         type={safeProps.answerType === "number" ? "number" : safeProps.answerType === "date" ? "date" : safeProps.answerType === "datetime" ? "datetime-local" : "text"}
         value={String(value ?? "")}
         oninput={handleText}
+        data-question-input
+        data-question-card-id={safeProps.questionId}
       />
     {/if}
 
@@ -185,9 +198,9 @@
     {/if}
 
     <div class="flex flex-wrap items-center gap-2">
-      <Button type="button" onclick={() => submit(false)}>{safeProps.submitLabel ?? "Submit answer"}</Button>
+      <Button type="button" onclick={() => submit(false)} data-question-action="submit" data-question-card-id={safeProps.questionId}>{safeProps.submitLabel ?? "Submit answer"}</Button>
       {#if safeProps.allowSkip !== false}
-        <Button type="button" variant="outline" onclick={() => submit(true)}>{safeProps.skipLabel ?? "Mark unknown"}</Button>
+        <Button type="button" variant="outline" onclick={() => submit(true)} data-question-action="skip" data-question-card-id={safeProps.questionId}>{safeProps.skipLabel ?? "Mark unknown"}</Button>
       {/if}
       {#if submitStatus === "sent"}
         <span class="text-xs font-medium text-primary">Answer sent to agent</span>

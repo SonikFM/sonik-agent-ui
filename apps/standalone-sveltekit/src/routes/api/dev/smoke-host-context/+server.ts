@@ -7,10 +7,20 @@ const SMOKE_GUEST_EMAIL = "agent-ui-smoke@example.test";
 const SMOKE_GUEST_NAME = "Agent UI Smoke Guest";
 const MAX_SMOKE_RUN_ID_LENGTH = 120;
 const SMOKE_CONTEXT_NAME = "Agent UI Smoke Context";
+const LOCAL_SMOKE_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 
-function readEnvString(env: Record<string, unknown> | null | undefined, key: string): string | null {
-  const value = env?.[key];
+function readEnvString(env: Record<string, unknown> | null | undefined, key: string, { allowProcessEnv = false }: { allowProcessEnv?: boolean } = {}): string | null {
+  const processValue = allowProcessEnv && typeof process !== "undefined" ? process.env?.[key] : undefined;
+  const value = env?.[key] ?? processValue;
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isLocalSmokeRequest(request: Request): boolean {
+  try {
+    return LOCAL_SMOKE_HOSTS.has(new URL(request.url).hostname);
+  } catch {
+    return false;
+  }
 }
 
 function cleanSmokeRunId(value: unknown): string {
@@ -150,12 +160,16 @@ async function ensureSmokeBookingContext(input: { platform: Parameters<RequestHa
 }
 
 export const POST: RequestHandler = async ({ request, platform }) => {
+  if (!isLocalSmokeRequest(request)) {
+    throw error(404, "Smoke host context signer is local-dev only.");
+  }
+
   const env = platform?.env as Record<string, unknown> | null | undefined;
-  if (readEnvString(env, "SONIK_AGENT_UI_ENABLE_SMOKE_HOST_CONTEXT_SIGNER") !== "true") {
+  if (readEnvString(env, "SONIK_AGENT_UI_ENABLE_SMOKE_HOST_CONTEXT_SIGNER", { allowProcessEnv: true }) !== "true") {
     throw error(404, "Smoke host context signer is disabled.");
   }
 
-  const secret = readEnvString(env, "SONIK_AGENT_UI_HOST_CONTEXT_SECRET");
+  const secret = readEnvString(env, "SONIK_AGENT_UI_HOST_CONTEXT_SECRET", { allowProcessEnv: true });
   if (!secret) throw error(503, "SONIK_AGENT_UI_HOST_CONTEXT_SECRET is required to sign smoke host context.");
 
   const body = await request.json().catch(() => ({})) as { smokeRunId?: unknown };

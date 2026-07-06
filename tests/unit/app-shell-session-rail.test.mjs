@@ -294,6 +294,7 @@ const sessionsRouteSource = await readFile("apps/standalone-sveltekit/src/routes
 const observabilityPackageSource = await readFile("packages/agent-observability/src/index.ts", "utf8");
 const evidenceServerSource = await readFile("scripts/agent-ui-dev-evidence-server.mjs", "utf8");
 const smokeHarnessSource = await readFile("scripts/agent-ui-smoke.mjs", "utf8");
+const smokeHostContextRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/dev/smoke-host-context/+server.ts", "utf8");
 const bookingReservationSmokeSource = await readFile("scripts/agent-ui-booking-reservation-pipeb-smoke.mjs", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const agentEmbedSource = await readFile("packages/agent-embed/src/index.ts", "utf8");
@@ -359,6 +360,7 @@ assert.equal(fakeBookingHostSource.includes("mountSonikAgentUI"), true, "static 
 assert.equal(fakeBookingHostSource.includes('theme: () => url.searchParams.get("theme") ?? "sonik-operator-dark"'), true, "fake booking host smoke fixture should donate the Booking operator dark theme by default");
 assert.equal(agentEmbedSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "host embed helper should define a stable page-context request message type");
 assert.equal(agentEmbedSource.includes("onRequestPageContext"), true, "host embed helper should respond to page context request messages from the iframe");
+assert.equal(fakeBookingHostSource.includes("launcher: \"#agent-fab-main\""), true, "static fake host should expose the visible FAB launcher through the SDK element map");
 assert.equal(fakeBookingHostSource.includes("openChat: \"#open-chat\""), true, "static fake host should expose a compact chat launcher through the SDK element map");
 assert.equal(fakeBookingHostSource.includes("openCanvas: \"#open-canvas\""), true, "static fake host should expose a canvas workspace launcher through the SDK element map");
 assert.equal(fakeBookingHostSource.includes("agentUrl: \"/\""), true, "static fake host should pass the agent URL through the SDK mount helper");
@@ -389,6 +391,8 @@ assert.equal(pageSource.includes("$state.snapshot"), true, "page-control snapsho
 assert.equal(pageSource.includes("submitPrompt"), true, "page-control contract should expose a semantic submit action backed by existing handlers");
 assert.equal(pageSource.includes("function getSubmitDisabledReason"), true, "page-control submit and manual submit should share one disabled-reason gate");
 assert.equal(pageSource.includes("createDevSmokeHeaders"), true, "dev smoke mode should be transported as headers from the local smoke URL");
+assert.equal(pageSource.includes('"x-sonik-agent-ui-smoke-persistence-mode": "auto"'), true, "local dev smoke should be able to use auto persistence without requiring a live cloud DB");
+assert.equal(pageSource.includes("...createDevSmokeHeaders(),\n        ...createWorkspaceRequestHeaders()"), true, "workspaceFetch should forward dev smoke headers before signed host-context headers");
 assert.equal(pageSource.includes("devSmokeMockStream"), false, "page should not put smoke-only mode flags into the application request body");
 assert.equal(pageSource.includes("openWorkspaceDocument"), true, "page-control contract should expose document host action without DOM scraping");
 assert.equal(pageSource.includes("async function createInitialWorkspaceDocument"), true, "parent app should create initial workspace documents through signed workspaceFetch before mounting the static document iframe");
@@ -415,6 +419,9 @@ assert.equal(evidenceServerSource.includes("127.0.0.1"), true, "local evidence s
 assert.equal(evidenceServerSource.includes('access-control-allow-origin"] = origin'), true, "local evidence server should echo only allowed localhost origins instead of wildcard CORS");
 assert.equal(evidenceServerSource.includes("AGENT_UI_EVIDENCE_ALLOW_LAN"), true, "local evidence server LAN exposure should be explicit opt-in");
 assert.equal(evidenceServerSource.includes("/stream"), true, "local evidence server should expose an SSE tail for future live log streaming");
+assert.equal(smokeHostContextRouteSource.includes("isLocalSmokeRequest(request)"), true, "smoke host-context signer must reject non-local requests before reading signer env/secrets");
+assert.equal(smokeHostContextRouteSource.includes("LOCAL_SMOKE_HOSTS"), true, "smoke host-context signer should keep its local-only host allowlist explicit");
+assert.equal(smokeHostContextRouteSource.indexOf("isLocalSmokeRequest(request)") < smokeHostContextRouteSource.indexOf("SONIK_AGENT_UI_ENABLE_SMOKE_HOST_CONTEXT_SIGNER"), true, "smoke signer should prove local request origin before evaluating signer enablement");
 assert.equal(smokeHarnessSource.includes('page.on("crash"'), true, "smoke harness should explicitly catch browser page crashes");
 assert.equal(smokeHarnessSource.includes("x-sonik-request-id"), true, "smoke harness should verify generate correlation headers");
 assert.equal(smokeHarnessSource.includes("window.__sonikAgentUI"), true, "smoke harness should require canonical page-control state/actions instead of DOM synthesis");

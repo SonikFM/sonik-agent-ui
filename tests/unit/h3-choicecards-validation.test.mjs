@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 const [
   propSafety,
@@ -11,6 +12,12 @@ const [
   import("../../apps/standalone-sveltekit/src/lib/server/booking-workflows/context-intake.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/workspace-request-store.ts"),
 ]);
+
+const questionCardSource = await readFile("apps/standalone-sveltekit/src/lib/render/components/QuestionCard.svelte", "utf8");
+assert.equal(questionCardSource.includes("data-question-card"), true, "QuestionCard root should expose a deterministic selector for ultratest");
+assert.equal(questionCardSource.includes("data-question-option-value"), true, "QuestionCard options should expose deterministic answer values for ultratest");
+assert.equal(questionCardSource.includes('data-question-action="submit"'), true, "QuestionCard submit button should expose a deterministic action selector");
+assert.equal(questionCardSource.includes('data-question-action="skip"'), true, "QuestionCard skip button should expose a deterministic action selector");
 
 const { sanitizeChoiceCardsProps, sanitizeQuestionCardProps, formatQuestionSubmitError } = propSafety;
 const { createIntakeArtifact, updateIntakeArtifactState } = intakeModule;

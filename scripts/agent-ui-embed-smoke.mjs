@@ -15,6 +15,11 @@ const telemetryLogPath = process.env.SONIK_AGENT_UI_TELEMETRY_LOG ?? path.join(r
 const evidencePath = path.join(repoRoot, ".omx", "logs", `${runId}.json`);
 const startServer = process.env.AGENT_UI_SMOKE_START_SERVER !== "false";
 const useMockStream = process.env.AGENT_UI_EMBED_SMOKE_REAL_MODEL !== "true";
+const smokeHostContextEnv = {
+  SONIK_AGENT_UI_ENABLE_SMOKE_HOST_CONTEXT_SIGNER: process.env.SONIK_AGENT_UI_ENABLE_SMOKE_HOST_CONTEXT_SIGNER ?? "true",
+  SONIK_AGENT_UI_HOST_CONTEXT_SECRET: process.env.SONIK_AGENT_UI_HOST_CONTEXT_SECRET ?? `agent-ui-embed-smoke-secret-${runId}`,
+  SONIK_AGENT_UI_PERSISTENCE_MODE: process.env.AGENT_UI_EMBED_SMOKE_PERSISTENCE_MODE ?? "auto",
+};
 const startedAtMs = Date.now();
 const children = [];
 const evidence = {
@@ -95,7 +100,7 @@ function spawnDevProcess(command, args, options = {}) {
 async function ensureAppServer() {
   if (await isReachable(baseUrl)) return record("app.server.reused", { baseUrl }), true;
   if (!startServer) return false;
-  spawnDevProcess("pnpm", ["dev"], { name: "app.dev" });
+  spawnDevProcess("pnpm", ["dev"], { name: "app.dev", env: smokeHostContextEnv });
   return waitForReachable(baseUrl);
 }
 
@@ -236,10 +241,25 @@ try {
   if (!frame) throw new Error("agent iframe frame was not available");
   await frame.waitForFunction(() => Boolean(window.__sonikAgentUI?.getPageContext), undefined, { timeout: 20_000 });
   await frame.waitForFunction(() => window.__sonikAgentUI?.getPageContext?.().surface === "booking-console", undefined, { timeout: 10_000 });
-  await frame.waitForFunction(() => window.__sonikAgentUI?.getAssertions?.().hasActiveSession === true, undefined, { timeout: 20_000 });
 
   evidence.pageContext = await frame.evaluate(() => window.__sonikAgentUI.getPageContext());
   evidence.assertions = await frame.evaluate(() => window.__sonikAgentUI.getAssertions());
+  if (evidence.pageContext?.surface !== "booking-console") throw new Error("Iframe page context did not reflect host booking surface before submit.");
+  if (!evidence.pageContext?.activeEntity?.label) throw new Error("Iframe page context did not include a host active entity label before submit.");
+  if (!evidence.pageContext?.commandFamilies?.includes("booking")) throw new Error("Iframe page context did not include booking command family before submit.");
+  const preSessionId = evidence.pageContext?.activeSessionId ?? null;
+  const session = await frame.evaluate(async () => window.__sonikAgentUI.actions.createSession());
+  evidence.sessionBootstrap = { preSessionId, result: session };
+  if (!session?.ok) throw new Error(`session bootstrap failed: ${JSON.stringify(session)}`);
+  await frame.waitForFunction((expectedSessionId) => {
+    const context = window.__sonikAgentUI?.getPageContext?.();
+    const assertions = window.__sonikAgentUI?.getAssertions?.();
+    return assertions?.hasActiveSession === true && Boolean(context?.activeSessionId) && context.activeSessionId !== expectedSessionId;
+  }, preSessionId, { timeout: 20_000 });
+  evidence.pageContext = await frame.evaluate(() => window.__sonikAgentUI.getPageContext());
+  evidence.assertions = await frame.evaluate(() => window.__sonikAgentUI.getAssertions());
+  if (preSessionId && evidence.pageContext?.activeSessionId === preSessionId) throw new Error(`session bootstrap reused stale active session: ${preSessionId}`);
+
   const submit = await frame.evaluate(async () => window.__sonikAgentUI.actions.submitPrompt({ prompt: "Using the current page context, summarize where I am in one sentence." }));
   if (!submit?.ok) throw new Error(`semantic submit failed: ${JSON.stringify(submit)}`);
   await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === true, undefined, { timeout: 10_000 });
@@ -249,6 +269,7 @@ try {
   await frame.waitForFunction(() => window.__sonikAgentUI?.getPageContext?.().surface === "booking-console", undefined, { timeout: 10_000 });
   evidence.pageContext = await frame.evaluate(() => window.__sonikAgentUI.getPageContext());
   evidence.assertions = await frame.evaluate(() => window.__sonikAgentUI.getAssertions());
+  if (evidence.assertions?.hasActiveSession !== true) throw new Error(`Embedded prompt did not create an active session: ${JSON.stringify(evidence.assertions)}`);
   const chatSessionId = evidence.pageContext?.activeSessionId ?? null;
   classifyTelemetry(await readTelemetryEvents());
 
@@ -257,12 +278,14 @@ try {
   const activeEntityLabel = evidence.pageContext?.activeEntity?.label;
   if (!activeEntityLabel) await finish("FAIL", "Iframe page context did not include a host active entity label.");
   if (!evidence.pageContext?.commandFamilies?.includes("booking")) await finish("FAIL", "Iframe page context did not include booking command family.");
-  if (localTelemetryRequired) {
+  if (localTelemetryRequired && !useMockStream) {
     if (evidence.telemetry.commandIndexContext.length === 0) await finish("FAIL", "No command-index telemetry observed for embed prompt.");
     const commandEvent = evidence.telemetry.commandIndexContext.at(-1);
     if (commandEvent?.surface !== "booking-console") await finish("FAIL", "Command-index telemetry did not include booking surface.");
     if (commandEvent?.pageContext?.activeEntity?.label !== activeEntityLabel) await finish("FAIL", "Command-index telemetry did not include the current active entity label.");
     if (!commandEvent?.commandFamilies?.includes("booking")) await finish("FAIL", "Command-index telemetry did not include booking command family.");
+  } else if (localTelemetryRequired && useMockStream) {
+    record("telemetry.local_command_index_skipped", { reason: "mock_stream_does_not_call_generate_api", baseUrl });
   } else {
     record("telemetry.local_command_index_skipped", { reason: "remote_worker_url_uses_cloudflare_tail_not_local_jsonl", baseUrl });
   }
@@ -299,7 +322,9 @@ try {
   if (chatSessionId && canvasContext?.activeSessionId !== chatSessionId) await finish("FAIL", `Session changed across chat to canvas switch: ${chatSessionId} -> ${canvasContext?.activeSessionId}`);
   await browser.close();
   await finish("PASS", localTelemetryRequired
-    ? "Iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, opened canvas without launcher overlap, and emitted correlated command-index telemetry."
+    ? useMockStream
+      ? "Iframe embed accepted signed host page context, created an active session, compressed chat into a non-overlapping sidecar, persisted a mock-stream prompt, and opened canvas without launcher overlap."
+      : "Iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, opened canvas without launcher overlap, and emitted correlated command-index telemetry."
     : "Remote iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, opened canvas without launcher overlap, and skipped local JSONL telemetry because the deployed Worker uses Cloudflare/Pipe-B evidence.");
 } catch (error) {
   await browser?.close().catch(() => undefined);

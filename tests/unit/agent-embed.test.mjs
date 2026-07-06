@@ -237,6 +237,9 @@ const fakeChatSlot = new FakeElement("chat-slot");
 const fakeCanvasSlot = new FakeElement("canvas-slot");
 const fakeSidecar = new FakeElement("sidecar");
 const fakeCanvas = new FakeElement("canvas");
+const fakeLauncher = new FakeElement("launcher");
+const fakeOpenChat = new FakeElement("open-chat");
+const fakeOpenCanvas = new FakeElement("open-canvas");
 const fakeDocumentElement = new FakeElement("html");
 const fakeBody = new FakeElement("body");
 const fakeWindow = {
@@ -260,6 +263,9 @@ const fakeDocument = {
     "#canvas-slot": fakeCanvasSlot,
     "#sidecar": fakeSidecar,
     "#canvas": fakeCanvas,
+    "#launcher": fakeLauncher,
+    "#open-chat": fakeOpenChat,
+    "#open-canvas": fakeOpenCanvas,
   })[selector] ?? null,
 };
 fakeWindow.document = fakeDocument;
@@ -271,7 +277,7 @@ const controller = mountSonikAgentUI({
   smokeMockStream: "1",
   smokeRunId: "mount-test",
   getPageContext: () => ({ surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], signatureVersion: "sonik.agent_ui.host_context.hmac.v1", issuedAt: "2026-06-24T22:00:00.000Z", expiresAt: "2026-06-24T22:10:00.000Z", signature: "abc123_signature", activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } }),
-  elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas" },
+  elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas", launcher: "#launcher", openChat: "#open-chat", openCanvas: "#open-canvas" },
   window: fakeWindow,
   document: fakeDocument,
 });
@@ -279,6 +285,16 @@ assert.equal(fakeIframe.parentElement, fakeChatSlot, "mount should park iframe i
 assert.equal(fakeWindow.__sonikAgentHost?.schemaVersion, "sonik.agent_ui.host_controller.v1", "mount should expose a stable host controller for embed automation and release gates");
 assert.equal(fakeIframe.dataset.sonikAgentUiControl, "iframe", "mount should annotate iframe with a stable Agent UI control attribute");
 assert.equal(fakeIframe.getAttribute("data-testid"), "sonik-agent-ui-iframe", "mount should annotate iframe with a stable test id");
+assert.equal(fakeLauncher.dataset.sonikAgentUiControl, "launcher", "mount should annotate a host-owned launcher for deterministic embed discovery");
+assert.equal(fakeLauncher.getAttribute("data-testid"), "sonik-agent-ui-launcher", "mount should annotate launcher with the release-gate test id");
+assert.equal(fakeOpenChat.dataset.sonikAgentUiControl, "open-chat", "mount should annotate open-chat controls for deterministic embed discovery");
+assert.equal(fakeOpenCanvas.dataset.sonikAgentUiControl, "open-canvas", "mount should annotate open-canvas controls for deterministic embed discovery");
+fakeOpenChat.dispatch("click");
+assert.equal(controller.getMode(), "chat", "annotated open-chat control should open chat via the SDK click handler");
+controller.close();
+fakeOpenCanvas.dispatch("click");
+assert.equal(controller.getMode(), "canvas", "annotated open-canvas control should open canvas via the SDK click handler");
+controller.close();
 fakeIframe.dispatch("load");
 assert.equal(fakeIframe.contentWindow.messages.length, 0, "parked about:blank iframe must not receive host context before it is navigated to the agent origin");
 fakeWindow.__sonikAgentHost.openChat();
@@ -339,6 +355,18 @@ timerController.destroy();
 assert.deepEqual(clearedTimers, queuedTimers.map((timer) => timer.id), "destroy should clear queued context-post timers");
 assert.equal(timerController.getMode(), null, "destroy should close active mode");
 
+const localEmbedSmokeSource = await readFile("scripts/agent-ui-embed-smoke.mjs", "utf8");
+const bookingContextSmokeSource = await readFile("scripts/agent-ui-booking-context-pipeb-smoke.mjs", "utf8");
+const bookingReservationSmokeSource = await readFile("scripts/agent-ui-booking-reservation-pipeb-smoke.mjs", "utf8");
+assert.equal(localEmbedSmokeSource.includes("session bootstrap reused stale active session"), true, "local embed smoke should prove a fresh session instead of accepting stale state");
+assert.equal(localEmbedSmokeSource.includes("evidence.sessionBootstrap"), true, "local embed smoke should record explicit session bootstrap evidence");
+assert.equal(bookingContextSmokeSource.includes("usedDeterministicHostController"), true, "booking context release gate should report deterministic host-controller opening");
+assert.equal(bookingContextSmokeSource.includes("Booking embed did not open through window.__sonikAgentHost"), true, "booking context release gate should fail if host controller opening is unavailable");
+assert.equal(bookingReservationSmokeSource.includes("usedDeterministicHostController"), true, "booking reservation release gate should report deterministic host-controller opening");
+assert.equal(bookingReservationSmokeSource.includes("Booking reservation embed did not open through window.__sonikAgentHost"), true, "booking reservation release gate should fail if host controller opening is unavailable");
+assert.equal(bookingReservationSmokeSource.includes("fake-booking-host.html?autoOpen=chat"), false, "booking reservation fake-host release gate should not auto-open before exercising host controller");
+assert.equal(bookingReservationSmokeSource.indexOf("const openResult = await page.evaluate") < bookingReservationSmokeSource.indexOf("const frame = page.frames().find"), true, "booking reservation release gate should call host controller before accepting an iframe frame");
+assert.equal(bookingContextSmokeSource.indexOf("const openResult = await page.evaluate") < bookingContextSmokeSource.indexOf("const frame = page.frames().find"), true, "booking context release gate should call host controller before accepting an iframe frame");
 const amplifySmokeSource = await readFile("scripts/agent-ui-amplify-smoke.mjs", "utf8");
 assert.equal(amplifySmokeSource.includes("page.mouse.click"), false, "authenticated release gate should not use coordinate-click fallback to open embeds");
 assert.equal(amplifySmokeSource.includes("__sonikAgentHost"), true, "authenticated release gate should prefer the deterministic host controller when available");

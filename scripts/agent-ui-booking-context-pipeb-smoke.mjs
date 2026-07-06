@@ -130,20 +130,30 @@ function observe(page) {
   });
 }
 async function findAgentFrame(page) {
+  evidence.openAttempts ??= [];
   for (let attempt = 0; attempt < 5; attempt += 1) {
+    const openResult = await page.evaluate(() => {
+      const host = window.__sonikAgentHost;
+      if (host?.schemaVersion === 'sonik.agent_ui.host_controller.v1' && typeof host.openChat === 'function') {
+        host.openChat();
+        return { target: 'host-controller-openChat', state: host.getState?.() ?? null };
+      }
+      const launcher = document.querySelector('#agent-fab-main, [data-sonik-agent-ui-control="launcher"], [data-testid="sonik-agent-ui-launcher"], [aria-label="Open Sonik agent launcher"], [aria-label="Open Sonik agent"]');
+      launcher?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      const chat = document.querySelector('#booking-agent-ui-open-chat, #open-chat, [data-sonik-agent-ui-control="open-chat"], [data-testid="sonik-agent-ui-open-chat"], [aria-label="Open Sonik chat sidecar"], [aria-label="Open Sonik chat"]');
+      chat?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return { target: 'fallback-dom-controls', hasHost: Boolean(host), schemaVersion: host?.schemaVersion ?? null, launcherFound: Boolean(launcher), chatFound: Boolean(chat) };
+    });
+    evidence.openAttempts.push({ at: new Date().toISOString(), attempt, openResult });
+    evidence.checks.usedDeterministicHostController = evidence.checks.usedDeterministicHostController === true || openResult?.target === 'host-controller-openChat';
+    await sleep(1500);
     const frame = page.frames().find((candidate) => {
       const url = candidate.url();
       return url.startsWith(agentOrigin) && (url.includes('embedMode=') || url.includes('agentUiHostOrigin='));
     });
-    if (frame) return frame;
-    await page.evaluate(() => {
-      if (window.__sonikAgentHost?.openChat) return window.__sonikAgentHost.openChat();
-      document.querySelector('#agent-fab-main, [data-sonik-agent-ui-control="launcher"], [data-testid="sonik-agent-ui-launcher"], [aria-label="Open Sonik agent launcher"], [aria-label="Open Sonik agent"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      document.querySelector('#booking-agent-ui-open-chat, #open-chat, [data-sonik-agent-ui-control="open-chat"], [data-testid="sonik-agent-ui-open-chat"], [aria-label="Open Sonik chat sidecar"], [aria-label="Open Sonik chat"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-    });
-    await sleep(1500);
+    if (frame && evidence.checks.usedDeterministicHostController === true) return frame;
   }
-  throw new Error('Agent UI iframe was not found after opening host launcher.');
+  throw new Error('Booking embed did not open through window.__sonikAgentHost');
 }
 function parseTailSummaries(text) {
   const summaries = [];
@@ -332,6 +342,7 @@ try {
   };
   evidence.checks = {
     loginOk: evidence.loginStatus < 400,
+    usedDeterministicHostController: evidence.checks.usedDeterministicHostController === true,
     hostAuthenticated: before.context?.hostSession?.authenticated === true,
     createSessionOk: createSession?.ok === true,
     artifactPersisted: artifactUpsert.ok === true && artifactUpsert.body.includes('workspace-session-'),

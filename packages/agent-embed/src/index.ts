@@ -63,6 +63,7 @@ export type AgentEmbedElementRefs = {
   sidecar?: AgentEmbedElementRef<HTMLElement>;
   canvasWindow?: AgentEmbedElementRef<HTMLElement>;
   resizeHandle?: AgentEmbedElementRef<HTMLElement>;
+  launcher?: AgentEmbedElementRef<HTMLElement>;
   openChat?: AgentEmbedElementRef<HTMLElement>;
   openCanvas?: AgentEmbedElementRef<HTMLElement>;
   expandCanvas?: AgentEmbedElementRef<HTMLElement>;
@@ -325,6 +326,7 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   annotateHostElement(sidecar, "sidecar");
   annotateHostElement(canvasWindow, "canvas-window");
   annotateHostElement(resizeHandle, "resize-handle");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.launcher), "launcher");
   annotateHostElement(optionalElement(ownerDocument, options.elements.openChat), "open-chat");
   annotateHostElement(optionalElement(ownerDocument, options.elements.openCanvas), "open-canvas");
   annotateHostElement(optionalElement(ownerDocument, options.elements.expandCanvas), "expand-canvas");
