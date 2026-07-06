@@ -23,6 +23,14 @@ Timeline (all 2026-07-06 UTC):
 
 So the regression window is **at or before the 07:52 build**, not the 14:24 one.
 
+## Root cause (confirmed 14:50 UTC — this is NOT a regression)
+
+`git log -S "__sonikAgentHost"` in sonik-booking-service returns **nothing — branch, main, or anywhere in history**. The booking app never implemented the controller. It was never working and never broke:
+
+1. The controller is implemented in agent-ui's `packages/agent-embed/src/index.ts:320` (`hostControllerKey`, default `"__sonikAgentHost"`), added during the Jul 5 determinism hardening (`5853c3b`, `2f9addb`) along with the smoke/release-gate requirement to use it.
+2. The booking app embeds the sidecar via `@sonikfm/sonik-sdk` (`BookingAgentUiEmbed.svelte` imports from the SDK), whose embed code is an older port with zero `__sonikAgentHost` references.
+3. Net: the agent-ui test contract got ahead of the SDK. The fix is to port the host-controller mounting from `packages/agent-embed` into `@sonikfm/sonik-sdk`'s agent-ui module (or adopt `agent-embed` directly in the booking app).
+
 ## What works / what doesn't (current deploys)
 
 - WORKS: human click on chat bubble opens sidecar; signed host context arrives (`authenticated: true`, org id, `booking:write`, 72 approvedCommandIds); sessions + telemetry return 200; Pipe-B tail is alive (82 events captured 14:37–14:41).
