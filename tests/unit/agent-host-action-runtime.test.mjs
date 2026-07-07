@@ -88,6 +88,31 @@ assert.equal(unsafeSanitized?.hostUiTargetRegistry?.targets[0].locator, undefine
 assert.equal(unsafeSanitized?.hostUiTargetRegistry?.targets[0].policy.reason, "[REDACTED]", "secret-like policy reasons should be redacted");
 assert.deepEqual(unsafeSanitized?.hostUiTargets?.[0].metadata, {}, "standalone hostUiTargets metadata should also be stripped");
 
+const invalidRawTarget = {
+  targetId: "booking.context.private-invalid",
+  label: "Private invalid target",
+  description: "This target should never leak through generic context sanitization",
+  surface: "booking-context",
+  capabilities: ["highlight"],
+  locator: { kind: "host-private", ref: "sk-invalidSecretMustNotLeak1234567890" },
+  metadata: { selector: "#raw-secret-node", token: "sk-invalidSecretMustNotLeak1234567890" },
+  policy: { actionMode: "ask", reason: "Bearer invalidSecretMustNotLeak1234567890" },
+};
+const invalidRegistrySanitized = sanitizeAgentHostPageContext({
+  surface: "booking-context",
+  hostUiTargetRegistry: {
+    version: "sonik-agent-ui.target-registry.invalid",
+    generatedAt: "2026-07-07T00:00:00.000Z",
+    provider: "invalid-host",
+    targets: [invalidRawTarget],
+  },
+  hostUiTargets: [{ ...invalidRawTarget, capabilities: "not-an-array" }],
+});
+assert.equal(invalidRegistrySanitized?.hostUiTargetRegistry, undefined, "invalid host registries must fail closed rather than fall back to generic sanitized raw objects");
+assert.equal(invalidRegistrySanitized?.hostUiTargets, undefined, "invalid host targets must fail closed rather than fall back to generic sanitized raw objects");
+assert.equal(JSON.stringify(invalidRegistrySanitized).includes("invalidSecretMustNotLeak"), false, "invalid target sanitizer path must not leak secret-like target data");
+assert.equal(JSON.stringify(invalidRegistrySanitized).includes("raw-secret-node"), false, "invalid target sanitizer path must not leak raw DOM selectors");
+
 const happyChild = createChildWindow({
   respond: ({ message, targetOrigin, child }) => {
     child.dispatchMessage({

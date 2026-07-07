@@ -312,8 +312,9 @@ export function sanitizePageContext(value: unknown): AgentUiPageContextSnapshot 
     visibleWarnings: sanitizeTelemetryStringList(record.visibleWarnings),
     visibleErrors: sanitizeTelemetryStringList(record.visibleErrors),
     workflow: sanitizeWorkflowSnapshot(record.workflow),
-    hostUiTargets: Array.isArray(record.hostUiTargets) ? (sanitizeTelemetryValue(record.hostUiTargets.slice(0, MAX_LIST_ITEMS * 4)) as unknown[]) : undefined,
-    hostUiTargetRegistry: sanitizeTelemetryValue(record.hostUiTargetRegistry),
+    // Host UI target data carries action-routing and locator semantics. Keep it out
+    // of the generic telemetry sanitizer so embedders must opt into the stricter
+    // target-registry sanitizer before anything target-like reaches the agent.
     commandFamilies: sanitizeTelemetryStringList(record.commandFamilies),
     skillFamilies: sanitizeTelemetryStringList(record.skillFamilies),
     at: cleanOptionalString(record.at),

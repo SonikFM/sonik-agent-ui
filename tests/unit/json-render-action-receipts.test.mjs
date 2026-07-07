@@ -46,6 +46,7 @@ assert.match(actionRailSource, /Needs attention/, "failed or approval-required r
 const pageSource = readFileSync("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
 assert.match(pageSource, /async function handleJsonRenderHostAction/, "page controller must route JSON-render host-action requests through the host action channel");
 assert.match(pageSource, /recordJsonRenderActionReceipt\(createJsonRenderActionReceipt/, "page controller must record receipts for renderer actions");
+assert.match(pageSource, /activeArtifactStateStore\?\.update\(updates\);\n\s*handleActiveArtifactStateChange\(changes\);/, "action receipts must update live renderer state and the persisted artifact state patch path");
 assert.match(pageSource, /json_render\.host_action\.receipt/, "host-action receipts must emit telemetry");
 
 console.log("json-render action receipt tests passed");

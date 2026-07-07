@@ -839,11 +839,12 @@
       { path: `/actionReceipts/${actionSegment}`, value: receipt },
     ];
     const updates = Object.fromEntries(changes.map((change) => [change.path, change.value]));
-    if (activeArtifactStateStore) {
-      activeArtifactStateStore.update(updates);
-    } else {
-      handleActiveArtifactStateChange(changes);
-    }
+    // Keep the live StateStore and the persisted artifact patch queue in lockstep.
+    // StateStore.update makes the renderer respond immediately; the normal state
+    // patch path updates activeArtifact.content, queues persistence, and records
+    // telemetry. Do not choose one or the other for action receipts.
+    activeArtifactStateStore?.update(updates);
+    handleActiveArtifactStateChange(changes);
   }
 
   function createJsonRenderActionReceipt(input: {
