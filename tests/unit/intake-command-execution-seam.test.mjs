@@ -261,4 +261,34 @@ const denied = await unapprovedTools.commitActiveIntakeCommand.execute({ artifac
 assert.equal(denied.ok, false, "user text alone must not bypass trusted approvedCommandIds");
 assert.equal(denied.receipt.policy.reasons.includes("approval_required"), true);
 
+// Agent Settings family mode "off" must block commitActiveIntakeCommand even with a full
+// trusted host approval grant (closes the hole: this path previously never consulted
+// toolPermissionModes at all).
+const familyOffTools = createArtifactStateTools({
+  sessionId,
+  pageContext,
+  allowIntakeCommandCommit: true,
+  approvedCommandIds: ["booking.create.context"],
+  bookingServiceBaseUrl: "https://booking.example.test",
+  bookingRuntimeAuth: { mode: "service-token", token: "test-service-token", source: "test" },
+  bookingRuntimeFetcher: fetcher,
+  toolPermissionModes: { booking: "off" },
+  hostSession: {
+    source: "amplify-embedded",
+    sessionId,
+    userId: "user_1",
+    principalId: "user_1",
+    organizationId: "org_1",
+    authenticated: true,
+    scopes: ["booking:read", "booking:write"],
+    expiresAt: null,
+    metadata: { approvedCommandIds: ["booking.create.context"] },
+  },
+});
+const familyOffFetchCallsBefore = fetchCalls.length;
+const familyOffDenied = await familyOffTools.commitActiveIntakeCommand.execute({ confirmation: "APPROVE_AND_RUN" });
+assert.equal(familyOffDenied.ok, false, "Agent Settings family mode off must refuse commitActiveIntakeCommand");
+assert.equal(familyOffDenied.receipt.policy.reasons.includes("tool_policy_off"), true, "refusal must name tool_policy_off");
+assert.equal(fetchCalls.length, familyOffFetchCallsBefore, "family-disabled commit must not reach the booking runtime");
+
 console.log("intake command execution seam tests passed");

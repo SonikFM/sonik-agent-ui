@@ -107,6 +107,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
             action: "execute",
             source: "agent-ui",
             sessionId: executionContext.sessionId ?? context.sessionId,
+            toolPolicy: { familyModes: context.toolPermissionModes },
           },
         });
         await writeAgentTelemetry({
@@ -147,6 +148,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
             source: "agent-ui",
             sessionId: executionContext.sessionId ?? context.sessionId,
             approved: context.approvedCommandIds?.includes(commandId) === true,
+            toolPolicy: { familyModes: context.toolPermissionModes },
           },
         });
         await writeAgentTelemetry({

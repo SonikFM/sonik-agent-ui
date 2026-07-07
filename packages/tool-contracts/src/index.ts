@@ -960,6 +960,31 @@ export type SkillIndexSummary = z.infer<typeof skillIndexSummarySchema>;
 export type SkillIndex = z.infer<typeof skillIndexSchema>;
 export type SkillLearnAspect = "description" | "workflow" | "examples" | "policy" | "context" | "commands";
 
+export type ToolPolicyMode = "off" | "ask" | "allow";
+export type ToolPolicyInput = {
+  familyModes?: Record<string, ToolPolicyMode>;
+  commandModes?: Record<string, ToolPolicyMode>;
+};
+
+const TOOL_POLICY_MODE_RANK: Record<ToolPolicyMode, number> = { off: 0, ask: 1, allow: 2 };
+
+/**
+ * Resolves the effective policy for a command across the family-level and per-command
+ * policy layers. Most-restrictive-wins: off > ask > allow. Absence of `input`, or of any
+ * layer within it, is skipped rather than treated as `off` — no policy input means "allow"
+ * (today's behavior, before this policy layer existed).
+ */
+export function resolveEffectiveToolPolicy(command: CommandDescriptor, input?: ToolPolicyInput): ToolPolicyMode {
+  if (!input) return "allow";
+  const candidates: ToolPolicyMode[] = [];
+  const familyMode = input.familyModes?.[command.familyId];
+  if (familyMode) candidates.push(familyMode);
+  const commandMode = input.commandModes?.[command.id];
+  if (commandMode) candidates.push(commandMode);
+  if (candidates.length === 0) return "allow";
+  return candidates.reduce((mostRestrictive, mode) => (TOOL_POLICY_MODE_RANK[mode] < TOOL_POLICY_MODE_RANK[mostRestrictive] ? mode : mostRestrictive));
+}
+
 export type CommandExecutionContext = {
   action?: CommandAction;
   source?: CommandExecutionSource;
@@ -973,6 +998,7 @@ export type CommandExecutionContext = {
   authenticated?: boolean;
   organizationId?: string | null;
   scopes?: string[];
+  toolPolicy?: ToolPolicyInput;
 };
 
 export type CommandLearnAspect = "description" | "schema" | "examples" | "policy" | "output" | "surfaces" | "transport" | "auth";
@@ -1296,8 +1322,11 @@ export function evaluateCommandPolicy(command: CommandDescriptor, context: Comma
   if (action === "commit" && command.approval === "required" && context.approved !== true) reasons.push("approval_required");
   if (command.approval === "denied") reasons.push("command_denied_by_manifest");
   if (command.effect === "destructive" && context.approved !== true) reasons.push("destructive_requires_explicit_approval");
+  const effectiveToolPolicy = resolveEffectiveToolPolicy(command, context.toolPolicy);
+  if (effectiveToolPolicy === "off") reasons.push("tool_policy_off");
+  if (effectiveToolPolicy === "ask" && context.approved !== true) reasons.push("tool_policy_requires_approval");
   if (reasons.length === 0) return { decision: "allow", reasons: ["policy_allowed"] };
-  if (reasons.every((reason) => reason === "approval_required" || reason === "use_commit_for_mutation_command")) return { decision: "needs_approval", reasons };
+  if (reasons.every((reason) => reason === "approval_required" || reason === "use_commit_for_mutation_command" || reason === "tool_policy_requires_approval")) return { decision: "needs_approval", reasons };
   if (reasons.length === 1 && reasons[0] === "approval_required") return { decision: "needs_approval", reasons };
   return { decision: "deny", reasons };
 }
@@ -2022,3 +2051,6 @@ export function sanitizeAgentAnalyticsHints(value: unknown): AgentAnalyticsHints
   if (typeof record.hasExistingArtifact === "boolean") hints.hasExistingArtifact = record.hasExistingArtifact;
   return Object.keys(hints).length > 0 ? hints : undefined;
 }
+
+export * from "./marketplace.js";
+export * from "./marketplace-fixtures.js";

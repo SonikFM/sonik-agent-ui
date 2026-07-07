@@ -9,6 +9,7 @@ import type { AsyncWorkspacePersistenceAdapter, WorkspaceArtifactRecord } from "
 import { getWorkspaceArtifact } from "../server/workspace-store.ts";
 import { createStandaloneHostCommandIndex, createStandaloneHostCommandRuntimeBundle, type BookingRuntimeAuthContext } from "../server/host-command-runtime.ts";
 import { writeAgentTelemetry } from "../server/agent-telemetry.ts";
+import type { AgentToolPermissionMode } from "../agent-settings.ts";
 
 const artifactIdSchema = z.object({
   artifactId: z.string().optional().describe("Artifact id to read. Must match the active artifact when page context declares one."),
@@ -44,6 +45,10 @@ type ArtifactStateToolContext = {
   bookingRuntimeAuth?: BookingRuntimeAuthContext | null;
   bookingRuntimeFetcher?: typeof fetch;
   allowIntakeCommandCommit?: boolean;
+  // Optional Agent Settings family-mode input for the toolPolicy enforcement layer. Not yet
+  // threaded from agent.ts (deferred to the marketplace lane); absence here resolves to
+  // "allow" for every family, matching today's behavior exactly.
+  toolPermissionModes?: Record<string, AgentToolPermissionMode>;
 };
 
 type JsonRenderArtifact = WorkspaceArtifactRecord<Spec>;
@@ -368,6 +373,7 @@ export function createArtifactStateTools(context: ArtifactStateToolContext = {})
             source: "agent-ui",
             sessionId: executionContext.sessionId ?? context.sessionId,
             approved: context.approvedCommandIds?.includes(command.commandId) === true,
+            toolPolicy: { familyModes: context.toolPermissionModes },
           },
         });
         const contextCommandIds = new Set(createStandaloneHostCommandIndex({
