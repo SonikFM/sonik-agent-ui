@@ -15,3 +15,5 @@
 ## One-line takeaway
 
 The unclaimed position is *self-serve agent setup that ends in a real live action, no sales call, no shadow-mode ramp*; the industry frontier on our top risk (malicious publisher updates) is thin; our execution-inert + trusted-commit + immutable-version model is already ahead. Lead, don't catch up.
+
+5. **`agent-marketplace-recon-supplement-2026-07.md`** — internal recon-corpus supplement: what amp.pkg v3 already designed (resume, not build), the three-marketplace disambiguation, claim corrections, and amendments A1-A6 to the decision brief.
