@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { HostUiTarget, HostUiTargetRegistry } from "./target-registry.js";
 
 
 export const toolSourceSchema = z.enum(["orpc", "openapi", "mcp", "sandbox", "local-ui"]);
@@ -1024,6 +1025,13 @@ export type AgentPageContext = {
   activeDocumentId?: string;
   artifactType?: string;
   visibleActions?: string[];
+  /**
+   * Optional semantic target inventory exposed by the trusted host/page.
+   * Agents may reference these target ids; they must not receive raw CSS selectors.
+   */
+  hostUiTargets?: HostUiTarget[];
+  /** Full registry envelope when the host wants to expose route/surface provenance. */
+  hostUiTargetRegistry?: HostUiTargetRegistry;
   skillFamilies?: string[];
   commandFamilies?: string[];
 };
@@ -2052,5 +2060,4 @@ export function sanitizeAgentAnalyticsHints(value: unknown): AgentAnalyticsHints
   return Object.keys(hints).length > 0 ? hints : undefined;
 }
 
-export * from "./marketplace.js";
-export * from "./marketplace-fixtures.js";
+export * from "./target-registry.js";

@@ -12,7 +12,7 @@
   import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
-  import { RESUME_CONTINUE_PROMPT, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
+  import { RESUME_CONTINUE_PROMPT, createDefaultHostUiTargetRegistry, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
   import {
     createEmptyAgentRunContextSelection,
     reconcileAgentContextSelection,
@@ -43,19 +43,21 @@
   } from "$lib/artifacts/artifact-observability";
   import { CanvasViewport, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
   import type { AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult } from "@sonik-agent-ui/agent-observability";
+  import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
     isAgentHostPageContextMessage,
     mergeAgentHostPageContext,
     normalizeAgentEmbedIntent,
     sanitizeAgentHostPageContext,
     isAgentOriginAllowed,
+    requestAgentHostAction,
     type AgentHostMergedPageContext,
     type AgentHostPageContext,
     type AgentEmbedMode,
     type AgentEmbedRailMode,
   } from "@sonik-agent-ui/agent-embed";
   import { nextSignedWorkspaceHostContextCache, selectSignedWorkspaceHostContext } from "$lib/host-context-authority";
-  import { createQuestionErrorStatePath, createQuestionLifecycleStatePath } from "$lib/render/question-card-state";
+  import { createQuestionErrorStatePath, createQuestionLifecycleStatePath, escapeJsonPointerSegment } from "$lib/render/question-card-state";
   import { registry } from "$lib/render/registry";
   import {
     applyJsonRenderStateChanges,
@@ -812,6 +814,83 @@
     scheduleActiveArtifactStatePersistence();
   }
 
+
+  type JsonRenderActionReceiptState = {
+    actionName: string;
+    ok: boolean;
+    status: "saved" | "submitted" | "preview_requested" | "approved" | "cancelled" | "host_executed" | "host_blocked" | "host_approval_required" | "error";
+    message: string;
+    commandId?: string | null;
+    hostAction?: {
+      actionKey: HostActionKey;
+      status: HostActionResult["status"];
+      policyMode: HostActionResult["policyMode"];
+      requestId: string;
+      targetId?: string;
+    } | null;
+    updatedAt: string;
+  };
+
+  function recordJsonRenderActionReceipt(receipt: JsonRenderActionReceiptState): void {
+    if (!activeArtifact || activeArtifact.kind !== "json-render") return;
+    const actionSegment = escapeJsonPointerSegment(receipt.actionName.replace(/[^a-zA-Z0-9_.:-]/g, "_"));
+    const changes: JsonRenderStateChange[] = [
+      { path: "/lastActionReceipt", value: receipt },
+      { path: `/actionReceipts/${actionSegment}`, value: receipt },
+    ];
+    const updates = Object.fromEntries(changes.map((change) => [change.path, change.value]));
+    if (activeArtifactStateStore) {
+      activeArtifactStateStore.update(updates);
+    } else {
+      handleActiveArtifactStateChange(changes);
+    }
+  }
+
+  function createJsonRenderActionReceipt(input: {
+    actionName: string;
+    ok: boolean;
+    status: JsonRenderActionReceiptState["status"];
+    message: string;
+    commandId?: string | null;
+    hostActionResult?: HostActionResult | null;
+  }): JsonRenderActionReceiptState {
+    return {
+      actionName: input.actionName,
+      ok: input.ok,
+      status: input.status,
+      message: input.message,
+      commandId: input.commandId ?? input.hostActionResult?.receipt?.commandId ?? null,
+      hostAction: input.hostActionResult ? {
+        actionKey: input.hostActionResult.actionKey,
+        status: input.hostActionResult.status,
+        policyMode: input.hostActionResult.policyMode,
+        requestId: input.hostActionResult.requestId,
+        targetId: input.hostActionResult.receipt?.targetId,
+      } : null,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function receiptStatusForTrustedIntakeAction(actionName: TrustedIntakeControllerAction, ok: boolean): JsonRenderActionReceiptState["status"] {
+    if (!ok) return "error";
+    if (actionName === "saveDraft" || actionName === "editDraft") return "saved";
+    if (actionName === "submitToAgent" || actionName === "reviseWithAgent") return "submitted";
+    if (actionName === "requestApproval") return "preview_requested";
+    if (actionName === "cancelApproval") return "cancelled";
+    return "approved";
+  }
+
+  function receiptMessageForTrustedIntakeAction(actionName: TrustedIntakeControllerAction, ok: boolean): string {
+    if (!ok) return "Workflow action could not be completed. Check the visible blocker and retry.";
+    if (actionName === "saveDraft") return "Draft saved.";
+    if (actionName === "editDraft") return "Draft editing is active.";
+    if (actionName === "submitToAgent") return "Draft sent to the agent for the next question.";
+    if (actionName === "reviseWithAgent") return "Draft sent to the agent for targeted revision.";
+    if (actionName === "requestApproval") return "Approval preview requested. No write has run yet.";
+    if (actionName === "cancelApproval") return "Approval request cancelled. Draft remains saved.";
+    return "Approval request submitted to the trusted host. Host policy still gates the write.";
+  }
+
   function mergeStateChanges(current: JsonRenderStateChange[], incoming: JsonRenderStateChange[]): JsonRenderStateChange[] {
     const map = new Map<string, JsonRenderStateChange>();
     for (const change of current) map.set(change.path, change);
@@ -1303,6 +1382,24 @@
     maybeBootstrapSessions("host_page_context_updated");
   }
 
+  function createLocalHostUiTargetRegistry() {
+    const activeBookingContext = hostPageContext?.activeEntity && (
+      hostPageContext.activeEntity.type === "booking_context"
+      || hostPageContext.activeEntity.type === "booking-context"
+      || hostPageContext.activeEntity.type === "bookable_context"
+      || hostPageContext.activeEntity.type === "booking"
+    )
+      ? { id: hostPageContext.activeEntity.id, label: hostPageContext.activeEntity.label ?? hostPageContext.title ?? "Active booking context" }
+      : undefined;
+    return createDefaultHostUiTargetRegistry({
+      provider: "sonik-agent-ui-local",
+      route: hostPageContext?.route ?? "/",
+      surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
+      activeArtifactId: activeArtifact?.id,
+      activeBookingContext,
+    });
+  }
+
   function createPageContextSnapshot(): AgentUiPageContextSnapshot {
     const workflow = createAgentWorkflowSnapshot({
       activeArtifact,
@@ -1311,6 +1408,7 @@
       approvalReadiness: getActiveIntakeApprovalReadiness(),
     });
     const workflowVisibleErrors = workflow.visibleErrors.map((error) => error.message);
+    const localTargetRegistry = createLocalHostUiTargetRegistry();
     const localContext: AgentUiPageContextSnapshot = {
       route: "/",
       surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
@@ -1345,6 +1443,8 @@
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
       visibleErrors: workflowVisibleErrors.length > 0 ? workflowVisibleErrors : undefined,
       workflow,
+      hostUiTargets: localTargetRegistry.targets,
+      hostUiTargetRegistry: localTargetRegistry,
       commandFamilies: documentEditorOpen ? ["local-ui", "document", "artifact"] : activeArtifact ? ["local-ui", "artifact"] : ["local-ui", "discovery"],
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
       at: new Date().toISOString(),
@@ -1444,6 +1544,79 @@
     return semanticActionResult(true, successMessage);
   }
 
+  type HostActionSemanticState = { hostActionResult?: HostActionResult } & AgentUiPageAssertions;
+
+  async function runPageControlHostAction(input: {
+    actionKey?: string;
+    targetId?: string;
+    targetInstanceId?: string;
+    entityRef?: unknown;
+    input?: unknown;
+    intentLabel?: string;
+  }): Promise<AgentUiSemanticActionResult<HostActionSemanticState>> {
+    const actionKey = parseHostActionKey(input.actionKey);
+    if (!actionKey) {
+      return semanticHostActionResult(null, false, "Host action key is required.", "invalid_host_action_key");
+    }
+    const entityRef = parseHostActionEntityRef(input.entityRef);
+    const result = await requestAgentHostAction({
+      actionKey,
+      targetId: typeof input.targetId === "string" && input.targetId.trim() ? input.targetId.trim() : undefined,
+      targetInstanceId: typeof input.targetInstanceId === "string" && input.targetInstanceId.trim() ? input.targetInstanceId.trim() : undefined,
+      entityRef,
+      input: input.input,
+      intentLabel: input.intentLabel,
+    }, {
+      hostOrigin: new URLSearchParams(window.location.search).get("agentUiHostOrigin"),
+      window,
+      timeoutMs: 5_000,
+    });
+    return semanticHostActionResult(result, result.ok, result.message ?? hostActionStatusMessage(result), result.disabledReason);
+  }
+
+  function semanticHostActionResult(
+    result: HostActionResult | null,
+    ok: boolean,
+    message?: string,
+    disabledReason?: string,
+  ): AgentUiSemanticActionResult<HostActionSemanticState> {
+    const state = {
+      ...snapshotAssertions(),
+      ...(result ? { hostActionResult: result } : {}),
+    };
+    return {
+      ok,
+      state,
+      message,
+      disabledReason,
+      activeSessionId,
+    };
+  }
+
+  function hostActionStatusMessage(result: HostActionResult): string {
+    if (result.status === "approval_required") return "Host approval is required before this action can run.";
+    if (result.status === "blocked") return "The host blocked this action.";
+    if (result.status === "requires_prerequisite") return "This action needs another visible prerequisite first.";
+    if (result.status === "invalid_request") return "The host action request was invalid.";
+    if (result.status === "unavailable") return "The embedding host action channel is unavailable.";
+    return "Host action executed.";
+  }
+
+  function parseHostActionKey(value: unknown): HostActionKey | null {
+    const parsed = hostActionKeySchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  }
+
+  function parseHostActionEntityRef(value: unknown): HostUiTargetEntityRef | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    const kind = typeof record.kind === "string" && record.kind.trim() ? record.kind.trim() : undefined;
+    const id = typeof record.id === "string" && record.id.trim() ? record.id.trim() : undefined;
+    const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined;
+    if (!kind || !id) return undefined;
+    return { kind, id, ...(label ? { label } : {}) };
+  }
+
   /** Runtime-safe host/page automation seam: snapshot reads + semantic actions only. */
   function installAgentPageControl(): void {
     const targetWindow = window as Window & {
@@ -1530,6 +1703,18 @@
         },
         cancelApproval: async () => {
           return runPageControlIntakeAction("cancelApproval", "Approval request cancelled.");
+        },
+        requestHostAction: async (input) => {
+          return runPageControlHostAction(input ?? {});
+        },
+        openCanvas: async () => {
+          return runPageControlHostAction({ actionKey: "canvas.open", intentLabel: "Open the Agent UI canvas." });
+        },
+        highlightTarget: async ({ targetId, targetInstanceId, entityRef }) => {
+          return runPageControlHostAction({ actionKey: "tour.highlight", targetId, targetInstanceId, entityRef, intentLabel: "Highlight a semantic host UI target." });
+        },
+        requestApprovalPreview: async (input = {}) => {
+          return runPageControlHostAction({ actionKey: "approval.requestPreview", targetId: input.targetId, targetInstanceId: input.targetInstanceId, entityRef: input.entityRef, intentLabel: "Request approval preview for a command-backed action." });
         },
       },
     };
@@ -2498,13 +2683,36 @@
   async function handleJsonRenderAction(actionName: string, params?: Record<string, unknown>): Promise<void> {
     try {
       if (actionName === "submitAnswer") {
-        await handleSubmitAnswerAction(params ?? {});
+        const ok = await handleSubmitAnswerAction(params ?? {});
+        recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+          actionName,
+          ok,
+          status: ok ? "submitted" : "error",
+          message: ok ? "Answer saved and sent to the agent." : "Answer could not be saved. Retry this question before continuing.",
+        }));
+        return;
+      }
+      if (actionName === "requestHostAction" || actionName === "hostAction") {
+        await handleJsonRenderHostAction(actionName, params ?? {});
         return;
       }
       if (isTrustedIntakeControllerAction(actionName)) {
-        await handleTrustedIntakeControllerAction(actionName, params ?? {});
+        const ok = await handleTrustedIntakeControllerAction(actionName, params ?? {});
+        recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+          actionName,
+          ok,
+          status: receiptStatusForTrustedIntakeAction(actionName, ok),
+          message: receiptMessageForTrustedIntakeAction(actionName, ok),
+          commandId: typeof params?.commandId === "string" ? params.commandId : null,
+        }));
         return;
       }
+      recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+        actionName,
+        ok: false,
+        status: "error",
+        message: "No trusted renderer action is registered for this control.",
+      }));
       logArtifactTelemetry({
         source: "client",
         event: "json_render.action.ignored",
@@ -2516,6 +2724,12 @@
         error: "No trusted host action handler is registered for this action.",
       });
     } catch (error) {
+      recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+        actionName,
+        ok: false,
+        status: "error",
+        message: error instanceof Error ? error.message : "Renderer action failed.",
+      }));
       reportClientEffectError("json_render.action.error", error, {
         sessionId: activeSessionId,
         artifactId: activeArtifact?.id,
@@ -2533,6 +2747,41 @@
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  async function handleJsonRenderHostAction(actionName: string, params: Record<string, unknown>): Promise<void> {
+    const result = await runPageControlHostAction({
+      actionKey: typeof params.actionKey === "string" ? params.actionKey : undefined,
+      targetId: typeof params.targetId === "string" ? params.targetId : undefined,
+      targetInstanceId: typeof params.targetInstanceId === "string" ? params.targetInstanceId : undefined,
+      entityRef: params.entityRef,
+      input: params.input,
+      intentLabel: typeof params.intentLabel === "string" ? params.intentLabel : undefined,
+    });
+    const hostResult = result.state.hostActionResult;
+    const status: JsonRenderActionReceiptState["status"] = hostResult?.ok
+      ? "host_executed"
+      : hostResult?.status === "approval_required"
+        ? "host_approval_required"
+        : "host_blocked";
+    recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+      actionName,
+      ok: result.ok,
+      status,
+      message: result.message ?? hostResult?.message ?? hostResult?.disabledReason ?? "Host action did not complete.",
+      hostActionResult: hostResult ?? null,
+    }));
+    logArtifactTelemetry({
+      source: "client",
+      event: "json_render.host_action.receipt",
+      sessionId: activeSessionId ?? undefined,
+      artifactId: activeArtifact?.id,
+      artifactVersion: activeArtifact?.version,
+      reason: hostResult?.actionKey ?? actionName,
+      toolCallId: hostResult?.receipt?.commandId,
+      ok: result.ok,
+      error: result.ok ? undefined : (result.disabledReason ?? hostResult?.disabledReason ?? hostResult?.message),
+    });
   }
 
   async function handleTrustedIntakeControllerAction(actionName: TrustedIntakeControllerAction, _params: Record<string, unknown>): Promise<boolean> {

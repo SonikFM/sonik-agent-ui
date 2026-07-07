@@ -16,6 +16,7 @@ assert.deepEqual(
   "trusted intake action rail should expose the v0 controller lifecycle with edit/revise/cancel/approve controls",
 );
 assert.equal(actionRail.props.actions.find((action) => action.id === "requestApproval")?.commandId, "booking.create.context");
+assert.deepEqual(actionRail.props.lastReceipt, { $bindState: "/lastActionReceipt" }, "trusted action rail must render the latest controller receipt from artifact state");
 assert.equal(actionRail.props.actions.find((action) => action.id === "approveAndRun")?.approval, "host_required");
 
 const buttonActions = Object.entries(spec.elements)
@@ -43,5 +44,7 @@ for (const action of ["saveDraft", "editDraft", "submitToAgent", "reviseWithAgen
 assert.ok(pageSource.includes("persistActiveArtifactStatePatch"), "controller actions must flush artifact state before sending turns");
 assert.ok(pageSource.includes("commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN"), "approve action must route the agent to the dedicated trusted commit seam");
 assert.ok(pageSource.includes("trusted host approval"), "approve action must tell users/agents host approval is still required");
+assert.ok(pageSource.includes("recordJsonRenderActionReceipt"), "renderer actions must write user-facing action receipts into artifact state");
+assert.ok(pageSource.includes("requestHostAction"), "JSON-render artifacts must be able to request allowlisted host actions through the action channel");
 
 console.log("intake controller actions tests passed");

@@ -1,10 +1,28 @@
 import { sanitizePageContext, type AgentUiPageContextSnapshot } from "@sonik-agent-ui/agent-observability";
 import type { HostSessionEnvelope, PlatformAdapterContext } from "@sonik-agent-ui/platform-adapters";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
+import {
+  agentActionChannelVersion,
+  createHostActionRequest,
+  createHostActionResult,
+  evaluateHostActionRequest,
+  hostActionRequestSchema,
+  hostActionResultSchema,
+  hostUiTargetRegistrySchema,
+  hostUiTargetSchema,
+  targetRegistryVersion,
+  type HostActionKey,
+  type HostActionRequest,
+  type HostActionResult,
+  type HostUiTarget,
+  type HostUiTargetRegistry,
+} from "@sonik-agent-ui/tool-contracts/target-registry";
 
 export const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST = "sonik:agent-ui:request-page-context";
+export const SONIK_AGENT_UI_HOST_ACTION_REQUEST = "sonik:agent-ui:action-request";
+export const SONIK_AGENT_UI_HOST_ACTION_RESULT = "sonik:agent-ui:action-result";
 
 export type AgentEmbedMode = "workspace" | "chat" | "canvas";
 export type AgentEmbedRailMode = "expanded" | "collapsed" | "hidden";
@@ -54,6 +72,33 @@ export type AgentHostPageContextMessage = {
 export type AgentHostContextProvider = () => AgentHostPageContext | Promise<AgentHostPageContext>;
 export type AgentEmbedThemeProvider = string | (() => string | undefined);
 
+export type AgentHostActionRequestInput = {
+  actionKey: HostActionKey;
+  targetId?: string;
+  targetInstanceId?: string;
+  entityRef?: HostActionRequest["entityRef"];
+  input?: unknown;
+  intentLabel?: string;
+  requestId?: string;
+  requiresReceipt?: boolean;
+};
+
+export type AgentHostActionRequestOptions = {
+  window?: Window;
+  hostOrigin?: string | null;
+  timeoutMs?: number;
+  now?: () => number;
+  requestIdFactory?: () => string;
+};
+
+export type AgentEmbedHostActionContext = {
+  controller: Pick<AgentEmbedHostController, "open" | "close" | "getMode" | "openChat" | "openCanvas">;
+  registry?: HostUiTargetRegistry;
+  pageContext: AgentHostMergedPageContext;
+};
+
+export type AgentEmbedHostActionHandler = (request: HostActionRequest, context: AgentEmbedHostActionContext) => HostActionResult | Promise<HostActionResult>;
+
 export type AgentEmbedElementRef<T extends HTMLElement = HTMLElement> = T | string | null | undefined;
 
 export type AgentEmbedElementRefs = {
@@ -95,6 +140,13 @@ export type AgentEmbedMountOptions = {
   hostControllerKey?: string | null;
   onModeChange?: (mode: AgentEmbedMode | null) => void;
   onError?: (error: unknown) => void;
+  /**
+   * Optional host-owned implementation of Agent Action Channel requests coming
+   * from the embedded iframe. When omitted, the SDK only handles safe canvas
+   * open/close requests and returns typed unavailable receipts for everything
+   * else; booking/Amplify must install their own adapter before actions execute.
+   */
+  handleHostAction?: AgentEmbedHostActionHandler;
   window?: Window;
   document?: Document;
 };
@@ -116,6 +168,7 @@ export type AgentEmbedController = {
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
 const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
+const MAX_HOST_UI_TARGETS = MAX_LIST_ITEMS * 4;
 const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds"]);
 const ALLOWED_CONTEXT_KEYS = new Set([
   "route",
@@ -134,6 +187,8 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "visibleWarnings",
   "visibleErrors",
   "workflow",
+  "hostUiTargets",
+  "hostUiTargetRegistry",
   "commandFamilies",
   "skillFamilies",
   "activeEntity",
@@ -214,6 +269,25 @@ function parseOriginUrl(origin: string): URL | undefined {
   }
 }
 
+function resolveAgentHostActionTargetOrigin(ownerWindow: Window, configuredHostOrigin?: string | null): string | undefined {
+  const explicit = typeof configuredHostOrigin === "string" && configuredHostOrigin.trim()
+    ? configuredHostOrigin.trim()
+    : new URLSearchParams(ownerWindow.location.search).get("agentUiHostOrigin");
+  if (!explicit) return undefined;
+  try {
+    return new URL(explicit, ownerWindow.location.origin).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function createAgentHostActionRequestId(nowMs: number): string {
+  const random = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 18)
+    : Math.random().toString(36).slice(2, 20).padEnd(18, "0");
+  return `hostact_${Math.max(0, Math.floor(nowMs)).toString(36)}_${random}`;
+}
+
 function doesOriginMatchPattern(origin: URL, pattern: string): boolean {
   if (pattern === "*") return true;
   const wildcardMatch = pattern.match(/^(https?):\/\/\*\.([^/:]+(?::\d+)?)$/i);
@@ -250,17 +324,138 @@ export function createAgentHostPageContextMessage(payload: AgentHostPageContext)
   };
 }
 
+export function isAgentHostActionRequestMessage(value: unknown): value is HostActionRequest {
+  return hostActionRequestSchema.safeParse(value).success;
+}
+
+export function isAgentHostActionResultMessage(value: unknown): value is HostActionResult {
+  return hostActionResultSchema.safeParse(value).success;
+}
+
+export function createUnavailableAgentHostActionResult(input: {
+  requestId: string;
+  actionKey: HostActionKey;
+  disabledReason: string;
+  message?: string;
+}): HostActionResult {
+  return createHostActionResult({
+    requestId: input.requestId,
+    actionKey: input.actionKey,
+    ok: false,
+    status: "unavailable",
+    policyMode: "require",
+    disabledReason: input.disabledReason,
+    ...(input.message ? { message: input.message } : {}),
+  });
+}
+
+export function requestAgentHostAction(input: AgentHostActionRequestInput, options: AgentHostActionRequestOptions = {}): Promise<HostActionResult> {
+  const ownerWindow = options.window ?? globalThis.window;
+  const request = createHostActionRequest({
+    requestId: input.requestId ?? options.requestIdFactory?.() ?? createAgentHostActionRequestId(options.now?.() ?? Date.now()),
+    actionKey: input.actionKey,
+    targetId: input.targetId,
+    targetInstanceId: input.targetInstanceId,
+    entityRef: input.entityRef,
+    input: input.input,
+    intentLabel: input.intentLabel,
+    requiresReceipt: input.requiresReceipt ?? true,
+  });
+
+  if (!ownerWindow || ownerWindow.parent === ownerWindow) {
+    return Promise.resolve(createUnavailableAgentHostActionResult({
+      requestId: request.requestId,
+      actionKey: request.actionKey,
+      disabledReason: "host_action_parent_unavailable",
+      message: "No embedding host is available for this action.",
+    }));
+  }
+
+  const targetOrigin = resolveAgentHostActionTargetOrigin(ownerWindow, options.hostOrigin);
+  if (!targetOrigin) {
+    return Promise.resolve(createUnavailableAgentHostActionResult({
+      requestId: request.requestId,
+      actionKey: request.actionKey,
+      disabledReason: "host_action_origin_unavailable",
+      message: "No trusted host origin is configured for this embedded action.",
+    }));
+  }
+
+  const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? 5_000, 30_000));
+  return new Promise((resolve) => {
+    let settled = false;
+    const cleanup = () => {
+      settled = true;
+      ownerWindow.clearTimeout(timeoutId);
+      ownerWindow.removeEventListener("message", onMessage);
+    };
+    const finish = (result: HostActionResult) => {
+      if (settled) return;
+      cleanup();
+      resolve(result);
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== targetOrigin) return;
+      if (event.source !== ownerWindow.parent) return;
+      const record = event.data && typeof event.data === "object" && !Array.isArray(event.data)
+        ? event.data as Record<string, unknown>
+        : null;
+      if (record?.requestId !== request.requestId) return;
+      const parsed = hostActionResultSchema.safeParse(event.data);
+      if (!parsed.success) {
+        finish(createHostActionResult({
+          requestId: request.requestId,
+          actionKey: request.actionKey,
+          ok: false,
+          status: "invalid_request",
+          policyMode: "block",
+          disabledReason: "host_action_result_invalid",
+          message: "The embedding host returned a malformed action result.",
+        }));
+        return;
+      }
+      if (parsed.data.version !== agentActionChannelVersion || parsed.data.actionKey !== request.actionKey) {
+        finish(createHostActionResult({
+          requestId: request.requestId,
+          actionKey: request.actionKey,
+          ok: false,
+          status: "invalid_request",
+          policyMode: "block",
+          disabledReason: "host_action_result_mismatch",
+          message: "The embedding host returned an action result for the wrong action channel.",
+        }));
+        return;
+      }
+      finish(parsed.data);
+    };
+    const timeoutId = ownerWindow.setTimeout(() => {
+      finish(createUnavailableAgentHostActionResult({
+        requestId: request.requestId,
+        actionKey: request.actionKey,
+        disabledReason: "host_action_timeout",
+        message: "The embedding host did not return an action receipt before timeout.",
+      }));
+    }, timeoutMs);
+    ownerWindow.addEventListener("message", onMessage);
+    ownerWindow.parent.postMessage(request, targetOrigin);
+  });
+}
+
 export function sanitizeAgentHostPageContext(value: unknown): AgentHostMergedPageContext | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   const allowedRecord = Object.fromEntries(Object.entries(record).filter(([key]) => ALLOWED_CONTEXT_KEYS.has(key)));
   const base = sanitizePageContext(allowedRecord) as AgentHostPageContext | undefined;
   const activeEntity = sanitizeAgentHostActiveEntity(record.activeEntity);
+  const hostUiTargets = sanitizeHostUiTargets(record.hostUiTargets);
+  const hostUiTargetRegistry = sanitizeHostUiTargetRegistry(record.hostUiTargetRegistry);
   const trusted = sanitizeTrustedHostContext(record as AgentTrustedHostContext);
   const signedFields = sanitizeSignedHostContextFields(record);
   const context: AgentHostMergedPageContext = {
     ...(base ?? {}),
     ...(activeEntity ? { activeEntity } : {}),
+    ...(hostUiTargets ? { hostUiTargets } : {}),
+    ...(hostUiTargetRegistry ? { hostUiTargetRegistry } : {}),
     ...trusted,
     ...signedFields,
   };
@@ -398,6 +593,19 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
     resizeHandle?.setAttribute("aria-valuenow", String(Math.round(clamped)));
   };
 
+  const hostController: AgentEmbedHostController = {
+    schemaVersion: "sonik.agent_ui.host_controller.v1",
+    open,
+    close,
+    postContext,
+    scheduleContextPosts,
+    getMode: () => activeMode,
+    setChatWidth,
+    openChat: () => open("chat"),
+    openCanvas: () => open("canvas"),
+    getState: () => ({ mode: activeMode, iframeSrc: iframe.getAttribute("src") }),
+  };
+
   const startResize = (event: PointerEvent) => {
     if (activeMode !== "chat") return;
     event.preventDefault();
@@ -441,11 +649,30 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
     if (event.origin !== resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow)) return;
     void postContext();
   };
+  const onRequestHostAction = (event: MessageEvent) => {
+    if (event.source !== iframe.contentWindow) return;
+    const agentOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
+    if (!agentOrigin || event.origin !== agentOrigin) return;
+    const parsed = hostActionRequestSchema.safeParse(event.data);
+    if (!parsed.success) return;
+    void handleEmbeddedHostAction({
+      request: parsed.data,
+      ownerWindow,
+      iframe,
+      agentOrigin,
+      getPageContext,
+      controller: hostController,
+      handler: options.handleHostAction,
+      onError: options.onError,
+    });
+  };
   iframe.addEventListener("load", onLoad);
   ownerWindow.addEventListener("message", onRequestPageContext);
+  ownerWindow.addEventListener("message", onRequestHostAction);
   disposers.push(() => {
     iframe.removeEventListener("load", onLoad);
     ownerWindow.removeEventListener("message", onRequestPageContext);
+    ownerWindow.removeEventListener("message", onRequestHostAction);
   });
 
   addClick(options.elements.openChat, () => open("chat"));
@@ -478,19 +705,6 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
 
   const getMode = () => activeMode;
 
-  const hostController: AgentEmbedHostController = {
-    schemaVersion: "sonik.agent_ui.host_controller.v1",
-    open,
-    close,
-    postContext,
-    scheduleContextPosts,
-    getMode,
-    setChatWidth,
-    openChat: () => open("chat"),
-    openCanvas: () => open("canvas"),
-    getState: () => ({ mode: activeMode, iframeSrc: iframe.getAttribute("src") }),
-  };
-
   const controller: AgentEmbedController = {
     iframe,
     open,
@@ -522,6 +736,76 @@ function annotateHostElement(element: HTMLElement | null | undefined, control: s
   if (!element.getAttribute("data-testid")) element.setAttribute("data-testid", `sonik-agent-ui-${control}`);
 }
 
+async function handleEmbeddedHostAction(input: {
+  ownerWindow: Window;
+  iframe: HTMLIFrameElement;
+  agentOrigin: string;
+  getPageContext: AgentHostContextProvider;
+  controller: AgentEmbedHostController;
+  handler?: AgentEmbedHostActionHandler;
+  onError?: (error: unknown) => void;
+} & { request: HostActionRequest }): Promise<void> {
+  const { request } = input;
+  let result: HostActionResult;
+  try {
+    const pageContext = sanitizeAgentHostPageContext(await input.getPageContext()) ?? {};
+    const registry = resolveHostActionRegistry(pageContext);
+    if (input.handler) {
+      const handlerResult = hostActionResultSchema.parse(await input.handler(request, { controller: input.controller, pageContext, registry }));
+      result = correlateHostActionResult(request, handlerResult);
+    } else {
+      result = handleDefaultEmbeddedHostAction(request, { controller: input.controller, registry });
+    }
+  } catch (error) {
+    input.onError?.(error);
+    result = createHostActionResult({
+      requestId: request.requestId,
+      actionKey: request.actionKey,
+      ok: false,
+      status: "invalid_request",
+      policyMode: "block",
+      disabledReason: "host_action_handler_error",
+      message: "Host action handler failed.",
+    });
+  }
+  input.iframe.contentWindow?.postMessage(result, input.agentOrigin);
+}
+
+function correlateHostActionResult(request: HostActionRequest, result: HostActionResult): HostActionResult {
+  if (result.requestId === request.requestId && result.actionKey === request.actionKey) return result;
+  return createHostActionResult({
+    requestId: request.requestId,
+    actionKey: request.actionKey,
+    ok: false,
+    status: "invalid_request",
+    policyMode: "block",
+    disabledReason: "host_action_result_mismatch",
+    message: "The embedding host returned an action result for the wrong action request.",
+  });
+}
+
+function handleDefaultEmbeddedHostAction(
+  request: HostActionRequest,
+  input: { controller: AgentEmbedHostController; registry?: HostUiTargetRegistry },
+): HostActionResult {
+  const evaluated = evaluateHostActionRequest({ request, registry: input.registry });
+  if (!evaluated.ok) return evaluated;
+  if (request.actionKey === "canvas.open") {
+    input.controller.openCanvas();
+    return evaluated;
+  }
+  if (request.actionKey === "canvas.close") {
+    input.controller.close("canvas");
+    return evaluated;
+  }
+  return createUnavailableAgentHostActionResult({
+    requestId: request.requestId,
+    actionKey: request.actionKey,
+    disabledReason: "host_action_handler_not_registered",
+    message: "The embedding host has not registered an implementation for this action.",
+  });
+}
+
 function sanitizeTrustedHostContext(value: AgentTrustedHostContext | null | undefined): Partial<AgentTrustedHostContext> {
   if (!value) return {};
   const trusted: Partial<AgentTrustedHostContext> = {};
@@ -547,6 +831,95 @@ function sanitizeTrustedHostContext(value: AgentTrustedHostContext | null | unde
     };
   }
   return trusted;
+}
+
+function resolveHostActionRegistry(pageContext: AgentHostMergedPageContext): HostUiTargetRegistry | undefined {
+  return sanitizeHostUiTargetRegistry(pageContext.hostUiTargetRegistry) ?? createHostUiTargetRegistryFromTargets(pageContext);
+}
+
+function createHostUiTargetRegistryFromTargets(pageContext: AgentHostMergedPageContext): HostUiTargetRegistry | undefined {
+  const targets = sanitizeHostUiTargets(pageContext.hostUiTargets);
+  if (!targets?.length) return undefined;
+  return hostUiTargetRegistrySchema.parse({
+    version: targetRegistryVersion,
+    generatedAt: cleanText(pageContext.at) ?? new Date(0).toISOString(),
+    provider: `${cleanText(pageContext.surface) ?? "page-context"}-targets`,
+    ...(cleanText(pageContext.route) ? { route: cleanText(pageContext.route) } : {}),
+    ...(cleanText(pageContext.surface) ? { surface: cleanText(pageContext.surface) } : {}),
+    targets,
+  });
+}
+
+function sanitizeHostUiTargets(value: unknown): AgentHostPageContext["hostUiTargets"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const targets = value.flatMap((entry) => {
+    const sanitized = sanitizeHostUiTarget(entry);
+    return sanitized ? [sanitized] : [];
+  }).slice(0, MAX_HOST_UI_TARGETS);
+  return targets.length > 0 ? targets : undefined;
+}
+
+function sanitizeHostUiTargetRegistry(value: unknown): HostUiTargetRegistry | undefined {
+  const parsed = hostUiTargetRegistrySchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const provider = cleanText(parsed.data.provider);
+  const generatedAt = cleanText(parsed.data.generatedAt);
+  if (!provider || !generatedAt) return undefined;
+  const targets = parsed.data.targets.flatMap((target) => {
+    const sanitized = sanitizeHostUiTarget(target);
+    return sanitized ? [sanitized] : [];
+  }).slice(0, MAX_HOST_UI_TARGETS);
+  if (targets.length === 0) return undefined;
+  return hostUiTargetRegistrySchema.parse({
+    version: parsed.data.version,
+    generatedAt,
+    provider,
+    ...(cleanText(parsed.data.route) ? { route: cleanText(parsed.data.route) } : {}),
+    ...(cleanText(parsed.data.surface) ? { surface: cleanText(parsed.data.surface) } : {}),
+    targets,
+  });
+}
+
+function sanitizeHostUiTarget(value: unknown): HostUiTarget | undefined {
+  const parsed = hostUiTargetSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const target = parsed.data;
+  const targetId = cleanText(target.targetId);
+  const label = cleanText(target.label);
+  const description = cleanText(target.description);
+  const surface = cleanText(target.surface);
+  if (!targetId || !label || !description || !surface) return undefined;
+  const targetInstanceId = cleanText(target.targetInstanceId);
+  const disabledReason = cleanText(target.disabledReason);
+  const policyReason = cleanText(target.policy.reason);
+  const entityKind = cleanText(target.entityRef?.kind);
+  const entityId = cleanText(target.entityRef?.id);
+  const entityLabel = cleanText(target.entityRef?.label);
+  const sanitized: HostUiTarget = {
+    targetId,
+    ...(targetInstanceId ? { targetInstanceId } : {}),
+    label,
+    description,
+    surface,
+    ...(entityKind && entityId ? { entityRef: { kind: entityKind, id: entityId, ...(entityLabel ? { label: entityLabel } : {}) } } : {}),
+    capabilities: [...target.capabilities],
+    visible: target.visible,
+    enabled: target.enabled,
+    ...(disabledReason ? { disabledReason } : {}),
+    ...(sanitizePublicHostUiLocator(target.locator) ? { locator: sanitizePublicHostUiLocator(target.locator) } : {}),
+    ...(target.bounds ? { bounds: target.bounds } : {}),
+    policy: { actionMode: target.policy.actionMode, ...(policyReason ? { reason: policyReason } : {}) },
+    metadata: {},
+  };
+  return hostUiTargetSchema.parse(sanitized);
+}
+
+function sanitizePublicHostUiLocator(locator: HostUiTarget["locator"]): HostUiTarget["locator"] | undefined {
+  if (!locator) return undefined;
+  if (locator.kind === "host-private") return undefined;
+  if (locator.kind === "bounds") return locator;
+  const value = cleanText(locator.value);
+  return value ? { ...locator, value } : undefined;
 }
 
 

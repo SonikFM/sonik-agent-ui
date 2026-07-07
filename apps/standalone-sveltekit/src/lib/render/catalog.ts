@@ -477,8 +477,22 @@ export const explorerCatalog = schema.createCatalog({
           approval: z.string().nullable().optional(),
         })).nullable(),
         emptyMessage: z.string().nullable().optional(),
+        lastReceipt: z.object({
+          actionName: z.string().nullable().optional(),
+          ok: z.boolean().nullable().optional(),
+          status: z.string().nullable().optional(),
+          message: z.string().nullable().optional(),
+          commandId: z.string().nullable().optional(),
+          updatedAt: z.string().nullable().optional(),
+          hostAction: z.object({
+            actionKey: z.string().nullable().optional(),
+            status: z.string().nullable().optional(),
+            policyMode: z.string().nullable().optional(),
+            targetId: z.string().nullable().optional(),
+          }).nullable().optional(),
+        }).nullable().optional(),
       }),
-      description: 'Read-only action/command preview rail. Paired buttons may dispatch whitelisted controller actions, but commands are never executed from this renderer component.',
+      description: 'Read-only action/command preview rail with a last-action receipt. Paired buttons may dispatch whitelisted controller actions, but commands are never executed from this renderer component.',
     },
 
 

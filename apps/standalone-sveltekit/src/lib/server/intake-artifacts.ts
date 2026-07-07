@@ -219,6 +219,7 @@ function createTrustedIntakeControllerActionElements(elements: Spec["elements"])
     props: {
       title: "Trusted workflow actions",
       emptyMessage: null,
+      lastReceipt: { $bindState: "/lastActionReceipt" },
       actions: [
         {
           id: "saveDraft",

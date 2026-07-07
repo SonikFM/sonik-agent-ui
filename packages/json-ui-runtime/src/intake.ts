@@ -22,6 +22,7 @@ function createTrustedIntakeControllerActionElements(elements: JsonRenderSpecLik
     props: {
       title: "Trusted workflow actions",
       emptyMessage: null,
+      lastReceipt: { $bindState: "/lastActionReceipt" },
       actions: [
         {
           id: "saveDraft",

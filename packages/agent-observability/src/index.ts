@@ -60,6 +60,10 @@ export interface AgentUiPageContextSnapshot {
   visibleWarnings?: string[];
   visibleErrors?: string[];
   workflow?: AgentUiWorkflowSnapshot;
+  /** Sanitized semantic targets exposed by the trusted host/page; never raw selectors. */
+  hostUiTargets?: unknown[];
+  /** Optional full target registry envelope for agent/action runtimes. */
+  hostUiTargetRegistry?: unknown;
   commandFamilies?: string[];
   skillFamilies?: string[];
   at?: string;
@@ -112,6 +116,17 @@ export interface AgentUiPageControl {
     requestApproval: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     approveAndRun: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     cancelApproval: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    requestHostAction?: (input: {
+      actionKey?: string;
+      targetId?: string;
+      targetInstanceId?: string;
+      entityRef?: unknown;
+      input?: unknown;
+      intentLabel?: string;
+    }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
+    openCanvas?: () => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
+    highlightTarget?: (input: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
+    requestApprovalPreview?: (input?: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
   };
 }
 
@@ -297,6 +312,8 @@ export function sanitizePageContext(value: unknown): AgentUiPageContextSnapshot 
     visibleWarnings: sanitizeTelemetryStringList(record.visibleWarnings),
     visibleErrors: sanitizeTelemetryStringList(record.visibleErrors),
     workflow: sanitizeWorkflowSnapshot(record.workflow),
+    hostUiTargets: Array.isArray(record.hostUiTargets) ? (sanitizeTelemetryValue(record.hostUiTargets.slice(0, MAX_LIST_ITEMS * 4)) as unknown[]) : undefined,
+    hostUiTargetRegistry: sanitizeTelemetryValue(record.hostUiTargetRegistry),
     commandFamilies: sanitizeTelemetryStringList(record.commandFamilies),
     skillFamilies: sanitizeTelemetryStringList(record.skillFamilies),
     at: cleanOptionalString(record.at),
