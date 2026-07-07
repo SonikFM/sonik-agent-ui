@@ -277,7 +277,9 @@ function cleanEmbedRailMode(value: unknown): AgentEmbedRailMode | undefined {
 
 function defaultRailModeForEmbedMode(mode: AgentEmbedMode): AgentEmbedRailMode {
   if (mode === "chat") return "hidden";
-  if (mode === "canvas") return "collapsed";
+  // Canvas/workspace modes show the full rail so session management
+  // (pin, archive/restore) is reachable in the embedded product surface;
+  // hosts can still pass railMode=collapsed to override.
   return "expanded";
 }
 

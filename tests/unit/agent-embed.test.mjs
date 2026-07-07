@@ -197,8 +197,8 @@ assert.deepEqual(
 );
 assert.deepEqual(
   normalizeAgentEmbedIntent({ embedMode: "canvas" }),
-  { mode: "canvas", railMode: "collapsed" },
-  "canvas embed mode should default to collapsed rail",
+  { mode: "canvas", railMode: "expanded" },
+  "canvas embed mode should default to the expanded rail so pin/archive session management is reachable in embeds (host can override with railMode=collapsed)",
 );
 assert.deepEqual(
   normalizeAgentEmbedIntent({ agentUiMode: "workspace", rail: "expanded" }),
