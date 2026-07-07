@@ -31,6 +31,11 @@ const PAGE_CONTROL_ACTION_NAMES = [
   "requestApproval",
   "approveAndRun",
   "cancelApproval",
+  // Added 2026-07-07 (tour/action-channel lane): host-action + tour primitives.
+  "requestHostAction",
+  "openCanvas",
+  "highlightTarget",
+  "requestApprovalPreview",
 ];
 
 function sleep(ms) {

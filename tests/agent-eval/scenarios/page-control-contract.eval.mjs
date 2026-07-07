@@ -134,7 +134,7 @@ async function run() {
     // --- 2. all 13 actions exist and are callable ---
     const actionNames = await client.getActionNames();
     const expectedSorted = [...PAGE_CONTROL_ACTION_NAMES].sort();
-    record("allThirteenActionsRegistered", JSON.stringify(actionNames) === JSON.stringify(expectedSorted), {
+    record("allRegisteredActionsMatchContract", JSON.stringify(actionNames) === JSON.stringify(expectedSorted), {
       expected: expectedSorted,
       actual: actionNames,
     });
