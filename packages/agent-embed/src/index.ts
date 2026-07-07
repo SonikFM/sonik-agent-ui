@@ -133,6 +133,7 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "visibleActions",
   "visibleWarnings",
   "visibleErrors",
+  "workflow",
   "commandFamilies",
   "skillFamilies",
   "activeEntity",

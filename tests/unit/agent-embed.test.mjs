@@ -13,6 +13,9 @@ import {
   mountSonikAgentUI,
   sanitizeAgentHostPageContext,
 } from "../../packages/agent-embed/src/index.ts";
+import { createInteractiveSurfaceJsonRenderSpec } from "../../packages/json-ui-runtime/src/intake.ts";
+import { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE } from "../../apps/standalone-sveltekit/src/lib/server/booking-workflows/context-intake.ts";
+import { createAgentWorkflowSnapshot } from "../../apps/standalone-sveltekit/src/lib/agent-workflows/page-control-workflow.ts";
 
 const message = {
   source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
@@ -55,6 +58,28 @@ assert.equal(merged.activeSessionId, "sess-local", "local app session state shou
 assert.equal(merged.activeEntity?.id, "booking_123", "merged context should include active entity id");
 assert.equal(merged.organizationId, "org-trusted", "trusted context should be appended explicitly");
 assert.deepEqual(merged.scopes, ["booking:read"], "trusted scopes should come from trusted context only");
+
+// Regression: window.__sonikAgentUI.getPageContext() (the standalone route's createPageContextSnapshot)
+// always routes the local snapshot through mergeAgentHostPageContext/sanitizeAgentHostPageContext before
+// returning it, even with no embedding host present. The sanitizer's key allowlist previously omitted
+// "workflow", so the agent-readable workflow snapshot (currentQuestion, phase, etc.) was silently dropped
+// for every intake artifact, regardless of whether it was created via createBookingIntakeArtifact or a
+// hand-built manifest. Build the workflow snapshot from the same generator the live agent tool uses.
+const liveAgentIntakeSpec = createInteractiveSurfaceJsonRenderSpec(BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE);
+const liveAgentIntakeArtifact = { id: "artifact-live-agent-intake", title: "Booking intake", kind: "json-render", version: 1, content: liveAgentIntakeSpec };
+const liveAgentWorkflow = createAgentWorkflowSnapshot({
+  activeArtifact: liveAgentIntakeArtifact,
+  pendingChangeCount: 0,
+  isStreaming: false,
+  approvalReadiness: { ready: false, visible: true, reason: "Answer setup type and inventory before previewing." },
+});
+const mergedWithWorkflow = mergeAgentHostPageContext(
+  { route: "/", surface: "artifact", activeArtifactId: liveAgentIntakeArtifact.id, workflow: liveAgentWorkflow },
+  null,
+);
+assert.ok(mergedWithWorkflow.workflow, "page context returned by getPageContext() must retain the workflow snapshot after merge/sanitize");
+assert.equal(typeof mergedWithWorkflow.workflow?.phase, "string", "merged workflow snapshot must report a phase string");
+assert.equal(mergedWithWorkflow.workflow?.currentQuestion?.id, "q_intake_mode", "merged workflow snapshot must retain the current unanswered question for page-control submitAnswer/markUnknown");
 
 const redacted = sanitizeAgentHostPageContext({
   route: "/safe",
