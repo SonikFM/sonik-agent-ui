@@ -1,0 +1,118 @@
+import { createInteractiveSurfaceSpec, type InteractiveSurfaceSpec } from "@sonik-agent-ui/tool-contracts";
+
+export const BOOKING_EVENT_CREATE_SURFACE_TEMPLATE: InteractiveSurfaceSpec = createInteractiveSurfaceSpec({
+  id: "booking-event-create-lite",
+  kind: "question_group",
+  title: "Create event manifest",
+  description: "Collect the minimum event facts needed to draft an event, ticket, access, and communications manifest.",
+  skillId: "booking.event.create",
+  state: {
+    manifest: {
+      manifestType: "event",
+      status: "draft",
+      source: { createdBy: "agent", skill: "booking.event.create" },
+    },
+  },
+  questions: [
+    {
+      id: "q_event_title",
+      title: "What is the event?",
+      body: "What is the event title or working name customers and operators should recognize?",
+      answerType: "short_text",
+      required: true,
+      allowSkip: false,
+      writesTo: "/manifest/event/title",
+    },
+    {
+      id: "q_event_time",
+      title: "When does it happen?",
+      body: "Provide the event date and start time. Include doors or check-in time if that is already known.",
+      whyThisMatters: "Event timing controls inventory availability, reminders, access windows, and proof evidence.",
+      answerType: "datetime",
+      required: true,
+      allowSkip: false,
+      writesTo: "/manifest/event/startsAt",
+    },
+    {
+      id: "q_event_inventory",
+      title: "What can attendees buy, reserve, or request?",
+      body: "List tickets, passes, tables, add-ons, sessions, rooms, or request-only inventory that should be part of this event.",
+      answerType: "long_text",
+      required: true,
+      allowSkip: false,
+      writesTo: "/manifest/inventory/coreDescription",
+    },
+    {
+      id: "q_event_access_mode",
+      title: "How should access be handled?",
+      body: "Should guests use QR tickets, wallet passes, a guest list, manual check-in, member cards, or another access method?",
+      answerType: "multi_choice",
+      required: false,
+      allowSkip: true,
+      skipValue: "unknown",
+      writesTo: "/manifest/event/accessModes",
+      choices: [
+        { value: "qr_ticket", label: "QR ticket", description: "Issue a scannable ticket or credential." },
+        { value: "wallet_pass", label: "Wallet pass", description: "Create Apple/Google wallet-style access." },
+        { value: "guest_list", label: "Guest list", description: "Use operator lookup at the door." },
+        { value: "manual_check_in", label: "Manual check-in", description: "Staff checks people in without a credential." },
+        { value: "member_card", label: "Member card", description: "Access is tied to existing membership identity." },
+      ],
+    },
+  ],
+});
+
+export const BOOKING_EVENT_CREATE_WORKFLOW = {
+  id: "booking.event.create",
+  title: "Create booking event manifest",
+  description: "Guide an agent through source copy analysis, structured questions, and draft manifest state for a time-bound event with tickets, reservations, access, and proof requirements.",
+  intentAliases: [
+    "create event",
+    "create booking event",
+    "set up event",
+    "build event manifest",
+    "create ticketed event",
+    "configure event inventory",
+  ],
+  requiredTools: ["ask_user_question", "create_or_update_intake_artifact"],
+  optionalTools: ["copy_analyze_retrofit", "manifest_validate", "manifest_export"],
+  workflowSteps: [
+    "Inspect donated event page context and pasted source copy before asking broad questions.",
+    "Create or update a JSON-render event intake artifact using the interactiveSurfaceTemplate.",
+    "Prioritize event timing, venue, inventory, access, pricing, policies, communications, proof, and loyalty.",
+    "Ask only the next highest-impact missing question; preserve unknowns rather than inventing policy.",
+    "Keep event/context creation commands preview-only until Phase 5 validation/export and explicit command confirmation exist.",
+  ],
+  questionPolicy: {
+    mode: "progressive_disclosure",
+    askStyle: "one_high_impact_question_at_a_time",
+    confidenceRequiredForAutofill: 0.75,
+    neverInvent: ["pricing", "refund_policy", "transfer_policy", "capacity", "payment_required", "access_rules", "legal_terms"],
+  },
+  successEvidence: [
+    "searchSkillCatalog returns booking.event.create for event setup intent",
+    "learnSkill returns event question policy and an interactiveSurfaceTemplate with no executable command payload",
+    "tool.askUserQuestion/tool.submitQuestionAnswer telemetry can be emitted by the controller when the UI flow runs",
+    "artifact.intake.created/artifact.intake.version_created telemetry can be emitted by the artifact persistence seam when wired",
+  ],
+  telemetryEvents: [
+    "tool.searchSkillCatalog",
+    "tool.learnSkill",
+    "tool.askUserQuestion",
+    "tool.submitQuestionAnswer",
+    "artifact.intake.created",
+    "artifact.intake.version_created",
+  ],
+  forbiddenUnlessExplicit: [
+    "booking.create.booking",
+    "booking.create.hold",
+    "booking.create.event",
+    "booking.create.ticket",
+    "booking.create.pricing.rule",
+  ],
+  negativeRules: [
+    "Do not turn an event manifest answer into approval for a booking/event write command.",
+    "Do not call executeCommand or commitCommand from the JSON renderer or ask-user component.",
+    "Do not invent pricing, refund, transfer, access, capacity, payment, or legal policy when source material is thin.",
+  ],
+} as const;

@@ -152,7 +152,7 @@
       currentStore.set(path, value);
       const next = currentStore.getSnapshot();
       model = next;
-      if (!store && next !== prev) {
+      if (next !== prev) {
         onStateChange?.([{ path, value }]);
       }
     },
@@ -162,7 +162,7 @@
       currentStore.update(updates);
       const next = currentStore.getSnapshot();
       model = next;
-      if (!store && next !== prev) {
+      if (next !== prev) {
         const changes: Array<{ path: string; value: unknown }> = [];
         for (const [path, value] of Object.entries(updates)) {
           if (getByPath(prev, path) !== value) {

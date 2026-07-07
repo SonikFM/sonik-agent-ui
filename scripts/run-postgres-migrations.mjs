@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { buildPgEnv } from "./lib/postgres-connection.mjs";
 
 const repoRoot = process.cwd();
 const databaseUrl = process.env.DATABASE_URL;
@@ -34,6 +35,32 @@ const migrations = [
 			)::text
 		`,
 	},
+	{
+		version: "0003",
+		name: "agent_run_lifecycle",
+		file: "packages/workspace-session/migrations/postgres/0003_agent_run_lifecycle.sql",
+		baselineCheck: `
+				select (
+					to_regclass('sonik_agent_ui.agent_workspace_runs') is not null
+					and to_regclass('sonik_agent_ui.agent_workspace_run_events') is not null
+				)::text
+			`,
+	},
+	{
+		version: "0004",
+		name: "run_context_selection",
+		file: "packages/workspace-session/migrations/postgres/0004_run_context_selection.sql",
+		baselineCheck: `
+				select (
+					exists (
+						select 1 from information_schema.columns
+						where table_schema = 'sonik_agent_ui'
+							and table_name = 'agent_workspace_runs'
+							and column_name = 'context_selection'
+					)
+				)::text
+			`,
+	},
 ];
 
 if (!databaseUrl) {
@@ -41,11 +68,18 @@ if (!databaseUrl) {
 	process.exit(2);
 }
 
+// Supply the connection via PG* env vars, never as a psql argv: a non-zero psql
+// exit echoes its argv (password included) to stderr, which the release gate
+// captures and persists into evidence. Keeping credentials in the env keeps them
+// out of any error/log output.
+const pgEnv = buildPgEnv(databaseUrl);
+
 function psql(args, options = {}) {
-	return execFileSync("psql", [databaseUrl, "-v", "ON_ERROR_STOP=1", ...args], {
+	return execFileSync("psql", ["-v", "ON_ERROR_STOP=1", ...args], {
 		cwd: repoRoot,
 		encoding: "utf8",
 		stdio: options.stdio ?? ["ignore", "pipe", "inherit"],
+		env: { ...process.env, ...pgEnv },
 	});
 }
 

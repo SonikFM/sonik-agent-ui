@@ -11,7 +11,7 @@ import {
 const summary = getGlobalCommandRegistrySummary();
 assert.equal(summary.version, "sonik-agent-ui.global-command-registry.v1");
 assert.equal(summary.provider, "sonik-global-command-registry");
-assert.equal(summary.summary.commandCount, 71, "global registry exposes generated booking command count");
+assert.equal(summary.summary.commandCount, 72, "global registry exposes generated booking command count");
 assert.equal(summary.providers[0].provider, "sonik-booking-openapi-fixture");
 assert.equal(JSON.stringify(summary).includes("/Users/"), false, "runtime summary must not leak local paths");
 
@@ -44,7 +44,7 @@ assert.equal(surfaceSearch.commands.length <= 8, true);
 assert.equal(surfaceSearch.commands.some((command) => command.id === "booking.create.context"), true, "search finds create context command");
 assert.equal(surfaceSearch.commands.find((command) => command.id === "booking.create.context")?.contextLoaded, true, "booking surface marks matching generated command as context-loaded");
 assert.equal(surfaceSearch.commands.every((command) => !Object.hasOwn(command, "input") && !Object.hasOwn(command, "inputSchemaJson")), true, "search summaries stay schema-free");
-assert.equal(surfaceSearch.contextIndex.totalMatches, 71, "booking surface can expose all generated booking commands as summaries");
+assert.equal(surfaceSearch.contextIndex.totalMatches, 72, "booking surface can expose all generated booking commands as summaries");
 
 const lazySearch = searchGlobalCommandRegistry({ query: "reservation", limit: 5 });
 assert.equal(lazySearch.commands.length <= 5, true);

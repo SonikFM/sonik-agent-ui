@@ -7,8 +7,8 @@
     /** Component registry (passed through for convenience; not used internally) */
     registry?: ComponentRegistry;
     /**
-     * External store (controlled mode). When provided, `initialState` and
-     * `onStateChange` are ignored.
+     * External store (controlled mode). When provided, `initialState` is ignored;
+     * `onStateChange` still observes writes routed through this provider.
      */
     store?: StateStore;
     /** Initial state model */
@@ -26,7 +26,7 @@
     functions?: Record<string, ComputedFunction>;
     /** Custom directives for user-defined `$`-prefixed dynamic values */
     directives?: DirectiveDefinition[];
-    /** Callback when state changes (uncontrolled mode) */
+    /** Callback when state changes through this provider. */
     onStateChange?: (changes: Array<{ path: string; value: unknown }>) => void;
     /** Children snippet */
     children: Snippet;

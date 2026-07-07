@@ -13,15 +13,13 @@
 
   let { props, bindings }: Props = $props();
 
-  function valueBinding() {
-    return getBoundProp<string>(
-      () => (props.value ?? undefined) as string | undefined,
-      () => bindings?.value,
-    );
-  }
+  const valueBinding = getBoundProp<string>(
+    () => (props.value ?? undefined) as string | undefined,
+    () => bindings?.value,
+  );
 
   let value = $derived(
-    valueBinding().current ?? ""
+    valueBinding.current ?? ""
   );
 
   const selectedOption = $derived(
@@ -30,7 +28,7 @@
 
   function handleChange(newValue: string | undefined) {
     if (newValue) {
-      valueBinding().current = newValue;
+      valueBinding.current = newValue;
     }
   }
 </script>

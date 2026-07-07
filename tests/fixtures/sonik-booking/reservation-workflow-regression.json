@@ -1,0 +1,22 @@
+{
+  "version": "sonik-agent-ui.booking-reservation-regression.v1",
+  "badTranscript": {
+    "prompt": "Create a reservation for Dan at 1pm July 1 for 3.",
+    "assistantText": "Found it! booking.create.hold is the command I need. The principal ID doesn't exist as a user yet, so let me create a guest for it.",
+    "toolCalls": [
+      { "commandId": "booking.get.availability", "action": "execute", "inputJson": "{\"contextId\":\"ctx_123\",\"from\":\"2026-07-01T20:00:00.000Z\",\"to\":\"2026-07-01T20:10:00.000Z\",\"partySize\":3}" },
+      { "commandId": "booking.create.hold", "action": "commit", "inputJson": "{\"contextId\":\"ctx_123\",\"userId\":\"179b55fd-179b-77c3-aff1-8a53359b07bf\",\"partySize\":3}" },
+      { "commandId": "booking.create.guest", "action": "commit", "inputJson": "{\"name\":\"Host Principal\",\"email\":\"host-principal@example.test\",\"userId\":\"179b55fd-179b-77c3-aff1-8a53359b07bf\"}" },
+      { "commandId": "booking.create.booking", "action": "commit", "inputJson": "{\"contextId\":\"ctx_123\",\"userId\":\"179b55fd-179b-77c3-aff1-8a53359b07bf\",\"startsAt\":\"2026-07-01T20:00:00.000Z\",\"endsAt\":\"2026-07-01T20:10:00.000Z\",\"partySize\":3}" }
+    ]
+  },
+  "goodTranscript": {
+    "prompt": "Create a reservation for Dan at 1pm July 1 for 3.",
+    "assistantText": "I checked availability, created/resolved Dan as the guest, and created the booking reservation.",
+    "toolCalls": [
+      { "commandId": "booking.get.availability", "action": "execute", "inputJson": "{\"contextId\":\"ctx_123\",\"from\":\"2026-07-01T20:00:00.000Z\",\"to\":\"2026-07-01T20:10:00.000Z\",\"partySize\":3}" },
+      { "commandId": "booking.create.guest", "action": "commit", "inputJson": "{\"name\":\"Dan\",\"email\":\"dan@example.test\"}" },
+      { "commandId": "booking.create.booking", "action": "commit", "inputJson": "{\"contextId\":\"ctx_123\",\"userId\":\"guest_123\",\"startsAt\":\"2026-07-01T20:00:00.000Z\",\"endsAt\":\"2026-07-01T20:10:00.000Z\",\"partySize\":3,\"source\":\"admin\",\"clientRequestId\":\"agent-ui-reservation-demo-001\"}" }
+    ]
+  }
+}

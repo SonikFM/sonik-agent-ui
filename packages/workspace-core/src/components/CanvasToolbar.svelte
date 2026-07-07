@@ -15,6 +15,7 @@
     activeArtifactVersion?: number | null;
     onArtifactVersionChange?: (version: number) => void;
     onClear?: () => void;
+    showDeveloperPanels?: boolean;
   }
 </script>
 
@@ -33,15 +34,18 @@
     activeArtifactVersion = null,
     onArtifactVersionChange,
     onClear,
+    showDeveloperPanels = true,
   }: CanvasToolbarProps = $props();
 
-  const panelButtons: Array<{ id: CanvasPanel; label: string }> = [
+  const allPanelButtons: Array<{ id: CanvasPanel; label: string; developer?: boolean }> = [
     { id: "canvas", label: "Preview" },
     { id: "document", label: "Document" },
-    { id: "editor", label: "Edit JSON" },
-    { id: "inspector", label: "Inspector" },
-    { id: "raw", label: "Raw" },
+    { id: "editor", label: "Edit JSON", developer: true },
+    { id: "inspector", label: "Inspector", developer: true },
+    { id: "raw", label: "Raw", developer: true },
   ];
+
+  const panelButtons = $derived(allPanelButtons.filter((item) => showDeveloperPanels || !item.developer));
 
   function panelEnabled(panelId: CanvasPanel): boolean {
     if (panelId === "document") return documentAvailable;

@@ -1,5 +1,5 @@
 import { env } from "$env/dynamic/private";
-import { createAgent } from "$lib/agent";
+import { createAgent, resolveAgentPromptComposition } from "$lib/agent";
 import { minuteRateLimit, dailyRateLimit } from "$lib/rate-limit";
 import {
   convertToModelMessages,
@@ -13,10 +13,22 @@ import { pipeArtifactToolOutputsToSpecParts } from "$lib/artifacts/artifact-stre
 import { logArtifactTelemetry } from "$lib/artifacts/artifact-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
 import { createTelemetryCorrelation, sanitizePageContext } from "@sonik-agent-ui/agent-observability";
+import { classifyRunErrorCode, sanitizeAgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
+import {
+  parseAgentRunContextSelection,
+  resolveAgentContextSelection,
+  type AgentContextSelectionResolution,
+  type AgentRunContextSelection,
+} from "@sonik-agent-ui/tool-contracts/run-context";
 import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
-import { createDevSmokeStream, readDevSmokeRunId, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
-import { getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord } from "$lib/server/workspace-request-store";
+import { createDevSmokeStream, readDevSmokeFailMode, readDevSmokeRunId, readDevSmokeScenario, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
+import { startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
+import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord, type WorkspaceSessionRecord } from "$lib/server/workspace-request-store";
+import { resolveEffectiveContextDocument } from "$lib/server/run-context-document";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
+import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
+import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
+import { resolveImplicitWorkflowSkillIds } from "$lib/runtime-skill-intent";
 import {
   createBookingRuntimeAuthContextFromEnv,
   createBookingRuntimeAuthContextFromTrustedHostHeader,
@@ -25,6 +37,13 @@ import {
 import { AGENT_UI_HOST_CONTEXT_HEADER, resolveTrustedHostSessionSnapshot } from "$lib/server/workspace-services";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
+import {
+  couldStartWorkspaceSessionTitleMarker,
+  deriveWorkspaceSessionTitle,
+  extractWorkspaceSessionTitleMarker,
+  isDefaultWorkspaceSessionName,
+  WORKSPACE_SESSION_TITLE_MARKER_PREFIX,
+} from "@sonik-agent-ui/workspace-session";
 import {
   optionalRouteString,
   routeString,
@@ -38,7 +57,35 @@ import type { RequestHandler } from "./$types";
 
 const PAGE_CONTEXT_FIELD_MAX_CHARS = 160;
 const PAGE_CONTEXT_LIST_MAX_ITEMS = 8;
+const APPROVED_COMMAND_IDS_MAX_ITEMS = 128;
+const AGENT_SKILL_IDS_MAX_ITEMS = 8;
+const AGENT_SKILL_ID_MAX_CHARS = 160;
+const AGENT_UI_RUN_ID_HEADER = "x-sonik-agent-ui-run-id";
+const TITLE_GENERATION_BUFFER_MAX_CHARS = 320;
 
+// Per-turn skill ids: donor-style `ChatRequest.skillIds` on the request, unioned
+// with the explicit runtime-skill composer chips for this turn. Sourced only from
+// EXPLICIT selection (never implicit page-context skill families) so a default
+// turn composes exactly today's monolith-equivalent prompt with no appended
+// skills. Bounded in count and length; resolved through the skill registry.
+function resolveRequestSkillIds(input: { requestSkillIds: unknown; selectedSkillFamilies: string[]; implicitSkillIds?: string[] }): string[] {
+  const fromRequest = Array.isArray(input.requestSkillIds)
+    ? input.requestSkillIds
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0 && entry.length <= AGENT_SKILL_ID_MAX_CHARS)
+    : [];
+  return [...new Set([...fromRequest, ...input.selectedSkillFamilies, ...(input.implicitSkillIds ?? [])])].slice(0, AGENT_SKILL_IDS_MAX_ITEMS);
+}
+
+
+function createServiceBindingFetcher(binding: unknown): typeof fetch | undefined {
+  if (!binding || typeof binding !== "object") return undefined;
+  const candidate = binding as { fetch?: typeof fetch };
+  if (typeof candidate.fetch !== "function") return undefined;
+  const bindingFetch = candidate.fetch.bind(candidate);
+  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => bindingFetch(input, init)) as typeof fetch;
+}
 
 function createAgentHostSessionEnvelope(event: RequestEvent): HostSessionEnvelope | null {
   const snapshot = resolveTrustedHostSessionSnapshot(event);
@@ -59,7 +106,13 @@ function createAgentHostSessionEnvelope(event: RequestEvent): HostSessionEnvelop
 function approvedCommandIdsFromHostSession(hostSession: HostSessionEnvelope | null): string[] {
   const value = hostSession?.metadata?.approvedCommandIds;
   if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0))].slice(0, 20);
+  return [
+    ...new Set(
+      value
+        .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        .map((entry) => entry.trim()),
+    ),
+  ].slice(0, APPROVED_COMMAND_IDS_MAX_ITEMS);
 }
 
 function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: WorkspaceDocumentRecord | null } = {}): AgentPageContext | undefined {
@@ -82,6 +135,33 @@ function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: Wo
   if (!pageContext.artifactType && defaults.activeDocument?.language) pageContext.artifactType = defaults.activeDocument.language;
   if (!pageContext.surface && pageContext.activeDocumentId) pageContext.surface = "document";
   return hasPageContext(pageContext) ? pageContext : undefined;
+}
+
+// Layer an explicit composer selection over the implicit host/page context.
+// Explicit wins: the selection's page/document/artifact refs set the active
+// pointers and its command/skill families union in. Callers only invoke this
+// when the selection is explicit; an absent/empty selection leaves the implicit
+// page context untouched (graceful degradation to today's behavior).
+function applyRunContextSelectionToPageContext(
+  base: AgentPageContext | undefined,
+  resolution: AgentContextSelectionResolution,
+): AgentPageContext | undefined {
+  if (!resolution.explicit) return base;
+  const next: AgentPageContext = { ...(base ?? {}) };
+  if (resolution.page?.route) next.route = resolution.page.route;
+  if (resolution.page?.title) next.title = resolution.page.title;
+  const selectedDocumentId = resolution.documentIds[0];
+  if (selectedDocumentId) next.activeDocumentId = selectedDocumentId;
+  const selectedArtifactId = resolution.artifactIds[0];
+  if (selectedArtifactId) next.activeArtifactId = selectedArtifactId;
+  if (resolution.activeEntity) next.activeEntity = resolution.activeEntity;
+  if (resolution.commandFamilies.length > 0) {
+    next.commandFamilies = [...new Set([...(next.commandFamilies ?? []), ...resolution.commandFamilies])].slice(0, PAGE_CONTEXT_LIST_MAX_ITEMS);
+  }
+  if (resolution.skillFamilies.length > 0) {
+    next.skillFamilies = [...new Set([...(next.skillFamilies ?? []), ...resolution.skillFamilies])].slice(0, PAGE_CONTEXT_LIST_MAX_ITEMS);
+  }
+  return hasPageContext(next) ? next : undefined;
 }
 
 function resolveActiveEntity(value: unknown): AgentPageContext["activeEntity"] | undefined {
@@ -131,6 +211,136 @@ function createCurrentPageContextSummary(context: AgentPageContext | undefined):
   if (context.visibleActions?.length) lines.push(`- visibleActions: ${context.visibleActions.join(", ")}`);
   lines.push("If the user asks where they are, what page this is, or what context is attached, answer directly from this block. Do not create an artifact or dashboard unless the user explicitly asks for one.");
   return lines.join("\n");
+}
+
+function createConversationTitleGenerationPrompt(input: { firstUserMessage: string; fallbackTitle: string }): string {
+  return [
+    "CONVERSATION TITLE GENERATION:",
+    "This is the first turn of a new conversation. Begin the first assistant text block with exactly one hidden title marker:",
+    `${WORKSPACE_SESSION_TITLE_MARKER_PREFIX} <2-7 word conversation title>]]`,
+    "Use a concise natural title based on the user's first message. Do not quote the title, do not add punctuation inside the marker, and do not mention the marker in the visible response.",
+    `First user message: ${input.firstUserMessage}`,
+    `If unsure, use a short variant of this fallback title: ${input.fallbackTitle}`,
+  ].join("\n");
+}
+
+function readUiMessageText(message: UIMessage | undefined): string {
+  if (!message || typeof message !== "object") return "";
+  const parts = Array.isArray((message as { parts?: unknown }).parts) ? (message as { parts: unknown[] }).parts : [];
+  const fromParts = parts
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const candidate = part as { type?: unknown; text?: unknown };
+      return candidate.type === "text" && typeof candidate.text === "string" ? candidate.text : "";
+    })
+    .join("");
+  if (fromParts.trim()) return fromParts;
+  const fallback = message as unknown as { content?: unknown };
+  return typeof fallback.content === "string" ? fallback.content : "";
+}
+
+function resolveFirstUserMessage(messages: UIMessage[]): string {
+  const userMessage = messages.find((message) => message.role === "user") ?? messages.at(-1);
+  return readUiMessageText(userMessage).trim();
+}
+
+function resolveLatestUserMessage(messages: UIMessage[]): string {
+  const userMessage = [...messages].reverse().find((message) => message.role === "user") ?? messages.at(-1);
+  return readUiMessageText(userMessage).trim();
+}
+
+function shouldRequestConversationTitle(input: { session: WorkspaceSessionRecord | null; analyticsHints?: { isFirstRun?: boolean } | null; fallbackTitle: string }): boolean {
+  const session = input.session;
+  if (!session) return false;
+  if (session.message_count > 0) return false;
+  if (input.analyticsHints && input.analyticsHints.isFirstRun === false) return false;
+  const name = session.name.trim();
+  return isDefaultWorkspaceSessionName(name) || name === input.fallbackTitle;
+}
+
+function pipeConversationTitleGeneration(
+  stream: ReadableStream<UIMessageChunk>,
+  input: {
+    sessionId: string;
+    firstUserMessage: string;
+    fallbackTitle: string;
+    initialSessionName: string;
+    getSession: (id: string) => Promise<WorkspaceSessionRecord | null>;
+    patchSession: (id: string, patch: { name: string }) => Promise<WorkspaceSessionRecord | null>;
+  },
+): ReadableStream<UIMessageChunk> {
+  let resolved = false;
+  let buffer = "";
+  let patchPromise: Promise<void> | null = null;
+  let lastTextDeltaChunk: UIMessageChunk | null = null;
+
+  function canPatchSessionName(name: string): boolean {
+    const trimmed = name.trim();
+    return isDefaultWorkspaceSessionName(trimmed) || trimmed === input.fallbackTitle || trimmed === input.initialSessionName.trim();
+  }
+
+  function persistTitle(title: string): void {
+    if (patchPromise) return;
+    patchPromise = (async () => {
+      const current = await input.getSession(input.sessionId).catch(() => null);
+      if (!current || !canPatchSessionName(current.name)) return;
+      if (current.name.trim() === title) return;
+      await input.patchSession(input.sessionId, { name: title }).catch(() => null);
+    })();
+  }
+
+  function emitText(controller: TransformStreamDefaultController<UIMessageChunk>, template: UIMessageChunk | null, delta: string): void {
+    if (!delta) return;
+    controller.enqueue({ ...(template ?? { type: "text-delta", id: "conversation-title" }), delta } as UIMessageChunk);
+  }
+
+  function resolveBufferedText(controller: TransformStreamDefaultController<UIMessageChunk>): void {
+    if (!buffer) return;
+    const extracted = extractWorkspaceSessionTitleMarker(buffer, input.firstUserMessage);
+    persistTitle(extracted.title);
+    emitText(controller, lastTextDeltaChunk, extracted.markerFound ? extracted.visibleText : buffer);
+    buffer = "";
+    resolved = true;
+  }
+
+  return stream.pipeThrough(new TransformStream<UIMessageChunk, UIMessageChunk>({
+    transform(chunk, controller) {
+      if (resolved) {
+        controller.enqueue(chunk);
+        return;
+      }
+      if (chunk.type !== "text-delta" || typeof chunk.delta !== "string") {
+        resolveBufferedText(controller);
+        controller.enqueue(chunk);
+        return;
+      }
+
+      lastTextDeltaChunk = chunk;
+      buffer += chunk.delta;
+      const extracted = extractWorkspaceSessionTitleMarker(buffer, input.firstUserMessage);
+      if (extracted.markerFound) {
+        resolved = true;
+        persistTitle(extracted.title);
+        emitText(controller, chunk, extracted.visibleText);
+        return;
+      }
+
+      if (buffer.length < TITLE_GENERATION_BUFFER_MAX_CHARS && couldStartWorkspaceSessionTitleMarker(buffer)) return;
+
+      resolved = true;
+      persistTitle(input.fallbackTitle);
+      emitText(controller, chunk, buffer);
+      buffer = "";
+    },
+    async flush(controller) {
+      if (!resolved && buffer) {
+        resolveBufferedText(controller);
+      } else if (!resolved) {
+        persistTitle(input.fallbackTitle);
+      }
+      await patchPromise;
+    },
+  }));
 }
 
 function resolvePageContextSource(body: Record<string, unknown>, activeDocument: WorkspaceDocumentRecord | null): string {
@@ -191,16 +401,42 @@ export const POST: RequestHandler = async (event) => {
   const workspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
   const telemetrySessionId = activeDocument?.session_id ?? workspaceSessionId;
   const smokeRunId = readDevSmokeRunId(request);
-  const pageContext = resolveAgentPageContext(body?.pageContext ?? body?.workspace?.pageContext, { activeDocument });
+  // Explicit composer context selection wins over implicit host/page context.
+  // When the user deselected the active-document chip, includeActiveDocument is
+  // false and the document is neither injected nor exposed to the agent for this
+  // turn (authoritative removal at the server boundary). Absent selection keeps
+  // the current implicit behavior.
+  const runContextSelection: AgentRunContextSelection | undefined = parseAgentRunContextSelection(body?.contextSelection ?? body?.workspace?.contextSelection);
+  const selectionResolution = resolveAgentContextSelection(runContextSelection);
+  // Feed the chip-selected document's content (loaded from session-scoped
+  // persistence) rather than always the request's active document, so a non-active
+  // document selection actually reaches the agent. Out-of-scope ids are ignored.
+  const effectiveActiveDocument = await resolveEffectiveContextDocument({
+    includeActiveDocument: selectionResolution.includeActiveDocument,
+    selectedDocumentId: selectionResolution.documentIds[0],
+    requestActiveDocument: activeDocument,
+    sessionId: telemetrySessionId,
+    loadDocument: (id) => getRequestWorkspaceDocument(event, id),
+  });
+  const pageContext = applyRunContextSelectionToPageContext(
+    resolveAgentPageContext(body?.pageContext ?? body?.workspace?.pageContext, { activeDocument: effectiveActiveDocument }),
+    selectionResolution,
+  );
   const telemetryPageContext = sanitizePageContext(body?.pageContext ?? body?.workspace?.pageContext);
   const pageContextSource = resolvePageContextSource(body, activeDocument);
   const bookingServiceBaseUrl = env.SONIK_BOOKING_API_BASE_URL ?? env.BOOKING_SERVICE_BASE_URL ?? null;
+  const bookingRuntimeFetcher = createServiceBindingFetcher(event.platform?.env?.BOOKING_SERVICE);
   const bookingRuntimeAuth = createBookingRuntimeAuthContextFromTrustedHostHeader({
     header: request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER),
     fallback: createBookingRuntimeAuthContextFromEnv(env),
   });
   const hostSession = createAgentHostSessionEnvelope(event);
   const approvedCommandIds = approvedCommandIdsFromHostSession(hostSession);
+  // Analytics-only run hints (entryFrom / turnIndex / isFirstRun /
+  // hasExistingArtifact). Sanitized + bounded here and used ONLY for run and
+  // telemetry analytics — never passed to createAgent, prompt composition, or
+  // tool inputs. Absent/dropped hints reproduce today's behavior.
+  const analyticsHints = sanitizeAgentAnalyticsHints(body?.analyticsHints ?? body?.workspace?.analyticsHints);
   const startedAt = Date.now();
 
   if (!uiMessages || !Array.isArray(uiMessages) || uiMessages.length === 0) {
@@ -214,6 +450,24 @@ export const POST: RequestHandler = async (event) => {
   }
 
   const lastMessage = uiMessages.at(-1);
+  const firstUserMessage = resolveFirstUserMessage(uiMessages);
+  const latestUserMessage = resolveLatestUserMessage(uiMessages);
+  const implicitSkillIds = resolveImplicitWorkflowSkillIds({ userMessage: latestUserMessage, pageContext });
+  const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
+  const skillIds = resolveRequestSkillIds({
+    requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
+    selectedSkillFamilies: selectionResolution.skillFamilies,
+    implicitSkillIds,
+  });
+  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl });
+  const fallbackConversationTitle = firstUserMessage ? deriveWorkspaceSessionTitle(firstUserMessage) : "";
+  const titleSession = workspaceSessionId ? await requestPersistence.getSession(workspaceSessionId).catch(() => null) : null;
+  const titleGenerationEnabled = Boolean(
+    workspaceSessionId &&
+    firstUserMessage &&
+    fallbackConversationTitle &&
+    shouldRequestConversationTitle({ session: titleSession, analyticsHints, fallbackTitle: fallbackConversationTitle }),
+  );
   const startEvent = {
     source: "server" as const,
     event: "api.generate.start",
@@ -232,10 +486,20 @@ export const POST: RequestHandler = async (event) => {
   void writeAgentTelemetry(startEvent).catch(() => undefined);
 
   const modelMessages = await convertToModelMessages(uiMessages);
-  const contextSummary = summarizeWorkspaceContext({ activeDocument });
+  const contextSummary = summarizeWorkspaceContext({ activeDocument: effectiveActiveDocument });
   const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSession: hostSession ?? undefined, hostSessionMode: hostSession ? undefined : "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth });
+  const skillIndexSummary = createRuntimeSkillIndexSummary({
+    ...pageContext,
+    authenticated: hostSession?.authenticated,
+    organizationId: hostSession?.organizationId,
+    scopes: hostSession?.scopes,
+  });
   const pageContextSummary = createCurrentPageContextSummary(pageContext);
-  const systemContext = [contextSummary, pageContextSummary, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
+  const conversationTitlePrompt = titleGenerationEnabled
+    ? createConversationTitleGenerationPrompt({ firstUserMessage, fallbackTitle: fallbackConversationTitle })
+    : "";
+  const agentSettingsSummary = summarizeAgentRuntimeSettings(agentRuntimeSettings);
+  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, conversationTitlePrompt, `CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;
@@ -260,9 +524,45 @@ export const POST: RequestHandler = async (event) => {
       bookingRuntimeCredentialed: hasBookingRuntimeCredential(bookingRuntimeAuth),
       hostSessionSource: hostSession?.source ?? null,
       approvedCommandCount: approvedCommandIds.length,
+      // Analytics-only run hints, stamped onto the run telemetry / Pipe-B so a
+      // session's run sequence is queryable. Never influences behavior.
+      analyticsHints: analyticsHints ?? null,
+      agentSettings: agentRuntimeSettings,
     },
     ok: true,
   }).catch(() => undefined);
+  void writeAgentTelemetry({
+    source: "server",
+    event: "api.generate.skill_index_context",
+    requestId,
+    traceId,
+    traceparent,
+    runId: smokeRunId,
+    sessionId: telemetrySessionId,
+    messageId: lastMessage?.id,
+    elementCount: skillIndexSummary.split("\n- ").length - 1,
+    surface: pageContext?.surface,
+    route: pageContext?.route,
+    commandFamilies: pageContext?.commandFamilies,
+    skillFamilies: pageContext?.skillFamilies,
+    contextSource: pageContextSource,
+    pageContext: telemetryPageContext,
+    ok: true,
+  }).catch(() => undefined);
+  // A run is one persisted, resumable agent turn. Requires a session to key the
+  // run to; without one (or when cloud persistence lacks host context) the
+  // recorder is null and we degrade to the existing non-persisted streaming.
+  const runRecorder: RunRecorder | null = telemetrySessionId
+    ? await startRunRecorder(requestPersistence, {
+        sessionId: telemetrySessionId,
+        messageId: null,
+        correlation,
+        contextSelection: runContextSelection ?? null,
+        promptComposition: { moduleIds: promptComposition.moduleIds, skillIds: promptComposition.skillIds, implicitSkillIds },
+        analyticsHints: analyticsHints ?? null,
+      })
+    : null;
+
   if (shouldUseDevSmokeStream(request)) {
     const smokeInput = {
       requestId,
@@ -272,16 +572,30 @@ export const POST: RequestHandler = async (event) => {
       sessionId: telemetrySessionId,
       messageId: lastMessage?.id,
       startedAt,
+      failMode: readDevSmokeFailMode(request),
+      scenario: readDevSmokeScenario(request),
     };
     await writeDevSmokeStreamTelemetry(smokeInput);
+    const smokeStream = createDevSmokeStream(smokeInput);
+    const titledSmokeStream = titleGenerationEnabled && workspaceSessionId && titleSession
+      ? pipeConversationTitleGeneration(smokeStream, {
+          sessionId: workspaceSessionId,
+          firstUserMessage,
+          fallbackTitle: fallbackConversationTitle,
+          initialSessionName: titleSession.name,
+          getSession: (id) => requestPersistence.getSession(id),
+          patchSession: (id, patch) => requestPersistence.patchSession(id, patch),
+        })
+      : smokeStream;
     const response = createUIMessageStreamResponse({
-      stream: createDevSmokeStream(smokeInput),
+      stream: runRecorder ? teeRunEvents(titledSmokeStream, runRecorder) : titledSmokeStream,
     });
     for (const [key, value] of Object.entries(correlationHeaders)) response.headers.set(key, value);
+    if (runRecorder) response.headers.set(AGENT_UI_RUN_ID_HEADER, runRecorder.runId);
     return response;
   }
 
-  const agent = createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, persistence: requestPersistence });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });
@@ -314,7 +628,17 @@ export const POST: RequestHandler = async (event) => {
             },
           },
         );
-        writer.merge(instrumentGenerateStream(aiStream, {
+        const titleStream = titleGenerationEnabled && workspaceSessionId && titleSession
+          ? pipeConversationTitleGeneration(aiStream, {
+              sessionId: workspaceSessionId,
+              firstUserMessage,
+              fallbackTitle: fallbackConversationTitle,
+              initialSessionName: titleSession.name,
+              getSession: (id) => requestPersistence.getSession(id),
+              patchSession: (id, patch) => requestPersistence.patchSession(id, patch),
+            })
+          : aiStream;
+        const instrumented = instrumentGenerateStream(titleStream, {
           requestId,
           traceId,
           traceparent,
@@ -326,7 +650,8 @@ export const POST: RequestHandler = async (event) => {
           startedAt,
           waitingMs: 10_000,
           waitingIntervalMs: 20_000,
-        }));
+        });
+        writer.merge((runRecorder ? teeRunEvents(instrumented, runRecorder) : instrumented) as ReadableStream<UIMessageChunk>);
         void writeAgentTelemetry({
           source: "server",
           event: "api.generate.stream_attached",
@@ -344,6 +669,7 @@ export const POST: RequestHandler = async (event) => {
       },
       onError: (error) => {
         const message = error instanceof Error ? error.message : String(error);
+        void runRecorder?.finalize({ status: "failed", error: message, errorCode: classifyRunErrorCode({ message }), resumable: true });
         void writeAgentTelemetry({
           source: "server",
           event: "api.generate.stream_error",
@@ -363,9 +689,11 @@ export const POST: RequestHandler = async (event) => {
 
     const response = createUIMessageStreamResponse({ stream });
     for (const [key, value] of Object.entries(correlationHeaders)) response.headers.set(key, value);
+    if (runRecorder) response.headers.set(AGENT_UI_RUN_ID_HEADER, runRecorder.runId);
     return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    void runRecorder?.finalize({ status: "failed", error: message, errorCode: classifyRunErrorCode({ message }), resumable: true });
     void writeAgentTelemetry({
       source: "server",
       event: "api.generate.error",

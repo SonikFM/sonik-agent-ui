@@ -7,6 +7,8 @@ export const SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST = "sonik:agent-ui:request-page-
 
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
+const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
+const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds"]);
 const ALLOWED_CONTEXT_KEYS = new Set([
   "route", "surface", "pageType", "title", "theme", "mode", "activeSessionId",
   "activeArtifactId", "activeDocumentId", "artifactType", "conversationStatus", "messageCount",
@@ -68,6 +70,7 @@ export function mountSonikAgentUI(options) {
   annotateHostElement(sidecar, "sidecar");
   annotateHostElement(canvasWindow, "canvas-window");
   annotateHostElement(resizeHandle, "resize-handle");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.launcher), "launcher");
   annotateHostElement(optionalElement(ownerDocument, options.elements.openChat), "open-chat");
   annotateHostElement(optionalElement(ownerDocument, options.elements.openCanvas), "open-canvas");
   annotateHostElement(optionalElement(ownerDocument, options.elements.expandCanvas), "expand-canvas");
@@ -280,6 +283,7 @@ function sanitizeTrustedHostSession(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const source = cleanText(value.source);
   const scopes = Array.isArray(value.scopes) ? value.scopes.map(cleanText).filter(Boolean).slice(0, MAX_LIST_ITEMS) : [];
+  const metadata = sanitizeHostSessionMetadata(value.metadata);
   return {
     source: source === "amplify-embedded" || source === "embedded-host" || source === "standalone-demo" ? source : "anonymous",
     sessionId: cleanText(value.sessionId) ?? null,
@@ -289,8 +293,39 @@ function sanitizeTrustedHostSession(value) {
     authenticated: value.authenticated === true,
     scopes,
     expiresAt: cleanText(value.expiresAt) ?? null,
-    metadata: undefined,
+    ...(metadata ? { metadata } : {}),
   };
+}
+function sanitizeHostSessionMetadata(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = [];
+  let publicMetadataCount = 0;
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = cleanText(rawKey);
+    if (!key) continue;
+    const isSignedCommandMetadata = SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS.has(key);
+    if (!isSignedCommandMetadata && publicMetadataCount >= MAX_LIST_ITEMS) continue;
+    if (typeof rawValue === "boolean" || typeof rawValue === "number") {
+      entries.push([key, rawValue]);
+      if (!isSignedCommandMetadata) publicMetadataCount += 1;
+      continue;
+    }
+    if (Array.isArray(rawValue)) {
+      const maxItems = isSignedCommandMetadata ? MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS : MAX_LIST_ITEMS;
+      const values = rawValue.map(cleanText).filter(Boolean).slice(0, maxItems);
+      if (values.length > 0) {
+        entries.push([key, values]);
+        if (!isSignedCommandMetadata) publicMetadataCount += 1;
+      }
+      continue;
+    }
+    const text = cleanText(rawValue);
+    if (text) {
+      entries.push([key, text]);
+      if (!isSignedCommandMetadata) publicMetadataCount += 1;
+    }
+  }
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 function sanitizeAgentHostActiveEntity(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;

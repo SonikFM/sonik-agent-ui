@@ -2,17 +2,17 @@
 
 ## Purpose
 
-This slice proves the command manifest generator can ingest a real Sonik booking OpenAPI surface without hand-writing per-operation tools.
+This slice proves the command manifest generator can ingest a real Sonik booking OpenAPI surface without hand-writing per-operation tools. The later copy-retrofit proof pack in `docs/architecture/phase-booking-command-copy-retrofit.md` anchors this fixture to direct-copied booking-service generated artifacts.
 
 Source fixture:
 
 - repo: `/Users/danielletterio/Documents/GitHub/sonik-booking-service`
-- ref: `emdash/major-schools-raise-3zsc2`
+- ref: `codex/booking-agent-ui-runtime-bridge`
 - source file: `packages/sonik-sdk/docs/booking-openapi.generated.json`
-- source SHA-256: `5baf5b0a9588fea0c0349ca3fe1f25342b29c342d0cb749607acfd913ae8060f`
-- operation count: `71`
+- source SHA-256: `936f732d40a9dada43bc6986b9871e8e3c4ee538c4547c5199f66646b0951955`
+- full source operation count: `72`; generated fixture operation count: `72`
 
-The checked OpenAPI fixture intentionally keeps operation metadata only. Request/response bodies are replaced with fixture refs because generator v0 only needs path, method, operation id, security, tags, request presence, and response presence.
+The checked OpenAPI fixture is a full copied booking OpenAPI source plus `x-fixture-provenance`. Generator v0 uses path, method, operation id, security, tags, request presence, and response presence to produce the command catalog; the copy-retrofit gate ensures every generated command maps back to the copied OpenAPI method/path/operationId.
 
 ## Generated artifacts
 

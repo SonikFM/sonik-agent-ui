@@ -1,0 +1,51 @@
+{
+	"name": "sonik-mcp-command-doctrine-proof-pack",
+	"upstream": {
+		"repoPath": "/Users/danielletterio/Documents/GitHub/sonik-mcp",
+		"gitRemote": "git@github.com:dletterio1/sonik-mcp.git",
+		"revision": "befe393f69580297eff5605938f1ee9e685af245",
+		"license": "UNLICENSED"
+	},
+	"entries": [
+		{
+			"source": "docs/sonik-mcp-architectural-doctrine.md",
+			"destination": "docs/upstream-proofs/sonik-mcp/docs/sonik-mcp-architectural-doctrine.md",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "185256ae3ec7c9fc852fb0cad18e9c5dc6b7579cda7f4fc0dc5e8bcc8142bbdc"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/parity/cli-mcp-parity.test.ts",
+			"destination": "docs/upstream-proofs/sonik-mcp/tests/parity/cli-mcp-parity.test.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "ce121fdfe1fe2a7c3ef0ac981173ec700edc9797bc5f9b83c52f5ea8eea62998"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/policy/policy.test.ts",
+			"destination": "docs/upstream-proofs/sonik-mcp/tests/policy/policy.test.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "423fa21d8626eec95a5dfec469051a5dd909b50ce3027e32db0af16f2088ae4f"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": []
+}

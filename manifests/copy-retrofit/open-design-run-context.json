@@ -1,0 +1,146 @@
+{
+  "manifest": "copy-retrofit",
+  "name": "open-design-run-context",
+  "createdAt": "2026-07-01",
+  "finalizedAt": "2026-07-02",
+  "status": "implemented",
+  "ledgerCheckpoint": "G002-composer-context-sources",
+  "intent": "Retrofit Open Design's composer context sources (#4869) into Sonik Agent UI as user-visible, per-turn-persisted run context selection. Behavior translated to Svelte 5 runes; no JSX copied.",
+  "donor": {
+    "repo": "/Users/danielletterio/Documents/GitHub/open-design",
+    "upstreamRef": "main (pulled 2026-07-01)",
+    "keyCommit": "31d98634c feat(web): add composer context sources (#4869)",
+    "sources": [
+      {
+        "path": "packages/contracts/src/api/context.ts",
+        "role": "RunContextSelection + WorkspaceContextItem contract shape (10 kinds)"
+      },
+      {
+        "path": "apps/web/src/components/workspace-context.ts",
+        "role": "kind label / detail-line helper discipline (mirrored, not copied)"
+      },
+      {
+        "path": "apps/web/src/components/ContextChipHoverCard.tsx",
+        "role": "chip hover card UX (kind label + detail line)"
+      },
+      {
+        "path": "apps/web/src/components/ComposerPlusMenu.tsx",
+        "role": "plus-menu for attaching context sources"
+      },
+      {
+        "path": "packages/contracts/src/api/chat.ts#ChatMessage.runContext",
+        "role": "per-turn persistence of the selection"
+      }
+    ],
+    "behavioralLessonsFromCommitTrail": [
+      "local context removal must be authoritative (user-removed chips stay removed)",
+      "preserve context across workdir change / clear / send",
+      "hydrate context chips on reload",
+      "fail loudly on missing/unresolvable context paths rather than silently dropping"
+    ]
+  },
+  "translation": {
+    "kinds": ["document", "artifact", "booking-context", "page", "command-family", "runtime-skill"],
+    "notes": [
+      "Svelte 5 runes throughout; no React/JSX copied.",
+      "Authoritative removal is a pure, unit-tested contract function (reconcile/add/remove) rather than ad-hoc component state, so removal survives reseed, send, and reload by construction.",
+      "Explicit selection wins over implicit host/page context at the server boundary: a deselected document chip is neither injected nor exposed to the agent for that turn; a dismissal is treated as explicit intent even when the item list is otherwise empty.",
+      "Absent selection degrades gracefully to the prior implicit-context behavior.",
+      "Selection persists on the Phase 1 run record (new nullable context_selection jsonb column) — the run is the per-turn persisted object, so provenance and reload rehydration read from it."
+    ]
+  },
+  "destination": {
+    "repo": "/Users/danielletterio/Documents/GitHub/sonik-agent-ui",
+    "branch": "feat/composer-context-sources-20260702",
+    "targets": [
+      {
+        "path": "packages/tool-contracts/src/run-context.ts",
+        "content": "AgentRunContextSelection + AgentContextItem (kinds document|artifact|booking-context|page|command-family|runtime-skill), agentContextKindLabel / agentContextDetailLine helpers, and the authoritative reconcile/add/remove + parse + resolve functions. Exposed via the @sonik-agent-ui/tool-contracts/run-context subpath export (barrel kept single-file so Node type-stripping tests still resolve src)."
+      },
+      {
+        "path": "packages/chat-surface/src/components/ContextChip.svelte",
+        "content": "Context chip + hover card (kind label + detail line); read-only variant used for message provenance."
+      },
+      {
+        "path": "packages/chat-surface/src/components/ComposerContextMenu.svelte",
+        "content": "Plus-menu popover to attach context sources, grouped by kind, click-outside/Escape close."
+      },
+      {
+        "path": "packages/chat-surface/src/components/AgentComposer.svelte",
+        "content": "Additive context bar (plus-menu + chips) above the textarea; renders the plain composer when no context props are wired."
+      },
+      {
+        "path": "packages/chat-surface/src/components/AgentConversation.svelte",
+        "content": "Threads context props to the composer and a messageContext resolver to AgentMessage."
+      },
+      {
+        "path": "packages/chat-surface/src/components/AgentMessage.svelte",
+        "content": "Renders the persisted selection as read-only provenance chips on a past user turn."
+      },
+      {
+        "path": "apps/standalone-sveltekit/src/lib/agent-context/context-sources.ts",
+        "content": "deriveAgentContextCandidates: auto-seeds (current page + active document) and the attachable catalog (artifact, booking entity, command families, runtime skills)."
+      },
+      {
+        "path": "apps/standalone-sveltekit/src/routes/+page.svelte",
+        "content": "Selection state (runes), reconcile-on-context-change effect (authoritative removal), attach/remove handlers, sends contextSelection with the generate request, per-turn provenance capture, and rehydration from persisted runs on reload."
+      },
+      {
+        "path": "apps/standalone-sveltekit/src/routes/api/generate/+server.ts",
+        "content": "Parses the explicit selection, layers it over implicit page context (applyRunContextSelectionToPageContext), gates active-document injection on the selection, and persists the selection on the run via startRunRecorder."
+      },
+      {
+        "path": "apps/standalone-sveltekit/src/lib/server/run-event-log.ts",
+        "content": "startRunRecorder accepts contextSelection and persists it on the run record via createRun."
+      },
+      {
+        "path": "packages/workspace-session/src/index.ts",
+        "content": "WorkspaceRunContextSelection type + nullable context_selection on WorkspaceRunRecord, threaded through the in-memory and cloud SQL createRun/select/mapper paths."
+      },
+      {
+        "path": "packages/workspace-session/migrations/postgres/0004_run_context_selection.sql",
+        "content": "Additive nullable context_selection jsonb column on agent_workspace_runs (registered in scripts/run-postgres-migrations.mjs)."
+      },
+      {
+        "path": "apps/standalone-sveltekit/src/lib/server/workspace-store.ts",
+        "content": "createWorkspaceRun wrapper forwards context_selection."
+      },
+      {
+        "path": "manifests/copy-retrofit/open-design-run-context.json",
+        "content": "This manifest, finalized."
+      }
+    ],
+    "autoSeededChips": [
+      "current page (from AgentPageContext)",
+      "active document (from workspace snapshot)"
+    ],
+    "doNotCopy": [
+      "React component code (translated behavior to Svelte, not JSX)",
+      "open-design daemon filesystem materialization (ProjectReferenceModal dir linking) — Sonik has no local-fs projects",
+      "design-files / design-system / terminal / side-chat kinds — no Sonik equivalent yet"
+    ]
+  },
+  "verification": [
+    {
+      "test": "tests/unit/run-context-selection.test.mjs",
+      "asserts": "kind labels/detail-line discipline; reconcile keeps manual + honors dismissals; authoritative removal survives reseed (idempotent/reload-safe); re-add clears dismissal; parse bounds/drops malformed; server resolution — explicit wins, dismissal-only is still explicit, document not re-injected after removal."
+    },
+    {
+      "test": "tests/unit/composer-context-sources.test.mjs",
+      "asserts": "only current page + active document auto-seed; full attachable catalog covers all six kinds; stable ids; empty context yields no candidates."
+    },
+    {
+      "test": "tests/unit/composer-context-run-lifecycle.test.mjs",
+      "asserts": "attach document chip -> send -> selection recorded on the run and consumed (document included); remove auto-seeded chip -> stays removed after next send AND after simulated reload (rehydrate from persisted run)."
+    },
+    {
+      "check": "pnpm --filter svelte-chat check-types",
+      "asserts": "svelte-check clean (0 errors) across the app."
+    },
+    {
+      "check": "existing booking intake + run lifecycle smokes unchanged",
+      "asserts": "additive changes; implicit-context fallback preserved when no selection is sent."
+    }
+  ],
+  "dependsOn": "G001-run-lifecycle-hardening (selection persists onto run records; branched off feat/run-lifecycle-hardening-20260701)"
+}

@@ -210,7 +210,7 @@
           <dl>
             <div><dt>Surface</dt><dd>booking-console</dd></div>
             <div><dt>Page type</dt><dd>event-booking-detail</dd></div>
-            <div><dt>Entity</dt><dd>Summer Jazz Night · booking_123</dd></div>
+            <div><dt>Entity</dt><dd id="host-entity-label">Summer Jazz Night · booking_123</dd></div>
             <div><dt>Families</dt><dd><code>booking</code> <code>event</code></dd></div>
           </dl>
           <button id="resend" type="button">Resend page context</button>
@@ -294,21 +294,78 @@
 
       const url = new URL(window.location.href);
       const smokeRunId = url.searchParams.get("smokeRunId") ?? `fake-booking-host-${Date.now()}`;
+      const fixtureHostSession = url.searchParams.get("hostSession") === "fixture"
+        ? {
+            source: "embedded-host",
+            sessionId: `fixture-session-${smokeRunId}`,
+            userId: "fixture-user-0001",
+            principalId: "fixture-user-0001",
+            organizationId: "11111111-1111-4111-8111-111111111111",
+            authenticated: true,
+            scopes: ["booking:read", "booking:write"],
+            metadata: {
+              approvedCommandIds: [
+                "booking.create.guest",
+                "booking.create.booking",
+                "booking.create.hold",
+                "booking.commit.hold",
+                "booking.release.hold"
+              ]
+            }
+          }
+        : null;
+      let signedFixtureContext = null;
+      let smokeBookingContext = null;
+      let smokeBookingContextWarning = null;
+      if (fixtureHostSession) {
+        try {
+          const response = await fetch("/api/dev/smoke-host-context", {
+            method: "POST",
+            headers: { "content-type": "application/json", "cache-control": "no-cache" },
+            cache: "no-store",
+            body: JSON.stringify({ smokeRunId }),
+          });
+          if (response.ok) {
+            const body = await response.json();
+            signedFixtureContext = body?.context ?? null;
+            smokeBookingContext = body?.bookingContext ?? null;
+            smokeBookingContextWarning = body?.warning ?? null;
+          } else {
+            console.warn("[fake-booking-host] smoke host context signer unavailable", response.status);
+          }
+        } catch (error) {
+          console.warn("[fake-booking-host] smoke host context signer failed", error);
+        }
+      }
+      const activeBookingContext = smokeBookingContext?.id
+        ? { type: "booking_context", id: smokeBookingContext.id, label: smokeBookingContext.label ?? "Agent UI Smoke Context" }
+        : { type: "booking", id: "11111111-1111-4111-8111-111111111111", label: "Summer Jazz Night" };
+      const entityLabel = document.getElementById("host-entity-label");
+      if (entityLabel && smokeBookingContext?.id) entityLabel.textContent = `${smokeBookingContext.label ?? "Agent UI Smoke Context"} · ${smokeBookingContext.id}`;
+      if (smokeBookingContextWarning) console.warn("[fake-booking-host] smoke booking context warning", smokeBookingContextWarning);
       const pageContext = {
         route: "/booking/bookings/booking_123",
         surface: "booking-console",
         pageType: "event-booking-detail",
-        title: "Summer Jazz Night booking",
-        activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" },
+        title: `${activeBookingContext.label} booking`,
+        activeEntity: activeBookingContext,
+        organizationId: signedFixtureContext?.organizationId ?? fixtureHostSession?.organizationId,
+        authenticated: signedFixtureContext?.authenticated ?? fixtureHostSession?.authenticated,
+        scopes: signedFixtureContext?.scopes ?? fixtureHostSession?.scopes,
+        hostSession: signedFixtureContext?.hostSession ?? fixtureHostSession,
+        signatureVersion: signedFixtureContext?.signatureVersion,
+        issuedAt: signedFixtureContext?.issuedAt,
+        expiresAt: signedFixtureContext?.expiresAt,
+        signature: signedFixtureContext?.signature,
         commandFamilies: ["booking", "event"],
         skillFamilies: ["booking-ops"],
-        visibleActions: ["viewBooking", "listResources", "assignResource"],
+        visibleActions: ["viewBooking", "listResources", "assignResource", "createReservation"],
       };
 
       const agentUi = mountSonikAgentUI({
         agentUrl: "/",
         hostOrigin: window.location.origin,
-        theme: () => url.searchParams.get("theme") ?? "system",
+        theme: () => url.searchParams.get("theme") ?? "sonik-operator-dark",
         smokeMockStream: url.searchParams.get("smokeMockStream") !== "0" ? (url.searchParams.get("smokeMockStream") ?? "1") : null,
         smokeRunId,
         initialMode: ["chat", "canvas"].includes(url.searchParams.get("autoOpen") ?? "") ? url.searchParams.get("autoOpen") : null,
@@ -320,6 +377,7 @@
           sidecar: "#agent-sidecar",
           canvasWindow: "#canvas-window",
           resizeHandle: "#sidecar-resize",
+          launcher: "#agent-fab-main",
           openChat: "#open-chat",
           openCanvas: "#open-canvas",
           expandCanvas: "#expand-canvas",

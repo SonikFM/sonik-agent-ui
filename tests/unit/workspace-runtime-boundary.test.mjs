@@ -61,6 +61,18 @@ const autoDiagnosticHeaders = createWorkspaceRuntimeDiagnosticHeaders({ platform
 assert.equal(autoDiagnosticHeaders["x-sonik-agent-ui-persistence-policy"], "auto", "diagnostic headers should expose persistence policy for smoke gates");
 assert.equal(autoDiagnosticHeaders["x-sonik-agent-ui-persistence-mode"], "memory", "diagnostic headers should expose runtime mode for smoke gates");
 assert.equal(autoDiagnosticHeaders["x-sonik-agent-ui-host-user"], "missing", "diagnostic headers should report missing trusted host user without exposing identities");
+const localSmokeDiagnostics = resolveWorkspaceRuntimeDiagnostics({
+  platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "cloud" } },
+  request: new Request("http://localhost:5173/api/session", { headers: { "x-sonik-agent-ui-smoke-persistence-mode": "auto" } }),
+});
+assert.equal(localSmokeDiagnostics.policy, "auto", "localhost smoke persistence override should make embedded release gates deterministic without a live DB");
+assert.equal(localSmokeDiagnostics.mode, "memory", "localhost smoke persistence override should fall back to memory when cloud DB is absent");
+const remoteSmokeDiagnostics = resolveWorkspaceRuntimeDiagnostics({
+  platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "cloud" } },
+  request: new Request("https://agent.example/api/session", { headers: { "x-sonik-agent-ui-smoke-persistence-mode": "auto" } }),
+});
+assert.equal(remoteSmokeDiagnostics.policy, "cloud", "remote smoke persistence override must not downgrade deployed cloud policy");
+assert.equal(remoteSmokeDiagnostics.cloudErrorCode, "missing-cloud-database", "remote cloud policy should still fail closed without DB env");
 const invalidDiagnosticHeaders = createWorkspaceRuntimeDiagnosticHeaders({ platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "sqlite" } } });
 assert.equal(invalidDiagnosticHeaders["x-sonik-agent-ui-persistence-policy"], "invalid", "diagnostic headers should fail safe when persistence policy parsing fails");
 assert.equal(invalidDiagnosticHeaders["x-sonik-agent-ui-cloud-error"], "invalid-persistence-policy", "diagnostic headers should preserve invalid policy error code for failure responses");

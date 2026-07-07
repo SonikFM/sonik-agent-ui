@@ -28,6 +28,88 @@ export function deriveWorkspaceSessionTitle(message: string, input: { maxWords?:
   return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 3).trim()}...` : sentence;
 }
 
+export const WORKSPACE_SESSION_TITLE_MARKER_NAME = "titleGeneration";
+export const WORKSPACE_SESSION_TITLE_MARKER_PREFIX = `[[${WORKSPACE_SESSION_TITLE_MARKER_NAME}:`;
+const WORKSPACE_SESSION_TITLE_MARKER_SUFFIX = "]]";
+
+export interface WorkspaceSessionTitleExtraction {
+  title: string;
+  visibleText: string;
+  source: "marker" | "fallback";
+  markerFound: boolean;
+  markerMalformed: boolean;
+}
+
+export function extractWorkspaceSessionTitleMarker(text: string, fallbackMessage: string, input: { maxWords?: number; maxLength?: number } = {}): WorkspaceSessionTitleExtraction {
+  const fallback = deriveWorkspaceSessionTitle(fallbackMessage, input);
+  const leadingWhitespace = text.match(/^\s*/u)?.[0] ?? "";
+  const candidate = text.slice(leadingWhitespace.length);
+  const marker = readWorkspaceSessionTitleMarker(candidate);
+  if (!marker) {
+    return {
+      title: fallback,
+      visibleText: text,
+      source: "fallback",
+      markerFound: false,
+      markerMalformed: false,
+    };
+  }
+
+  const normalized = normalizeWorkspaceSessionTitleCandidate(marker.rawTitle, input);
+  return {
+    title: normalized || fallback,
+    visibleText: `${leadingWhitespace}${candidate.slice(marker.endIndex)}`.replace(/^\s*\n/u, ""),
+    source: normalized ? "marker" : "fallback",
+    markerFound: true,
+    markerMalformed: !normalized,
+  };
+}
+
+export function couldStartWorkspaceSessionTitleMarker(text: string): boolean {
+  const candidate = text.trimStart();
+  if (!candidate) return true;
+  return WORKSPACE_SESSION_TITLE_MARKER_PREFIX.startsWith(candidate) || candidate.startsWith(WORKSPACE_SESSION_TITLE_MARKER_PREFIX);
+}
+
+function readWorkspaceSessionTitleMarker(text: string): { rawTitle: string; endIndex: number } | null {
+  if (text.startsWith(WORKSPACE_SESSION_TITLE_MARKER_PREFIX)) {
+    const titleStart = WORKSPACE_SESSION_TITLE_MARKER_PREFIX.length;
+    const titleEnd = text.indexOf(WORKSPACE_SESSION_TITLE_MARKER_SUFFIX, titleStart);
+    if (titleEnd === -1) return null;
+    return { rawTitle: text.slice(titleStart, titleEnd), endIndex: titleEnd + WORKSPACE_SESSION_TITLE_MARKER_SUFFIX.length };
+  }
+
+  const xmlStart = `<${WORKSPACE_SESSION_TITLE_MARKER_NAME}>`;
+  const xmlEnd = `</${WORKSPACE_SESSION_TITLE_MARKER_NAME}>`;
+  if (text.startsWith(xmlStart)) {
+    const titleEnd = text.indexOf(xmlEnd, xmlStart.length);
+    if (titleEnd === -1) return null;
+    return { rawTitle: text.slice(xmlStart.length, titleEnd), endIndex: titleEnd + xmlEnd.length };
+  }
+
+  const jsonMatch = text.match(/^\{\s*"titleGeneration"\s*:\s*"([^"]*)"\s*\}/u);
+  return jsonMatch ? { rawTitle: jsonMatch[1] ?? "", endIndex: jsonMatch[0].length } : null;
+}
+
+function normalizeWorkspaceSessionTitleCandidate(title: string, input: { maxWords?: number; maxLength?: number }): string | null {
+  const maxWords = Math.max(1, input.maxWords ?? 7);
+  const maxLength = Math.max(16, input.maxLength ?? 56);
+  const cleaned = title
+    .replace(/[\r\n\t]+/gu, " ")
+    .replace(/[`*_#>\[\](){}]/g, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/gu, "")
+    .replace(/[?.!,;:]+$/gu, "")
+    .trim();
+  if (!cleaned) return null;
+  const words = cleaned.split(/\s+/u).filter(Boolean);
+  if (words.length > maxWords * 2) return null;
+  const titleWords = words.slice(0, maxWords).join(" ");
+  const sentence = titleWords.charAt(0).toUpperCase() + titleWords.slice(1);
+  return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 3).trim()}...` : sentence;
+}
+
 export type WorkspaceArtifactKind = "json-render" | "document";
 export type WorkspaceDocumentVersionSource = "user" | "ai" | "system";
 
@@ -140,6 +222,60 @@ export interface WorkspaceTelemetryEventRecord<TPayload = unknown> {
   created_at: string;
 }
 
+export type WorkspaceRunStatus = "running" | "succeeded" | "failed" | "canceled";
+
+// Composer context selection persisted on a run. Structural (not imported from
+// @sonik-agent-ui/tool-contracts) so this package stays dependency-light; the app
+// layer narrows it to AgentRunContextSelection.
+export interface WorkspaceRunContextItem {
+  id: string;
+  kind: string;
+  label: string;
+  source: string;
+  ref?: string;
+  detail?: string;
+  route?: string;
+  metadata?: Record<string, unknown>;
+}
+export interface WorkspaceRunContextSelection {
+  items: WorkspaceRunContextItem[];
+  dismissedAutoSeedIds: string[];
+}
+
+// Persisted run object. Types are structural (not imported from
+// @sonik-agent-ui/tool-contracts) so this package stays dependency-light and
+// keeps its position in the build order; the app layer narrows `error_code` to
+// RunErrorCode and run events to PersistedRunEvent.
+export interface WorkspaceRunRecord {
+  id: string;
+  session_id: string;
+  message_id: string | null;
+  status: WorkspaceRunStatus;
+  resumable: boolean;
+  error: string | null;
+  error_code: string | null;
+  request_id: string | null;
+  trace_id: string | null;
+  traceparent: string | null;
+  /** Composer context selection for this turn; null when no explicit selection
+   *  was sent (implicit-context fallback). */
+  context_selection: WorkspaceRunContextSelection | null;
+  started_at: string;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceRunEventRecord<TEvent = unknown> {
+  id: string;
+  run_id: string;
+  session_id: string | null;
+  seq: number;
+  kind: string;
+  event: TEvent;
+  created_at: string;
+}
+
 export interface WorkspaceAuthContext {
   userId: string;
   sessionId: string;
@@ -204,7 +340,16 @@ export interface WorkspaceTelemetryStore {
   listTelemetryEvents(sessionId?: string | null): WorkspaceTelemetryEventRecord[];
 }
 
-export type WorkspacePersistenceAdapter = WorkspaceSessionDocumentStore & WorkspaceArtifactStore & WorkspaceActivityStore & WorkspaceTelemetryStore;
+export interface WorkspaceRunStore {
+  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord;
+  getRun(id: string): WorkspaceRunRecord | null;
+  listRuns(sessionId: string): WorkspaceRunRecord[];
+  updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null; ended_at?: string | null }): WorkspaceRunRecord | null;
+  appendRunEvent<TEvent = unknown>(input: { run_id: string; session_id?: string | null; seq?: number; kind: string; event: TEvent }): WorkspaceRunEventRecord<TEvent>;
+  listRunEvents<TEvent = unknown>(runId: string): WorkspaceRunEventRecord<TEvent>[];
+}
+
+export type WorkspacePersistenceAdapter = WorkspaceSessionDocumentStore & WorkspaceArtifactStore & WorkspaceActivityStore & WorkspaceTelemetryStore & WorkspaceRunStore;
 
 export interface WorkspaceServices {
   persistence: WorkspacePersistenceAdapter;
@@ -280,7 +425,16 @@ export interface AsyncWorkspaceTelemetryStore {
   listTelemetryEvents(sessionId?: string | null): Promise<WorkspaceTelemetryEventRecord[]>;
 }
 
-export type AsyncWorkspacePersistenceAdapter = AsyncWorkspaceSessionDocumentStore & AsyncWorkspaceArtifactStore & AsyncWorkspaceActivityStore & AsyncWorkspaceTelemetryStore;
+export interface AsyncWorkspaceRunStore {
+  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): Promise<WorkspaceRunRecord>;
+  getRun(id: string): Promise<WorkspaceRunRecord | null>;
+  listRuns(sessionId: string): Promise<WorkspaceRunRecord[]>;
+  updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null; ended_at?: string | null }): Promise<WorkspaceRunRecord | null>;
+  appendRunEvent<TEvent = unknown>(input: { run_id: string; session_id?: string | null; seq?: number; kind: string; event: TEvent }): Promise<WorkspaceRunEventRecord<TEvent>>;
+  listRunEvents<TEvent = unknown>(runId: string): Promise<WorkspaceRunEventRecord<TEvent>[]>;
+}
+
+export type AsyncWorkspacePersistenceAdapter = AsyncWorkspaceSessionDocumentStore & AsyncWorkspaceArtifactStore & AsyncWorkspaceActivityStore & AsyncWorkspaceTelemetryStore & AsyncWorkspaceRunStore;
 
 export type WorkspacePersistencePolicy = "memory" | "cloud" | "auto";
 
@@ -373,6 +527,12 @@ export function createAsyncWorkspacePersistenceAdapter(adapter: WorkspacePersist
     listLayoutSnapshots: async <TLayout = unknown>(sessionId: string) => adapter.listLayoutSnapshots<TLayout>(sessionId),
     recordTelemetryEvent: async <TPayload = unknown>(input: { session_id?: string | null; request_id?: string | null; source: WorkspaceTelemetryEventRecord<TPayload>["source"]; event: string; payload?: TPayload; ok?: boolean | null; error?: string | null }) => adapter.recordTelemetryEvent<TPayload>(input),
     listTelemetryEvents: async (sessionId) => adapter.listTelemetryEvents(sessionId),
+    createRun: async (input) => adapter.createRun(input),
+    getRun: async (id) => adapter.getRun(id),
+    listRuns: async (sessionId) => adapter.listRuns(sessionId),
+    updateRun: async (id, input) => adapter.updateRun(id, input),
+    appendRunEvent: async <TEvent = unknown>(input: { run_id: string; session_id?: string | null; seq?: number; kind: string; event: TEvent }) => adapter.appendRunEvent<TEvent>(input),
+    listRunEvents: async <TEvent = unknown>(runId: string) => adapter.listRunEvents<TEvent>(runId),
   };
 }
 
@@ -496,6 +656,34 @@ type CloudWorkspaceLayoutSnapshotRow<TLayout = unknown> = {
   active_artifact_id: string | null;
   layout: TLayout;
   source: WorkspaceLayoutSnapshotRecord<TLayout>["source"];
+  created_at: string | Date;
+};
+
+type CloudWorkspaceRunRow = {
+  id: string;
+  session_id: string;
+  message_id: string | null;
+  status: WorkspaceRunStatus;
+  resumable: boolean;
+  error: string | null;
+  error_code: string | null;
+  request_id: string | null;
+  trace_id: string | null;
+  traceparent: string | null;
+  context_selection: WorkspaceRunContextSelection | null;
+  started_at: string | Date;
+  ended_at: string | Date | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+};
+
+type CloudWorkspaceRunEventRow<TEvent = unknown> = {
+  id: string;
+  run_id: string;
+  session_id: string | null;
+  seq: number;
+  kind: string;
+  event: TEvent;
   created_at: string | Date;
 };
 
@@ -973,6 +1161,118 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       return rows.map(mapCloudArtifactVersionRow<TContent>);
     });
   }
+  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): Promise<WorkspaceRunRecord> {
+    return this.#withContext(async (tx) => {
+      const session = await this.#ensureSession(tx, input.session_id);
+      const id = input.id?.trim() || this.#nextId("workspace-run");
+      const { rows } = await tx.query<CloudWorkspaceRunRow>(
+        `insert into sonik_agent_ui.agent_workspace_runs
+          (organization_id, user_id, id, session_id, message_id, status, resumable, request_id, trace_id, traceparent, context_selection)
+         values ($1, $2, $3, $4, $5, 'running', false, $6, $7, $8, $9::jsonb)
+         returning id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, session.id, input.message_id ?? null, input.request_id ?? null, input.trace_id ?? null, input.traceparent ?? null, input.context_selection != null ? JSON.stringify(input.context_selection) : null],
+      );
+      const row = rows[0];
+      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run insert returned no row.");
+      return mapCloudRunRow(row);
+    });
+  }
+
+  getRun(id: string): Promise<WorkspaceRunRecord | null> {
+    return this.#withContext((tx) => this.#selectRun(tx, id));
+  }
+
+  listRuns(sessionId: string): Promise<WorkspaceRunRecord[]> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceRunRow>(
+        `select id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at
+         from sonik_agent_ui.agent_workspace_runs
+         where organization_id = $1 and user_id = $2 and session_id = $3
+         order by created_at asc`,
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId],
+      );
+      return rows.map(mapCloudRunRow);
+    });
+  }
+
+  updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null; ended_at?: string | null }): Promise<WorkspaceRunRecord | null> {
+    return this.#withContext(async (tx) => {
+      const existing = await this.#selectRun(tx, id);
+      if (!existing) return null;
+      const status = input.status ?? existing.status;
+      const endedAt = input.ended_at !== undefined
+        ? input.ended_at
+        : status !== "running"
+          ? (existing.ended_at ?? new Date().toISOString())
+          : null;
+      const next = {
+        status,
+        resumable: input.resumable ?? existing.resumable,
+        error: input.error !== undefined ? input.error : existing.error,
+        error_code: input.error_code !== undefined ? input.error_code : existing.error_code,
+        message_id: input.message_id !== undefined ? input.message_id : existing.message_id,
+        ended_at: endedAt,
+      };
+      const { rows } = await tx.query<CloudWorkspaceRunRow>(
+        `update sonik_agent_ui.agent_workspace_runs
+         set status = $4, resumable = $5, error = $6, error_code = $7, message_id = $8, ended_at = $9, updated_at = now()
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, next.status, next.resumable, next.error, next.error_code, next.message_id, next.ended_at],
+      );
+      return rows[0] ? mapCloudRunRow(rows[0]) : null;
+    });
+  }
+
+  appendRunEvent<TEvent = unknown>(input: { run_id: string; session_id?: string | null; seq?: number; kind: string; event: TEvent }): Promise<WorkspaceRunEventRecord<TEvent>> {
+    return this.#withContext(async (tx) => {
+      const seq = input.seq ?? (await this.#nextRunEventSeq(tx, input.run_id));
+      const { rows } = await tx.query<CloudWorkspaceRunEventRow<TEvent>>(
+        `insert into sonik_agent_ui.agent_workspace_run_events
+          (organization_id, user_id, id, run_id, session_id, seq, kind, event)
+         values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+         returning id, run_id, session_id, seq, kind, event, created_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-run-event"), input.run_id, input.session_id ?? null, seq, input.kind, JSON.stringify(input.event)],
+      );
+      const row = rows[0];
+      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run event insert returned no row.");
+      return mapCloudRunEventRow<TEvent>(row);
+    });
+  }
+
+  listRunEvents<TEvent = unknown>(runId: string): Promise<WorkspaceRunEventRecord<TEvent>[]> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceRunEventRow<TEvent>>(
+        `select id, run_id, session_id, seq, kind, event, created_at
+         from sonik_agent_ui.agent_workspace_run_events
+         where organization_id = $1 and user_id = $2 and run_id = $3
+         order by seq asc`,
+        [this.#authorized.organizationId, this.#authorized.userId, runId],
+      );
+      return rows.map(mapCloudRunEventRow<TEvent>);
+    });
+  }
+
+  async #selectRun(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceRunRecord | null> {
+    const { rows } = await tx.query<CloudWorkspaceRunRow>(
+      `select id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at
+       from sonik_agent_ui.agent_workspace_runs
+       where organization_id = $1 and user_id = $2 and id = $3`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
+    );
+    return rows[0] ? mapCloudRunRow(rows[0]) : null;
+  }
+
+  async #nextRunEventSeq(tx: WorkspaceSqlTransaction, runId: string): Promise<number> {
+    const { rows } = await tx.query<{ next_seq: number }>(
+      `select coalesce(max(seq), -1) + 1 as next_seq
+       from sonik_agent_ui.agent_workspace_run_events
+       where organization_id = $1 and user_id = $2 and run_id = $3`,
+      [this.#authorized.organizationId, this.#authorized.userId, runId],
+    );
+    return Number(rows[0]?.next_seq ?? 0);
+  }
+
   recordToolCall<TInput = unknown, TOutput = unknown>(): Promise<WorkspaceToolCallRecord<TInput, TOutput>> {
     return unsupportedCloudWorkspaceOperation("recordToolCall");
   }
@@ -1309,6 +1609,38 @@ function mapCloudLayoutSnapshotRow<TLayout = unknown>(row: CloudWorkspaceLayoutS
   };
 }
 
+function mapCloudRunRow(row: CloudWorkspaceRunRow): WorkspaceRunRecord {
+  return {
+    id: row.id,
+    session_id: row.session_id,
+    message_id: row.message_id ?? null,
+    status: row.status,
+    resumable: Boolean(row.resumable),
+    error: row.error ?? null,
+    error_code: row.error_code ?? null,
+    request_id: row.request_id ?? null,
+    trace_id: row.trace_id ?? null,
+    traceparent: row.traceparent ?? null,
+    context_selection: row.context_selection ?? null,
+    started_at: toIsoTimestamp(row.started_at),
+    ended_at: row.ended_at ? toIsoTimestamp(row.ended_at) : null,
+    created_at: toIsoTimestamp(row.created_at),
+    updated_at: toIsoTimestamp(row.updated_at),
+  };
+}
+
+function mapCloudRunEventRow<TEvent = unknown>(row: CloudWorkspaceRunEventRow<TEvent>): WorkspaceRunEventRecord<TEvent> {
+  return {
+    id: row.id,
+    run_id: row.run_id,
+    session_id: row.session_id ?? null,
+    seq: Number(row.seq),
+    kind: row.kind,
+    event: row.event,
+    created_at: toIsoTimestamp(row.created_at),
+  };
+}
+
 function resolveDocumentLibraryOrderBy(sort?: string | null): string {
   if (sort === "oldest") return "documents.created_at asc";
   if (sort === "alpha") return "documents.title asc";
@@ -1341,6 +1673,8 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
   #toolCalls = new Map<string, WorkspaceToolCallRecord>();
   #layoutSnapshots = new Map<string, WorkspaceLayoutSnapshotRecord[]>();
   #telemetryEvents: WorkspaceTelemetryEventRecord[] = [];
+  #runs = new Map<string, WorkspaceRunRecord>();
+  #runEvents = new Map<string, WorkspaceRunEventRecord[]>();
   #sequence = 0;
 
   constructor(options: InMemoryWorkspacePersistenceOptions = {}) {
@@ -1430,6 +1764,12 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
     this.#layoutSnapshots.delete(id);
     for (const [toolCallId, toolCall] of [...this.#toolCalls.entries()]) {
       if (toolCall.session_id === id) this.#toolCalls.delete(toolCallId);
+    }
+    for (const run of [...this.#runs.values()]) {
+      if (run.session_id === id) {
+        this.#runEvents.delete(run.id);
+        this.#runs.delete(run.id);
+      }
     }
     this.#telemetryEvents = this.#telemetryEvents.filter((event) => event.session_id !== id);
     return this.#sessions.delete(id);
@@ -1720,6 +2060,87 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
       .filter((call) => call.session_id === sessionId)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .map(clone);
+  }
+
+  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord {
+    const session = this.ensureSession(input.session_id);
+    const timestamp = this.#now();
+    const run: WorkspaceRunRecord = {
+      id: input.id?.trim() || this.#nextId("workspace-run"),
+      session_id: session.id,
+      message_id: input.message_id ?? null,
+      status: "running",
+      resumable: false,
+      error: null,
+      error_code: null,
+      request_id: input.request_id ?? null,
+      trace_id: input.trace_id ?? null,
+      traceparent: input.traceparent ?? null,
+      context_selection: input.context_selection ?? null,
+      started_at: timestamp,
+      ended_at: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    this.#runs.set(run.id, run);
+    return clone(run);
+  }
+
+  getRun(id: string): WorkspaceRunRecord | null {
+    const run = this.#runs.get(id);
+    return run ? clone(run) : null;
+  }
+
+  listRuns(sessionId: string): WorkspaceRunRecord[] {
+    return [...this.#runs.values()]
+      .filter((run) => run.session_id === sessionId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map(clone);
+  }
+
+  updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null; ended_at?: string | null }): WorkspaceRunRecord | null {
+    const existing = this.#runs.get(id);
+    if (!existing) return null;
+    const status = input.status ?? existing.status;
+    const endedAt = input.ended_at !== undefined
+      ? input.ended_at
+      : status !== "running"
+        ? (existing.ended_at ?? this.#now())
+        : null;
+    const updated: WorkspaceRunRecord = {
+      ...existing,
+      status,
+      resumable: input.resumable ?? existing.resumable,
+      error: input.error !== undefined ? input.error : existing.error,
+      error_code: input.error_code !== undefined ? input.error_code : existing.error_code,
+      message_id: input.message_id !== undefined ? input.message_id : existing.message_id,
+      ended_at: endedAt,
+      updated_at: this.#now(),
+    };
+    this.#runs.set(id, updated);
+    return clone(updated);
+  }
+
+  appendRunEvent<TEvent = unknown>(input: { run_id: string; session_id?: string | null; seq?: number; kind: string; event: TEvent }): WorkspaceRunEventRecord<TEvent> {
+    const events = this.#runEvents.get(input.run_id) ?? [];
+    const seq = input.seq ?? (events.length ? Math.max(...events.map((entry) => entry.seq)) + 1 : 0);
+    const record: WorkspaceRunEventRecord<TEvent> = {
+      id: this.#nextId("workspace-run-event"),
+      run_id: input.run_id,
+      session_id: input.session_id ?? null,
+      seq,
+      kind: input.kind,
+      event: input.event === undefined ? (null as TEvent) : clone(input.event),
+      created_at: this.#now(),
+    };
+    this.#runEvents.set(input.run_id, [...events, record as WorkspaceRunEventRecord]);
+    return clone(record);
+  }
+
+  listRunEvents<TEvent = unknown>(runId: string): WorkspaceRunEventRecord<TEvent>[] {
+    return [...(this.#runEvents.get(runId) ?? [])]
+      .sort((a, b) => a.seq - b.seq)
+      .map((entry) => clone(entry as WorkspaceRunEventRecord<TEvent>));
   }
 
   recordLayoutSnapshot<TLayout = unknown>(input: { session_id?: string | null; active_pane_id?: string | null; active_artifact_id?: string | null; layout: TLayout; source?: WorkspaceLayoutSnapshotRecord<TLayout>["source"] }): WorkspaceLayoutSnapshotRecord<TLayout> {

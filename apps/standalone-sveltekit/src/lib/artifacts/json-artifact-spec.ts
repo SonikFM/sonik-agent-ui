@@ -10,6 +10,10 @@ interface ElementLike {
   type?: unknown;
   props?: unknown;
   children?: unknown;
+  visible?: unknown;
+  on?: unknown;
+  repeat?: unknown;
+  watch?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -21,11 +25,30 @@ function isRenderableElement(value: unknown): value is { type: string; props: Re
   return typeof value.type === "string" && isRecord(value.props);
 }
 
-function sanitizeElement(value: ElementLike): { type: string; props: Record<string, unknown>; children: string[] } | null {
+type SanitizedElement = {
+  type: string;
+  props: Record<string, unknown>;
+  children: string[];
+  visible?: unknown;
+  on?: Record<string, unknown>;
+  repeat?: { statePath: string; key?: string };
+  watch?: Record<string, unknown>;
+};
+
+function sanitizeElement(value: ElementLike): SanitizedElement | null {
   if (typeof value.type !== "string") return null;
   const props = isRecord(value.props) ? value.props : {};
   const children = Array.isArray(value.children) ? value.children.filter((child): child is string => typeof child === "string") : [];
-  return { type: value.type, props, children };
+  const element: SanitizedElement = { type: value.type, props, children };
+  if ("visible" in value) element.visible = value.visible;
+  if (isRecord(value.on)) element.on = value.on;
+  if (isRecord(value.watch)) element.watch = value.watch;
+  if (isRecord(value.repeat) && typeof value.repeat.statePath === "string") {
+    element.repeat = typeof value.repeat.key === "string"
+      ? { statePath: value.repeat.statePath, key: value.repeat.key }
+      : { statePath: value.repeat.statePath };
+  }
+  return element;
 }
 
 export function createRecoveredJsonArtifactSpec(title: string, reason = "invalid_spec"): Spec {
@@ -65,7 +88,7 @@ export function normalizeJsonArtifactSpec(input: unknown, title: string): Normal
 
   const requestedRoot = typeof input.root === "string" && input.root.trim() ? input.root.trim() : "main";
   const rawElements = isRecord(input.elements) ? input.elements : {};
-  const elements: Record<string, { type: string; props: Record<string, unknown>; children: string[] }> = {};
+  const elements: Record<string, SanitizedElement> = {};
 
   for (const [id, rawElement] of Object.entries(rawElements)) {
     const element = sanitizeElement(rawElement as ElementLike);

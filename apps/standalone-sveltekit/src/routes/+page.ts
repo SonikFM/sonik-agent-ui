@@ -7,6 +7,7 @@ import type { PageLoad } from "./$types";
 export const ssr = false;
 
 export const load: PageLoad = ({ url }) => ({
+  embeddedHostContextExpected: url.searchParams.has("agentUiHostOrigin"),
   embedIntent: normalizeAgentEmbedIntent({
     embedMode: url.searchParams.get("embedMode"),
     agentUiMode: url.searchParams.get("agentUiMode"),

@@ -9,6 +9,10 @@ import {
   type WorkspaceMessageRecord,
   type WorkspaceMode,
   type WorkspacePersistenceAdapter,
+  type WorkspaceRunContextSelection,
+  type WorkspaceRunEventRecord,
+  type WorkspaceRunRecord,
+  type WorkspaceRunStatus,
   type WorkspaceSessionRecord,
   type WorkspaceTelemetryEventRecord,
   type WorkspaceToolCallRecord,
@@ -24,6 +28,9 @@ export type {
   WorkspaceMessageRecord,
   WorkspaceMode,
   WorkspacePersistenceAdapter,
+  WorkspaceRunEventRecord,
+  WorkspaceRunRecord,
+  WorkspaceRunStatus,
   WorkspaceSessionRecord,
   WorkspaceTelemetryEventRecord,
   WorkspaceToolCallRecord,
@@ -188,6 +195,51 @@ export function listWorkspaceMessages<TParts = unknown>(sessionId: string): Work
   return workspacePersistence.listMessages(sessionId);
 }
 
+export function createWorkspaceRun(input: {
+  id?: string;
+  session_id?: string | null;
+  message_id?: string | null;
+  request_id?: string | null;
+  trace_id?: string | null;
+  traceparent?: string | null;
+  context_selection?: WorkspaceRunContextSelection | null;
+} = {}): WorkspaceRunRecord {
+  return workspacePersistence.createRun(input);
+}
+
+export function getWorkspaceRun(id: string): WorkspaceRunRecord | null {
+  return workspacePersistence.getRun(id);
+}
+
+export function listWorkspaceRuns(sessionId: string): WorkspaceRunRecord[] {
+  return workspacePersistence.listRuns(sessionId);
+}
+
+export function updateWorkspaceRun(id: string, input: {
+  status?: WorkspaceRunStatus;
+  resumable?: boolean;
+  error?: string | null;
+  error_code?: string | null;
+  message_id?: string | null;
+  ended_at?: string | null;
+}): WorkspaceRunRecord | null {
+  return workspacePersistence.updateRun(id, input);
+}
+
+export function appendWorkspaceRunEvent<TEvent = unknown>(input: {
+  run_id: string;
+  session_id?: string | null;
+  seq?: number;
+  kind: string;
+  event: TEvent;
+}): WorkspaceRunEventRecord<TEvent> {
+  return workspacePersistence.appendRunEvent<TEvent>(input);
+}
+
+export function listWorkspaceRunEvents<TEvent = unknown>(runId: string): WorkspaceRunEventRecord<TEvent>[] {
+  return workspacePersistence.listRunEvents<TEvent>(runId);
+}
+
 export function recordWorkspaceToolCall<TInput = unknown, TOutput = unknown>(
   input: Omit<WorkspaceToolCallRecord<TInput, TOutput>, "id" | "created_at" | "completed_at"> & {
     id?: string;
@@ -273,6 +325,12 @@ export const workspaceProcedures = {
   "workspace.artifact.versions": listWorkspaceArtifactVersions,
   "workspace.message.append": appendWorkspaceMessage,
   "workspace.message.list": listWorkspaceMessages,
+  "workspace.run.create": createWorkspaceRun,
+  "workspace.run.get": getWorkspaceRun,
+  "workspace.run.list": listWorkspaceRuns,
+  "workspace.run.update": updateWorkspaceRun,
+  "workspace.run.event.append": appendWorkspaceRunEvent,
+  "workspace.run.event.list": listWorkspaceRunEvents,
   "workspace.toolCall.record": recordWorkspaceToolCall,
   "workspace.toolCall.list": listWorkspaceToolCalls,
   "workspace.layoutSnapshot.record": recordWorkspaceLayoutSnapshot,

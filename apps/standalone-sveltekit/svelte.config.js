@@ -1,7 +1,4 @@
 import adapter from "@sveltejs/adapter-cloudflare";
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -10,4 +7,4 @@ const config = {
   },
 };
 
-export default config
+export default config;
