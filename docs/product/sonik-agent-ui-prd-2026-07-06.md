@@ -94,7 +94,7 @@ A world-class harness is the prerequisite for running a cheaper model safely in 
 
 ## 8. Out of scope (parked, not cancelled)
 
-- **Agent marketplace** (workflows/templates/workspaces/agents/skills as installable packages) — contract-v0 skeleton exists and is tested; runtime endpoints, install UI, and persistence are deferred. Dan's decision 2026-07-06: hold until after this demo; the demo proves the point without it. This is the *agent* marketplace, a primer for the future full B2B/B2C commerce marketplace (a separate, larger PRD).
+- **Agent marketplace** (workflows/templates/workspaces/agents/skills as installable packages) — contract-v0 skeleton exists and is tested; runtime endpoints, install UI, and persistence are deferred. Dan's decision 2026-07-06: hold until after this demo; the demo proves the point without it. This is the *agent* marketplace, a primer for the future full B2B/B2C commerce marketplace (a separate, larger PRD). **Direction ratified 2026-07-07** after a 5-lane research pass + internal recon supplement: see `docs/product/agent-workspace-marketplace/DECISIONS.md` D008–D017 (resume amp.pkg v3 trust machinery; trust-tiers + per-install kill-switch + capability namespace; fused Intent-Preview+Trust install screen; JSON-first descriptors-only; freemium first) and `docs/research/README.md` for the full corpus.
 - Full workflow-builder canvas; publishing/moderation; template versioning; billing.
 
 ## 9. Known issues (evidence-backed)

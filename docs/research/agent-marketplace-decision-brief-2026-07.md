@@ -1,6 +1,6 @@
 # Agent Marketplace — Decision Brief
 
-Status: FOR RATIFICATION · 2026-07-06 · Owner: Dan
+Status: **RATIFIED in full** (Dan, 2026-07-07) → recorded as D008–D017 in `docs/product/agent-workspace-marketplace/DECISIONS.md`, amended by `agent-marketplace-recon-supplement-2026-07.md` (A1–A6). DR-9 (§4 posture) decided: JSON-first descriptors-only; HTML/custom UI a future exploration only if needs require (see D016). · Owner: Dan
 Basis: 5-lane deep-research pass (L1–L5, thorough posture, horizon July 2026) + foundational synthesis.
 Detail: `lane-L1…L5-*.md`, `agent-marketplace-foundational-synthesis-2026-07.md`.
 
