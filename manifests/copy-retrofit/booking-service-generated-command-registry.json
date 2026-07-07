@@ -1,0 +1,64 @@
+{
+	"name": "booking-service-generated-command-registry",
+	"upstream": {
+		"repoPath": "/Users/danielletterio/Documents/GitHub/sonik-booking-service",
+		"gitRemote": "git@github.com:dletterio1/sonik-booking-service.git",
+		"revision": "4324559be7f9533a0557dc0363f2fcfebb1cb6d9",
+		"license": "UNLICENSED"
+	},
+	"entries": [
+		{
+			"source": "packages/sonik-sdk/docs/booking-openapi.generated.json",
+			"destination": "docs/upstream-proofs/booking-service/packages/sonik-sdk/docs/booking-openapi.generated.json",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "936f732d40a9dada43bc6986b9871e8e3c4ee538c4547c5199f66646b0951955"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/sonik-sdk/docs/sonik-command-registry.generated.json",
+			"destination": "docs/upstream-proofs/booking-service/packages/sonik-sdk/docs/sonik-command-registry.generated.json",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "a113aa278754202deec19089643e4f18d4cbeb1fe7138720fdab3eb3510cd573"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/sonik-sdk/src/agent-command-registry.ts",
+			"destination": "docs/upstream-proofs/booking-service/packages/sonik-sdk/src/agent-command-registry.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "f259703194fa25fe3144b09e53b18a0652693e308acf09d7c43f8ac9fff60fa2"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/sonik-sdk/scripts/check-agent-command-registry.mjs",
+			"destination": "docs/upstream-proofs/booking-service/packages/sonik-sdk/scripts/check-agent-command-registry.mjs",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "2ee84d9c2583cf3b3b8e77c1089f8c2b203013544c15771cdd32793ad90514f9"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": []
+}

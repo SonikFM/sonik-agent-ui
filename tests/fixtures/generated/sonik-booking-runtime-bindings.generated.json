@@ -1,0 +1,2413 @@
+{
+  "version": "sonik-agent-ui.booking-runtime-bindings.v1",
+  "generatedAt": "2026-06-21T00:00:00.000Z",
+  "provider": "sonik-booking-openapi-runtime",
+  "source": {
+    "sourceRepo": "/Users/danielletterio/Documents/GitHub/sonik-booking-service",
+    "sourceRef": "codex/booking-agent-ui-runtime-bridge",
+    "sourceRevision": "4324559be7f9533a0557dc0363f2fcfebb1cb6d9",
+    "sourcePath": "packages/sonik-sdk/docs/booking-openapi.generated.json",
+    "sourceSha256": "936f732d40a9dada43bc6986b9871e8e3c4ee538c4547c5199f66646b0951955",
+    "sourceOperationCount": 72,
+    "extractedOperationCount": 72,
+    "generatedBy": "packages/service/src/generated/booking-openapi.generated.ts",
+    "copiedAt": "2026-06-29T00:00:00.000Z",
+    "notes": [
+      "Direct copy of the full booking OpenAPI used as the authoritative command-generation source for Sonik Agent UI. The sibling copied booking SDK command registry is retained as upstream proof but may lag this OpenAPI; scripts/check-booking-command-copy-retrofit.mjs gates the known drift explicitly."
+    ]
+  },
+  "summary": {
+    "sourceCommandCount": 72,
+    "commandCount": 53,
+    "shadowCommandCount": 19,
+    "shadowCommandIds": [
+      "booking.add.house.account.entry",
+      "booking.claim.waitlist.offer",
+      "booking.create.quote",
+      "booking.create.waitlist.entry",
+      "booking.delete.waitlist.entry",
+      "booking.expire.waitlist.entry",
+      "booking.get.customer",
+      "booking.get.customer.insights",
+      "booking.get.customer.profile",
+      "booking.get.house.account",
+      "booking.get.house.account.statement",
+      "booking.get.quote",
+      "booking.get.waitlist.entry",
+      "booking.list.house.account.entries",
+      "booking.list.waitlist.entries",
+      "booking.offer.waitlist.entry",
+      "booking.open.house.account",
+      "booking.update.customer",
+      "booking.update.customer.profile"
+    ],
+    "readCount": 24,
+    "writeCount": 25,
+    "destructiveCount": 4,
+    "mountedReadCount": 24,
+    "mountedWriteCount": 29
+  },
+  "bindings": [
+    {
+      "commandId": "booking.ping",
+      "operationId": "bookingPing",
+      "method": "GET",
+      "path": "/api/v1/booking/ping",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.context",
+      "operationId": "bookingCreateContext",
+      "method": "POST",
+      "path": "/api/v1/booking/contexts",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.contexts",
+      "operationId": "bookingListContexts",
+      "method": "GET",
+      "path": "/api/v1/booking/contexts",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Optional filter — restrict the list to contexts of one kind.",
+            "enum": [
+              "event",
+              "venue_schedule",
+              "resource"
+            ]
+          },
+          "enum": [
+            "event",
+            "venue_schedule",
+            "resource"
+          ]
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.project.event.context",
+      "operationId": "bookingProjectEventContext",
+      "method": "POST",
+      "path": "/api/v1/booking/event-shadows/contexts",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.get.context",
+      "operationId": "bookingGetContext",
+      "method": "GET",
+      "path": "/api/v1/booking/contexts/{contextId}",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "contextId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The bookable context's id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.update.context",
+      "operationId": "bookingUpdateContext",
+      "method": "PATCH",
+      "path": "/api/v1/booking/contexts/{contextId}",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "contextId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The bookable context's id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.schedule.rule",
+      "operationId": "bookingCreateScheduleRule",
+      "method": "POST",
+      "path": "/api/v1/booking/contexts/{contextId}/schedule-rules",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "contextId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The bookable context's id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.schedule.rules",
+      "operationId": "bookingListScheduleRules",
+      "method": "GET",
+      "path": "/api/v1/booking/contexts/{contextId}/schedule-rules",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "contextId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The bookable context's id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.update.schedule.rule",
+      "operationId": "bookingUpdateScheduleRule",
+      "method": "PATCH",
+      "path": "/api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId}",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "contextId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The owning bookable context's id."
+          }
+        },
+        {
+          "name": "ruleId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The schedule rule's id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.delete.schedule.rule",
+      "operationId": "bookingDeleteScheduleRule",
+      "method": "DELETE",
+      "path": "/api/v1/booking/contexts/{contextId}/schedule-rules/{ruleId}",
+      "effect": "destructive",
+      "approval": "required",
+      "familyId": "booking",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "contextId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The owning bookable context's id."
+          }
+        },
+        {
+          "name": "ruleId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The schedule rule's id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": true
+    },
+    {
+      "commandId": "booking.get.availability",
+      "operationId": "bookingGetAvailability",
+      "method": "GET",
+      "path": "/api/v1/booking/contexts/{contextId}/availability",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "contextId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The bookable context's id."
+          }
+        }
+      ],
+      "queryParams": [
+        {
+          "name": "from",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Start of the availability window (ISO 8601 date or datetime), inclusive."
+          }
+        },
+        {
+          "name": "to",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "End of the availability window (ISO 8601 date or datetime), inclusive."
+          }
+        },
+        {
+          "name": "partySize",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "description": "Optional party size for policy-aware availability filtering. Defaults to 1 when omitted.",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "source",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Optional booking source for policy-aware availability filtering. Defaults to web when omitted.",
+            "enum": [
+              "admin",
+              "web",
+              "mcp",
+              "microsite"
+            ]
+          },
+          "enum": [
+            "admin",
+            "web",
+            "mcp",
+            "microsite"
+          ]
+        },
+        {
+          "name": "resourceTypeId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional resource type target for policy-aware availability filtering. When supplied with resourceUnitId, the unit must belong to this type."
+          }
+        },
+        {
+          "name": "resourceUnitId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional resource unit target for policy-aware availability filtering. Implies the unit's resource type for policy matching."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.booking",
+      "operationId": "bookingCreateBooking",
+      "method": "POST",
+      "path": "/api/v1/booking/bookings",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "bookings",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.bookings",
+      "operationId": "bookingListBookings",
+      "method": "GET",
+      "path": "/api/v1/booking/bookings",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "bookings",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Filter to a single bookable_context."
+          }
+        },
+        {
+          "name": "userId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Filter to a single persistent auth/user holder.",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "customerId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Deprecated optional filter to customer-context id for old/imported rows."
+          }
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Filter by lifecycle status.",
+            "enum": [
+              "booked",
+              "confirmed",
+              "cancelled"
+            ]
+          },
+          "enum": [
+            "booked",
+            "confirmed",
+            "cancelled"
+          ]
+        },
+        {
+          "name": "startsAfter",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Only bookings starting at or after this instant (date-range lower bound)."
+          }
+        },
+        {
+          "name": "startsBefore",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Only bookings starting at or before this instant (date-range upper bound)."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.get.booking",
+      "operationId": "bookingGetBooking",
+      "method": "GET",
+      "path": "/api/v1/booking/bookings/{bookingId}",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "bookings",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.cancel.booking",
+      "operationId": "bookingCancelBooking",
+      "method": "POST",
+      "path": "/api/v1/booking/bookings/{bookingId}/cancel",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "bookings",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.confirm.booking",
+      "operationId": "bookingConfirmBooking",
+      "method": "POST",
+      "path": "/api/v1/booking/bookings/{bookingId}/confirm",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "bookings",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.reschedule.booking",
+      "operationId": "bookingRescheduleBooking",
+      "method": "POST",
+      "path": "/api/v1/booking/bookings/{bookingId}/reschedule",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "bookings",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.party.members",
+      "operationId": "bookingListPartyMembers",
+      "method": "GET",
+      "path": "/api/v1/booking/bookings/{bookingId}/party",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "bookings",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.add.party.member",
+      "operationId": "bookingAddPartyMember",
+      "method": "POST",
+      "path": "/api/v1/booking/bookings/{bookingId}/party",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "bookings",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.remove.party.member",
+      "operationId": "bookingRemovePartyMember",
+      "method": "DELETE",
+      "path": "/api/v1/booking/bookings/{bookingId}/party/{partyMemberId}",
+      "effect": "destructive",
+      "approval": "required",
+      "familyId": "bookings",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        },
+        {
+          "name": "partyMemberId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Party member (booking_party) id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": true
+    },
+    {
+      "commandId": "booking.list.resource.assignments",
+      "operationId": "bookingListResourceAssignments",
+      "method": "GET",
+      "path": "/api/v1/booking/bookings/{bookingId}/resources",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "bookings",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.assign.resource",
+      "operationId": "bookingAssignResource",
+      "method": "POST",
+      "path": "/api/v1/booking/bookings/{bookingId}/resources",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "bookings",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.unassign.resource",
+      "operationId": "bookingUnassignResource",
+      "method": "DELETE",
+      "path": "/api/v1/booking/bookings/{bookingId}/resources/{assignmentId}",
+      "effect": "destructive",
+      "approval": "required",
+      "familyId": "bookings",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "bookingId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Booking id."
+          }
+        },
+        {
+          "name": "assignmentId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The booking_resource assignment row id to release."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": true
+    },
+    {
+      "commandId": "booking.search.guests",
+      "operationId": "bookingSearchGuests",
+      "method": "GET",
+      "path": "/api/v1/booking/guests",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "q",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Free-text search over user name/email (max 120 chars). Omitted = recent users.",
+            "maxLength": 120
+          }
+        },
+        {
+          "name": "page",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "description": "1-based page index (default 1).",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "description": "Page size (default 25, max 100).",
+            "minimum": -9007199254740991,
+            "maximum": 100
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.guest",
+      "operationId": "bookingCreateGuest",
+      "method": "POST",
+      "path": "/api/v1/booking/guests",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.resource.type",
+      "operationId": "bookingCreateResourceType",
+      "method": "POST",
+      "path": "/api/v1/booking/resources/types",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-resources",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.resource.types",
+      "operationId": "bookingListResourceTypes",
+      "method": "GET",
+      "path": "/api/v1/booking/resources/types",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-resources",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional bookable context filter."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.resource.unit",
+      "operationId": "bookingCreateResourceUnit",
+      "method": "POST",
+      "path": "/api/v1/booking/resources/units",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-resources",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.resource.units",
+      "operationId": "bookingListResourceUnits",
+      "method": "GET",
+      "path": "/api/v1/booking/resources/units",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-resources",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "typeId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional resource type filter."
+          }
+        },
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional bookable context filter."
+          }
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Optional resource unit status filter.",
+            "enum": [
+              "active",
+              "inactive",
+              "maintenance"
+            ]
+          },
+          "enum": [
+            "active",
+            "inactive",
+            "maintenance"
+          ]
+        },
+        {
+          "name": "active",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Legacy active/inactive resource unit filter; maps to status=active when true."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.resource.block",
+      "operationId": "bookingCreateResourceBlock",
+      "method": "POST",
+      "path": "/api/v1/booking/resources/blocks",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-resources",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.resource.blocks",
+      "operationId": "bookingListResourceBlocks",
+      "method": "GET",
+      "path": "/api/v1/booking/resources/blocks",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-resources",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        },
+        {
+          "name": "resourceTypeId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        },
+        {
+          "name": "resourceUnitId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.resource.combination",
+      "operationId": "bookingCreateResourceCombination",
+      "method": "POST",
+      "path": "/api/v1/booking/resources/combinations",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-resources",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.resource.combinations",
+      "operationId": "bookingListResourceCombinations",
+      "method": "GET",
+      "path": "/api/v1/booking/resources/combinations",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-resources",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.policy",
+      "operationId": "bookingCreatePolicy",
+      "method": "POST",
+      "path": "/api/v1/booking/policies",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-policies",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.policies",
+      "operationId": "bookingListPolicies",
+      "method": "GET",
+      "path": "/api/v1/booking/policies",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-policies",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Optional policy kind filter.",
+            "enum": [
+              "booking_window",
+              "cancellation",
+              "deposit",
+              "no_show",
+              "party",
+              "pace",
+              "resource"
+            ]
+          },
+          "enum": [
+            "booking_window",
+            "cancellation",
+            "deposit",
+            "no_show",
+            "party",
+            "pace",
+            "resource"
+          ]
+        },
+        {
+          "name": "active",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Optional active/inactive policy filter."
+          }
+        },
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional context binding filter."
+          }
+        },
+        {
+          "name": "resourceTypeId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional resource-type binding filter."
+          }
+        },
+        {
+          "name": "resourceUnitId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional resource-unit binding filter."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.update.policy",
+      "operationId": "bookingUpdatePolicy",
+      "method": "PATCH",
+      "path": "/api/v1/booking/policies/{policyId}",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-policies",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "policyId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.rate.plan",
+      "operationId": "bookingCreateRatePlan",
+      "method": "POST",
+      "path": "/api/v1/booking/rate-plans",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-policies",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.rate.plans",
+      "operationId": "bookingListRatePlans",
+      "method": "GET",
+      "path": "/api/v1/booking/rate-plans",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-policies",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "active",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Optional active/inactive rate-plan filter."
+          }
+        },
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional context binding filter."
+          }
+        },
+        {
+          "name": "resourceTypeId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional resource-type binding filter."
+          }
+        },
+        {
+          "name": "resourceUnitId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional resource-unit binding filter."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.update.rate.plan",
+      "operationId": "bookingUpdateRatePlan",
+      "method": "PATCH",
+      "path": "/api/v1/booking/rate-plans/{ratePlanId}",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-policies",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "ratePlanId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.create.hold",
+      "operationId": "bookingCreateHold",
+      "method": "POST",
+      "path": "/api/v1/booking/holds",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-holds",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.get.hold",
+      "operationId": "bookingGetHold",
+      "method": "GET",
+      "path": "/api/v1/booking/holds/{holdId}",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-holds",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "holdId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.commit.hold",
+      "operationId": "bookingCommitHold",
+      "method": "POST",
+      "path": "/api/v1/booking/holds/{holdId}/commit",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-holds",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "holdId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.release.hold",
+      "operationId": "bookingReleaseHold",
+      "method": "POST",
+      "path": "/api/v1/booking/holds/{holdId}/release",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-holds",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "holdId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.extend.hold",
+      "operationId": "bookingExtendHold",
+      "method": "POST",
+      "path": "/api/v1/booking/holds/{holdId}/extend",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-holds",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "holdId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A booking-domain UUID (Postgres uuid primary/foreign key)."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/json"
+        ],
+        "preferredContentType": "application/json",
+        "bodyEncoding": "json"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.organizer.templates",
+      "operationId": "bookingListOrganizerTemplates",
+      "method": "GET",
+      "path": "/api/v1/booking/templates",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-templates",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.get.organizer.template",
+      "operationId": "bookingGetOrganizerTemplate",
+      "method": "GET",
+      "path": "/api/v1/booking/templates/{slug}",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-templates",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Organizer template slug, for example country-club or restaurant."
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.dry.run.organizer.template",
+      "operationId": "bookingDryRunOrganizerTemplate",
+      "method": "GET",
+      "path": "/api/v1/booking/templates/{slug}/dry-run",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-templates",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Organizer template slug, for example country-club or restaurant."
+          }
+        }
+      ],
+      "queryParams": [
+        {
+          "name": "organizationSlug",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Optional demo organization slug used to produce deterministic dry-run ids."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.get.organizer.template.browser.handoff",
+      "operationId": "bookingGetOrganizerTemplateBrowserHandoff",
+      "method": "GET",
+      "path": "/api/v1/booking/templates/{slug}/browser-handoff",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-templates",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Organizer template slug, for example country-club or restaurant."
+          }
+        }
+      ],
+      "queryParams": [
+        {
+          "name": "organizationSlug",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Optional demo organization slug used to produce deterministic dry-run ids."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.list.media.assets",
+      "operationId": "bookingListMediaAssets",
+      "method": "GET",
+      "path": "/api/v1/booking/media/assets",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-media",
+      "status": "mounted-read",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional bookable context filter."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.upload.media.asset",
+      "operationId": "bookingUploadMediaAsset",
+      "method": "POST",
+      "path": "/api/v1/booking/media/assets",
+      "effect": "write",
+      "approval": "required",
+      "familyId": "booking-media",
+      "status": "mounted-write",
+      "pathParams": [],
+      "queryParams": [
+        {
+          "name": "contextId",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required for application/octet-stream uploads; multipart uploads carry contextId in the form body."
+          }
+        },
+        {
+          "name": "fileName",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Optional file name for application/octet-stream uploads.",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "role",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "Optional media role for application/octet-stream uploads, such as context_overview or floor_plan.",
+            "minLength": 1
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": true,
+        "contentTypes": [
+          "application/octet-stream",
+          "multipart/form-data"
+        ],
+        "preferredContentType": "multipart/form-data",
+        "bodyEncoding": "multipart"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.get.media.asset",
+      "operationId": "bookingGetMediaAsset",
+      "method": "GET",
+      "path": "/api/v1/booking/media/assets/{assetId}",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-media",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "assetId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Opaque durable booking media asset identifier. New booking.media_asset rows use UUIDs; legacy mounted media catalogs may return non-UUID ids and must remain readable.",
+            "minLength": 1
+          }
+        }
+      ],
+      "queryParams": [
+        {
+          "name": "metadata",
+          "required": false,
+          "schema": {
+            "description": "Contract/SDK metadata read. The authenticated REST href can still stream bytes when metadata is omitted outside generated clients."
+          }
+        }
+      ],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    },
+    {
+      "commandId": "booking.delete.media.asset",
+      "operationId": "bookingDeleteMediaAsset",
+      "method": "DELETE",
+      "path": "/api/v1/booking/media/assets/{assetId}",
+      "effect": "destructive",
+      "approval": "required",
+      "familyId": "booking-media",
+      "status": "mounted-write",
+      "pathParams": [
+        {
+          "name": "assetId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Opaque durable booking media asset identifier. New booking.media_asset rows use UUIDs; legacy mounted media catalogs may return non-UUID ids and must remain readable.",
+            "minLength": 1
+          }
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:write"
+        ]
+      },
+      "commit": true,
+      "destructive": true
+    },
+    {
+      "commandId": "booking.get.media.asset.variant",
+      "operationId": "bookingGetMediaAssetVariant",
+      "method": "GET",
+      "path": "/api/v1/booking/media/assets/{assetId}/variants/{variant}",
+      "effect": "read",
+      "approval": "none",
+      "familyId": "booking-media",
+      "status": "mounted-read",
+      "pathParams": [
+        {
+          "name": "assetId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Opaque durable booking media asset identifier. New booking.media_asset rows use UUIDs; legacy mounted media catalogs may return non-UUID ids and must remain readable.",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "variant",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Cloudflare Images-backed private image variant.",
+            "enum": [
+              "thumbnail",
+              "card",
+              "hero",
+              "floorPlan"
+            ]
+          },
+          "enum": [
+            "thumbnail",
+            "card",
+            "hero",
+            "floorPlan"
+          ]
+        }
+      ],
+      "queryParams": [],
+      "headerParams": [],
+      "cookieParams": [],
+      "requestBody": {
+        "required": false,
+        "contentTypes": [],
+        "preferredContentType": null,
+        "bodyEncoding": "none"
+      },
+      "auth": {
+        "required": true,
+        "orgScoped": true,
+        "scopes": [
+          "booking:read"
+        ]
+      },
+      "commit": false,
+      "destructive": false
+    }
+  ]
+}

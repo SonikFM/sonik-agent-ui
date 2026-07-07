@@ -195,13 +195,13 @@ async function openAgentFrame(page) {
       };
       const fire = (element) => element?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
       const describe = (element) => element ? { tag: element.tagName, id: element.id, cls: String(element.className || "").slice(0, 160), aria: element.getAttribute("aria-label"), testId: element.getAttribute("data-testid"), control: element.getAttribute("data-sonik-agent-ui-control"), text: element.textContent?.trim().slice(0, 80), rect: (() => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; })() } : null;
-      let chat = document.querySelector('[data-testid="sonik-agent-ui-open-chat"], [data-sonik-agent-ui-control="open-chat"], [aria-label="Open Sonik chat sidecar"]');
+      let chat = document.querySelector('#booking-agent-ui-open-chat, #open-chat, [data-testid="sonik-agent-ui-open-chat"], [data-sonik-agent-ui-control="open-chat"], [aria-label="Open Sonik chat sidecar"], [aria-label="Open Sonik chat"]');
       if (visibleEnough(chat)) return { target: "open-chat-control", fired: fire(chat), chat: describe(chat) };
-      const launcher = document.querySelector('[data-testid="sonik-agent-ui-launcher"], [data-sonik-agent-ui-control="launcher"], [aria-label="Open Sonik agent launcher"]');
+      const launcher = document.querySelector('#agent-fab-main, [data-testid="sonik-agent-ui-launcher"], [data-sonik-agent-ui-control="launcher"], [aria-label="Open Sonik agent launcher"], [aria-label="Open Sonik agent"]');
       if (visibleEnough(launcher)) {
         const launcherFired = fire(launcher);
         await new Promise((resolve) => setTimeout(resolve, 450));
-        chat = document.querySelector('[data-testid="sonik-agent-ui-open-chat"], [data-sonik-agent-ui-control="open-chat"], [aria-label="Open Sonik chat sidecar"]');
+        chat = document.querySelector('#booking-agent-ui-open-chat, #open-chat, [data-testid="sonik-agent-ui-open-chat"], [data-sonik-agent-ui-control="open-chat"], [aria-label="Open Sonik chat sidecar"], [aria-label="Open Sonik chat"]');
         if (chat) return { target: "launcher-then-open-chat-control", fired: Boolean(launcherFired && fire(chat)), launcher: describe(launcher), chat: describe(chat) };
         return { target: "launcher-only", fired: launcherFired, launcher: describe(launcher), chat: null };
       }

@@ -1,0 +1,48 @@
+{
+	"name": "open-design-intake",
+	"upstream": {
+		"repoPath": "/Users/danielletterio/Documents/GitHub/open-design",
+		"gitRemote": "https://github.com/nexu-io/open-design.git",
+		"revision": "56c410e9ef5edee9d01f8766248346f8be71bf9d",
+		"license": "Apache-2.0"
+	},
+	"entries": [
+		{
+			"source": "apps/web/src/artifacts/question-form.ts",
+			"destination": "vendor/open-design/question-form/src/artifacts/question-form.ts",
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "fbde12ae6fd90f152dbed923640246ffd229986b3f7e60ef5dc86ecd6cfe7f4d"
+					}
+				]
+			}
+		},
+		{
+			"source": "apps/web/src/runtime/partial-json.ts",
+			"destination": "vendor/open-design/question-form/src/runtime/partial-json.ts",
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "9575bd9aa75eecbab6b9610ca0f042e72ea5e5b703f638b25444bfe952f13fe7"
+					}
+				]
+			}
+		},
+		{
+			"source": "apps/web/tests/artifacts/question-form.test.ts",
+			"destination": "vendor/open-design/question-form/tests/artifacts/question-form.test.ts",
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "e90f2d2965b325037bd1272cb94daac522919ad46a9d79a5d8f5f835a57f6bf2"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": []
+}

@@ -41,6 +41,7 @@ export const DAISY_BUILTIN_THEME_IDS = [
 
 /** Registered via `@plugin "daisyui/theme"` in `custom/*.css`. */
 export const CUSTOM_DOCUMENT_THEME_IDS = [
+	"sonik-operator-dark",
 	"gunmetal-dark",
 	"gunmetal-light",
 	"light",
@@ -72,8 +73,8 @@ export interface DocumentThemeOption {
 	isDefault?: boolean;
 }
 
-/** Default `<html data-theme>` — matches gunmetal-dark.css default. */
-export const DEFAULT_DOCUMENT_THEME_ID: CustomDocumentThemeId = "gunmetal-dark";
+/** Default `<html data-theme>` for embedded Booking/operator parity. */
+export const DEFAULT_DOCUMENT_THEME_ID: CustomDocumentThemeId = "sonik-operator-dark";
 
 export const THEME_GROUPS = [
 	{
@@ -131,13 +132,21 @@ const DAISY_LIGHT_DOCUMENT_THEMES = new Set<string>([
 
 const CUSTOM_THEME_OPTIONS = [
 	{
+		id: "sonik-operator-dark",
+		title: "Sonik Operator Dark",
+		group: "product",
+		source: "custom",
+		colorScheme: "dark",
+		description: "Flat border-carried operator theme shared by Booking embeds.",
+		isDefault: true,
+	},
+	{
 		id: "gunmetal-dark",
 		title: "Gunmetal Dark",
 		group: "product",
 		source: "custom",
 		colorScheme: "dark",
-		description: "Default dark app theme with cool steel surfaces.",
-		isDefault: true,
+		description: "Dark app theme with cool steel surfaces retained for parity switching.",
 	},
 	{
 		id: "gunmetal-light",

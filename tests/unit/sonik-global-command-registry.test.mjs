@@ -81,7 +81,7 @@ const surfaceIndex = createSurfaceCommandIndex(catalog, {
   organizationId: "org_booking",
   scopes: [],
 }, { registry, limit: 100 });
-assert.equal(surfaceIndex.totalMatches, 71, "global surface index can expose booking commands when booking page context asks for them");
+assert.equal(surfaceIndex.totalMatches, 72, "global surface index can expose booking commands when booking page context asks for them");
 assert.equal(surfaceIndex.commands.every((entry) => !Object.hasOwn(entry, "input") && !Object.hasOwn(entry, "inputSchemaJson")), true, "global surface index remains schema-free");
 
 const learned = learnCommandDescriptor(catalog, "booking.create.booking", ["schema", "policy", "transport", "auth"]);

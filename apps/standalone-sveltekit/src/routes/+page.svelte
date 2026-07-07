@@ -1,24 +1,39 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { dev } from "$app/environment";
+  import { onMount, tick, untrack } from "svelte";
+  import { browser, dev } from "$app/environment";
   import { env as publicEnv } from "$env/dynamic/public";
   import type { PageData } from "./$types";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteSet, SvelteMap } from "svelte/reactivity";
   import { Chat } from "@ai-sdk/svelte";
   import { DefaultChatTransport } from "ai";
   import type { DataPart, Spec } from "@json-render/svelte";
+  import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
-  import { AgentConversation, getSpec, getText, snapshotDataParts, type AgentActivityStatus, type AgentChatMessage } from "@sonik-agent-ui/chat-surface";
-  import { upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
+  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
+  import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
+  import { RESUME_CONTINUE_PROMPT, createDefaultHostUiTargetRegistry, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
+  import {
+    createEmptyAgentRunContextSelection,
+    reconcileAgentContextSelection,
+    addAgentContextItem,
+    removeAgentContextItem,
+    parseAgentRunContextSelection,
+    type AgentContextItem,
+    type AgentRunContextSelection,
+  } from "@sonik-agent-ui/tool-contracts/run-context";
+  import { deriveAgentContextCandidates } from "$lib/agent-context/context-sources";
   import { promoteJsonRenderArtifact } from "$lib/artifacts/json-render-promotion";
   import { findDocumentArtifactToolCandidate, findJsonArtifactToolCandidate, type PreferredDocumentView } from "$lib/artifacts/tool-artifact-extraction";
+  import { findStreamingJsonArtifactSpecCandidate } from "$lib/artifacts/streaming-artifact";
   import { hasActiveArtifactUpdateIntent, hasExplicitArtifactIntent } from "$lib/artifacts/artifact-promotion";
   import { logArtifactTelemetry, summarizeSpec } from "$lib/artifacts/artifact-telemetry";
   import { createInMemoryArtifactWarehouse, type ArtifactWarehouseSnapshot, type ArtifactWarehouseVersion } from "$lib/artifacts/artifact-warehouse";
   import ArtifactInspector from "$lib/artifacts/ArtifactInspector.svelte";
   import SessionRail from "$lib/session/SessionRail.svelte";
+  import { friendlySessionError } from "$lib/session/friendly-errors";
   import ThemePicker from "$lib/theme/ThemePicker.svelte";
+  import { applyEmbeddedThemeSetting } from "$lib/theme/theme-runtime";
   import {
     appendArtifactObservationEvent,
     createArtifactObservationEvent,
@@ -28,18 +43,56 @@
   } from "$lib/artifacts/artifact-observability";
   import { CanvasViewport, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
   import type { AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult } from "@sonik-agent-ui/agent-observability";
+  import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
     isAgentHostPageContextMessage,
     mergeAgentHostPageContext,
     normalizeAgentEmbedIntent,
     sanitizeAgentHostPageContext,
     isAgentOriginAllowed,
+    requestAgentHostAction,
     type AgentHostMergedPageContext,
     type AgentHostPageContext,
     type AgentEmbedMode,
     type AgentEmbedRailMode,
   } from "@sonik-agent-ui/agent-embed";
+  import { nextSignedWorkspaceHostContextCache, selectSignedWorkspaceHostContext } from "$lib/host-context-authority";
+  import { createQuestionErrorStatePath, createQuestionLifecycleStatePath, escapeJsonPointerSegment } from "$lib/render/question-card-state";
   import { registry } from "$lib/render/registry";
+  import {
+    applyJsonRenderStateChanges,
+    buildJsonRenderStatePatchPayload,
+    createJsonRenderStateStore,
+    type JsonRenderStateChange,
+  } from "$lib/render/json-render-state-controller";
+  import {
+    createQuestionAnswerTurnPayload,
+    serializeQuestionAnswerTurnMessage,
+  } from "$lib/render/question-answer-loop";
+  import { createWorkflowSuggestions } from "$lib/agent-workflows/suggestions";
+  import {
+    createAgentWorkflowSnapshot,
+    createQuestionAnswerStateChanges,
+  } from "$lib/agent-workflows/page-control-workflow";
+  import {
+    decideTrustedIntakeControllerAction,
+    isTrustedIntakeControllerAction,
+    type TrustedIntakeControllerAction,
+  } from "$lib/agent-workflows/trusted-intake-controller";
+  import {
+    AGENT_MODEL_OPTIONS,
+    AGENT_SKILL_OPTIONS,
+    AGENT_TOOL_FAMILY_OPTIONS,
+    DEFAULT_AGENT_MODEL_ID,
+    MAX_AGENT_PROMPT_OVERRIDE_CHARS,
+    createDefaultAgentToolPermissionModes,
+    sanitizeAgentRuntimeSettings,
+    createAgentCustomSkillId,
+    type AgentCustomSkill,
+    type AgentModelOption,
+    type AgentRuntimeSettings,
+  } from "$lib/agent-settings";
+  import { AGENT_PROMPT_CORE, AGENT_PROMPT_MODULES, CORE_MODULE_ID, composeAgentSystemPrompt } from "$lib/agent-prompt";
 
   interface ActiveDocumentSnapshot {
     id: string;
@@ -98,10 +151,27 @@
     created_at: string;
   }
 
+  interface WorkspaceRunSummary {
+    id: string;
+    status: "running" | "succeeded" | "failed" | "canceled";
+    resumable: boolean;
+    error: string | null;
+    error_code: string | null;
+    message_id: string | null;
+    context_selection?: AgentRunContextSelection | null;
+    started_at: string;
+    ended_at: string | null;
+  }
+
   interface WorkspaceSessionDetail {
     session: WorkspaceSessionSummary;
     activeDocument: ActiveDocumentSnapshot | null;
     messages: WorkspaceMessageSnapshot[];
+    runs?: WorkspaceRunSummary[];
+    reattach?: {
+      run: WorkspaceRunSummary;
+      message: { id: string; role: "assistant"; content: string; parts: DataPart[] } | null;
+    } | null;
     telemetry?: unknown[];
     artifactState?: {
       persistence: "cloud-or-memory-v1";
@@ -129,6 +199,11 @@
   let activeArtifact = $state<JsonRenderArtifact | null>(null);
   let activeArtifactStatus = $state<ArtifactStatus | null>(null);
   let activeArtifactVersions = $state<ArtifactWarehouseVersion<Spec>[]>([]);
+  let activeArtifactStateStore = $state<StateStore | undefined>();
+  let activeArtifactStateStoreKey = $state<string | null>(null);
+  let activeArtifactStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let activeArtifactPersistence = $state<{ artifactId: string; promise: Promise<boolean> } | null>(null);
+  let pendingActiveArtifactStateChanges: JsonRenderStateChange[] = [];
   let pendingArtifactIntent = $state<string | null>(null);
   let documentEditorOpen = $state(false);
   let activeDocument = $state<ActiveDocumentSnapshot | null>(null);
@@ -139,12 +214,48 @@
   let lastDocumentPromotionKey = $state<string | null>(null);
   let sessions = $state<WorkspaceSessionSummary[]>([]);
   let archivedSessionCount = $state(0);
+  let archivedSessions = $state<WorkspaceSessionSummary[]>([]);
   let activeSessionId = $state<string | null>(null);
+  let sessionSelectionRevision = 0;
   let sessionRailBusy = $state(false);
   let sessionRailError = $state<string | null>(null);
+  let resumableRun = $state<WorkspaceRunSummary | null>(null);
+  let agentModelId = $state(DEFAULT_AGENT_MODEL_ID);
+  let agentModelOptions = $state<AgentModelOption[]>(AGENT_MODEL_OPTIONS);
+  let agentModelCatalogStatus = $state<"idle" | "loading" | "ready" | "fallback" | "error">("idle");
+  let agentModelCatalogMessage = $state<string | null>(null);
+  let agentRequireZdr = $state(true);
+  let enabledAgentSkillIds = $state<string[]>([]);
+  let agentCustomSkills = $state<AgentCustomSkill[]>([]);
+  let agentAdditionalSystemPrompt = $state("");
+  let agentToolPermissionModes = $state<Record<string, AgentToolPermissionMode>>(createDefaultAgentToolPermissionModes());
+  let agentPromptModuleOverrides = $state<Record<string, string>>({});
+  let agentSkillPromptOverrides = $state<Record<string, string>>({});
+  // Runtime-skill default bodies live under $lib/server (skill-registry.ts) and
+  // can't be imported into this client component, so they're fetched once from
+  // /api/agent-prompt-preview to populate the Prompt tab's skill-override editors.
+  let agentSkillPromptDefaults = $state<{ id: string; familyId: string; title: string; defaultBody: string }[]>([]);
+  let agentSkillPromptDefaultsStatus = $state<"idle" | "loading" | "ready" | "error">("idle");
+  // Composer context selection for the next turn (chips + authoritative dismissals).
+  let runContextSelection = $state<AgentRunContextSelection>(createEmptyAgentRunContextSelection());
+  // Analytics-only run hints, computed client-side at send time. `analyticsTurnIndex`
+  // is 0-based per workspace session (reset on clear/switch); `pendingAnalyticsEntryFrom`
+  // records how the next turn started (default composer; workflow launcher / Continue
+  // override it); `pendingAnalyticsHints` is the object read by the transport for the
+  // in-flight send. Never influences behavior — analytics dimension only.
+  let analyticsTurnIndex = 0;
+  let pendingAnalyticsEntryFrom: AgentAnalyticsEntryFrom = "composer";
+  let pendingAnalyticsHints: AgentAnalyticsHints | null = null;
+  // Per-turn provenance: user message id -> the context items sent with that turn.
+  let turnContextByMessageId = new SvelteMap<string, AgentContextItem[]>();
   let persistedMessageIds = new SvelteSet<string>();
   let reportedToolErrorKeys = new SvelteSet<string>();
   let processedJsonRenderPromotionKeys = new SvelteSet<string>();
+  // Live tool-input streaming: the partial-spec signature currently mounted as a
+  // preview, and the artifact ids we have already logged a first preview mount
+  // for. Non-reactive bookkeeping so the preview effect skips no-op re-runs.
+  let lastStreamingPreviewSignature: string | null = null;
+  let streamingPreviewMountedIds = new SvelteSet<string>();
   let messagePersistInFlight = false;
   let pendingDocumentSnapshot: ActiveDocumentSnapshot | null = null;
   let documentPersistPromise: Promise<void> | null = null;
@@ -158,6 +269,9 @@
   let sessionBootstrapPromise: Promise<void> | null = null;
   let hostContextWaitTimer: number | null = null;
   let hostPageContext = $state<AgentHostMergedPageContext | null>(null);
+  let lastSignedHostPageContext = $state<AgentHostMergedPageContext | null>(null);
+  let embeddedHostContextExpected = $state(browser && new URLSearchParams(window.location.search).has("agentUiHostOrigin"));
+  let embeddedUrlTheme: string | null = null;
   let embedMode = $state<AgentEmbedMode>(getInitialEmbedIntent().mode);
   let embedRailMode = $state<AgentEmbedRailMode>(getInitialEmbedIntent().railMode);
   let streamStartedAt = $state<number | null>(null);
@@ -186,6 +300,10 @@
               pageContext: createPageContextSnapshot(),
             },
             pageContext: createPageContextSnapshot(),
+            contextSelection: $state.snapshot(runContextSelection),
+            analyticsHints: pendingAnalyticsHints ?? undefined,
+            agentSettings: createAgentSettingsSnapshot(),
+            skillIds: enabledAgentSkillIds,
           },
         };
       },
@@ -222,6 +340,7 @@
         ? true
         : Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen),
   );
+  const showCanvasDeveloperPanels = $derived(dev || !isEmbeddedHostContextExpected());
   const agentActivity = $derived<AgentActivityStatus | null>(createAgentActivityStatus());
   const pageAssertions = $derived<AgentUiPageAssertions>({
     schemaVersion: "sonik.agent_ui.assertions.v1",
@@ -265,6 +384,22 @@
       };
     }
 
+    return null;
+  });
+  // Live preview of a createJsonArtifact spec while its tool-call arguments are
+  // still streaming. Only fires while streaming and only until the completed
+  // tool output exists — at that point findJsonArtifactToolCandidate owns the
+  // artifact (latestJsonRenderSpec below), so the partial preview hands off to
+  // the authoritative, persisted version with no double-render.
+  const streamingJsonRenderPreview = $derived.by<{ id: string; spec: Spec; title?: string } | null>(() => {
+    if (!isStreaming) return null;
+    for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+      const message = conversation.messages[index];
+      if (!message || message.role !== "assistant") continue;
+      const parts = snapshotDataParts(message.parts as DataPart[]);
+      if (findJsonArtifactToolCandidate(message.id, parts as unknown[])) return null;
+      return findStreamingJsonArtifactSpecCandidate(message.id, parts as unknown[]);
+    }
     return null;
   });
   const latestDocumentArtifact = $derived.by<{ id: string; document: ActiveDocumentSnapshot; action: "create" | "update"; title: string; preferredView?: PreferredDocumentView } | null>(() => {
@@ -324,6 +459,19 @@
       ok: true,
     });
   });
+
+
+  function collectToolOutputErrorKeys(messages: typeof conversation.messages): string[] {
+    const keys: string[] = [];
+    for (const message of messages) {
+      if (!message || message.role !== "assistant") continue;
+      for (const part of snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string }>) {
+        if (!part.type?.startsWith("tool-") || part.state !== "output-error") continue;
+        keys.push(`${message.id}:${part.toolCallId ?? part.type}`);
+      }
+    }
+    return keys;
+  }
 
   $effect(() => {
     for (const message of conversation.messages) {
@@ -415,6 +563,51 @@
       persistJsonRenderArtifactSnapshot(promotedSnapshot, "agent");
       activeArtifactStatus = createArtifactStatus(promotedSnapshot.artifact, event);
       pendingArtifactIntent = null;
+    }
+  });
+
+  // Mount the streaming createJsonArtifact spec into the live canvas as its
+  // arguments arrive. This stays in memory only — no warehouse version commit
+  // and no /api/artifact persistence per delta — so the completed tool output
+  // (handled by the promotion effect above) remains the single authoritative,
+  // persisted spec. Reusing the same artifact id makes partial -> final an
+  // in-place update rather than a swap.
+  $effect(() => {
+    const preview = streamingJsonRenderPreview;
+    if (!preview) {
+      lastStreamingPreviewSignature = null;
+      return;
+    }
+
+    let signature: string;
+    let upsert: ReturnType<typeof upsertJsonRenderArtifact>;
+    try {
+      signature = createJsonRenderArtifactSignature(preview.spec);
+      if (signature === lastStreamingPreviewSignature && activeArtifact?.id === preview.id) return;
+      upsert = upsertJsonRenderArtifact({
+        previous: activeArtifact?.id === preview.id ? activeArtifact : null,
+        id: preview.id,
+        title: preview.title ?? "Live artifact",
+        spec: preview.spec,
+      });
+    } catch (error) {
+      reportClientEffectError("json_artifact.stream_preview_error", error, { messageId: preview.id });
+      return;
+    }
+
+    lastStreamingPreviewSignature = signature;
+    activeArtifact = upsert.artifact;
+    pendingArtifactIntent = null;
+
+    if (!streamingPreviewMountedIds.has(preview.id)) {
+      streamingPreviewMountedIds.add(preview.id);
+      logArtifactTelemetry({
+        source: "client",
+        event: "artifact.stream.preview_mounted",
+        artifactId: preview.id,
+        ...summarizeSpec(preview.spec),
+        ok: true,
+      });
     }
   });
 
@@ -537,10 +730,10 @@
     activeArtifactVersions = snapshot.versions;
   }
 
-  function persistJsonRenderArtifactSnapshot(snapshot: ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }, source: "agent" | "user-edit" | "system" = "agent"): void {
+  function persistJsonRenderArtifactSnapshot(snapshot: ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }, source: "agent" | "user-edit" | "system" = "agent"): Promise<boolean> {
     const sessionId = activeSessionId ?? snapshot.record.sessionId;
-    if (!sessionId) return;
-    void workspaceFetch("/api/artifact", {
+    if (!sessionId) return Promise.resolve(false);
+    const persistence = workspaceFetch("/api/artifact", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -563,13 +756,294 @@
         reason: source,
         ok: true,
       });
+      return true;
     }).catch((error) => {
       reportClientEffectError("artifact.persistence.error", error, {
         sessionId,
         root: snapshot.artifact.content.root,
         elementCount: Object.keys(snapshot.artifact.content.elements ?? {}).length,
       });
+      return false;
     });
+    activeArtifactPersistence = { artifactId: snapshot.artifact.id, promise: persistence };
+    return persistence;
+  }
+
+
+  function ensureActiveArtifactStateStore(): void {
+    if (!activeArtifact) {
+      activeArtifactStateStore = undefined;
+      activeArtifactStateStoreKey = null;
+      pendingActiveArtifactStateChanges = [];
+      clearActiveArtifactStateSaveTimer();
+      return;
+    }
+    const key = `${activeArtifact.id}:${activeArtifact.version}`;
+    if (activeArtifactStateStoreKey === key && activeArtifactStateStore) return;
+    activeArtifactStateStore = createJsonRenderStateStore(activeArtifact.content);
+    activeArtifactStateStoreKey = key;
+    pendingActiveArtifactStateChanges = [];
+    clearActiveArtifactStateSaveTimer();
+  }
+
+  function handleActiveArtifactStateChange(changes: JsonRenderStateChange[]): void {
+    if (!activeArtifact) return;
+    let payload: ReturnType<typeof buildJsonRenderStatePatchPayload>;
+    try {
+      payload = buildJsonRenderStatePatchPayload({
+        artifactId: activeArtifact.id,
+        baseVersion: activeArtifact.version,
+        changes,
+      });
+    } catch (error) {
+      reportClientEffectError("json_render.state_patch.invalid", error, {
+        sessionId: activeSessionId,
+        root: activeArtifact.content.root,
+        elementCount: Object.keys(activeArtifact.content.elements ?? {}).length,
+      });
+      return;
+    }
+
+    activeArtifact = {
+      ...activeArtifact,
+      content: applyJsonRenderStateChanges(activeArtifact.content, payload.changes),
+      updatedAt: new Date().toISOString(),
+    };
+    pendingActiveArtifactStateChanges = mergeStateChanges(pendingActiveArtifactStateChanges, payload.changes);
+    logArtifactTelemetry({
+      source: "client",
+      event: "json_render.state_patch.requested",
+      sessionId: activeSessionId ?? undefined,
+      artifactId: payload.artifactId,
+      artifactVersion: payload.baseVersion,
+      reason: payload.summary,
+      elementCount: payload.changes.length,
+      ok: true,
+    });
+    scheduleActiveArtifactStatePersistence();
+  }
+
+
+  type JsonRenderActionReceiptState = {
+    actionName: string;
+    ok: boolean;
+    status: "saved" | "submitted" | "preview_requested" | "approved" | "cancelled" | "host_executed" | "host_blocked" | "host_approval_required" | "error";
+    message: string;
+    commandId?: string | null;
+    hostAction?: {
+      actionKey: HostActionKey;
+      status: HostActionResult["status"];
+      policyMode: HostActionResult["policyMode"];
+      requestId: string;
+      targetId?: string;
+    } | null;
+    updatedAt: string;
+  };
+
+  function recordJsonRenderActionReceipt(receipt: JsonRenderActionReceiptState): void {
+    if (!activeArtifact || activeArtifact.kind !== "json-render") return;
+    const actionSegment = escapeJsonPointerSegment(receipt.actionName.replace(/[^a-zA-Z0-9_.:-]/g, "_"));
+    const changes: JsonRenderStateChange[] = [
+      { path: "/lastActionReceipt", value: receipt },
+      { path: `/actionReceipts/${actionSegment}`, value: receipt },
+    ];
+    const updates = Object.fromEntries(changes.map((change) => [change.path, change.value]));
+    // Keep the live StateStore and the persisted artifact patch queue in lockstep.
+    // StateStore.update makes the renderer respond immediately; the normal state
+    // patch path updates activeArtifact.content, queues persistence, and records
+    // telemetry. Do not choose one or the other for action receipts.
+    activeArtifactStateStore?.update(updates);
+    handleActiveArtifactStateChange(changes);
+  }
+
+  function createJsonRenderActionReceipt(input: {
+    actionName: string;
+    ok: boolean;
+    status: JsonRenderActionReceiptState["status"];
+    message: string;
+    commandId?: string | null;
+    hostActionResult?: HostActionResult | null;
+  }): JsonRenderActionReceiptState {
+    return {
+      actionName: input.actionName,
+      ok: input.ok,
+      status: input.status,
+      message: input.message,
+      commandId: input.commandId ?? input.hostActionResult?.receipt?.commandId ?? null,
+      hostAction: input.hostActionResult ? {
+        actionKey: input.hostActionResult.actionKey,
+        status: input.hostActionResult.status,
+        policyMode: input.hostActionResult.policyMode,
+        requestId: input.hostActionResult.requestId,
+        targetId: input.hostActionResult.receipt?.targetId,
+      } : null,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function receiptStatusForTrustedIntakeAction(actionName: TrustedIntakeControllerAction, ok: boolean): JsonRenderActionReceiptState["status"] {
+    if (!ok) return "error";
+    if (actionName === "saveDraft" || actionName === "editDraft") return "saved";
+    if (actionName === "submitToAgent" || actionName === "reviseWithAgent") return "submitted";
+    if (actionName === "requestApproval") return "preview_requested";
+    if (actionName === "cancelApproval") return "cancelled";
+    return "approved";
+  }
+
+  function receiptMessageForTrustedIntakeAction(actionName: TrustedIntakeControllerAction, ok: boolean): string {
+    if (!ok) return "Workflow action could not be completed. Check the visible blocker and retry.";
+    if (actionName === "saveDraft") return "Draft saved.";
+    if (actionName === "editDraft") return "Draft editing is active.";
+    if (actionName === "submitToAgent") return "Draft sent to the agent for the next question.";
+    if (actionName === "reviseWithAgent") return "Draft sent to the agent for targeted revision.";
+    if (actionName === "requestApproval") return "Approval preview requested. No write has run yet.";
+    if (actionName === "cancelApproval") return "Approval request cancelled. Draft remains saved.";
+    return "Approval request submitted to the trusted host. Host policy still gates the write.";
+  }
+
+  function mergeStateChanges(current: JsonRenderStateChange[], incoming: JsonRenderStateChange[]): JsonRenderStateChange[] {
+    const map = new Map<string, JsonRenderStateChange>();
+    for (const change of current) map.set(change.path, change);
+    for (const change of incoming) map.set(change.path, change);
+    return Array.from(map.values());
+  }
+
+  function markQuestionAnswerPersistFailure(params: Record<string, unknown>, message: string): void {
+    const questionId = typeof params.questionId === "string" && params.questionId.trim() ? params.questionId.trim() : null;
+    if (!questionId || !activeArtifact || activeArtifact.kind !== "json-render") return;
+    const changes: JsonRenderStateChange[] = [
+      { path: createQuestionErrorStatePath(questionId), value: message },
+      { path: createQuestionLifecycleStatePath(questionId), value: "error" },
+    ];
+    pendingActiveArtifactStateChanges = mergeStateChanges(pendingActiveArtifactStateChanges, changes);
+    activeArtifact = {
+      ...activeArtifact,
+      content: applyJsonRenderStateChanges(activeArtifact.content, changes),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function scheduleActiveArtifactStatePersistence(): void {
+    clearActiveArtifactStateSaveTimer();
+    activeArtifactStateSaveTimer = setTimeout(() => {
+      void persistActiveArtifactStatePatch();
+    }, 600);
+  }
+
+  function clearActiveArtifactStateSaveTimer(): void {
+    if (activeArtifactStateSaveTimer) {
+      clearTimeout(activeArtifactStateSaveTimer);
+      activeArtifactStateSaveTimer = null;
+    }
+  }
+
+  async function persistActiveArtifactStatePatch(): Promise<{ artifact: WorkspaceArtifactSnapshot; activeArtifactVersions: WorkspaceArtifactVersionSnapshot[] } | null> {
+    clearActiveArtifactStateSaveTimer();
+    const artifact = activeArtifact;
+    const changes = pendingActiveArtifactStateChanges;
+    if (!artifact || changes.length === 0) return null;
+
+    let payload: ReturnType<typeof buildJsonRenderStatePatchPayload>;
+    try {
+      payload = buildJsonRenderStatePatchPayload({
+        artifactId: artifact.id,
+        baseVersion: artifact.version,
+        changes,
+      });
+    } catch (error) {
+      pendingActiveArtifactStateChanges = [];
+      reportClientEffectError("json_render.state_patch.invalid", error, {
+        sessionId: activeSessionId,
+        root: artifact.content.root,
+        elementCount: Object.keys(artifact.content.elements ?? {}).length,
+      });
+      return null;
+    }
+
+    pendingActiveArtifactStateChanges = [];
+    try {
+      const response = await workspaceFetch(`/api/artifact/${encodeURIComponent(payload.artifactId)}/state`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 409) {
+        const body = await response.json().catch(() => null) as { latestVersion?: number; error?: string } | null;
+        logArtifactTelemetry({
+          source: "client",
+          event: "json_render.state_patch.conflict",
+          sessionId: activeSessionId ?? undefined,
+          artifactId: payload.artifactId,
+          artifactVersion: payload.baseVersion,
+          reason: body?.latestVersion ? `latest v${body.latestVersion}` : undefined,
+          ok: false,
+          error: body?.error ?? "Artifact version conflict",
+        });
+        if (activeSessionId) await switchSession(activeSessionId, { force: true });
+        return null;
+      }
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      const result = await response.json() as { artifact: WorkspaceArtifactSnapshot; activeArtifactVersions: WorkspaceArtifactVersionSnapshot[] };
+      applyPersistedArtifactStatePatch(result);
+      if (pendingActiveArtifactStateChanges.length > 0 && activeArtifact?.id === result.artifact.id) {
+        activeArtifact = {
+          ...activeArtifact,
+          content: applyJsonRenderStateChanges(activeArtifact.content, pendingActiveArtifactStateChanges),
+          updatedAt: new Date().toISOString(),
+        };
+        scheduleActiveArtifactStatePersistence();
+      }
+      logArtifactTelemetry({
+        source: "client",
+        event: "json_render.state_patch.persisted",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: result.artifact.id,
+        artifactVersion: result.artifact.version,
+        elementCount: payload.changes.length,
+        ok: true,
+      });
+      return result;
+    } catch (error) {
+      pendingActiveArtifactStateChanges = mergeStateChanges(pendingActiveArtifactStateChanges, payload.changes);
+      reportClientEffectError("json_render.state_patch.error", error, {
+        sessionId: activeSessionId,
+        root: artifact.content.root,
+        elementCount: Object.keys(artifact.content.elements ?? {}).length,
+      });
+      return null;
+    }
+  }
+
+  function applyPersistedArtifactStatePatch(result: { artifact: WorkspaceArtifactSnapshot; activeArtifactVersions: WorkspaceArtifactVersionSnapshot[] }): void {
+    const artifact = result.artifact;
+    const snapshot = artifactWarehouse.hydrateJsonRenderArtifact({
+      sessionId: artifact.session_id ?? activeSessionId,
+      artifact: {
+        id: artifact.id,
+        kind: "json-render",
+        title: artifact.title,
+        version: artifact.version,
+        content: artifact.content,
+        createdAt: artifact.created_at,
+        updatedAt: artifact.updated_at,
+      },
+      versions: result.activeArtifactVersions.map((version) => ({
+        versionId: version.id,
+        artifactId: version.artifact_id,
+        version: version.version_number,
+        payload: version.content,
+        source: version.source === "user" ? "user-edit" : version.source === "system" ? "system" : "agent",
+        createdAt: version.created_at,
+      })),
+    });
+    applyArtifactWarehouseSnapshot(snapshot);
+    if (activeArtifactStatus) {
+      activeArtifactStatus = {
+        ...activeArtifactStatus,
+        artifactVersion: snapshot.artifact.version,
+        updatedAt: snapshot.artifact.updatedAt,
+      };
+    }
   }
 
   function handleArtifactVersionChange(version: number): void {
@@ -622,19 +1096,6 @@
   }
 
 
-  function formatToolActivityDetail(toolType: string): string {
-    const slug = toolType.replace(/^tool-/, "");
-    if (slug === "createJsonArtifact") return "Creating artifact";
-    if (slug === "updateDocument") return "Updating document";
-    if (slug === "createDocument") return "Creating document";
-    if (slug === "readDocument") return "Reading document";
-    return slug
-      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-      .replace(/[-_]+/g, " ")
-      .trim()
-      .replace(/^./, (char) => char.toUpperCase()) || "Running tool";
-  }
-
   function createAgentActivityStatus(): AgentActivityStatus | null {
     if (!isStreaming) return null;
     const elapsedSeconds = streamStartedAt ? Math.max(0, Math.floor((activityClock - streamStartedAt) / 1000)) : 0;
@@ -642,11 +1103,15 @@
     const parts = snapshotDataParts(lastAssistant?.parts as DataPart[]);
     const latestTool = [...parts].reverse().find((part) => part.type?.startsWith("tool-")) as (DataPart & { state?: string }) | undefined;
 
-    if (latestTool?.state === "output-error") return { label: "Tool failed", detail: "Inspecting recovery path…", tone: "error" };
-    if (latestTool && latestTool.state !== "output-available" && latestTool.state !== "output-denied") {
-      return { label: "Calling tool", detail: formatToolActivityDetail(latestTool.type), tone: "tool" };
+    if (latestTool?.state === "output-error" || latestTool?.state === "output-denied") {
+      const activity = resolveToolActivity(latestTool.type, latestTool.state);
+      return { label: activity.label, detail: "Checking recovery path…", tone: "error" };
     }
-    if (parts.some((part) => part.type === "data-spec" || part.type === "tool-createJsonArtifact")) {
+    if (latestTool && latestTool.state !== "output-available") {
+      const activity = resolveToolActivity(latestTool.type, latestTool.state);
+      return { label: "Working", detail: activity.label, tone: "tool" };
+    }
+    if (parts.some((part) => part.type === "data-spec" || part.type === "tool-createJsonArtifact" || part.type === "tool-createBookingIntakeArtifact")) {
       return { label: "Preparing canvas", detail: "Promoting artifact view…", tone: "artifact" };
     }
     if (parts.some((part) => part.type === "text" && typeof part.text === "string" && part.text.trim())) {
@@ -674,7 +1139,7 @@
       sessionId: activeSessionId ?? undefined,
       runtimeStatus: conversation.status,
       mode: activity.tone ?? "neutral",
-      reason: activity.label,
+      reason: `${activity.tone ?? "neutral"}:${conversation.status}`,
       ok: true,
     });
   }
@@ -682,6 +1147,7 @@
   function getSubmitDisabledReason(message: string): AgentUiPageAssertions["submitDisabledReason"] {
     if (isStreaming) return "streaming";
     if (sessionRailBusy) return "session_loading";
+    if (!isWorkspaceHostContextReady()) return "missing_host_context";
     if (!activeSessionId) return "missing_session";
     if (!message.trim()) return "empty_prompt";
     return undefined;
@@ -692,16 +1158,26 @@
     const searchParams = new URLSearchParams(window.location.search);
     if (searchParams.get("smokeMockStream") !== "1") return {};
     const smokeRunId = searchParams.get("smokeRunId") ?? "agent-ui-smoke-local";
+    const smokeScenario = searchParams.get("smokeScenario");
     return {
       "x-sonik-agent-ui-smoke-stream": "true",
       "x-sonik-agent-ui-smoke-run-id": smokeRunId,
+      "x-sonik-agent-ui-smoke-persistence-mode": "auto",
+      ...(smokeScenario ? { "x-sonik-agent-ui-smoke-scenario": smokeScenario } : {}),
     };
   }
 
   async function workspaceFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+    if (!isWorkspaceHostContextReady()) {
+      sessionRailError = "Reconnect the embedded page so Sonik Chat can receive signed workspace context.";
+      requestHostPageContext("workspace_fetch_missing_signed_host_context");
+      logSessionTelemetry("workspace.fetch.blocked_missing_host_context", { ok: false, reason: "missing_signed_host_context" });
+      throw new Error("Workspace cloud runtime is not available. (missing-host-context)");
+    }
     const response = await fetch(input, {
       ...init,
       headers: {
+        ...createDevSmokeHeaders(),
         ...createWorkspaceRequestHeaders(),
         ...headersToRecord(init.headers),
       },
@@ -737,29 +1213,58 @@
   }
 
   function createWorkspaceRequestHeaders(): Record<string, string> {
-    const hostSession = hostPageContext?.hostSession;
-    const organizationId = hostSession?.organizationId ?? hostPageContext?.organizationId;
-    const authenticated = hostSession?.authenticated === true || hostPageContext?.authenticated === true;
+    const context = getSignedWorkspaceHostContext();
+    const hostSession = context?.hostSession;
+    const organizationId = hostSession?.organizationId ?? context?.organizationId;
+    const authenticated = hostSession?.authenticated === true || context?.authenticated === true;
     const userId = hostSession?.userId ?? hostSession?.principalId;
     if (!authenticated || !organizationId || !userId || !hostSession) return {};
     return {
       "x-sonik-agent-ui-host-context": encodeWorkspaceHostContextHeader({
         authenticated,
         organizationId,
-        scopes: hostPageContext?.scopes ?? hostSession.scopes ?? [],
-        signatureVersion: hostPageContext?.signatureVersion ?? null,
-        issuedAt: hostPageContext?.issuedAt ?? null,
-        expiresAt: hostPageContext?.expiresAt ?? null,
-        signature: hostPageContext?.signature ?? null,
-        hostSession: {
-          ...hostSession,
+        scopes: context?.scopes ?? hostSession.scopes ?? [],
+        signatureVersion: context?.signatureVersion ?? null,
+        issuedAt: context?.issuedAt ?? null,
+        expiresAt: context?.expiresAt ?? null,
+        signature: context?.signature ?? null,
+        hostSession: createSignedWorkspaceHostSession(hostSession, {
           authenticated,
           organizationId,
           userId,
-          principalId: hostSession.principalId ?? userId,
-        },
+        }),
       }),
     };
+  }
+
+  function createSignedWorkspaceHostSession(
+    hostSession: NonNullable<AgentHostMergedPageContext["hostSession"]>,
+    input: { authenticated: boolean; organizationId: string; userId: string },
+  ) {
+    // This object is HMAC-covered by the embedding host. Do not spread sanitized
+    // display-only fields (for example hostSession.theme) into the header: adding
+    // even a harmless null changes the stable JSON payload and makes the cloud
+    // runtime reject the session as missing-host-context.
+    return {
+      source: hostSession.source,
+      sessionId: hostSession.sessionId ?? null,
+      userId: input.userId,
+      principalId: hostSession.principalId ?? input.userId,
+      organizationId: input.organizationId,
+      authenticated: input.authenticated,
+      scopes: hostSession.scopes ?? [],
+      expiresAt: hostSession.expiresAt ?? null,
+      ...(hostSession.metadata ? { metadata: hostSession.metadata } : {}),
+    };
+  }
+
+  function getSignedWorkspaceHostContext(): AgentHostMergedPageContext | null {
+    return selectSignedWorkspaceHostContext({ current: hostPageContext, cached: lastSignedHostPageContext });
+  }
+
+  function isWorkspaceHostContextReady(): boolean {
+    if (!isEmbeddedHostContextExpected()) return true;
+    return Boolean(getSignedWorkspaceHostContext());
   }
 
   function encodeWorkspaceHostContextHeader(value: unknown): string {
@@ -785,8 +1290,7 @@
   }
 
   function isEmbeddedHostContextExpected(): boolean {
-    if (typeof window === "undefined") return false;
-    return new URLSearchParams(window.location.search).has("agentUiHostOrigin");
+    return embeddedHostContextExpected;
   }
 
   function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {
@@ -872,6 +1376,8 @@
       return;
     }
     hostPageContext = nextContext;
+    lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext });
+    applyEmbeddedThemeFromHost(nextContext.theme ?? embeddedUrlTheme);
     logArtifactTelemetry({
       source: "client",
       event: "host.page_context.updated",
@@ -886,7 +1392,33 @@
     maybeBootstrapSessions("host_page_context_updated");
   }
 
+  function createLocalHostUiTargetRegistry() {
+    const activeBookingContext = hostPageContext?.activeEntity && (
+      hostPageContext.activeEntity.type === "booking_context"
+      || hostPageContext.activeEntity.type === "booking-context"
+      || hostPageContext.activeEntity.type === "bookable_context"
+      || hostPageContext.activeEntity.type === "booking"
+    )
+      ? { id: hostPageContext.activeEntity.id, label: hostPageContext.activeEntity.label ?? hostPageContext.title ?? "Active booking context" }
+      : undefined;
+    return createDefaultHostUiTargetRegistry({
+      provider: "sonik-agent-ui-local",
+      route: hostPageContext?.route ?? "/",
+      surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
+      activeArtifactId: activeArtifact?.id,
+      activeBookingContext,
+    });
+  }
+
   function createPageContextSnapshot(): AgentUiPageContextSnapshot {
+    const workflow = createAgentWorkflowSnapshot({
+      activeArtifact,
+      pendingChangeCount: pendingActiveArtifactStateChanges.length,
+      isStreaming,
+      approvalReadiness: getActiveIntakeApprovalReadiness(),
+    });
+    const workflowVisibleErrors = workflow.visibleErrors.map((error) => error.message);
+    const localTargetRegistry = createLocalHostUiTargetRegistry();
     const localContext: AgentUiPageContextSnapshot = {
       route: "/",
       surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
@@ -900,8 +1432,29 @@
       artifactType: activeDocument?.language ?? (activeArtifact ? "json-render" : null),
       conversationStatus: conversation.status,
       messageCount: conversation.messages.length,
-      visibleActions: ["theme-picker", "workspace-docs", "start-over", "createSession", "submitPrompt", "stop", "clearChat", "clearArtifact", "openWorkspaceDocument"],
+      visibleActions: [
+        ...(isEmbeddedHostContextExpected() ? [] : ["theme-picker"]),
+        "workspace-docs",
+        "start-over",
+        "createSession",
+        "submitPrompt",
+        "stop",
+        "clearChat",
+        "clearArtifact",
+        "reloadSession",
+        "openWorkspaceDocument",
+        "submitAnswer",
+        "markUnknown",
+        "saveDraft",
+        "requestApproval",
+        "approveAndRun",
+        "cancelApproval",
+      ],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
+      visibleErrors: workflowVisibleErrors.length > 0 ? workflowVisibleErrors : undefined,
+      workflow,
+      hostUiTargets: localTargetRegistry.targets,
+      hostUiTargetRegistry: localTargetRegistry,
       commandFamilies: documentEditorOpen ? ["local-ui", "document", "artifact"] : activeArtifact ? ["local-ui", "artifact"] : ["local-ui", "discovery"],
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
       at: new Date().toISOString(),
@@ -943,13 +1496,135 @@
     return $state.snapshot(pageAssertions) as AgentUiPageAssertions;
   }
 
-  function semanticActionResult(ok: boolean, message?: string, disabledReason?: string): AgentUiSemanticActionResult {
+  function semanticActionResult(ok: boolean, message?: string, disabledReason?: string, extras: Partial<AgentUiSemanticActionResult> = {}): AgentUiSemanticActionResult {
     return {
       ok,
       state: snapshotAssertions(),
       message,
       disabledReason,
+      activeSessionId,
+      ...extras,
     };
+  }
+
+  async function submitPageControlQuestionAnswer(input: { questionId?: string; value?: unknown; skipped?: boolean }): Promise<AgentUiSemanticActionResult> {
+    if (isStreaming) return semanticActionResult(false, "Wait for the current assistant response to finish before answering.", "streaming");
+    if (!activeArtifact || activeArtifact.kind !== "json-render") {
+      return semanticActionResult(false, "Open a workflow artifact before answering a question.", "missing_active_artifact");
+    }
+    const questionId = typeof input.questionId === "string" && input.questionId.trim() ? input.questionId.trim() : undefined;
+    if (!questionId) return semanticActionResult(false, "Question id is required.", "missing_question_id");
+    let staged: ReturnType<typeof createQuestionAnswerStateChanges>;
+    try {
+      staged = createQuestionAnswerStateChanges({
+        artifact: activeArtifact,
+        questionId,
+        value: input.value,
+        skipped: input.skipped === true,
+        sessionId: activeSessionId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return semanticActionResult(false, message, "invalid_question_answer");
+    }
+    activeArtifact = {
+      ...activeArtifact,
+      content: applyJsonRenderStateChanges(activeArtifact.content, staged.changes),
+      updatedAt: new Date().toISOString(),
+    };
+    pendingActiveArtifactStateChanges = mergeStateChanges(pendingActiveArtifactStateChanges, staged.changes);
+    const submitted = await handleSubmitAnswerAction(staged.actionParams);
+    await tick();
+    if (!submitted) return semanticActionResult(false, "Question answer state could not be saved or submitted.", "question_answer_not_saved");
+    return semanticActionResult(true, input.skipped ? "Question marked unknown." : "Question answer submitted.");
+  }
+
+  async function runPageControlIntakeAction(actionName: TrustedIntakeControllerAction, successMessage: string): Promise<AgentUiSemanticActionResult> {
+    if (isStreaming) return semanticActionResult(false, "Wait for the current assistant response to finish first.", "streaming");
+    if (!activeArtifact || activeArtifact.kind !== "json-render") {
+      return semanticActionResult(false, "Open a workflow artifact first.", "missing_active_artifact");
+    }
+    const beforeMessageCount = conversation.messages.length;
+    const accepted = await handleTrustedIntakeControllerAction(actionName, { source: "page_control", commandId: "booking.create.context" });
+    await tick();
+    if (!accepted) return semanticActionResult(false, "The workflow action could not save the active artifact state.", "controller_action_not_saved");
+    if (!["saveDraft", "editDraft"].includes(actionName) && conversation.messages.length <= beforeMessageCount) {
+      return semanticActionResult(false, "The workflow action was accepted but did not append a trusted controller turn.", "controller_turn_not_appended");
+    }
+    return semanticActionResult(true, successMessage);
+  }
+
+  type HostActionSemanticState = { hostActionResult?: HostActionResult } & AgentUiPageAssertions;
+
+  async function runPageControlHostAction(input: {
+    actionKey?: string;
+    targetId?: string;
+    targetInstanceId?: string;
+    entityRef?: unknown;
+    input?: unknown;
+    intentLabel?: string;
+  }): Promise<AgentUiSemanticActionResult<HostActionSemanticState>> {
+    const actionKey = parseHostActionKey(input.actionKey);
+    if (!actionKey) {
+      return semanticHostActionResult(null, false, "Host action key is required.", "invalid_host_action_key");
+    }
+    const entityRef = parseHostActionEntityRef(input.entityRef);
+    const result = await requestAgentHostAction({
+      actionKey,
+      targetId: typeof input.targetId === "string" && input.targetId.trim() ? input.targetId.trim() : undefined,
+      targetInstanceId: typeof input.targetInstanceId === "string" && input.targetInstanceId.trim() ? input.targetInstanceId.trim() : undefined,
+      entityRef,
+      input: input.input,
+      intentLabel: input.intentLabel,
+    }, {
+      hostOrigin: new URLSearchParams(window.location.search).get("agentUiHostOrigin"),
+      window,
+      timeoutMs: 5_000,
+    });
+    return semanticHostActionResult(result, result.ok, result.message ?? hostActionStatusMessage(result), result.disabledReason);
+  }
+
+  function semanticHostActionResult(
+    result: HostActionResult | null,
+    ok: boolean,
+    message?: string,
+    disabledReason?: string,
+  ): AgentUiSemanticActionResult<HostActionSemanticState> {
+    const state = {
+      ...snapshotAssertions(),
+      ...(result ? { hostActionResult: result } : {}),
+    };
+    return {
+      ok,
+      state,
+      message,
+      disabledReason,
+      activeSessionId,
+    };
+  }
+
+  function hostActionStatusMessage(result: HostActionResult): string {
+    if (result.status === "approval_required") return "Host approval is required before this action can run.";
+    if (result.status === "blocked") return "The host blocked this action.";
+    if (result.status === "requires_prerequisite") return "This action needs another visible prerequisite first.";
+    if (result.status === "invalid_request") return "The host action request was invalid.";
+    if (result.status === "unavailable") return "The embedding host action channel is unavailable.";
+    return "Host action executed.";
+  }
+
+  function parseHostActionKey(value: unknown): HostActionKey | null {
+    const parsed = hostActionKeySchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  }
+
+  function parseHostActionEntityRef(value: unknown): HostUiTargetEntityRef | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    const kind = typeof record.kind === "string" && record.kind.trim() ? record.kind.trim() : undefined;
+    const id = typeof record.id === "string" && record.id.trim() ? record.id.trim() : undefined;
+    const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined;
+    if (!kind || !id) return undefined;
+    return { kind, id, ...(label ? { label } : {}) };
   }
 
   /** Runtime-safe host/page automation seam: snapshot reads + semantic actions only. */
@@ -965,17 +1640,35 @@
       actions: {
         createSession: async () => {
           if (isStreaming) return semanticActionResult(false, "Stop the current stream before creating a new session.", "streaming");
-          await createSession({ force: true });
-          if (!activeSessionId) return semanticActionResult(false, sessionRailError || "Session was not created.", "session_unavailable");
-          if (sessionRailError) return semanticActionResult(false, sessionRailError, "session_error");
-          return semanticActionResult(true, "New session created.");
+          const session = await createSession({ force: true });
+          const sessionId = session?.id ?? activeSessionId;
+          if (!sessionId) return semanticActionResult(false, sessionRailError || "Session was not created.", "session_unavailable");
+          if (activeSessionId !== sessionId) return semanticActionResult(false, `Fresh session selection drifted to ${activeSessionId ?? "none"}.`, "session_selection_drift", { expectedSessionId: sessionId });
+          if (sessionRailError) return semanticActionResult(false, sessionRailError, "session_error", { expectedSessionId: sessionId });
+          return semanticActionResult(true, "New session created.", undefined, { expectedSessionId: sessionId });
         },
-        submitPrompt: ({ prompt }) => {
+        submitPrompt: async ({ prompt, sessionId }) => {
+          const expectedSessionId = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : undefined;
+          if (expectedSessionId && activeSessionId !== expectedSessionId) {
+            const switched = await switchSession(expectedSessionId, { force: true });
+            if (!switched || activeSessionId !== expectedSessionId) {
+              return semanticActionResult(false, `Active session mismatch: expected ${expectedSessionId}, got ${activeSessionId ?? "none"}.`, "active_session_mismatch", { expectedSessionId });
+            }
+          }
           const message = typeof prompt === "string" ? prompt : "";
           const disabledReason = getSubmitDisabledReason(message);
-          if (disabledReason) return semanticActionResult(false, `Prompt cannot be submitted: ${disabledReason}.`, disabledReason);
+          if (disabledReason) return semanticActionResult(false, `Prompt cannot be submitted: ${disabledReason}.`, disabledReason, { expectedSessionId });
+          const beforeMessageCount = conversation.messages.length;
           handleSubmit(message);
-          return semanticActionResult(true, "Prompt submitted.");
+          await tick();
+          await new Promise((resolve) => window.setTimeout(resolve, 0));
+          if (conversation.messages.length <= beforeMessageCount) {
+            return semanticActionResult(false, "Prompt was accepted by page control but did not append a user turn.", "submit_not_appended", { expectedSessionId });
+          }
+          if (expectedSessionId && activeSessionId !== expectedSessionId) {
+            return semanticActionResult(false, `Prompt submitted to unstable session: expected ${expectedSessionId}, got ${activeSessionId ?? "none"}.`, "active_session_mismatch", { expectedSessionId });
+          }
+          return semanticActionResult(true, "Prompt submitted.", undefined, { expectedSessionId });
         },
         stop: () => {
           handleStop();
@@ -989,9 +1682,49 @@
           handleClearArtifact();
           return semanticActionResult(true, "Artifact cleared.");
         },
+        reloadSession: async () => {
+          if (isStreaming) return semanticActionResult(false, "Stop the current stream before reloading the active session.", "streaming");
+          if (!activeSessionId) return semanticActionResult(false, "No active session is available to reload.", "missing_session");
+          const expectedSessionId = activeSessionId;
+          const reloaded = await switchSession(expectedSessionId, { force: true });
+          if (!reloaded || activeSessionId !== expectedSessionId) {
+            return semanticActionResult(false, `Active session reload drifted: expected ${expectedSessionId}, got ${activeSessionId ?? "none"}.`, "active_session_mismatch", { expectedSessionId });
+          }
+          return semanticActionResult(true, "Active session reloaded.", undefined, { expectedSessionId });
+        },
         openWorkspaceDocument: async () => {
           await openDocumentEditor();
           return semanticActionResult(true, "Workspace document opened.");
+        },
+        submitAnswer: async ({ questionId, value }) => {
+          return submitPageControlQuestionAnswer({ questionId, value, skipped: false });
+        },
+        markUnknown: async ({ questionId }) => {
+          return submitPageControlQuestionAnswer({ questionId, skipped: true });
+        },
+        saveDraft: async () => {
+          return runPageControlIntakeAction("saveDraft", "Draft saved.");
+        },
+        requestApproval: async () => {
+          return runPageControlIntakeAction("requestApproval", "Approval preview requested.");
+        },
+        approveAndRun: async () => {
+          return runPageControlIntakeAction("approveAndRun", "Approval run requested through trusted host workflow.");
+        },
+        cancelApproval: async () => {
+          return runPageControlIntakeAction("cancelApproval", "Approval request cancelled.");
+        },
+        requestHostAction: async (input) => {
+          return runPageControlHostAction(input ?? {});
+        },
+        openCanvas: async () => {
+          return runPageControlHostAction({ actionKey: "canvas.open", intentLabel: "Open the Agent UI canvas." });
+        },
+        highlightTarget: async ({ targetId, targetInstanceId, entityRef }) => {
+          return runPageControlHostAction({ actionKey: "tour.highlight", targetId, targetInstanceId, entityRef, intentLabel: "Highlight a semantic host UI target." });
+        },
+        requestApprovalPreview: async (input = {}) => {
+          return runPageControlHostAction({ actionKey: "approval.requestPreview", targetId: input.targetId, targetInstanceId: input.targetInstanceId, entityRef: input.entityRef, intentLabel: "Request approval preview for a command-backed action." });
         },
       },
     };
@@ -1028,6 +1761,8 @@
 
   function applyEmbedUrlOptions(): void {
     const params = new URLSearchParams(window.location.search);
+    embeddedHostContextExpected = params.has("agentUiHostOrigin");
+    embeddedUrlTheme = params.get("theme");
     const nextIntent = normalizeAgentEmbedIntent({
       embedMode: params.get("embedMode"),
       agentUiMode: params.get("agentUiMode"),
@@ -1036,6 +1771,12 @@
     });
     embedMode = nextIntent.mode;
     embedRailMode = nextIntent.railMode;
+    applyEmbeddedThemeFromHost(embeddedUrlTheme);
+  }
+
+  function applyEmbeddedThemeFromHost(hostTheme?: string | null): void {
+    if (!isEmbeddedHostContextExpected()) return;
+    applyEmbeddedThemeSetting({ hostTheme });
   }
 
   function installDevLongTaskTelemetry(): (() => void) | undefined {
@@ -1086,6 +1827,8 @@
         }
       }, 1_500);
     }
+    void refreshAgentModelCatalog();
+    void loadAgentSkillPromptDefaults();
     return () => {
       stopLongTaskTelemetry?.();
       window.clearInterval(activityTimer);
@@ -1114,6 +1857,11 @@
     syncDevPageContext("state_changed");
   });
 
+
+  $effect(() => {
+    ensureActiveArtifactStateStore();
+  });
+
   $effect(() => {
     if (!activeSessionId) return;
     if (isStreaming) return;
@@ -1123,6 +1871,11 @@
   });
 
   function maybeBootstrapSessions(reason: string): void {
+    if (!isWorkspaceHostContextReady()) {
+      requestHostPageContext(`session_bootstrap_${reason}`);
+      logSessionTelemetry("session.bootstrap.waiting_for_signed_host_context", { ok: false, reason });
+      return;
+    }
     const hostPageKey = createHostPageContextKey();
     const bootstrapKey = hostPageKey ?? (isEmbeddedHostContextExpected() ? null : "standalone");
     if (!bootstrapKey) return;
@@ -1135,7 +1888,7 @@
     logSessionTelemetry("session.bootstrap.start", { reason, mode: hostPageKey ? "embedded-page-context" : "standalone" });
     sessionBootstrapPromise = initializeSessions(reason)
       .catch((error) => {
-        sessionRailError = error instanceof Error ? error.message : String(error);
+        sessionRailError = friendlySessionError("We couldn't load your chats.", error);
         logSessionTelemetry("session.bootstrap.error", { ok: false, error: sessionRailError, reason });
       })
       .finally(() => {
@@ -1144,11 +1897,25 @@
   }
 
   async function initializeSessions(reason = "manual"): Promise<void> {
+    const bootstrapRevision = sessionSelectionRevision;
     await loadSessions();
+    if (sessionSelectionRevision !== bootstrapRevision || activeSessionId) {
+      logSessionTelemetry("session.bootstrap.superseded", { sessionId: activeSessionId, reason });
+      return;
+    }
+    if (isEmbeddedHostContextExpected()) {
+      logSessionTelemetry("session.bootstrap.embedded_fresh_session", { reason, mode: "embedded_new_chat" });
+      await createSession({ force: true });
+      return;
+    }
     const firstSession = sessions[0];
     if (firstSession) {
       await switchSession(firstSession.id, { force: true });
       logSessionTelemetry("session.bootstrap.success", { sessionId: firstSession.id, reason });
+      return;
+    }
+    if (sessionSelectionRevision !== bootstrapRevision || activeSessionId) {
+      logSessionTelemetry("session.bootstrap.superseded", { sessionId: activeSessionId, reason });
       return;
     }
     await createSession({ force: true });
@@ -1162,7 +1929,7 @@
       sessions = (await response.json()) as WorkspaceSessionSummary[];
       void loadArchivedSessionCount();
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't load your chats.", error);
     }
   }
 
@@ -1170,7 +1937,8 @@
     try {
       const response = await workspaceFetch("/api/sessions?archived=true");
       if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
-      archivedSessionCount = ((await response.json()) as WorkspaceSessionSummary[]).length;
+      archivedSessions = (await response.json()) as WorkspaceSessionSummary[];
+      archivedSessionCount = archivedSessions.length;
     } catch (error) {
       logSessionTelemetry("session.archive_count.error", {
         ok: false,
@@ -1191,7 +1959,7 @@
     });
   }
 
-  function reportClientEffectError(event: string, error: unknown, input: { sessionId?: string | null; messageId?: string; documentId?: string; documentVersion?: number; root?: string; elementCount?: number } = {}): void {
+  function reportClientEffectError(event: string, error: unknown, input: { sessionId?: string | null; messageId?: string; documentId?: string; documentVersion?: number; root?: string; elementCount?: number; artifactId?: string; artifactVersion?: number; actionName?: string } = {}): void {
     logArtifactTelemetry({
       source: "client",
       event,
@@ -1199,6 +1967,9 @@
       messageId: input.messageId,
       documentId: input.documentId,
       documentVersion: input.documentVersion,
+      artifactId: input.artifactId,
+      artifactVersion: input.artifactVersion,
+      reason: input.actionName,
       root: input.root,
       elementCount: input.elementCount,
       ok: false,
@@ -1206,12 +1977,19 @@
     });
   }
 
-  async function createSession({ force = false }: { force?: boolean } = {}): Promise<void> {
+  async function createSession({ force = false }: { force?: boolean } = {}): Promise<WorkspaceSessionSummary | null> {
     if (isStreaming) {
       sessionRailError = "Stop the current stream before creating a new session.";
-      return;
+      return null;
     }
-    if (sessionRailBusy && !force) return;
+    if (!isWorkspaceHostContextReady()) {
+      sessionRailError = "Waiting for signed host context from the embedded page.";
+      requestHostPageContext("session_create_waiting_for_signed_host_context");
+      logSessionTelemetry("session.create.waiting_for_signed_host_context", { ok: false, reason: "missing_signed_host_context" });
+      return null;
+    }
+    if (sessionRailBusy && !force) return null;
+    const selectionRevision = ++sessionSelectionRevision;
     sessionRailBusy = true;
     sessionRailError = null;
     try {
@@ -1224,23 +2002,34 @@
       if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
       const session = (await response.json()) as WorkspaceSessionSummary;
       await loadSessions();
-      await switchSession(session.id, { force: true });
+      if (selectionRevision !== sessionSelectionRevision) {
+        logSessionTelemetry("session.create.superseded", { sessionId: session.id, mode: session.mode });
+        return null;
+      }
+      const switched = await switchSession(session.id, { force: true });
+      if (!switched || activeSessionId !== session.id) {
+        logSessionTelemetry("session.create.selection_error", { sessionId: session.id, ok: false, reason: activeSessionId ?? "none" });
+        return null;
+      }
       logSessionTelemetry("session.create.success", { sessionId: session.id, mode: session.mode });
+      return session;
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't start a new chat.", error);
       logSessionTelemetry("session.create.error", { ok: false, error: sessionRailError });
+      return null;
     } finally {
       sessionRailBusy = false;
     }
   }
 
-  async function switchSession(sessionId: string, { force = false }: { force?: boolean } = {}): Promise<void> {
+  async function switchSession(sessionId: string, { force = false }: { force?: boolean } = {}): Promise<boolean> {
     if (isStreaming) {
       sessionRailError = "Stop the current stream before switching sessions.";
-      return;
+      return false;
     }
-    if (sessionId === activeSessionId && conversation.messages.length > 0) return;
-    if (sessionRailBusy && !force) return;
+    if (!force && sessionId === activeSessionId && conversation.messages.length > 0) return true;
+    if (sessionRailBusy && !force) return false;
+    const selectionRevision = ++sessionSelectionRevision;
     sessionRailBusy = true;
     sessionRailError = null;
     try {
@@ -1248,16 +2037,58 @@
       const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}`);
       if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
       const detail = (await response.json()) as WorkspaceSessionDetail;
+      if (selectionRevision !== sessionSelectionRevision) {
+        logSessionTelemetry("session.switch.superseded", { sessionId, mode: detail.session.mode });
+        return false;
+      }
       activeSessionId = detail.session.id;
       sessions = upsertSessionSummary(sessions, detail.session);
       hydrateWorkspaceSession(detail);
       logSessionTelemetry("session.switch.success", { sessionId: detail.session.id, mode: detail.session.mode });
+      return true;
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't open that chat.", error);
       logSessionTelemetry("session.switch.error", { sessionId, ok: false, error: sessionRailError });
+      return false;
     } finally {
       sessionRailBusy = false;
     }
+  }
+
+  async function refreshActiveSessionRunState(reason: string): Promise<void> {
+    const sessionId = activeSessionId;
+    if (!sessionId) return;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}`);
+        if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+        const detail = (await response.json()) as WorkspaceSessionDetail;
+        if (activeSessionId !== sessionId) return;
+
+        sessions = upsertSessionSummary(sessions, detail.session);
+        reattachRunState(detail);
+        rehydrateRunContextState(detail);
+
+        const latestRun = detail.runs?.at(-1);
+        if (!latestRun || latestRun.status !== "running" || latestRun.resumable) {
+          logSessionTelemetry("session.run.refresh", { sessionId, reason });
+          return;
+        }
+      } catch (error) {
+        logSessionTelemetry("session.run.refresh_error", {
+          sessionId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+          reason,
+        });
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    logSessionTelemetry("session.run.refresh_timeout", { sessionId, ok: false, reason });
   }
 
   async function archiveSession(sessionId: string): Promise<void> {
@@ -1283,7 +2114,7 @@
       }
       logSessionTelemetry("session.archive.success", { sessionId, reason: "hidden_from_active_recents" });
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't archive that chat.", error);
       logSessionTelemetry("session.archive.error", { sessionId, ok: false, error: sessionRailError });
     } finally {
       sessionRailBusy = false;
@@ -1317,8 +2148,46 @@
       }
       logSessionTelemetry("session.delete.success", { sessionId });
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't delete that chat.", error);
       logSessionTelemetry("session.delete.error", { sessionId, ok: false, error: sessionRailError });
+    } finally {
+      sessionRailBusy = false;
+    }
+  }
+
+  async function toggleSessionImportant(sessionId: string, important: boolean): Promise<void> {
+    if (sessionRailBusy) return;
+    sessionRailBusy = true;
+    sessionRailError = null;
+    try {
+      const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}/important`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ important }),
+      });
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      await loadSessions();
+      logSessionTelemetry("session.important.success", { sessionId, reason: important ? "pinned" : "unpinned" });
+    } catch (error) {
+      sessionRailError = friendlySessionError(important ? "We couldn't pin that chat." : "We couldn't unpin that chat.", error);
+      logSessionTelemetry("session.important.error", { sessionId, ok: false, error: sessionRailError });
+    } finally {
+      sessionRailBusy = false;
+    }
+  }
+
+  async function restoreSession(sessionId: string): Promise<void> {
+    if (sessionRailBusy) return;
+    sessionRailBusy = true;
+    sessionRailError = null;
+    try {
+      const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}/unarchive`, { method: "POST" });
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      await loadSessions();
+      logSessionTelemetry("session.unarchive.success", { sessionId });
+    } catch (error) {
+      sessionRailError = friendlySessionError("We couldn't restore that chat.", error);
+      logSessionTelemetry("session.unarchive.error", { sessionId, ok: false, error: sessionRailError });
     } finally {
       sessionRailBusy = false;
     }
@@ -1338,7 +2207,7 @@
       sessions = upsertSessionSummary(sessions, session);
       logSessionTelemetry("session.rename.success", { sessionId: session.id });
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't rename that chat.", error);
       logSessionTelemetry("session.rename.error", { sessionId, ok: false, error: sessionRailError });
     }
   }
@@ -1367,6 +2236,13 @@
       parts: normalizePersistedParts(message),
     })) as typeof conversation.messages;
     persistedMessageIds = new SvelteSet(detail.messages.map((message) => message.id));
+    reattachRunState(detail);
+    reportedToolErrorKeys = new SvelteSet(collectToolOutputErrorKeys(conversation.messages));
+    rehydrateRunContextState(detail);
+    // Entering a session restarts its per-session analytics turn sequence.
+    analyticsTurnIndex = 0;
+    pendingAnalyticsEntryFrom = "composer";
+    pendingAnalyticsHints = null;
     activeDocument = detail.activeDocument;
     documentSeed = detail.activeDocument;
     documentPreferredView = detail.activeDocument ? inferPreferredDocumentView(detail.activeDocument.language) : "auto";
@@ -1390,6 +2266,70 @@
     pendingDocumentSnapshot = null;
     lastPersistedDocumentSignature = detail.activeDocument ? createDocumentSnapshotSignature(detail.activeDocument) : "";
   }
+
+  // Reattach a persisted run after reload: a non-succeeded latest run may carry
+  // a rebuilt assistant message (from its event log) that the client never got
+  // to persist because the stream was interrupted; a resumable run also drives
+  // the Continue affordance.
+  function reattachRunState(detail: WorkspaceSessionDetail): void {
+    resumableRun = null;
+    const reattach = detail.reattach;
+    if (!reattach?.run || reattach.run.status === "succeeded") return;
+
+    const rebuilt = reattach.message;
+    const runCount = detail.runs?.length ?? 0;
+    const localAssistantCount = conversation.messages.filter((message) => message.role === "assistant").length;
+    const localAssistantTurnExists = runCount > 0 && localAssistantCount >= runCount;
+    if (rebuilt && rebuilt.parts.length > 0 && !localAssistantTurnExists && !persistedMessageIds.has(rebuilt.id)) {
+      conversation.messages = [
+        ...conversation.messages,
+        { id: rebuilt.id, role: "assistant", parts: snapshotDataParts(rebuilt.parts) },
+      ] as typeof conversation.messages;
+      // The reattached message is a view of an unfinished run, not a new turn to
+      // persist — mark it so the persist effect leaves it alone.
+      persistedMessageIds.add(rebuilt.id);
+    }
+
+    if (reattach.run.resumable) {
+      resumableRun = reattach.run;
+      logSessionTelemetry("session.run.reattached", {
+        sessionId: detail.session.id,
+        reason: reattach.run.error_code ?? reattach.run.status,
+      });
+    }
+  }
+
+  // Restore composer context + per-turn provenance from persisted runs on reload.
+  // The most recent run's persisted selection re-seeds the composer so removed
+  // chips stay removed (its dismissedAutoSeedIds survive); each run's selection
+  // is paired to its user turn (runs and user messages are 1:1, both ordered) for
+  // historical provenance.
+  function rehydrateRunContextState(detail: WorkspaceSessionDetail): void {
+    turnContextByMessageId.clear();
+    const runs = detail.runs ?? [];
+    const userMessageIds = detail.messages.filter((message) => message.role === "user").map((message) => message.id);
+    runs.forEach((run, index) => {
+      const items = (run.context_selection?.items ?? []) as AgentContextItem[];
+      const userId = userMessageIds[index];
+      if (userId && items.length > 0) turnContextByMessageId.set(userId, items);
+    });
+    const latest = [...runs].reverse().find((run) => run.context_selection);
+    runContextSelection = latest?.context_selection
+      ? parseAgentRunContextSelection(latest.context_selection) ?? createEmptyAgentRunContextSelection()
+      : createEmptyAgentRunContextSelection();
+  }
+
+  const runRecovery = $derived.by(() => {
+    if (!resumableRun) return null;
+    const code = isRunErrorCode(resumableRun.error_code) ? resumableRun.error_code : null;
+    const affordance = describeRunError(code);
+    return {
+      title: affordance.title,
+      guidance: affordance.guidance,
+      actionLabel: affordance.actionLabel,
+      canContinue: affordance.resumable && resumableRun.resumable,
+    };
+  });
 
   function hydrateArtifactState(detail: WorkspaceSessionDetail): (ArtifactWarehouseSnapshot<Spec> & { artifact: JsonRenderArtifact }) | null {
     const activeArtifactRecord = detail.artifactState?.activeArtifact;
@@ -1463,7 +2403,7 @@
       lastPersistStatus = "success";
       logSessionTelemetry("session.messages.persist_success", { sessionId, reason: `${messagesToPersist.length} message(s)` });
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't save your latest messages.", error);
       lastPersistStatus = "error";
       logSessionTelemetry("session.messages.persist_error", {
         sessionId,
@@ -1490,7 +2430,7 @@
         await persistPendingDocumentSnapshots();
       } catch (error) {
         failed = true;
-        sessionRailError = error instanceof Error ? error.message : String(error);
+        sessionRailError = friendlySessionError("We couldn't save your document changes.", error);
         throw error;
       } finally {
         documentPersistPromise = null;
@@ -1505,7 +2445,7 @@
       await flushPendingDocumentPersistence();
       return true;
     } catch (error) {
-      sessionRailError = error instanceof Error ? error.message : String(error);
+      sessionRailError = friendlySessionError("We couldn't save your document changes.", error);
       return false;
     }
   }
@@ -1574,51 +2514,211 @@
   }
 
   // =============================================================================
-  // Suggestions
+  // Workflow Suggestions
   // =============================================================================
 
-  const SUGGESTIONS = [
-    {
-      label: "Weather comparison",
-      prompt: "Compare the weather in New York, London, and Tokyo",
-    },
-    {
-      label: "GitHub repo stats",
-      prompt: "Show me stats for the vercel/next.js and vercel/ai GitHub repos",
-    },
-    {
-      label: "Crypto dashboard",
-      prompt: "Build a crypto dashboard for Bitcoin, Ethereum, and Solana",
-    },
-    {
-      label: "Hacker News top stories",
-      prompt: "Show me the top 15 Hacker News stories right now",
-    },
-  ];
+  const workflowSuggestions = $derived(createWorkflowSuggestions(createPageContextSnapshot()));
+  const agentSettingsToolFamilies = $derived(AGENT_TOOL_FAMILY_OPTIONS.map((family) => ({
+    ...family,
+    mode: agentToolPermissionModes[family.id] ?? family.defaultMode,
+  })));
 
   // =============================================================================
-  // Tool Labels
+  // Composer Context Selection
   // =============================================================================
 
-  const TOOL_LABELS: Record<string, [string, string]> = {
-    getWeather: ["Getting weather data", "Got weather data"],
-    getGitHubRepo: ["Fetching GitHub repo", "Fetched GitHub repo"],
-    getGitHubPullRequests: ["Fetching pull requests", "Fetched pull requests"],
-    getCryptoPrice: ["Looking up crypto price", "Looked up crypto price"],
-    getCryptoPriceHistory: ["Fetching price history", "Fetched price history"],
-    getHackerNewsTop: ["Loading Hacker News", "Loaded Hacker News"],
-    webSearch: ["Searching the web", "Searched the web"],
-    createJsonArtifact: ["Creating artifact", "Created artifact"],
-    createDocumentArtifact: ["Creating document", "Created document"],
-    updateDocumentArtifact: ["Updating document", "Updated document"],
-    readActiveDocument: ["Reading document", "Read document"],
-    readDocumentArtifact: ["Reading document", "Read document"],
-    listAvailableTools: ["Reading tool manifest", "Read tool manifest"],
-  };
+  // Auto-seed candidates (current page + active document) and the full attachable
+  // catalog for the plus menu, derived from live host/page + workspace state.
+  const contextCandidates = $derived(deriveAgentContextCandidates({
+    pageContext: createPageContextSnapshot(),
+    activeDocument: activeDocument ? { id: activeDocument.id, title: activeDocument.title, language: activeDocument.language } : null,
+    activeArtifact: activeArtifact ? { id: activeArtifact.id, title: activeArtifact.title } : null,
+  }));
+
+  // Reconcile fresh seeds into the selection whenever host/page context changes.
+  // reconcile keeps manual chips and honors dismissedAutoSeedIds, so a chip the
+  // user removed does not reappear (authoritative removal); idempotent, so this
+  // never loops even though it may reassign the selection.
+  $effect(() => {
+    const seeds = contextCandidates.seeds;
+    const next = reconcileAgentContextSelection({ previous: untrack(() => runContextSelection), seeds });
+    if (JSON.stringify(next) !== untrack(() => JSON.stringify(runContextSelection))) {
+      runContextSelection = next;
+    }
+  });
+
+  function handleAttachContext(item: AgentContextItem): void {
+    runContextSelection = addAgentContextItem(runContextSelection, item);
+    logArtifactTelemetry({ source: "client", event: "composer.context.attach", sessionId: activeSessionId ?? undefined, reason: item.kind, ok: true });
+  }
+
+  function handleRemoveContext(id: string): void {
+    runContextSelection = removeAgentContextItem(runContextSelection, id);
+    logArtifactTelemetry({ source: "client", event: "composer.context.remove", sessionId: activeSessionId ?? undefined, reason: id, ok: true });
+  }
+
+  function messageContextItems(message: AgentChatMessage): AgentContextItem[] | undefined {
+    return turnContextByMessageId.get(message.id);
+  }
+
+  function createAgentSettingsSnapshot(): AgentRuntimeSettings {
+    return sanitizeAgentRuntimeSettings({
+      modelId: agentModelId,
+      skillIds: enabledAgentSkillIds,
+      customSkills: agentCustomSkills,
+      additionalSystemPrompt: agentAdditionalSystemPrompt,
+      requireZdr: agentRequireZdr,
+      toolPermissionModes: agentToolPermissionModes,
+      promptModuleOverrides: agentPromptModuleOverrides,
+      skillPromptOverrides: agentSkillPromptOverrides,
+    });
+  }
+
+  // Prompt tab: always-on core plus the seedable modules, merged with any
+  // session overrides, for the Agent Settings "Prompt" tab editors.
+  const agentPromptModules = $derived(
+    [
+      { id: CORE_MODULE_ID, label: "Core identity & workflow", defaultBody: AGENT_PROMPT_CORE },
+      ...AGENT_PROMPT_MODULES.map((module) => ({ id: module.id, label: module.title, defaultBody: module.body })),
+    ].map((module) => ({ ...module, overrideBody: agentPromptModuleOverrides[module.id] })),
+  );
+  const agentSkillPromptModules = $derived(
+    agentSkillPromptDefaults.map((skill) => ({
+      id: skill.id,
+      label: `${skill.title} (${skill.familyId})`,
+      defaultBody: skill.defaultBody,
+      overrideBody: agentSkillPromptOverrides[skill.id],
+    })),
+  );
+  // Composed with composeAgentSystemPrompt (the same pure function `createAgent`
+  // uses) so this preview never reimplements composition logic. It only
+  // approximates the skill-body portion (fetched defaults + local overrides,
+  // not this turn's actual skill selection/caps) since that depends on
+  // per-turn state this static preview doesn't have.
+  const composedPromptPreview = $derived(
+    composeAgentSystemPrompt({
+      promptModuleOverrides: agentPromptModuleOverrides,
+      skillModules: agentSkillPromptDefaults
+        .filter((skill) => enabledAgentSkillIds.includes(skill.id))
+        .map((skill) => ({ id: skill.id, body: agentSkillPromptOverrides[skill.id] ?? skill.defaultBody }))
+        .filter((module) => module.body.trim().length > 0),
+    }).prompt,
+  );
+
+  async function loadAgentSkillPromptDefaults(): Promise<void> {
+    if (agentSkillPromptDefaultsStatus === "loading" || agentSkillPromptDefaultsStatus === "ready") return;
+    agentSkillPromptDefaultsStatus = "loading";
+    try {
+      const response = await fetch("/api/agent-prompt-preview");
+      if (!response.ok) throw new Error(`agent_prompt_preview_http_${response.status}`);
+      const payload = await response.json() as { skillModules?: typeof agentSkillPromptDefaults };
+      agentSkillPromptDefaults = Array.isArray(payload.skillModules) ? payload.skillModules : [];
+      agentSkillPromptDefaultsStatus = "ready";
+    } catch {
+      agentSkillPromptDefaultsStatus = "error";
+    }
+  }
+
+  function handleAgentPromptModuleOverrideChange(moduleId: string, overrideBody: string | undefined): void {
+    if (overrideBody === undefined) {
+      const next = { ...agentPromptModuleOverrides };
+      delete next[moduleId];
+      agentPromptModuleOverrides = next;
+    } else {
+      agentPromptModuleOverrides = { ...agentPromptModuleOverrides, [moduleId]: overrideBody };
+    }
+    logArtifactTelemetry({ source: "client", event: "agent_settings.prompt_module_override.change", sessionId: activeSessionId ?? undefined, reason: moduleId, ok: true });
+  }
+
+  function handleAgentSkillPromptOverrideChange(skillId: string, overrideBody: string | undefined): void {
+    if (overrideBody === undefined) {
+      const next = { ...agentSkillPromptOverrides };
+      delete next[skillId];
+      agentSkillPromptOverrides = next;
+    } else {
+      agentSkillPromptOverrides = { ...agentSkillPromptOverrides, [skillId]: overrideBody };
+    }
+    logArtifactTelemetry({ source: "client", event: "agent_settings.skill_prompt_override.change", sessionId: activeSessionId ?? undefined, reason: skillId, ok: true });
+  }
+
+  function handleAgentModelChange(modelId: string): void {
+    agentModelId = modelId;
+    logArtifactTelemetry({ source: "client", event: "agent_settings.model.change", sessionId: activeSessionId ?? undefined, reason: modelId, ok: true });
+  }
+
+  async function refreshAgentModelCatalog(): Promise<void> {
+    agentModelCatalogStatus = "loading";
+    agentModelCatalogMessage = null;
+    try {
+      const response = await fetch("/api/agent-models");
+      if (!response.ok) throw new Error(`model_catalog_http_${response.status}`);
+      const catalog = await response.json() as { models?: AgentModelOption[]; source?: string; error?: string };
+      const models = Array.isArray(catalog.models) && catalog.models.length > 0 ? catalog.models : AGENT_MODEL_OPTIONS;
+      agentModelOptions = models;
+      if (!models.some((model) => model.id === agentModelId)) {
+        agentModelId = models[0]?.id ?? DEFAULT_AGENT_MODEL_ID;
+      }
+      agentModelCatalogStatus = catalog.source === "gateway" ? "ready" : "fallback";
+      agentModelCatalogMessage = catalog.error ?? (catalog.source === "gateway" ? "Vercel AI Gateway catalog loaded." : "Using fallback model list.");
+    } catch (error) {
+      agentModelOptions = AGENT_MODEL_OPTIONS;
+      agentModelCatalogStatus = "error";
+      agentModelCatalogMessage = friendlySessionError("We couldn't load the model list — using the default models.", error);
+    }
+  }
+
+
+  function handleAgentSkillToggle(skillId: string, enabled: boolean): void {
+    enabledAgentSkillIds = enabled
+      ? [...new Set([...enabledAgentSkillIds, skillId])]
+      : enabledAgentSkillIds.filter((id) => id !== skillId);
+    logArtifactTelemetry({ source: "client", event: "agent_settings.skill.toggle", sessionId: activeSessionId ?? undefined, reason: `${skillId}:${enabled ? "on" : "off"}`, ok: true });
+  }
+
+  function handleAgentCustomSkillCreate(payload: { label: string; markdown: string }): void {
+    const id = createAgentCustomSkillId(payload.label, agentCustomSkills.map((skill) => skill.id));
+    agentCustomSkills = [...agentCustomSkills, { id, label: payload.label.trim(), markdown: payload.markdown.trim(), enabled: true }];
+    logArtifactTelemetry({ source: "client", event: "agent_settings.skill.create", sessionId: activeSessionId ?? undefined, reason: id, ok: true });
+  }
+
+  function handleAgentCustomSkillUpdate(skillId: string, patch: Partial<Pick<AgentCustomSkill, "label" | "markdown" | "enabled">>): void {
+    agentCustomSkills = agentCustomSkills.map((skill) => skill.id === skillId ? { ...skill, ...patch } : skill);
+    logArtifactTelemetry({ source: "client", event: "agent_settings.skill.update", sessionId: activeSessionId ?? undefined, reason: skillId, ok: true });
+  }
+
+  function handleAgentPromptChange(prompt: string): void {
+    agentAdditionalSystemPrompt = prompt;
+    logArtifactTelemetry({ source: "client", event: "agent_settings.prompt.change", sessionId: activeSessionId ?? undefined, reason: prompt ? "custom-prompt" : "cleared", ok: true });
+  }
+
+  function handleAgentRequireZdrChange(required: boolean): void {
+    agentRequireZdr = required;
+    logArtifactTelemetry({ source: "client", event: "agent_settings.zdr.change", sessionId: activeSessionId ?? undefined, reason: required ? "required" : "not-required", ok: true });
+  }
+
+
+  function handleAgentToolPermissionChange(familyId: string, mode: AgentToolPermissionMode): void {
+    agentToolPermissionModes = { ...agentToolPermissionModes, [familyId]: mode };
+    logArtifactTelemetry({ source: "client", event: "agent_settings.tool_permission.change", sessionId: activeSessionId ?? undefined, reason: `${familyId}:${mode}`, ok: true });
+  }
 
   // =============================================================================
   // Message Handling
   // =============================================================================
+
+  // Compute the analytics hints for the turn about to be sent and stash them for
+  // the transport (see prepareSendMessagesRequest). Advances the per-session turn
+  // index. Analytics-only: dropped hints reproduce today's behavior.
+  function stampAnalyticsHints(entryFrom: AgentAnalyticsEntryFrom) {
+    const turnIndex = analyticsTurnIndex;
+    pendingAnalyticsHints = {
+      entryFrom,
+      turnIndex,
+      isFirstRun: turnIndex === 0,
+      hasExistingArtifact: Boolean(activeArtifact),
+    };
+    analyticsTurnIndex = turnIndex + 1;
+  }
 
   function handleSubmit(message: string) {
     const trimmed = message.trim();
@@ -1629,20 +2729,359 @@
     }
 
     logSessionTelemetry("chat.submit.start", { sessionId: activeSessionId, reason: `${trimmed.length} chars` });
+    // A fresh user turn supersedes any pending run recovery.
+    resumableRun = null;
+    // Entry point defaults to composer; a workflow launcher chip sets it just
+    // before this call and we consume + reset it here.
+    stampAnalyticsHints(pendingAnalyticsEntryFrom);
+    pendingAnalyticsEntryFrom = "composer";
     maybeNameNewChat(trimmed);
+    const turnContext = ($state.snapshot(runContextSelection).items ?? []) as AgentContextItem[];
     conversation.sendMessage({ text: trimmed });
+    // Associate the selection sent with this turn to the just-appended user
+    // message so it renders as provenance (survives reload via persisted runs).
+    const sentUserMessage = conversation.messages.at(-1);
+    if (turnContext.length > 0 && sentUserMessage?.role === "user") {
+      turnContextByMessageId.set(sentUserMessage.id, turnContext);
+    }
+  }
+
+  function sendUserTurnWithEntryFrom(message: string, entryFrom: AgentAnalyticsEntryFrom): void {
+    const trimmed = message.trim();
+    if (!trimmed || isStreaming || getSubmitDisabledReason(trimmed)) return;
+    resumableRun = null;
+    stampAnalyticsHints(entryFrom);
+    pendingAnalyticsEntryFrom = "composer";
+    const turnContext = ($state.snapshot(runContextSelection).items ?? []) as AgentContextItem[];
+    conversation.sendMessage({ text: trimmed });
+    const sentUserMessage = conversation.messages.at(-1);
+    if (turnContext.length > 0 && sentUserMessage?.role === "user") {
+      turnContextByMessageId.set(sentUserMessage.id, turnContext);
+    }
+  }
+
+  async function handleJsonRenderAction(actionName: string, params?: Record<string, unknown>): Promise<void> {
+    try {
+      if (actionName === "submitAnswer") {
+        const ok = await handleSubmitAnswerAction(params ?? {});
+        recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+          actionName,
+          ok,
+          status: ok ? "submitted" : "error",
+          message: ok ? "Answer saved and sent to the agent." : "Answer could not be saved. Retry this question before continuing.",
+        }));
+        return;
+      }
+      if (actionName === "requestHostAction" || actionName === "hostAction") {
+        await handleJsonRenderHostAction(actionName, params ?? {});
+        return;
+      }
+      if (isTrustedIntakeControllerAction(actionName)) {
+        const ok = await handleTrustedIntakeControllerAction(actionName, params ?? {});
+        recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+          actionName,
+          ok,
+          status: receiptStatusForTrustedIntakeAction(actionName, ok),
+          message: receiptMessageForTrustedIntakeAction(actionName, ok),
+          commandId: typeof params?.commandId === "string" ? params.commandId : null,
+        }));
+        return;
+      }
+      recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+        actionName,
+        ok: false,
+        status: "error",
+        message: "No trusted renderer action is registered for this control.",
+      }));
+      logArtifactTelemetry({
+        source: "client",
+        event: "json_render.action.ignored",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: activeArtifact?.id,
+        artifactVersion: activeArtifact?.version,
+        reason: actionName,
+        ok: false,
+        error: "No trusted host action handler is registered for this action.",
+      });
+    } catch (error) {
+      recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+        actionName,
+        ok: false,
+        status: "error",
+        message: error instanceof Error ? error.message : "Renderer action failed.",
+      }));
+      reportClientEffectError("json_render.action.error", error, {
+        sessionId: activeSessionId,
+        artifactId: activeArtifact?.id,
+        artifactVersion: activeArtifact?.version,
+        actionName,
+      });
+      logArtifactTelemetry({
+        source: "client",
+        event: "json_render.action.error",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: activeArtifact?.id,
+        artifactVersion: activeArtifact?.version,
+        reason: actionName,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async function handleJsonRenderHostAction(actionName: string, params: Record<string, unknown>): Promise<void> {
+    const result = await runPageControlHostAction({
+      actionKey: typeof params.actionKey === "string" ? params.actionKey : undefined,
+      targetId: typeof params.targetId === "string" ? params.targetId : undefined,
+      targetInstanceId: typeof params.targetInstanceId === "string" ? params.targetInstanceId : undefined,
+      entityRef: params.entityRef,
+      input: params.input,
+      intentLabel: typeof params.intentLabel === "string" ? params.intentLabel : undefined,
+    });
+    const hostResult = result.state.hostActionResult;
+    const status: JsonRenderActionReceiptState["status"] = hostResult?.ok
+      ? "host_executed"
+      : hostResult?.status === "approval_required"
+        ? "host_approval_required"
+        : "host_blocked";
+    recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
+      actionName,
+      ok: result.ok,
+      status,
+      message: result.message ?? hostResult?.message ?? hostResult?.disabledReason ?? "Host action did not complete.",
+      hostActionResult: hostResult ?? null,
+    }));
+    logArtifactTelemetry({
+      source: "client",
+      event: "json_render.host_action.receipt",
+      sessionId: activeSessionId ?? undefined,
+      artifactId: activeArtifact?.id,
+      artifactVersion: activeArtifact?.version,
+      reason: hostResult?.actionKey ?? actionName,
+      toolCallId: hostResult?.receipt?.commandId,
+      ok: result.ok,
+      error: result.ok ? undefined : (result.disabledReason ?? hostResult?.disabledReason ?? hostResult?.message),
+    });
+  }
+
+  async function handleTrustedIntakeControllerAction(actionName: TrustedIntakeControllerAction, _params: Record<string, unknown>): Promise<boolean> {
+    const artifactBeforePersist = activeArtifact;
+    if (!artifactBeforePersist) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "intake.controller_action.blocked",
+        sessionId: activeSessionId ?? undefined,
+        reason: actionName,
+        ok: false,
+        error: "Controller actions require an active intake artifact.",
+      });
+      return false;
+    }
+    const decision = decideTrustedIntakeControllerAction({
+      actionName,
+      isBookingIntakeArtifact: isActiveBookingIntakeArtifact(),
+      readiness: getActiveIntakeApprovalReadiness(),
+    });
+    if (!decision.ok) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "intake.controller_action.blocked",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: artifactBeforePersist.id,
+        artifactVersion: artifactBeforePersist.version,
+        reason: actionName,
+        toolCallId: decision.commandId,
+        ok: false,
+        error: decision.reason ?? decision.code,
+      });
+      return false;
+    }
+
+    if (pendingActiveArtifactStateChanges.length > 0) {
+      const persisted = await persistActiveArtifactStatePatch();
+      if (!persisted) {
+        logArtifactTelemetry({
+          source: "client",
+          event: "intake.controller_action.blocked",
+          sessionId: activeSessionId ?? undefined,
+          artifactId: artifactBeforePersist.id,
+          artifactVersion: artifactBeforePersist.version,
+          reason: actionName,
+          ok: false,
+          error: "Artifact state was not persisted; controller action was not sent.",
+        });
+        return false;
+      }
+    }
+    if (activeArtifactPersistence?.artifactId === artifactBeforePersist.id) {
+      const persisted = await activeArtifactPersistence.promise;
+      if (!persisted) {
+        logArtifactTelemetry({
+          source: "client",
+          event: "intake.controller_action.blocked",
+          sessionId: activeSessionId ?? undefined,
+          artifactId: artifactBeforePersist.id,
+          artifactVersion: artifactBeforePersist.version,
+          reason: actionName,
+          toolCallId: decision.commandId,
+          ok: false,
+          error: "Artifact was not persisted; controller action was not sent.",
+        });
+        return false;
+      }
+    }
+
+    const artifact = activeArtifact ?? artifactBeforePersist;
+    logArtifactTelemetry({
+      source: "client",
+      event: "intake.controller_action.accepted",
+      sessionId: activeSessionId ?? undefined,
+      artifactId: artifact.id,
+      artifactVersion: artifact.version,
+      reason: actionName,
+      toolCallId: decision.commandId,
+      ok: true,
+    });
+
+    if (actionName === "saveDraft" || actionName === "editDraft") return true;
+
+    const prompt = createTrustedIntakeControllerPrompt(actionName, {
+      artifactId: artifact.id,
+      artifactVersion: artifact.version,
+      commandId: decision.commandId,
+    });
+    sendUserTurnWithEntryFrom(prompt, "workflow_launcher");
+    return true;
+  }
+
+  function createTrustedIntakeControllerPrompt(
+    actionName: Exclude<TrustedIntakeControllerAction, "saveDraft" | "editDraft">,
+    input: { artifactId: string; artifactVersion: number; commandId: string },
+  ): string {
+    const artifactLine = `Active artifact: ${input.artifactId} v${input.artifactVersion}.`;
+    if (actionName === "submitToAgent") {
+      return [
+        "Review the saved active intake artifact state and continue the workflow from the next highest-impact missing field.",
+        artifactLine,
+        "Call readActiveArtifactState before summarizing. Do not execute booking mutations or treat this as approval.",
+      ].join(" ");
+    }
+    if (actionName === "reviseWithAgent") {
+      return [
+        "Review the saved active intake artifact state and help revise it before approval.",
+        artifactLine,
+        "Call readActiveArtifactState, identify the smallest useful edits or missing fields, and ask one focused follow-up. Do not execute booking mutations or treat this as approval.",
+      ].join(" ");
+    }
+    if (actionName === "requestApproval") {
+      return [
+        "Validate the saved active intake artifact and show a typed command preview for approval.",
+        artifactLine,
+        `Target command: ${input.commandId}.`,
+        "Call readActiveArtifactState, then previewActiveIntakeCommand. Do not call commitActiveIntakeCommand yet.",
+      ].join(" ");
+    }
+    if (actionName === "cancelApproval") {
+      return [
+        "Cancel the pending approval path and keep the active intake artifact as a saved draft.",
+        artifactLine,
+        "Call readActiveArtifactState and summarize that no booking mutation was executed. Ask what the user wants to revise next.",
+      ].join(" ");
+    }
+    return [
+      "Approve this manifest and create the booking context from the active intake artifact.",
+      artifactLine,
+      `Target command: ${input.commandId}.`,
+      "Use booking.context.create: call readActiveArtifactState, previewActiveIntakeCommand, then commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN. If trusted host approval is missing, report that blocker instead of searching repeatedly.",
+    ].join(" ");
+  }
+
+  async function handleSubmitAnswerAction(params: Record<string, unknown>): Promise<boolean> {
+    const artifactBeforePersist = activeArtifact;
+    if (!artifactBeforePersist) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "question_answer.submit.blocked",
+        sessionId: activeSessionId ?? undefined,
+        reason: "missing_active_artifact",
+        ok: false,
+        error: "Question answers require an active persisted artifact.",
+      });
+      return false;
+    }
+
+    const persisted = await persistActiveArtifactStatePatch();
+    if (!persisted) {
+      const message = "Answer could not be saved. Retry this question before continuing.";
+      markQuestionAnswerPersistFailure(params, message);
+      logArtifactTelemetry({
+        source: "client",
+        event: "question_answer.submit.blocked",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: artifactBeforePersist.id,
+        artifactVersion: artifactBeforePersist.version,
+        reason: "artifact_state_not_persisted",
+        ok: false,
+        error: "Question answer state was not persisted; generate turn was not sent.",
+      });
+      return false;
+    }
+
+    const payload = createQuestionAnswerTurnPayload({
+      actionParams: params,
+      artifactId: persisted.artifact.id,
+      artifactVersion: persisted.artifact.version,
+      sessionId: activeSessionId,
+    });
+    const message = serializeQuestionAnswerTurnMessage(payload);
+    logArtifactTelemetry({
+      source: "client",
+      event: "question_answer.submit.generate",
+      sessionId: activeSessionId ?? undefined,
+      artifactId: payload.artifact.id,
+      artifactVersion: payload.artifact.version,
+      reason: payload.submission.questionId,
+      ok: true,
+    });
+    sendUserTurnWithEntryFrom(message, "question_answer");
+    return true;
+  }
+
+  // Continue a resumable failed/interrupted run. Distinct from retry-from-scratch:
+  // this sends the canonical continuation prompt so the agent picks up its
+  // interrupted work rather than re-running the original user turn.
+  function handleContinue() {
+    const run = resumableRun;
+    if (!run) return;
+    resumableRun = null;
+    logSessionTelemetry("chat.continue.start", { sessionId: activeSessionId, reason: run.error_code ?? run.status });
+    stampAnalyticsHints("resume_continue");
+    conversation.sendMessage({ text: RESUME_CONTINUE_PROMPT });
   }
 
   function handleClear() {
     conversation.messages = [];
     persistedMessageIds.clear();
     reportedToolErrorKeys.clear();
+    resumableRun = null;
+    // A cleared chat drops manual chips and prior dismissals; the reconcile
+    // effect re-seeds fresh page/document chips for the new turn.
+    runContextSelection = createEmptyAgentRunContextSelection();
+    turnContextByMessageId.clear();
+    // New conversation → restart the per-session analytics turn sequence.
+    analyticsTurnIndex = 0;
+    pendingAnalyticsEntryFrom = "composer";
+    pendingAnalyticsHints = null;
     lastPersistStatus = "idle";
     input = "";
     artifactWarehouse.clearActiveArtifact(activeSessionId);
     activeArtifact = null;
     activeArtifactStatus = null;
     activeArtifactVersions = [];
+    activeArtifactStateStore = undefined;
+    activeArtifactStateStoreKey = null;
+    pendingActiveArtifactStateChanges = [];
+    clearActiveArtifactStateSaveTimer();
     pendingArtifactIntent = null;
     streamStartedAt = null;
     lastActivityTelemetrySignature = "";
@@ -1658,6 +3097,7 @@
 
   function handleStop() {
     void conversation.stop();
+    void refreshActiveSessionRunState("chat.stop");
   }
 
   function handleClearArtifact() {
@@ -1665,6 +3105,10 @@
     activeArtifact = null;
     activeArtifactStatus = null;
     activeArtifactVersions = [];
+    activeArtifactStateStore = undefined;
+    activeArtifactStateStoreKey = null;
+    pendingActiveArtifactStateChanges = [];
+    clearActiveArtifactStateSaveTimer();
     pendingArtifactIntent = null;
     streamStartedAt = null;
     lastActivityTelemetrySignature = "";
@@ -1699,7 +3143,7 @@
         documentPreferredView = inferPreferredDocumentView(document.language);
         lastPersistedDocumentSignature = createDocumentSnapshotSignature(document);
       } catch (error) {
-        sessionRailError = error instanceof Error ? error.message : String(error);
+        sessionRailError = friendlySessionError("We couldn't open the workspace document.", error);
         reportClientEffectError("document_frame.open_error", error, { sessionId: activeSessionId });
         return;
       }
@@ -1735,6 +3179,56 @@
   function inferPreferredDocumentView(language?: string): PreferredDocumentView {
     return /^(markdown|md|html|htm|svg|xml)$/i.test(language ?? "") ? "preview" : "edit";
   }
+
+
+  function isActiveBookingIntakeArtifact(): boolean {
+    if (!activeArtifact || activeArtifact.kind !== "json-render") return false;
+    const state = activeArtifact.content?.state;
+    if (!state || typeof state !== "object" || Array.isArray(state)) return false;
+    const surface = (state as Record<string, unknown>).surface;
+    const manifest = (state as Record<string, unknown>).manifest;
+    if (surface && typeof surface === "object" && !Array.isArray(surface) && (surface as Record<string, unknown>).skillId === "booking.context.intake") return true;
+    if (manifest && typeof manifest === "object" && !Array.isArray(manifest)) {
+      const source = (manifest as Record<string, unknown>).source;
+      return Boolean(source && typeof source === "object" && !Array.isArray(source) && (source as Record<string, unknown>).skill === "booking.context.intake");
+    }
+    return false;
+  }
+
+  function getActiveIntakeApprovalReadiness(): { ready: boolean; visible: boolean; reason: string | null } {
+    const state = activeArtifact?.content?.state;
+    if (!isRecord(state)) return { ready: false, visible: false, reason: "Open a saved booking intake first." };
+    const manifest = isRecord(state.manifest) ? state.manifest : {};
+    const inventory = isRecord(manifest.inventory) ? manifest.inventory : {};
+    const questionErrors = isRecord(state.questionErrors) ? state.questionErrors : {};
+    const questionStates = isRecord(state.questionStates) ? state.questionStates : {};
+    const unresolvedError = Object.entries(questionErrors).find(([, value]) => value !== undefined && value !== null && value !== false && value !== "");
+    if (unresolvedError) return { ready: false, visible: false, reason: `Fix the saved answer for ${unresolvedError[0]} before previewing.` };
+    const erroredState = Object.entries(questionStates).find(([, value]) => ["error", "errored", "invalid"].includes(String(value).toLowerCase()));
+    if (erroredState) return { ready: false, visible: false, reason: `Fix the saved answer for ${erroredState[0]} before previewing.` };
+    const hasKind = typeof manifest.intakeMode === "string" && manifest.intakeMode.trim().length > 0;
+    const hasInventory = typeof inventory.coreDescription === "string" && inventory.coreDescription.trim().length > 0;
+    if (!hasKind || !hasInventory) return { ready: false, visible: false, reason: "Answer setup type and inventory before previewing." };
+    return { ready: true, visible: true, reason: null };
+  }
+
+  function createActiveIntakeApprovalAffordance(): AgentApprovalAffordance | null {
+    if (!isActiveBookingIntakeArtifact()) return null;
+    const readiness = getActiveIntakeApprovalReadiness();
+    if (!readiness.visible) return null;
+    return {
+      title: "Create this booking setup?",
+      description: "Preview the booking setup that will be sent to the trusted host. Chat approval is not enough; the host still gates the write.",
+      commandId: "booking.create.context",
+      artifactTitle: activeArtifact?.title ?? null,
+      status: readiness.ready ? "approval_required" : "blocked",
+      disabled: !activeArtifact || !readiness.ready,
+      disabledReason: readiness.reason,
+      onRequestPreview: () => void handleTrustedIntakeControllerAction("requestApproval", { source: "chat_approval_card", commandId: "booking.create.context" }),
+      onApprove: () => void handleTrustedIntakeControllerAction("approveAndRun", { source: "chat_approval_card", commandId: "booking.create.context" }),
+      onCancel: () => void handleTrustedIntakeControllerAction("cancelApproval", { source: "chat_approval_card", commandId: "booking.create.context" }),
+    };
+  }
 </script>
 
 <WorkspaceRoot title="Sonik Chat" {artifactOpen} layoutMode={workspaceLayoutMode} railMode={workspaceRailMode}>
@@ -1744,13 +3238,16 @@
       {currentSession}
       {activeSessionId}
       archivedCount={archivedSessionCount}
-      busy={sessionRailBusy || isStreaming}
+      {archivedSessions}
+      busy={sessionRailBusy}
       error={sessionRailError}
       collapsed={workspaceRailMode === "collapsed"}
       onCreate={() => void createSession()}
       onSwitch={(sessionId) => void switchSession(sessionId)}
       onArchive={(sessionId) => void archiveSession(sessionId)}
       onDelete={(sessionId) => void deleteSession(sessionId)}
+      onToggleImportant={(sessionId, important) => void toggleSessionImportant(sessionId, important)}
+      onRestore={(sessionId) => void restoreSession(sessionId)}
     />
   {/snippet}
 
@@ -1760,28 +3257,68 @@
       messages={conversation.messages as AgentChatMessage[]}
       status={conversation.status}
       error={conversation.error}
-      suggestions={SUGGESTIONS}
-      toolLabels={TOOL_LABELS}
+      suggestions={workflowSuggestions}
       activity={agentActivity}
       bind:input
       onSubmit={handleSubmit}
+      onSelectSuggestion={() => { pendingAnalyticsEntryFrom = "workflow_launcher"; }}
       onStop={handleStop}
       onClear={handleClear}
+      runRecovery={runRecovery}
+      onContinue={handleContinue}
+      approvalAffordance={createActiveIntakeApprovalAffordance()}
+      contextItems={runContextSelection.items}
+      contextSources={contextCandidates.sources}
+      onAttachContext={handleAttachContext}
+      onRemoveContext={handleRemoveContext}
+      messageContext={messageContextItems}
       shouldRenderArtifact={shouldRenderInlineArtifact}
     >
       {#snippet actions()}
-        <ThemePicker />
+        <AgentSettingsPanel
+          modelOptions={agentModelOptions}
+          selectedModelId={agentModelId}
+          modelCatalogStatus={agentModelCatalogStatus}
+          modelCatalogMessage={agentModelCatalogMessage}
+          requireZdr={agentRequireZdr}
+          skillOptions={AGENT_SKILL_OPTIONS}
+          enabledSkillIds={enabledAgentSkillIds}
+          customSkills={agentCustomSkills}
+          toolFamilies={agentSettingsToolFamilies}
+          contextItems={runContextSelection.items}
+          systemPrompt={agentAdditionalSystemPrompt}
+          embedded={isEmbeddedHostContextExpected()}
+          promptModules={agentPromptModules}
+          skillPromptModules={agentSkillPromptModules}
+          composedPromptPreview={composedPromptPreview}
+          skillPromptModulesStatus={agentSkillPromptDefaultsStatus}
+          promptOverrideMaxChars={MAX_AGENT_PROMPT_OVERRIDE_CHARS}
+          onModelChange={handleAgentModelChange}
+          onModelCatalogRefresh={() => void refreshAgentModelCatalog()}
+          onRequireZdrChange={handleAgentRequireZdrChange}
+          onSkillToggle={handleAgentSkillToggle}
+          onCustomSkillCreate={handleAgentCustomSkillCreate}
+          onCustomSkillUpdate={handleAgentCustomSkillUpdate}
+          onSystemPromptChange={handleAgentPromptChange}
+          onToolPermissionChange={handleAgentToolPermissionChange}
+          onPromptModuleOverrideChange={handleAgentPromptModuleOverrideChange}
+          onSkillPromptOverrideChange={handleAgentSkillPromptOverrideChange}
+        />
+        {#if !isEmbeddedHostContextExpected()}
+          <ThemePicker />
+        {/if}
         <button
           type="button"
           onclick={openDocumentEditor}
           class="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          aria-label="Open workspace documents"
         >
-          Workspace Docs
+          Documents
         </button>
       {/snippet}
 
       {#snippet renderArtifact(spec, loading)}
-        <JsonArtifactRenderer {spec} {registry} {loading} />
+        <JsonArtifactRenderer {spec} {registry} {loading} onAction={handleJsonRenderAction} />
       {/snippet}
     </AgentConversation>
   {/snippet}
@@ -1798,6 +3335,7 @@
       activeArtifactVersion={activeArtifactVersionNumber}
       onArtifactVersionChange={handleArtifactVersionChange}
       documentAvailable={documentEditorOpen}
+      showDeveloperPanels={showCanvasDeveloperPanels}
       documentTitle={documentFrameTitle}
       documentSubtitle={documentFrameSubtitle}
     >
@@ -1828,6 +3366,9 @@
           spec={activeArtifact.content}
           {registry}
           loading={isStreaming}
+          store={activeArtifactStateStore}
+          onStateChange={handleActiveArtifactStateChange}
+          onAction={handleJsonRenderAction}
         />
       {/if}
     </CanvasViewport>

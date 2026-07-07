@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { HostUiTarget, HostUiTargetRegistry } from "./target-registry.js";
+
 
 export const toolSourceSchema = z.enum(["orpc", "openapi", "mcp", "sandbox", "local-ui"]);
 export const toolEffectSchema = z.enum(["read", "write", "destructive", "environment", "unknown"]);
@@ -217,6 +219,488 @@ function formatCounts(counts: Record<string, number>): string {
   return Object.entries(counts).map(([key, value]) => `${key}:${value}`).join(",") || "none";
 }
 
+export const askUserAnswerTypeSchema = z.enum([
+  "single_choice",
+  "multi_choice",
+  "choice_cards",
+  "short_text",
+  "long_text",
+  "textarea",
+  "boolean",
+  "number",
+  "date",
+  "datetime",
+  "list",
+  "structured_list",
+  "weekly_schedule",
+  "confirmation",
+]);
+
+export const interactiveSurfaceKindSchema = z.enum([
+  "ask_user_question",
+  "question_group",
+  "manifest_wizard",
+  "command_confirmation",
+  "manifest_preview",
+  "intake_artifact",
+]);
+
+export const interactiveSurfaceStatusSchema = z.enum(["draft", "active", "answered", "skipped", "validated", "exported", "cancelled"]);
+export const interactiveSurfaceSourceSchema = z.enum(["agent", "skill", "page-context", "artifact", "host", "system"]);
+
+const askUserQuestionChoiceObjectSchema = z.object({
+  value: z.union([z.string(), z.number(), z.boolean()]),
+  label: z.string().min(1).optional(),
+  description: z.string().optional(),
+  disabled: z.boolean().default(false),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+});
+
+export const askUserQuestionChoiceSchema = z.union([
+  z.string().min(1).transform((value) => ({ value, label: value, disabled: false, metadata: {} })),
+  askUserQuestionChoiceObjectSchema.transform((choice) => ({
+    ...choice,
+    label: choice.label ?? String(choice.value),
+    disabled: choice.disabled ?? false,
+    metadata: choice.metadata ?? {},
+  })),
+]);
+
+function normalizeAskQuestionWireInput(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const raw = input as Record<string, unknown>;
+  return {
+    ...raw,
+    version: raw.version ?? "sonik-agent-ui.ask-user-question.v1",
+    id: raw.id ?? raw.question_id ?? raw.questionId,
+    whyThisMatters: raw.whyThisMatters ?? raw.why_this_matters,
+    answerType: raw.answerType ?? raw.answer_type,
+    defaultValue: raw.defaultValue ?? raw.default,
+    allowSkip: raw.allowSkip ?? raw.allow_skip,
+    skipValue: raw.skipValue ?? raw.skip_value,
+    writesTo: raw.writesTo ?? raw.writes_to,
+    maxSelections: raw.maxSelections ?? raw.max_selections,
+    minSelections: raw.minSelections ?? raw.min_selections,
+    reviewRequired: raw.reviewRequired ?? raw.review_required,
+  };
+}
+
+export const safeQuestionIdSchema = z.string().min(1).superRefine((id, ctx) => {
+  const segments = id.split("/").map((segment) => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
+  if (segments.some((segment) => segment === "__proto__" || segment === "prototype" || segment === "constructor")) {
+    ctx.addIssue({ code: "custom", message: "Question ids must not contain prototype-polluting path segments." });
+  }
+});
+
+export const askUserQuestionSpecSchema = z.preprocess(normalizeAskQuestionWireInput, z.object({
+  version: z.literal("sonik-agent-ui.ask-user-question.v1").default("sonik-agent-ui.ask-user-question.v1"),
+  id: safeQuestionIdSchema,
+  title: z.string().min(1),
+  body: z.string().min(1),
+  whyThisMatters: z.string().min(1).optional(),
+  answerType: askUserAnswerTypeSchema,
+  choices: z.array(askUserQuestionChoiceSchema).default([]),
+  defaultValue: z.unknown().optional(),
+  required: z.boolean().default(false),
+  allowSkip: z.boolean().default(true),
+  skipValue: z.unknown().default("unknown"),
+  writesTo: z.string().min(1).optional(),
+  minSelections: z.number().int().nonnegative().default(0),
+  maxSelections: z.number().int().positive().optional(),
+  source: interactiveSurfaceSourceSchema.default("agent"),
+  confidence: z.number().min(0).max(1).optional(),
+  reviewRequired: z.boolean().default(false),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).superRefine((question, ctx) => {
+  const choiceTypes = new Set(["single_choice", "multi_choice", "choice_cards", "confirmation"]);
+  if (choiceTypes.has(question.answerType) && question.choices.length === 0) {
+    ctx.addIssue({ code: "custom", path: ["choices"], message: `${question.answerType} questions require at least one choice.` });
+  }
+  if (!choiceTypes.has(question.answerType) && question.choices.length > 0) {
+    ctx.addIssue({ code: "custom", path: ["choices"], message: `${question.answerType} questions must not include choices.` });
+  }
+  if (question.required && question.allowSkip) {
+    ctx.addIssue({ code: "custom", path: ["allowSkip"], message: "Required questions must not allow skip." });
+  }
+  if (question.answerType === "single_choice" && question.maxSelections && question.maxSelections !== 1) {
+    ctx.addIssue({ code: "custom", path: ["maxSelections"], message: "single_choice maxSelections must be 1 when provided." });
+  }
+  if (question.answerType === "multi_choice" && question.maxSelections && question.minSelections > question.maxSelections) {
+    ctx.addIssue({ code: "custom", path: ["minSelections"], message: "minSelections cannot exceed maxSelections." });
+  }
+  const values = question.choices.map((choice) => String(choice.value));
+  if (new Set(values).size !== values.length) {
+    ctx.addIssue({ code: "custom", path: ["choices"], message: "Question choice values must be unique after normalization." });
+  }
+}));
+
+export const questionAnswerSubmissionSchema = z.preprocess((input) => {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const raw = input as Record<string, unknown>;
+  return {
+    ...raw,
+    questionId: raw.questionId ?? raw.question_id,
+    artifactId: raw.artifactId ?? raw.artifact_id,
+    sessionId: raw.sessionId ?? raw.session_id,
+    answeredAt: raw.answeredAt ?? raw.answered_at,
+    writesTo: raw.writesTo ?? raw.writes_to,
+  };
+}, z.object({
+  version: z.literal("sonik-agent-ui.question-answer-submission.v1").default("sonik-agent-ui.question-answer-submission.v1"),
+  questionId: z.string().min(1),
+  value: z.unknown().optional(),
+  skipped: z.boolean().default(false),
+  writesTo: z.string().min(1).optional(),
+  artifactId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  answeredAt: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}));
+
+const interactiveSurfaceActionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  kind: z.enum(["ask_user_question", "submit_answer", "validate_manifest", "export_manifest", "preview_command"]),
+  toolRef: z.string().min(1).optional(),
+  commandId: z.string().min(1).optional(),
+  requiresConfirmation: z.boolean().default(false),
+  inputMap: z.record(z.string(), z.unknown()).default({}),
+  outputMap: z.record(z.string(), z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).superRefine((action, ctx) => {
+  if ((action.toolRef || action.commandId) && action.kind !== "preview_command") {
+    ctx.addIssue({ code: "custom", path: ["kind"], message: "Interactive surfaces may preview command/tool targets only; execution belongs to command tools." });
+  }
+});
+
+export const interactiveSurfaceSpecSchema = z.object({
+  version: z.literal("sonik-agent-ui.interactive-surface.v1").default("sonik-agent-ui.interactive-surface.v1"),
+  id: z.string().min(1),
+  kind: interactiveSurfaceKindSchema,
+  title: z.string().min(1),
+  description: z.string().default(""),
+  status: interactiveSurfaceStatusSchema.default("draft"),
+  source: interactiveSurfaceSourceSchema.default("agent"),
+  skillId: z.string().min(1).optional(),
+  artifactId: z.string().min(1).optional(),
+  questions: z.array(askUserQuestionSpecSchema).default([]),
+  state: z.record(z.string(), z.unknown()).default({}),
+  actions: z.array(interactiveSurfaceActionSchema).default([]),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).superRefine((surface, ctx) => {
+  if ((surface.kind === "ask_user_question" || surface.kind === "question_group") && surface.questions.length === 0) {
+    ctx.addIssue({ code: "custom", path: ["questions"], message: `${surface.kind} surfaces require at least one question.` });
+  }
+  const questionIds = surface.questions.map((question) => question.id);
+  if (new Set(questionIds).size !== questionIds.length) {
+    ctx.addIssue({ code: "custom", path: ["questions"], message: "Interactive surface question ids must be unique." });
+  }
+});
+
+export type AskUserAnswerType = z.infer<typeof askUserAnswerTypeSchema>;
+export type AskUserQuestionChoice = z.infer<typeof askUserQuestionChoiceSchema>;
+export type AskUserQuestionSpec = z.infer<typeof askUserQuestionSpecSchema>;
+export type QuestionAnswerSubmission = z.infer<typeof questionAnswerSubmissionSchema>;
+export type InteractiveSurfaceKind = z.infer<typeof interactiveSurfaceKindSchema>;
+export type InteractiveSurfaceSpec = z.infer<typeof interactiveSurfaceSpecSchema>;
+
+export type QuestionAnswerValidationResult =
+  | { ok: true; submission: QuestionAnswerSubmission; writesTo?: string; normalizedValue: unknown }
+  | { ok: false; errors: Array<{ code: string; message: string; path: Array<string | number> }> };
+
+export function createAskUserQuestionSpec(input: unknown): AskUserQuestionSpec {
+  return askUserQuestionSpecSchema.parse(input);
+}
+
+export function createInteractiveSurfaceSpec(input: unknown): InteractiveSurfaceSpec {
+  return interactiveSurfaceSpecSchema.parse(input);
+}
+
+function normalizeOpenDesignQuestionOptions(options: unknown): AskUserQuestionChoice[] {
+  if (!Array.isArray(options)) return [];
+  return options.flatMap((option): AskUserQuestionChoice[] => {
+    if (typeof option === "string") {
+      const label = option.trim();
+      return label ? [{ value: label, label, disabled: false, metadata: {} }] : [];
+    }
+    if (!option || typeof option !== "object" || Array.isArray(option)) return [];
+    const raw = option as Record<string, unknown>;
+    const label = typeof raw.label === "string" && raw.label.trim() ? raw.label.trim() : undefined;
+    const rawValue = raw.value;
+    const value = typeof rawValue === "string" && rawValue.trim()
+      ? rawValue.trim()
+      : typeof rawValue === "number" || typeof rawValue === "boolean"
+        ? rawValue
+        : label;
+    if (value === undefined || !label) return [];
+    return [{
+      value,
+      label,
+      description: typeof raw.description === "string" && raw.description.trim() ? raw.description.trim() : undefined,
+      disabled: raw.disabled === true,
+      metadata: typeof raw.metadata === "object" && raw.metadata !== null && !Array.isArray(raw.metadata) ? raw.metadata as Record<string, unknown> : {},
+    }];
+  });
+}
+
+export function createAskUserQuestionsFromQuestionForm(formInput: unknown): AskUserQuestionSpec[] {
+  if (!formInput || typeof formInput !== "object" || Array.isArray(formInput)) return [];
+  const form = formInput as Record<string, unknown>;
+  const questions = Array.isArray(form.questions) ? form.questions : [];
+  return questions.flatMap((raw, index) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const question = raw as Record<string, unknown>;
+    const id = typeof question.id === "string" && question.id.trim() ? question.id.trim() : `q${index + 1}`;
+    const label = typeof question.label === "string" && question.label.trim() ? question.label.trim() : id;
+    const type = typeof question.type === "string" ? question.type.toLowerCase() : "text";
+    const choices = normalizeOpenDesignQuestionOptions(question.options);
+    const answerType: AskUserAnswerType = type === "direction-cards"
+      ? "choice_cards"
+      : type === "radio" || type === "select"
+        ? "single_choice"
+      : type === "checkbox"
+        ? "multi_choice"
+        : type === "textarea"
+          ? "long_text"
+          : "short_text";
+    return [createAskUserQuestionSpec({
+      id,
+      title: label,
+      body: label,
+      whyThisMatters: typeof question.help === "string" && question.help.trim() ? question.help : undefined,
+      answerType,
+      choices: answerType === "single_choice" || answerType === "multi_choice" || answerType === "choice_cards" ? choices : [],
+      defaultValue: question.defaultValue,
+      required: question.required === true,
+      allowSkip: question.required === true ? false : true,
+      maxSelections: typeof question.maxSelections === "number" ? question.maxSelections : undefined,
+      source: "agent",
+      metadata: {
+        questionFormId: typeof form.id === "string" ? form.id : undefined,
+        questionFormQuestionType: question.type,
+        placeholder: typeof question.placeholder === "string" ? question.placeholder : undefined,
+      },
+    })];
+  });
+}
+
+export function validateQuestionAnswer(questionInput: unknown, submissionInput: unknown): QuestionAnswerValidationResult {
+  const questionResult = askUserQuestionSpecSchema.safeParse(questionInput);
+  const submissionResult = questionAnswerSubmissionSchema.safeParse(submissionInput);
+  if (!questionResult.success || !submissionResult.success) {
+    return { ok: false, errors: [...zodIssues(questionResult), ...zodIssues(submissionResult)] };
+  }
+  const question = questionResult.data;
+  const submission = submissionResult.data;
+  const errors: Array<{ code: string; message: string; path: Array<string | number> }> = [];
+
+  if (submission.questionId !== question.id) {
+    errors.push({ code: "question_id_mismatch", message: "Submission questionId must match the question spec id.", path: ["questionId"] });
+  }
+  const selectedWritesTo = submission.writesTo ?? question.writesTo;
+  if (submission.skipped) {
+    if (!question.allowSkip) {
+      errors.push({ code: "skip_not_allowed", message: "This question cannot be skipped.", path: ["skipped"] });
+    }
+    const writesToError = validateQuestionWritesToPath(selectedWritesTo);
+    if (writesToError) errors.push(writesToError);
+    return errors.length > 0 ? { ok: false, errors } : { ok: true, submission, writesTo: selectedWritesTo, normalizedValue: question.skipValue };
+  }
+  if (question.required && isEffectivelyEmptyAnswer(submission.value)) {
+    errors.push({ code: "answer_required", message: "A non-empty value is required for this question.", path: ["value"] });
+  }
+
+  const enabledChoiceValues = new Set(question.choices.filter((choice) => !choice.disabled).map((choice) => choice.value));
+  const disabledChoiceValues = new Set(question.choices.filter((choice) => choice.disabled).map((choice) => choice.value));
+  if (question.answerType === "single_choice" || question.answerType === "choice_cards" || question.answerType === "confirmation") {
+    const submittedValue = submission.value as string | number | boolean;
+    if (disabledChoiceValues.has(submittedValue)) {
+      errors.push({ code: "disabled_choice", message: "Answer must not select a disabled choice.", path: ["value"] });
+    } else if (!enabledChoiceValues.has(submittedValue)) {
+      errors.push({ code: "invalid_choice", message: "Answer must match one of the declared enabled choices.", path: ["value"] });
+    }
+  }
+  if (question.answerType === "multi_choice") {
+    if (!Array.isArray(submission.value)) {
+      errors.push({ code: "invalid_multi_choice", message: "Answer must be an array for multi_choice questions.", path: ["value"] });
+    } else {
+      const selected = submission.value as Array<string | number | boolean>;
+      if (new Set(selected).size !== selected.length) {
+        errors.push({ code: "duplicate_selection", message: "Multi-choice answers must not contain duplicate selections.", path: ["value"] });
+      }
+      for (const value of selected) {
+        if (disabledChoiceValues.has(value)) {
+          errors.push({ code: "disabled_choice", message: `Disabled choice value: ${String(value)}`, path: ["value"] });
+        } else if (!enabledChoiceValues.has(value)) {
+          errors.push({ code: "invalid_choice", message: `Unknown choice value: ${String(value)}`, path: ["value"] });
+        }
+      }
+      const minimumSelections = question.required ? Math.max(1, question.minSelections) : question.minSelections;
+      if (selected.length < minimumSelections) errors.push({ code: "min_selections", message: `Select at least ${minimumSelections} choices.`, path: ["value"] });
+      if (question.maxSelections && selected.length > question.maxSelections) errors.push({ code: "max_selections", message: `Select no more than ${question.maxSelections} choices.`, path: ["value"] });
+    }
+  }
+  if (question.answerType === "boolean" && typeof submission.value !== "boolean") {
+    errors.push({ code: "invalid_boolean", message: "Answer must be boolean.", path: ["value"] });
+  }
+  if (question.answerType === "number" && (typeof submission.value !== "number" || !Number.isFinite(submission.value))) {
+    errors.push({ code: "invalid_number", message: "Answer must be a finite number.", path: ["value"] });
+  }
+  if (["short_text", "long_text", "textarea", "date", "datetime", "weekly_schedule"].includes(question.answerType) && typeof submission.value !== "string") {
+    errors.push({ code: "invalid_text", message: `${question.answerType} answers must be strings.`, path: ["value"] });
+  }
+  if ((question.answerType === "list" || question.answerType === "structured_list") && !Array.isArray(submission.value)) {
+    errors.push({ code: "invalid_list", message: `${question.answerType} answers must be arrays.`, path: ["value"] });
+  }
+  const writesToError = validateQuestionWritesToPath(selectedWritesTo);
+  if (writesToError) errors.push(writesToError);
+
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, submission, writesTo: selectedWritesTo, normalizedValue: submission.value };
+}
+
+function isEffectivelyEmptyAnswer(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string") return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "number") return !Number.isFinite(value);
+  return false;
+}
+
+function zodIssues(result: { success: true } | { success: false; error: { issues: Array<{ code: string; message: string; path: Array<PropertyKey> }> } }): Array<{ code: string; message: string; path: Array<string | number> }> {
+  if (result.success) return [];
+  return result.error.issues.map((issue) => ({
+    code: issue.code,
+    message: issue.message,
+    path: issue.path.map((part) => typeof part === "symbol" ? part.toString() : part),
+  }));
+}
+
+
+export const questionAnswerLifecycleSchema = z.enum(["draft", "answered", "skipped", "invalid"]);
+
+export type QuestionAnswerStateUpdate = { path: string; value: unknown };
+export type QuestionAnswerControllerReceipt = {
+  questionId: string;
+  lifecycle: z.infer<typeof questionAnswerLifecycleSchema>;
+  writesTo?: string;
+  authority: "user_answer_only";
+  execution: "none";
+  approval: "not_granted";
+};
+
+export type QuestionAnswerStateUpdateResult =
+  | { ok: true; submission: QuestionAnswerSubmission; normalizedValue: unknown; updates: QuestionAnswerStateUpdate[]; receipt: QuestionAnswerControllerReceipt }
+  | { ok: false; errors: Array<{ code: string; message: string; path: Array<string | number> }> };
+
+function escapeJsonPointerSegment(segment: string): string {
+  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function decodeJsonPointerSegment(segment: string): string {
+  return segment.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+function isJsonPointerPath(path: string | undefined): path is string {
+  return typeof path === "string" && path.startsWith("/");
+}
+
+function validateQuestionWritesToPath(path: string | undefined): { code: string; message: string; path: Array<string | number> } | null {
+  if (!isJsonPointerPath(path)) return null;
+  if (!path.startsWith("/manifest/")) {
+    return { code: "unsafe_writes_to", message: "JSON Pointer writesTo targets must stay inside /manifest/.", path: ["writesTo"] };
+  }
+  const segments = path.slice(1).split("/").map(decodeJsonPointerSegment);
+  if (segments.some((segment) => segment === "__proto__" || segment === "prototype" || segment === "constructor")) {
+    return { code: "unsafe_writes_to", message: "JSON Pointer writesTo targets must not contain prototype-polluting segments.", path: ["writesTo"] };
+  }
+  return null;
+}
+
+function nowIso(options?: { now?: string | Date }): string {
+  if (typeof options?.now === "string") return options.now;
+  if (options?.now instanceof Date) return options.now.toISOString();
+  return new Date().toISOString();
+}
+
+export function createQuestionAnswerStateUpdates(
+  questionInput: unknown,
+  submissionInput: unknown,
+  options: { now?: string | Date } = {},
+): QuestionAnswerStateUpdateResult {
+  const validation = validateQuestionAnswer(questionInput, submissionInput);
+  if (!validation.ok) return validation;
+
+  const question = createAskUserQuestionSpec(questionInput);
+  const questionIdSegment = escapeJsonPointerSegment(question.id);
+  const answeredAt = validation.submission.answeredAt ?? nowIso(options);
+  const writesTo = validation.writesTo;
+  const lifecycle = validation.submission.skipped ? "skipped" : "answered";
+  const submission: QuestionAnswerSubmission = {
+    ...validation.submission,
+    answeredAt,
+    writesTo,
+    metadata: {
+      ...validation.submission.metadata,
+      controller: "sonik-agent-ui.question-answer-state.v1",
+      execution: "none",
+      approval: "not_granted",
+    },
+  };
+
+  const updates: QuestionAnswerStateUpdate[] = [
+    { path: `/answers/${questionIdSegment}`, value: validation.normalizedValue },
+    { path: `/questionStates/${questionIdSegment}`, value: lifecycle },
+    { path: `/questionSubmissions/${questionIdSegment}`, value: submission },
+    {
+      path: "/lastQuestionSubmission",
+      value: {
+        questionId: question.id,
+        lifecycle,
+        answeredAt,
+        writesTo,
+      },
+    },
+  ];
+
+  if (writesTo) {
+    updates.push({
+      path: `/answerWrites/${questionIdSegment}`,
+      value: { questionId: question.id, writesTo, value: validation.normalizedValue, answeredAt },
+    });
+    if (isJsonPointerPath(writesTo)) {
+      updates.push({ path: writesTo, value: validation.normalizedValue });
+    }
+  }
+
+  return {
+    ok: true,
+    submission,
+    normalizedValue: validation.normalizedValue,
+    updates,
+    receipt: {
+      questionId: question.id,
+      lifecycle,
+      writesTo,
+      authority: "user_answer_only",
+      execution: "none",
+      approval: "not_granted",
+    },
+  };
+}
+
+export function createQuestionAnswerStateUpdateRecord(
+  questionInput: unknown,
+  submissionInput: unknown,
+  options: { now?: string | Date } = {},
+): Record<string, unknown> {
+  const result = createQuestionAnswerStateUpdates(questionInput, submissionInput, options);
+  if (!result.ok) {
+    const message = result.errors.map((error) => `${error.code}: ${error.message}`).join("; ");
+    throw new Error(message || "Invalid question answer submission.");
+  }
+  return Object.fromEntries(result.updates.map((update) => [update.path, update.value]));
+}
+
 export const commandShapeSchema = z.enum(["dispatch", "record", "catalog", "media", "local-ui", "composite"]);
 export const commandExecutionSourceSchema = z.enum(["cli", "mcp", "agent-ui", "orpc", "sandbox", "surface", "test", "headless"]);
 export const commandActionSchema = z.enum(["execute", "commit"]);
@@ -379,6 +863,129 @@ export type CommandCatalog = z.infer<typeof commandCatalogSchema>;
 export type CommandIndexSummary = z.infer<typeof commandIndexSummarySchema>;
 export type CommandIndex = z.infer<typeof commandIndexSchema>;
 
+export const commandWorkflowRecipeStepSchema = z.object({
+  commandId: z.string().min(1),
+  action: commandActionSchema,
+  why: z.string().min(1),
+  requiredBefore: z.array(z.string()).default([]),
+});
+
+export const commandWorkflowRecipeSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  familyId: z.string().min(1),
+  intentAliases: z.array(z.string().min(1)).default([]),
+  canonicalRegressionPrompt: z.string().min(1),
+  commandSequence: z.array(z.string().min(1)).min(1),
+  steps: z.array(commandWorkflowRecipeStepSchema).min(1),
+  forbiddenUnlessExplicit: z.array(z.string().min(1)).default([]),
+  actorFields: z.array(z.string().min(1)).default([]),
+  guestFields: z.array(z.string().min(1)).default([]),
+  trustedActorRules: z.array(z.string().min(1)).default([]),
+  pageContextRequirements: z.array(z.string().min(1)).default([]),
+  successEvidence: z.array(z.string().min(1)).default([]),
+  negativeTranscriptRegression: z.object({
+    prompt: z.string().min(1),
+    failIfCommandIds: z.array(z.string().min(1)).default([]),
+    failIfActorFieldsMutated: z.array(z.string().min(1)).default([]),
+    failIfRationalesContain: z.array(z.string().min(1)).default([]),
+    expectedCommandPath: z.array(z.string().min(1)).min(1),
+  }),
+});
+
+export type CommandWorkflowRecipeStep = z.infer<typeof commandWorkflowRecipeStepSchema>;
+export type CommandWorkflowRecipe = z.infer<typeof commandWorkflowRecipeSchema>;
+
+export const skillDescriptorSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  familyId: z.string().min(1),
+  loadPolicy: commandLoadPolicySchema.default({ mode: "lazy", priority: 0 }),
+  contextHints: commandContextHintsSchema.default({ routes: [], surfaces: [], pageTypes: [], artifactTypes: [], skillFamilies: [], commandFamilies: [], requiredScopes: [] }),
+  intentAliases: z.array(z.string().min(1)).default([]),
+  commandSequence: z.array(z.string().min(1)).default([]),
+  requiredCommands: z.array(z.string().min(1)).default([]),
+  forbiddenUnlessExplicit: z.array(z.string().min(1)).default([]),
+  workflowRecipe: commandWorkflowRecipeSchema.optional(),
+  examples: z.array(z.object({
+    title: z.string().min(1),
+    prompt: z.string().min(1),
+    expectedCommandPath: z.array(z.string().min(1)).default([]),
+  })).default([]),
+  negativeExamples: z.array(z.object({
+    title: z.string().min(1),
+    prompt: z.string().min(1),
+    failIfCommandIds: z.array(z.string().min(1)).default([]),
+    expectedCommandPath: z.array(z.string().min(1)).default([]),
+  })).default([]),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).superRefine((skill, ctx) => {
+  if (skill.workflowRecipe && skill.commandSequence.length > 0 && skill.workflowRecipe.commandSequence.join("\u0000") !== skill.commandSequence.join("\u0000")) {
+    ctx.addIssue({ code: "custom", path: ["commandSequence"], message: "Skill commandSequence must match workflowRecipe.commandSequence when a workflowRecipe is provided." });
+  }
+});
+
+export const skillCatalogSchema = z.object({
+  version: z.literal("sonik-agent-ui.skill-catalog.v1"),
+  generatedAt: z.string(),
+  provider: z.string().min(1),
+  skills: z.array(skillDescriptorSchema),
+});
+
+export const skillIndexSummarySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  familyId: z.string(),
+  loadPolicy: commandLoadPolicySchema,
+  intentAliases: z.array(z.string()),
+  commandSequence: z.array(z.string()),
+  requiredCommands: z.array(z.string()),
+});
+
+export const skillIndexSchema = z.object({
+  version: z.literal("sonik-agent-ui.skill-index.v1"),
+  provider: z.string(),
+  generatedAt: z.string(),
+  skills: z.array(skillIndexSummarySchema),
+  totalMatches: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  limit: z.number().int().positive(),
+});
+
+export type SkillDescriptor = z.infer<typeof skillDescriptorSchema>;
+export type SkillCatalog = z.infer<typeof skillCatalogSchema>;
+export type SkillIndexSummary = z.infer<typeof skillIndexSummarySchema>;
+export type SkillIndex = z.infer<typeof skillIndexSchema>;
+export type SkillLearnAspect = "description" | "workflow" | "examples" | "policy" | "context" | "commands";
+
+export type ToolPolicyMode = "off" | "ask" | "allow";
+export type ToolPolicyInput = {
+  familyModes?: Record<string, ToolPolicyMode>;
+  commandModes?: Record<string, ToolPolicyMode>;
+};
+
+const TOOL_POLICY_MODE_RANK: Record<ToolPolicyMode, number> = { off: 0, ask: 1, allow: 2 };
+
+/**
+ * Resolves the effective policy for a command across the family-level and per-command
+ * policy layers. Most-restrictive-wins: off > ask > allow. Absence of `input`, or of any
+ * layer within it, is skipped rather than treated as `off` — no policy input means "allow"
+ * (today's behavior, before this policy layer existed).
+ */
+export function resolveEffectiveToolPolicy(command: CommandDescriptor, input?: ToolPolicyInput): ToolPolicyMode {
+  if (!input) return "allow";
+  const candidates: ToolPolicyMode[] = [];
+  const familyMode = input.familyModes?.[command.familyId];
+  if (familyMode) candidates.push(familyMode);
+  const commandMode = input.commandModes?.[command.id];
+  if (commandMode) candidates.push(commandMode);
+  if (candidates.length === 0) return "allow";
+  return candidates.reduce((mostRestrictive, mode) => (TOOL_POLICY_MODE_RANK[mode] < TOOL_POLICY_MODE_RANK[mostRestrictive] ? mode : mostRestrictive));
+}
+
 export type CommandExecutionContext = {
   action?: CommandAction;
   source?: CommandExecutionSource;
@@ -392,6 +999,7 @@ export type CommandExecutionContext = {
   authenticated?: boolean;
   organizationId?: string | null;
   scopes?: string[];
+  toolPolicy?: ToolPolicyInput;
 };
 
 export type CommandLearnAspect = "description" | "schema" | "examples" | "policy" | "output" | "surfaces" | "transport" | "auth";
@@ -411,11 +1019,19 @@ export type AgentPageContext = {
   surface?: string;
   pageType?: string;
   title?: string;
+  theme?: string;
   activeEntity?: { type: string; id: string; label?: string };
   activeArtifactId?: string;
   activeDocumentId?: string;
   artifactType?: string;
   visibleActions?: string[];
+  /**
+   * Optional semantic target inventory exposed by the trusted host/page.
+   * Agents may reference these target ids; they must not receive raw CSS selectors.
+   */
+  hostUiTargets?: HostUiTarget[];
+  /** Full registry envelope when the host wants to expose route/surface provenance. */
+  hostUiTargetRegistry?: HostUiTargetRegistry;
   skillFamilies?: string[];
   commandFamilies?: string[];
 };
@@ -437,6 +1053,10 @@ const defaultCommandFamilies: CommandFamilyDefinition[] = [
 
 export function createCommandCatalog(provider: string, commands: CommandDescriptor[], generatedAt = new Date().toISOString()): CommandCatalog {
   return commandCatalogSchema.parse({ version: "sonik-agent-ui.command-catalog.v1", generatedAt, provider, commands });
+}
+
+export function createSkillCatalog(provider: string, skills: SkillDescriptor[], generatedAt = new Date().toISOString()): SkillCatalog {
+  return skillCatalogSchema.parse({ version: "sonik-agent-ui.skill-catalog.v1", generatedAt, provider, skills });
 }
 
 export function createCommandFamilyRegistry(provider: string, families: CommandFamilyDefinition[] = defaultCommandFamilies, generatedAt = new Date().toISOString()): CommandFamilyRegistry {
@@ -535,6 +1155,81 @@ export function searchCommandCatalog(catalog: CommandCatalog, query = "", limit 
   return searchCommandCatalogWithMetadata(catalog, query, limit).commands;
 }
 
+export function searchSkillCatalogWithMetadata(catalog: SkillCatalog, query = "", limit = 20, context: CommandIndexContext = {}): SkillIndex {
+  const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 50));
+  const normalized = query.trim().toLowerCase();
+  const tokens = tokenizeCommandText(normalized);
+  const matches = catalog.skills
+    .filter((skill) => skill.loadPolicy.mode !== "hidden")
+    .filter((skill) => skillVisibleInIndexContext(skill, context))
+    .filter((skill) => {
+      if (tokens.length === 0) return true;
+      const haystack = [
+        skill.id,
+        skill.title,
+        skill.description,
+        skill.familyId,
+        ...skill.intentAliases,
+        ...skill.commandSequence,
+        ...skill.requiredCommands,
+        ...skill.contextHints.routes,
+        ...skill.contextHints.surfaces,
+        ...skill.contextHints.pageTypes,
+        ...skill.contextHints.skillFamilies,
+        ...skill.contextHints.commandFamilies,
+      ].join(" ").toLowerCase();
+      return tokens.every((token) => haystack.includes(token));
+    })
+    .sort((a, b) => Number(skillMatchesIndexContext(b, context)) - Number(skillMatchesIndexContext(a, context)) || b.loadPolicy.priority - a.loadPolicy.priority || a.id.localeCompare(b.id));
+
+  return createSkillIndex(catalog, matches, boundedLimit);
+}
+
+export function createStartupSkillIndex(catalog: SkillCatalog, input: { limit?: number; context?: CommandIndexContext } = {}): SkillIndex {
+  const context = input.context ?? {};
+  const skills = catalog.skills
+    .filter((skill) => skill.loadPolicy.mode === "eager-summary" && skillVisibleInIndexContext(skill, context))
+    .sort((a, b) => b.loadPolicy.priority - a.loadPolicy.priority || a.id.localeCompare(b.id));
+  return createSkillIndex(catalog, skills, input.limit ?? 8);
+}
+
+export function createSurfaceSkillIndex(catalog: SkillCatalog, context: CommandIndexContext = {}, input: { limit?: number } = {}): SkillIndex {
+  const skills = catalog.skills
+    .filter((skill) => skill.loadPolicy.mode !== "hidden")
+    .filter((skill) => skillVisibleInIndexContext(skill, context))
+    .filter((skill) => skill.loadPolicy.mode === "eager-summary" || (skill.loadPolicy.mode === "surface-eager" && skillMatchesIndexContext(skill, context)))
+    .sort((a, b) => Number(skillMatchesIndexContext(b, context)) - Number(skillMatchesIndexContext(a, context)) || b.loadPolicy.priority - a.loadPolicy.priority || a.id.localeCompare(b.id));
+  return createSkillIndex(catalog, skills, input.limit ?? 8);
+}
+
+export function learnSkillDescriptor(catalog: SkillCatalog, skillId: string, aspects: SkillLearnAspect[] = ["description", "workflow", "examples", "policy", "context", "commands"]): Record<string, unknown> {
+  const skill = catalog.skills.find((entry) => entry.id === skillId);
+  if (!skill) return { ok: false, error: "UNKNOWN_SKILL", skillId };
+  const learned: Record<string, unknown> = { ok: true, skillId: skill.id, title: skill.title, familyId: skill.familyId };
+  if (aspects.includes("description")) {
+    learned.description = skill.description;
+    learned.intentAliases = skill.intentAliases;
+  }
+  if (aspects.includes("workflow")) learned.workflowRecipe = skill.workflowRecipe;
+  if (aspects.includes("examples")) {
+    learned.examples = skill.examples;
+    learned.negativeExamples = skill.negativeExamples;
+  }
+  if (aspects.includes("policy")) {
+    learned.forbiddenUnlessExplicit = skill.forbiddenUnlessExplicit;
+    learned.metadata = skill.metadata;
+  }
+  if (aspects.includes("context")) {
+    learned.contextHints = skill.contextHints;
+    learned.loadPolicy = skill.loadPolicy;
+  }
+  if (aspects.includes("commands")) {
+    learned.commandSequence = skill.commandSequence;
+    learned.requiredCommands = skill.requiredCommands;
+  }
+  return learned;
+}
+
 export function searchCommandCatalogWithMetadata(catalog: CommandCatalog, query = "", limit = 20): CommandCatalogSearchResult {
   const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 50));
   const normalized = query.trim().toLowerCase();
@@ -596,7 +1291,13 @@ export function learnCommandDescriptor(catalog: CommandCatalog, commandId: strin
   if (!command) return { ok: false, error: "UNKNOWN_COMMAND", commandId };
   const learned: Record<string, unknown> = { ok: true, commandId: command.id, title: command.title, source: command.source, effect: command.effect, approval: command.approval };
   if (aspects.includes("description")) learned.description = command.description;
-  if (aspects.includes("schema")) learned.inputSchema = command.inputSchemaJson ?? command.input;
+  if (aspects.includes("schema")) {
+    learned.inputSchema = command.inputSchemaJson ?? command.input;
+    if (typeof command.metadata.inputConvention === "string") learned.inputConvention = command.metadata.inputConvention;
+    if (Array.isArray(command.metadata.hostDerivedFields)) learned.hostDerivedFields = command.metadata.hostDerivedFields;
+    if (Array.isArray(command.metadata.forbiddenFields)) learned.forbiddenFields = command.metadata.forbiddenFields;
+    if (Array.isArray(command.metadata.commonErrors)) learned.commonErrors = command.metadata.commonErrors;
+  }
   if (aspects.includes("examples")) learned.examples = command.examples;
   if (aspects.includes("policy")) learned.policy = command.policy;
   if (aspects.includes("output")) learned.output = command.output;
@@ -629,8 +1330,11 @@ export function evaluateCommandPolicy(command: CommandDescriptor, context: Comma
   if (action === "commit" && command.approval === "required" && context.approved !== true) reasons.push("approval_required");
   if (command.approval === "denied") reasons.push("command_denied_by_manifest");
   if (command.effect === "destructive" && context.approved !== true) reasons.push("destructive_requires_explicit_approval");
+  const effectiveToolPolicy = resolveEffectiveToolPolicy(command, context.toolPolicy);
+  if (effectiveToolPolicy === "off") reasons.push("tool_policy_off");
+  if (effectiveToolPolicy === "ask" && context.approved !== true) reasons.push("tool_policy_requires_approval");
   if (reasons.length === 0) return { decision: "allow", reasons: ["policy_allowed"] };
-  if (reasons.every((reason) => reason === "approval_required" || reason === "use_commit_for_mutation_command")) return { decision: "needs_approval", reasons };
+  if (reasons.every((reason) => reason === "approval_required" || reason === "use_commit_for_mutation_command" || reason === "tool_policy_requires_approval")) return { decision: "needs_approval", reasons };
   if (reasons.length === 1 && reasons[0] === "approval_required") return { decision: "needs_approval", reasons };
   return { decision: "deny", reasons };
 }
@@ -751,6 +1455,46 @@ function commandMatchesIndexContext(command: CommandDescriptor, context: Command
   );
 }
 
+function createSkillIndex(catalog: SkillCatalog, skills: SkillDescriptor[], limit: number): SkillIndex {
+  const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 50));
+  return skillIndexSchema.parse({
+    version: "sonik-agent-ui.skill-index.v1",
+    provider: catalog.provider,
+    generatedAt: catalog.generatedAt,
+    skills: skills.slice(0, boundedLimit).map((skill) => ({
+      id: skill.id,
+      title: skill.title,
+      description: skill.description,
+      familyId: skill.familyId,
+      loadPolicy: skill.loadPolicy,
+      intentAliases: skill.intentAliases,
+      commandSequence: skill.commandSequence,
+      requiredCommands: skill.requiredCommands,
+    })),
+    totalMatches: skills.length,
+    truncated: skills.length > boundedLimit,
+    limit: boundedLimit,
+  });
+}
+
+function skillVisibleInIndexContext(skill: SkillDescriptor, context: CommandIndexContext): boolean {
+  const scopes = new Set(context.scopes ?? []);
+  const requiredScopes = [...new Set(skill.contextHints.requiredScopes)];
+  return requiredScopes.length === 0 || requiredScopes.every((scope) => scopes.has(scope));
+}
+
+function skillMatchesIndexContext(skill: SkillDescriptor, context: CommandIndexContext): boolean {
+  const hints = skill.contextHints;
+  return Boolean(
+    (context.surface && hints.surfaces.includes(context.surface)) ||
+    (context.route && hints.routes.includes(context.route)) ||
+    (context.pageType && hints.pageTypes.includes(context.pageType)) ||
+    (context.artifactType && hints.artifactTypes.includes(context.artifactType)) ||
+    context.commandFamilies?.some((family) => hints.commandFamilies.includes(family)) ||
+    context.skillFamilies?.some((family) => hints.skillFamilies.includes(family))
+  );
+}
+
 function inferCommandShape(tool: ToolContractEntry): CommandShape {
   if (tool.source === "local-ui") return "local-ui";
   const text = `${tool.id} ${tool.title} ${tool.capabilities.join(" ")}`.toLowerCase();
@@ -815,3 +1559,505 @@ function tokenizeCommandText(value: string): string[] {
 function commandReceiptRequestId(commandId: string, startedAt: number): string {
   return `cmd_${commandId.replace(/[^a-z0-9]+/gi, "_")}_${startedAt}`;
 }
+
+export const intakeManifestTypeSchema = z.enum(["venue_schedule", "event", "amplify_campaign_template"]);
+export const intakeManifestStatusSchema = z.enum(["draft", "validated", "exported"]);
+
+const intakeManifestSourceSchema = z.object({
+  createdBy: z.string().min(1).optional(),
+  created_by: z.string().min(1).optional(),
+  skill: z.string().min(1).optional(),
+  sourceMaterials: z.array(z.unknown()).optional(),
+  source_materials: z.array(z.unknown()).optional(),
+}).passthrough().default({});
+
+export const intakeManifestSchema = z.object({
+  manifestType: intakeManifestTypeSchema,
+  status: intakeManifestStatusSchema.default("draft"),
+  source: intakeManifestSourceSchema,
+}).passthrough();
+
+export type IntakeManifestType = z.infer<typeof intakeManifestTypeSchema>;
+export type IntakeManifestStatus = z.infer<typeof intakeManifestStatusSchema>;
+export type IntakeManifest = z.infer<typeof intakeManifestSchema>;
+
+export type IntakeManifestIssue = {
+  code: string;
+  message: string;
+  path: string;
+  severity: "blocking" | "warning";
+};
+
+export type IntakeManifestCommandPreview = {
+  commandId: string;
+  familyId: string;
+  effect: "write";
+  mode: "preview_only";
+  approval: "required";
+  reason: string;
+};
+
+export type IntakeManifestValidationResult = {
+  ok: boolean;
+  manifestType?: IntakeManifestType;
+  status: "valid" | "invalid";
+  issues: IntakeManifestIssue[];
+  blockingItems: IntakeManifestIssue[];
+  warnings: IntakeManifestIssue[];
+  commandPreview: IntakeManifestCommandPreview[];
+};
+
+export type IntakeManifestExportPayload = {
+  version: "sonik-agent-ui.intake-manifest-export.v1";
+  exportedAt: string;
+  manifest: IntakeManifest;
+  validation: IntakeManifestValidationResult;
+  commandPreview: IntakeManifestCommandPreview[];
+  execution: "none";
+  approval: "not_granted";
+};
+
+const manifestRequiredFields: Record<IntakeManifestType, Array<{ path: string; message: string }>> = {
+  venue_schedule: [
+    { path: "/intakeMode", message: "Venue schedule manifests require intakeMode." },
+    { path: "/inventory/coreDescription", message: "Venue schedule manifests require core inventory." },
+    { path: "/inventory/confirmationMode", message: "Venue schedule manifests require confirmation mode or explicit unknown." },
+  ],
+  event: [
+    { path: "/event/title", message: "Event manifests require an event title." },
+    { path: "/event/startsAt", message: "Event manifests require an event start date/time." },
+    { path: "/inventory/coreDescription", message: "Event manifests require ticket/reservation/inventory description." },
+  ],
+  amplify_campaign_template: [
+    { path: "/campaign/goal", message: "Campaign template manifests require a campaign goal." },
+    { path: "/audience/description", message: "Campaign template manifests require an audience description." },
+    { path: "/channels", message: "Campaign template manifests require channels or explicit unknown." },
+  ],
+};
+
+type IntakeManifestFieldRule = {
+  path: string;
+  code: string;
+  message: string;
+  accepts: (value: unknown) => boolean;
+};
+
+const manifestFieldRules: Record<IntakeManifestType, IntakeManifestFieldRule[]> = {
+  venue_schedule: [
+    { path: "/intakeMode", code: "invalid_intake_mode", message: "Venue schedule intakeMode must be venue_schedule or hybrid.", accepts: (value) => value === "venue_schedule" || value === "hybrid" },
+    { path: "/inventory/coreDescription", code: "invalid_core_inventory", message: "Venue schedule core inventory must be a non-empty text description.", accepts: isNonEmptyString },
+    { path: "/inventory/confirmationMode", code: "invalid_confirmation_mode", message: "Venue schedule confirmation mode must be a non-empty string or explicit unknown.", accepts: isNonEmptyString },
+  ],
+  event: [
+    { path: "/event/title", code: "invalid_event_title", message: "Event title must be a non-empty string.", accepts: isNonEmptyString },
+    { path: "/event/startsAt", code: "invalid_event_start", message: "Event start must be a parseable ISO-like date/time string.", accepts: isDateTimeString },
+    { path: "/inventory/coreDescription", code: "invalid_event_inventory", message: "Event inventory must be a non-empty text description.", accepts: isNonEmptyString },
+  ],
+  amplify_campaign_template: [
+    { path: "/campaign/goal", code: "invalid_campaign_goal", message: "Campaign goal must be a non-empty string.", accepts: isNonEmptyString },
+    { path: "/audience/description", code: "invalid_audience_description", message: "Audience description must be a non-empty string.", accepts: isNonEmptyString },
+    { path: "/channels", code: "invalid_campaign_channels", message: "Campaign channels must be a non-empty array or explicit unknown.", accepts: isNonEmptyArrayOrUnknownString },
+  ],
+};
+
+const manifestCommandPreview: Record<IntakeManifestType, IntakeManifestCommandPreview[]> = {
+  venue_schedule: [
+    {
+      commandId: "booking.create.context",
+      familyId: "booking-contexts",
+      effect: "write",
+      mode: "preview_only",
+      approval: "required",
+      reason: "A validated venue schedule manifest can later map to trusted booking context creation commands.",
+    },
+  ],
+  event: [
+    {
+      commandId: "booking.create.event",
+      familyId: "booking-events",
+      effect: "write",
+      mode: "preview_only",
+      approval: "required",
+      reason: "A validated event manifest can later map to trusted event/context/ticket commands.",
+    },
+  ],
+  amplify_campaign_template: [
+    {
+      commandId: "amplify.create.campaign.template",
+      familyId: "amplify-campaigns",
+      effect: "write",
+      mode: "preview_only",
+      approval: "required",
+      reason: "A validated campaign template manifest can later map to trusted Amplify campaign template commands.",
+    },
+  ],
+};
+
+export function validateIntakeManifest(input: unknown): IntakeManifestValidationResult {
+  const parsed = intakeManifestSchema.safeParse(input);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue): IntakeManifestIssue => ({
+      code: issue.code,
+      message: issue.message,
+      path: `/${issue.path.join("/")}`,
+      severity: "blocking",
+    }));
+    return { ok: false, status: "invalid", issues, blockingItems: issues, warnings: [], commandPreview: [] };
+  }
+
+  const manifest = parsed.data;
+  const issues: IntakeManifestIssue[] = [];
+  for (const required of manifestRequiredFields[manifest.manifestType]) {
+    const value = readJsonPointer(manifest, required.path);
+    if (isMissingManifestValue(value)) {
+      issues.push({ code: "missing_required_field", message: required.message, path: required.path, severity: "blocking" });
+    }
+  }
+  for (const rule of manifestFieldRules[manifest.manifestType]) {
+    const value = readJsonPointer(manifest, rule.path);
+    if (!isMissingManifestValue(value) && !rule.accepts(value)) {
+      issues.push({ code: rule.code, message: rule.message, path: rule.path, severity: "blocking" });
+    }
+  }
+
+  const policyWarnings = collectPolicyWarnings(manifest);
+  const blockingItems = issues.filter((issue) => issue.severity === "blocking");
+  const warnings = [...issues.filter((issue) => issue.severity === "warning"), ...policyWarnings];
+  return {
+    ok: blockingItems.length === 0,
+    manifestType: manifest.manifestType,
+    status: blockingItems.length === 0 ? "valid" : "invalid",
+    issues: [...blockingItems, ...warnings],
+    blockingItems,
+    warnings,
+    commandPreview: manifestCommandPreview[manifest.manifestType].map((preview) => ({ ...preview })),
+  };
+}
+
+export function exportIntakeManifestPayload(input: unknown, options: { exportedAt?: string | Date } = {}): IntakeManifestExportPayload {
+  const manifest = intakeManifestSchema.parse(input);
+  const validation = validateIntakeManifest(manifest);
+  if (!validation.ok) {
+    const message = validation.blockingItems.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
+    throw new Error(`Cannot export invalid intake manifest: ${message || "manifest validation failed"}`);
+  }
+  return {
+    version: "sonik-agent-ui.intake-manifest-export.v1",
+    exportedAt: options.exportedAt instanceof Date ? options.exportedAt.toISOString() : options.exportedAt ?? new Date().toISOString(),
+    manifest: { ...manifest, status: "exported" },
+    validation,
+    commandPreview: validation.commandPreview,
+    execution: "none",
+    approval: "not_granted",
+  };
+}
+
+function readJsonPointer(input: unknown, pointer: string): unknown {
+  if (!pointer.startsWith("/")) return undefined;
+  return pointer.slice(1).split("/").reduce((value: unknown, segment) => {
+    if (value === undefined || value === null || typeof value !== "object") return undefined;
+    const key = decodeJsonPointerSegment(segment);
+    return (value as Record<string, unknown>)[key];
+  }, input);
+}
+
+function isMissingManifestValue(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string") return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isDateTimeString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0 && !Number.isNaN(Date.parse(value));
+}
+
+function isNonEmptyArrayOrUnknownString(value: unknown): boolean {
+  return Array.isArray(value) ? value.length > 0 : value === "unknown";
+}
+
+function collectPolicyWarnings(manifest: IntakeManifest): IntakeManifestIssue[] {
+  const warnings: IntakeManifestIssue[] = [];
+  const policyPaths = ["/pricing", "/payment", "/policies", "/eligibility", "/compliance"];
+  for (const path of policyPaths) {
+    const value = readJsonPointer(manifest, path);
+    if (value && typeof value === "object") {
+      warnings.push({
+        code: "review_policy_field",
+        message: `${path} contains operational policy fields and must be human-reviewed before command execution.`,
+        path,
+        severity: "warning",
+      });
+    }
+  }
+  return warnings;
+}
+
+// Run lifecycle contract for the Sonik Agent UI streaming endpoint.
+//
+// A "run" is one agent turn treated as a persisted, resumable object: it has a
+// status, correlation ids, a per-run event log mirroring the UI-message stream,
+// and — on transient failures — a `resumable` flag that drives a Continue
+// affordance distinct from retry-from-scratch. Modelled on Open Design's
+// `ChatRunStatusResponse` / `PersistedAgentEvent` (packages/contracts), reshaped
+// for Sonik's persistence and json-render stream. Kept dependency-light (no AI
+// SDK / observability imports) so both the producer (api/generate) and the
+// consumers (persistence adapter, chat UI) share one type and cannot drift.
+
+export const RUN_STATUSES = ["running", "succeeded", "failed", "canceled"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export function isRunStatus(value: unknown): value is RunStatus {
+  return typeof value === "string" && (RUN_STATUSES as readonly string[]).includes(value);
+}
+
+export function isTerminalRunStatus(status: RunStatus): boolean {
+  return status !== "running";
+}
+
+// Structured failure codes surfaced on `error` status events so the UI can
+// render error-specific affordances instead of a dead chat. `UNKNOWN` is the
+// catch-all for opaque runtime failures (mirrors Open Design's
+// classify-opaque-runtime-failure work).
+export const RUN_ERROR_CODES = [
+  "MISSING_HOST_CONTEXT",
+  "RATE_LIMITED",
+  "STALE_DEPLOYMENT",
+  "AGENT_STREAM_FAILED",
+  "UNKNOWN",
+] as const;
+export type RunErrorCode = (typeof RUN_ERROR_CODES)[number];
+
+export function isRunErrorCode(value: unknown): value is RunErrorCode {
+  return typeof value === "string" && (RUN_ERROR_CODES as readonly string[]).includes(value);
+}
+
+/** Correlation ids reused from the request's telemetry correlation. Structurally
+ *  identical to `AgentTelemetryCorrelation` so callers can pass it straight
+ *  through without a new cross-package dependency. */
+export interface RunCorrelation {
+  requestId: string;
+  traceId: string;
+  traceparent: string;
+}
+
+export interface RunRecord {
+  id: string;
+  session_id: string;
+  /** The assistant message id this run produces, when the client supplied one. */
+  message_id: string | null;
+  status: RunStatus;
+  /** True when a failed run can be recovered by continuing rather than only
+   *  restarting from scratch. Absent/false on success and non-resumable
+   *  failures. Mirrors Open Design's `ChatRunStatusResponse.resumable`. */
+  resumable: boolean;
+  error: string | null;
+  error_code: RunErrorCode | null;
+  request_id: string | null;
+  trace_id: string | null;
+  traceparent: string | null;
+  started_at: string;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Persisted, mapped event union mirroring the live UI-message stream — NOT raw
+// transport chunks. `daemonAgentPayloadToPersistedAgentEvent` in Open Design
+// draws the same producer/persisted line; here the mapping lives in the app's
+// run-event-log (it needs the AI SDK chunk types). Reattach replays these in
+// `seq` order to rebuild the assistant message including tool/artifact parts.
+export type PersistedRunEvent =
+  | { kind: "status"; label: string; detail?: string; code?: RunErrorCode }
+  | { kind: "text"; text: string }
+  | { kind: "reasoning"; text: string }
+  | { kind: "tool_use"; id: string; name: string; input: unknown }
+  | { kind: "tool_result"; toolCallId: string; toolName?: string; output: unknown; isError: boolean }
+  | { kind: "artifact"; spec: unknown; dataPart?: unknown }
+  | { kind: "usage"; inputTokens?: number; outputTokens?: number; totalTokens?: number }
+  | { kind: "error"; message: string; code?: RunErrorCode };
+
+export type PersistedRunEventKind = PersistedRunEvent["kind"];
+
+export interface RunEventRecord {
+  id: string;
+  run_id: string;
+  session_id: string | null;
+  seq: number;
+  event: PersistedRunEvent;
+  created_at: string;
+}
+
+// Canonical prompt sent by the "Continue" affordance on a resumable failed run.
+// Adapted from Open Design's RESUME_CONTINUE_PROMPT: worded as a continuation of
+// interrupted work, deliberately NOT a re-send of the original user turn (that
+// is the from-scratch Retry path).
+export const RESUME_CONTINUE_PROMPT =
+  "The previous turn was interrupted before it finished. " +
+  "If your last response was cut off, continue it from where you left off and " +
+  "keep any work already produced; otherwise complete the original request. " +
+  "Review the current workspace document and artifact state before making " +
+  "further changes.";
+
+export interface RunErrorAffordance {
+  code: RunErrorCode;
+  /** Short user-facing headline. */
+  title: string;
+  /** One-line guidance describing the specific recovery path. */
+  guidance: string;
+  /** Label for the primary recovery action, when one applies. */
+  actionLabel: string | null;
+  /** Whether the failure is transient and the run should offer Continue. */
+  resumable: boolean;
+}
+
+const RUN_ERROR_AFFORDANCES: Record<RunErrorCode, RunErrorAffordance> = {
+  MISSING_HOST_CONTEXT: {
+    code: "MISSING_HOST_CONTEXT",
+    title: "Host connection lost",
+    guidance: "The signed host session expired or was not attached. Reconnect the host context, then continue the run.",
+    actionLabel: "Reconnect and continue",
+    resumable: true,
+  },
+  RATE_LIMITED: {
+    code: "RATE_LIMITED",
+    title: "Rate limit reached",
+    guidance: "Requests are being throttled. Wait a moment, then continue the run.",
+    actionLabel: "Continue",
+    resumable: true,
+  },
+  STALE_DEPLOYMENT: {
+    code: "STALE_DEPLOYMENT",
+    title: "Deployment changed mid-run",
+    guidance: "A new version deployed while this run was streaming. Continue to resume against the current deployment.",
+    actionLabel: "Continue",
+    resumable: true,
+  },
+  AGENT_STREAM_FAILED: {
+    code: "AGENT_STREAM_FAILED",
+    title: "Run interrupted",
+    guidance: "The stream dropped before the turn finished. Continue to pick up where it left off.",
+    actionLabel: "Continue",
+    resumable: true,
+  },
+  UNKNOWN: {
+    code: "UNKNOWN",
+    title: "Run failed",
+    guidance: "The run stopped for an unexpected reason. Retry to start the turn again.",
+    actionLabel: null,
+    resumable: false,
+  },
+};
+
+export function describeRunError(code: RunErrorCode | null | undefined): RunErrorAffordance {
+  if (code && isRunErrorCode(code)) return RUN_ERROR_AFFORDANCES[code];
+  return RUN_ERROR_AFFORDANCES.UNKNOWN;
+}
+
+export function isResumableErrorCode(code: RunErrorCode | null | undefined): boolean {
+  return describeRunError(code).resumable;
+}
+
+// Best-effort mapping from a raw failure (error message / HTTP status) to a
+// structured code. Server-side classification; deliberately conservative so an
+// unrecognised failure falls through to UNKNOWN rather than mislabelling.
+export function classifyRunErrorCode(input: {
+  message?: string | null;
+  status?: number | null;
+  cause?: string | null;
+} = {}): RunErrorCode {
+  const status = input.status ?? null;
+  if (status === 429) return "RATE_LIMITED";
+  const haystack = `${input.message ?? ""} ${input.cause ?? ""}`.toLowerCase();
+  if (!haystack.trim()) return "UNKNOWN";
+  if (haystack.includes("missing-host-context") || haystack.includes("host context") || haystack.includes("host session")) {
+    return "MISSING_HOST_CONTEXT";
+  }
+  if (haystack.includes("rate limit") || haystack.includes("rate-limit") || haystack.includes("too many requests") || haystack.includes("429")) {
+    return "RATE_LIMITED";
+  }
+  if (haystack.includes("stale") || haystack.includes("deployment") || haystack.includes("worker was updated") || haystack.includes("script updated")) {
+    return "STALE_DEPLOYMENT";
+  }
+  return "UNKNOWN";
+}
+
+// Where a generate turn started, from the client's point of view. Mirrors Open
+// Design's `ChatAnalyticsEntryFrom`, retargeted to Sonik's actual entry points.
+// Analytics-only: the server NEVER trusts these for behavior — they only shape
+// run/telemetry analytics props (see AgentAnalyticsHints).
+export const AGENT_ANALYTICS_ENTRY_FROM = [
+  // A turn launched from a workflow launcher chip (the "Set up a venue" /
+  // "Create an event" suggestion buttons on the empty-state composer). The chip
+  // prefills a skill-composed prompt; the run fires on that chip's send.
+  "workflow_launcher",
+  // A plain composer send: the user typed a prompt and submitted it. This is the
+  // default entry point when nothing more specific applies.
+  "composer",
+  // A turn that submits answers to an inline question-form clarification (the
+  // user answering an ask-user-question surface, still clarifying the current
+  // intent rather than a fresh create/edit request). Lets analytics separate
+  // clarification turns from initiating turns.
+  "question_answer",
+  // A turn started by the "Continue the run" affordance on a resumable failed
+  // run (Phase 1). Sends RESUME_CONTINUE_PROMPT rather than the original user
+  // turn, so isolating it makes the recovery mechanism's usage and success rate
+  // measurable — deliberately distinct from retry-from-scratch.
+  "resume_continue",
+] as const;
+export type AgentAnalyticsEntryFrom = (typeof AGENT_ANALYTICS_ENTRY_FROM)[number];
+
+export function isAgentAnalyticsEntryFrom(value: unknown): value is AgentAnalyticsEntryFrom {
+  return typeof value === "string" && (AGENT_ANALYTICS_ENTRY_FROM as readonly string[]).includes(value);
+}
+
+/**
+ * Session-dimension analytics hints stamped onto a run and its telemetry so a
+ * session's run sequence is analysable ("did this session reach an artifact, and
+ * on which turn?"). Computed client-side and sent with the generate request.
+ *
+ * IMPORTANT: hints are analytics-only. They are NEVER trusted for behavior and
+ * are kept out of the agent/tool inputs entirely — the server sanitizes them and
+ * records them alongside the run (as an `analytics_hints` status event) and on
+ * the run telemetry, but never feeds them into prompt composition, tool
+ * selection, or command policy. Absent/dropped hints reproduce today's behavior.
+ */
+export interface AgentAnalyticsHints {
+  /** How this turn started (see AGENT_ANALYTICS_ENTRY_FROM). */
+  entryFrom?: AgentAnalyticsEntryFrom;
+  /** 0-based turn index within the client analytics session. Lets a run be
+   *  placed in its session's turn sequence ("reached an artifact on turn N"). */
+  turnIndex?: number;
+  /** True when this is the first run of the session; equals `turnIndex === 0`. */
+  isFirstRun?: boolean;
+  /** True when the session already had a generated artifact when this run
+   *  started — the run is an edit/iteration rather than a first creation. */
+  hasExistingArtifact?: boolean;
+}
+
+const MAX_ANALYTICS_TURN_INDEX = 100_000;
+
+/**
+ * Validate + bound an untrusted analytics-hints payload (e.g. from the request
+ * body). Drops any field that is malformed rather than throwing, so a bad hint
+ * never breaks a turn. Returns undefined when nothing usable remains, so the
+ * caller can treat "no hints" as today's behavior (hints are droppable).
+ */
+export function sanitizeAgentAnalyticsHints(value: unknown): AgentAnalyticsHints | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const hints: AgentAnalyticsHints = {};
+  if (isAgentAnalyticsEntryFrom(record.entryFrom)) hints.entryFrom = record.entryFrom;
+  if (typeof record.turnIndex === "number" && Number.isFinite(record.turnIndex) && record.turnIndex >= 0) {
+    hints.turnIndex = Math.min(Math.floor(record.turnIndex), MAX_ANALYTICS_TURN_INDEX);
+  }
+  if (typeof record.isFirstRun === "boolean") hints.isFirstRun = record.isFirstRun;
+  if (typeof record.hasExistingArtifact === "boolean") hints.hasExistingArtifact = record.hasExistingArtifact;
+  return Object.keys(hints).length > 0 ? hints : undefined;
+}
+
+export * from "./target-registry.js";

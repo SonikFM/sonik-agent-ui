@@ -10,7 +10,11 @@ import {
   searchGlobalCommandRegistry,
 } from "../../apps/standalone-sveltekit/src/lib/server/global-command-registry.ts";
 
-const binding = JSON.parse(await readFile("tests/fixtures/sonik-booking/demo-command-binding.json", "utf8"));
+const [binding, bookingArtifact] = await Promise.all([
+  readJson("tests/fixtures/sonik-booking/demo-command-binding.json"),
+  readJson("tests/fixtures/generated/sonik-booking-command-artifacts.generated.json"),
+]);
+const expectedBookingCommandCount = bookingArtifact.summary.commandCount;
 const catalog = getGlobalCommandCatalog();
 const commandById = new Map(catalog.commands.map((command) => [command.id, command]));
 
@@ -28,7 +32,7 @@ const bookingContext = parseGlobalCommandRegistryContextFromSearchParams(new URL
 const registry = getGlobalCommandRegistryArtifact({ startupLimit: 10, context: bookingContext });
 const registryJson = JSON.stringify(registry);
 assert.equal(registry.version, "sonik-agent-ui.global-command-registry.v1");
-assert.equal(registry.summary.commandCount, 71, "registry reports all generated booking commands");
+assert.equal(registry.summary.commandCount, expectedBookingCommandCount, "registry reports all generated booking commands");
 assert.equal(registry.providers.some((provider) => provider.provider === "sonik-booking-openapi-fixture"), true, "registry summary includes booking provider");
 assert.equal(Object.hasOwn(registry, "catalog"), false, "default registry endpoint does not load the full catalog into context");
 assert.equal(Object.hasOwn(registry, "manifest"), false, "default registry endpoint does not load the full manifest into context");
@@ -36,16 +40,16 @@ assert.equal(registryJson.includes("inputSchema"), false, "default registry endp
 assert.equal(registry.startupIndex.commands.every((command) => command.execution.runtimeStatus === "shadow" && command.execution.executable === false), true, "startup index exposes runtime status without mounting generated commands");
 
 const summary = getGlobalCommandRegistrySummary();
-assert.equal(summary.summary.commandCount, 71);
-assert.equal(summary.summary.toolCount, 71);
-assert.equal(summary.summary.cliProjectionCount, 71);
-assert.equal(summary.summary.mcpProjectionCount, 71);
+assert.equal(summary.summary.commandCount, expectedBookingCommandCount);
+assert.equal(summary.summary.toolCount, expectedBookingCommandCount);
+assert.equal(summary.summary.cliProjectionCount, bookingArtifact.summary.cliProjectionCount);
+assert.equal(summary.summary.mcpProjectionCount, bookingArtifact.summary.mcpProjectionCount);
 
 const holdSearch = searchGlobalCommandRegistry({ query: "hold", limit: 12, context: bookingContext });
 assert.equal(holdSearch.kind, "global-command-registry-search");
 assert.equal(holdSearch.provider, "sonik-global-command-registry");
 assert.equal(holdSearch.commands.length <= 12, true);
-assert.equal(holdSearch.contextIndex.totalMatches, 71, "booking page context can surface all booking command summaries without schemas");
+assert.equal(holdSearch.contextIndex.totalMatches, expectedBookingCommandCount, "booking page context can surface all booking command summaries without schemas");
 assert.equal(JSON.stringify(holdSearch).includes("inputSchema"), false, "search endpoint remains schema-free");
 assert.equal(holdSearch.commands.every((command) => command.execution.executable === false), true, "search summaries explicitly remain non-executable discovery records");
 assert.equal(holdSearch.commands.every((command) => !Object.hasOwn(command, "input") && !Object.hasOwn(command, "inputSchemaJson")), true, "search returns bounded summaries, not full descriptors");
@@ -124,3 +128,7 @@ console.log(JSON.stringify({
   cleanupMutation: binding.cleanupMutation.commandId,
   destructiveProbe: destructive.commandId,
 }));
+
+async function readJson(path) {
+  return JSON.parse(await readFile(path, "utf8"));
+}

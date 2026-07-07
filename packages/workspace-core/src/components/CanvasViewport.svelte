@@ -19,6 +19,7 @@
     artifactVersions?: Array<{ version: number; label?: string }>;
     activeArtifactVersion?: number | null;
     onArtifactVersionChange?: (version: number) => void;
+    showDeveloperPanels?: boolean;
   }
 </script>
 
@@ -41,6 +42,7 @@
     artifactVersions = [],
     activeArtifactVersion = null,
     onArtifactVersionChange,
+    showDeveloperPanels = true,
   }: CanvasViewportProps = $props();
 
   let panel = $state<CanvasPanel>("canvas");
@@ -61,6 +63,7 @@
   const hasArtifact = $derived(Boolean(artifact));
   const hasWorkspaceContent = $derived(Boolean(artifact || documentAvailable));
   const artifactKey = $derived(artifact ? `${artifact.id}:${artifact.version}` : "");
+  const isDeveloperPanel = $derived(panel === "editor" || panel === "inspector" || panel === "raw");
 
   $effect(() => {
     if (!artifact) {
@@ -80,7 +83,8 @@
 
   $effect(() => {
     if (panel === "document" && !documentAvailable) panel = hasArtifact ? "canvas" : "canvas";
-    if (!hasArtifact && documentAvailable && panel !== "document") panel = "document";
+    if (!showDeveloperPanels && isDeveloperPanel) panel = hasArtifact ? "canvas" : documentAvailable ? "document" : "canvas";
+    if (!hasArtifact && documentAvailable && panel !== "document" && (showDeveloperPanels || !isDeveloperPanel)) panel = "document";
   });
 
   function applyDraft(): void {
@@ -106,6 +110,7 @@
     {artifactVersions}
     {activeArtifactVersion}
     {onArtifactVersionChange}
+    {showDeveloperPanels}
     onPanelChange={(nextPanel) => (panel = nextPanel)}
     onToggleFullscreen={() => (isFullscreen = !isFullscreen)}
     {onClear}

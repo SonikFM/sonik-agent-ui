@@ -13,20 +13,18 @@
 
   let { props, bindings }: Props = $props();
 
-  function valueBinding() {
-    return getBoundProp<string>(
-      () => (props.value ?? undefined) as string | undefined,
-      () => bindings?.value,
-    );
-  }
+  const valueBinding = getBoundProp<string>(
+    () => (props.value ?? undefined) as string | undefined,
+    () => bindings?.value,
+  );
 
   let value = $derived(
-    valueBinding().current ?? ""
+    valueBinding.current ?? ""
   );
 
   function handleInput(e: Event) {
     const newValue = (e.target as HTMLInputElement).value;
-    valueBinding().current = newValue;
+    valueBinding.current = newValue;
   }
 </script>
 

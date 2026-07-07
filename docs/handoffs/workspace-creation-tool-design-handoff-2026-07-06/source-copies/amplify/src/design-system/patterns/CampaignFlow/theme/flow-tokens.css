@@ -1,0 +1,398 @@
+/* pure CSS — no JS imports */
+
+/*
+ * Campaign Flow — Design Tokens
+ *
+ * This file declares ALL color tokens used by the flow module.
+ * Import once at app root (globals.css or layout.tsx).
+ * Override any --flow-* variable under [data-theme="..."] or
+ * [data-surface="campaign-wizard"] to re-skin. The TypeScript governance
+ * registry in flow-token-registry.ts owns the same defaults for Leva +
+ * Storybook verification.
+ *
+ * ZERO hardcoded hex values in any .tsx or .ts file.
+ */
+
+:root {
+	/* 1. EDGE STATUS */
+	--flow-edge-idle: oklch(var(--bc) / 0.48);
+	--flow-edge-active: oklch(var(--su));
+	--flow-edge-error: oklch(var(--er));
+	--flow-edge-blocked: oklch(var(--wa));
+
+	/* 2. BRANCH COLORS */
+	--flow-branch-true: oklch(0.723 0.191 142.5);
+	--flow-branch-false: oklch(0.637 0.237 25.3);
+	--flow-branch-a: oklch(0.623 0.214 259.1);
+	--flow-branch-b: oklch(0.702 0.183 55.1);
+	--flow-branch-c: oklch(0.627 0.208 292.7);
+
+	/* 3. SUB-CONNECTION ACCENTS */
+	--flow-accent-logic: oklch(0.627 0.208 292.7);
+	--flow-accent-event: oklch(0.769 0.188 70.1);
+	--flow-accent-ai: oklch(0.704 0.14 181.8);
+	--flow-accent-conditional: oklch(0.551 0.027 264.4);
+	--flow-accent-channel: oklch(var(--p));
+	--flow-accent-ads: oklch(0.611 0.179 259.1);
+
+	/* 4. PROVIDER COLORS */
+	--flow-provider-whatsapp: oklch(0.723 0.191 152.6);
+	--flow-provider-email: oklch(0.611 0.143 254.6);
+	--flow-provider-sms: oklch(0.668 0.19 41.6);
+	--flow-provider-tiktok: oklch(0.269 0 0);
+	--flow-provider-google-ads: oklch(0.611 0.179 259.1);
+	--flow-provider-meta-ads: oklch(0.611 0.143 254.6);
+	--flow-provider-tiktok-ads: oklch(0.269 0 0);
+	--flow-provider-instagram: oklch(0.637 0.237 340.5);
+	--flow-provider-default: oklch(0.551 0.027 264.4);
+
+	/* 5. SPOTLIGHT EFFECT */
+	--flow-spotlight-highlight: oklch(1 0 0 / 0.08);
+	--flow-motion-spotlight-strength: 0.08;
+	--flow-depth-card-rotate: 0;
+	--flow-depth-card-translate: 0;
+	--flow-depth-card-glow: 0 18px 45px oklch(0 0 0 / 0.22);
+
+	/* 6. NODE CHIP */
+	--flow-chip-bg: oklch(var(--b1));
+	--flow-chip-text: oklch(var(--bc));
+	--flow-chip-border-width: 2px;
+	--flow-chip-radius: 0.5rem;
+	--flow-chip-shadow: 0 1px 2px oklch(0 0 0 / 0.05);
+	--flow-node-card-width: 282px;
+	--flow-node-preview-height: 6rem;
+	--flow-node-border: oklch(var(--bc) / 0.12);
+	--flow-node-selected-ring: 0 0 0 3px oklch(var(--p) / 0.22);
+	--flow-node-status-opacity: 0.2;
+
+	/* 7. CANVAS */
+	--flow-canvas-bg: oklch(var(--b2));
+	--flow-canvas-grid: oklch(var(--bc) / 0.08);
+	--flow-selection-ring: oklch(var(--p) / 0.4);
+	--flow-selection-bg: oklch(var(--p) / 0.08);
+	--flow-controls-bg: oklch(var(--b1) / 0.92);
+	--flow-controls-border: oklch(var(--bc) / 0.12);
+	--flow-controls-radius: 0.85rem;
+	--flow-controls-shadow: 0 10px 30px oklch(0 0 0 / 0.16);
+	--flow-control-size: 34px;
+	--flow-canvas-hint-bg: oklch(var(--b1) / 0.86);
+	--flow-canvas-hint-border: oklch(var(--bc) / 0.1);
+	--flow-canvas-hint-radius: 999px;
+	--flow-canvas-hint-text: oklch(var(--bc) / 0.56);
+	--flow-canvas-hint-shadow: 0 10px 30px oklch(0 0 0 / 0.12);
+	--flow-canvas-hint-dot: oklch(var(--bc) / 0.28);
+
+	/* 8. MINIMAP */
+	--flow-minimap-bg: oklch(var(--b1) / 0.92);
+	--flow-minimap-border: oklch(var(--bc) / 0.12);
+	--flow-minimap-shadow: 0 4px 16px oklch(0 0 0 / 0.18);
+	--flow-minimap-radius: 0.5rem;
+
+	/* 9. HANDLES + EDGES */
+	--flow-handle-size: 9px;
+	--flow-handle-border-width: 1.5px;
+	--flow-handle-hover-scale: 1.2;
+	--flow-handle-hover-ring: 0 0 0 3px oklch(var(--p) / 0.22);
+	--flow-edge-stroke-width: 2.4px;
+	--flow-edge-selected-stroke-width: 3px;
+	--flow-edge-selected-glow: drop-shadow(0 0 8px oklch(var(--p) / 0.22));
+	--flow-edge-label-bg: oklch(var(--b1) / 0.88);
+	--flow-edge-label-radius: 999px;
+
+	/* 10. CAMPAIGN WIZARD SHELL */
+	--flow-shell-panel-radius: 1rem;
+	--flow-shell-panel-border: oklch(var(--bc) / 0.12);
+	--flow-shell-panel-bg: oklch(var(--b1));
+	--flow-shell-panel-elevated-bg: oklch(var(--b2) / 0.6);
+	--flow-shell-toolbar-gap: 0.5rem;
+	--flow-shell-palette-width: 16rem;
+	--flow-shell-palette-density: 0.5rem;
+	--flow-shell-drawer-width: 720px;
+}
+
+/* ===== ACCENT CLASSES (NodeChip) ===== */
+.flow-accent-channel {
+	border-color: var(--flow-accent-channel);
+}
+.flow-accent-channel .flow-node-chip__icon {
+	color: var(--flow-accent-channel);
+}
+.flow-accent-ads {
+	border-color: var(--flow-accent-ads);
+}
+.flow-accent-ads .flow-node-chip__icon {
+	color: var(--flow-accent-ads);
+}
+.flow-accent-logic {
+	border-color: var(--flow-accent-logic);
+}
+.flow-accent-logic .flow-node-chip__icon {
+	color: var(--flow-accent-logic);
+}
+.flow-accent-event {
+	border-color: var(--flow-accent-event);
+}
+.flow-accent-event .flow-node-chip__icon {
+	color: var(--flow-accent-event);
+}
+.flow-accent-ai {
+	border-color: var(--flow-accent-ai);
+}
+.flow-accent-ai .flow-node-chip__icon {
+	color: var(--flow-accent-ai);
+}
+.flow-accent-conditional {
+	border-color: var(--flow-accent-conditional);
+}
+.flow-accent-conditional .flow-node-chip__icon {
+	color: var(--flow-accent-conditional);
+}
+
+.flow-handle-logic {
+	background-color: var(--flow-accent-logic);
+	border-color: var(--flow-chip-bg);
+}
+
+.flow-handle-branch-true {
+	background-color: var(--flow-branch-true);
+	border-color: var(--flow-chip-bg);
+}
+
+.flow-handle-branch-false {
+	background-color: var(--flow-branch-false);
+	border-color: var(--flow-chip-bg);
+}
+
+/* ===== HANDLE SIZING ===== */
+.svelte-flow .svelte-flow__handle {
+	width: var(--flow-handle-size);
+	height: var(--flow-handle-size);
+	border-width: var(--flow-handle-border-width);
+	border-radius: 50%;
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.svelte-flow .svelte-flow__handle:hover {
+	transform: scale(var(--flow-handle-hover-scale));
+	box-shadow: var(--flow-handle-hover-ring);
+}
+
+/* ===== NODE CHIP BASE ===== */
+.flow-node-chip {
+	background: var(--flow-chip-bg);
+	color: var(--flow-chip-text);
+	border-width: var(--flow-chip-border-width);
+	border-radius: var(--flow-chip-radius);
+	box-shadow: var(--flow-chip-shadow);
+}
+
+/* ===== PROVIDER HEADERS (ChannelNode) ===== */
+.flow-provider-whatsapp {
+	background-color: oklch(from var(--flow-provider-whatsapp) l c h / 0.12);
+}
+.flow-provider-whatsapp .flow-channel-node__label {
+	color: var(--flow-provider-whatsapp);
+}
+.flow-provider-email {
+	background-color: oklch(from var(--flow-provider-email) l c h / 0.12);
+}
+.flow-provider-email .flow-channel-node__label {
+	color: var(--flow-provider-email);
+}
+.flow-provider-sms {
+	background-color: oklch(from var(--flow-provider-sms) l c h / 0.12);
+}
+.flow-provider-sms .flow-channel-node__label {
+	color: var(--flow-provider-sms);
+}
+.flow-provider-tiktok {
+	background-color: oklch(from var(--flow-provider-tiktok) l c h / 0.12);
+}
+.flow-provider-tiktok .flow-channel-node__label {
+	color: var(--flow-provider-tiktok);
+}
+.flow-provider-google-ads {
+	background-color: oklch(from var(--flow-provider-google-ads) l c h / 0.12);
+}
+.flow-provider-google-ads .flow-channel-node__label {
+	color: var(--flow-provider-google-ads);
+}
+.flow-provider-meta-ads {
+	background-color: oklch(from var(--flow-provider-meta-ads) l c h / 0.12);
+}
+.flow-provider-meta-ads .flow-channel-node__label {
+	color: var(--flow-provider-meta-ads);
+}
+.flow-provider-tiktok-ads {
+	background-color: oklch(from var(--flow-provider-tiktok-ads) l c h / 0.12);
+}
+.flow-provider-tiktok-ads .flow-channel-node__label {
+	color: var(--flow-provider-tiktok-ads);
+}
+.flow-provider-instagram {
+	background-color: oklch(from var(--flow-provider-instagram) l c h / 0.12);
+}
+.flow-provider-instagram .flow-channel-node__label {
+	color: var(--flow-provider-instagram);
+}
+.flow-provider-default {
+	background-color: oklch(from var(--flow-provider-default) l c h / 0.12);
+}
+.flow-provider-default .flow-channel-node__label {
+	color: var(--flow-provider-default);
+}
+
+/* ===== EDGE LABELS ===== */
+.flow-confidence-bar {
+	background-color: var(--flow-accent-ai);
+}
+
+.flow-logic-edge-label {
+	background-color: oklch(from var(--flow-accent-logic) l c h / 0.12);
+	color: var(--flow-accent-logic);
+}
+.flow-event-edge-label {
+	background-color: oklch(from var(--flow-accent-event) l c h / 0.12);
+	color: var(--flow-accent-event);
+}
+.flow-ai-edge-label {
+	background: linear-gradient(
+		to right,
+		oklch(from var(--flow-accent-ai) l c h / 0.15),
+		oklch(from var(--flow-branch-a) l c h / 0.15)
+	);
+	color: var(--flow-accent-ai);
+}
+.flow-branch-label {
+	color: var(--flow-chip-bg);
+}
+
+/* ===== CANVAS OVERRIDES ===== */
+.svelte-flow {
+	--xy-background-color: var(--flow-canvas-bg);
+	--xy-background-pattern-color: var(--flow-canvas-grid);
+}
+.svelte-flow .svelte-flow__selection {
+	border-color: var(--flow-selection-ring);
+	background: var(--flow-selection-bg);
+}
+.svelte-flow .svelte-flow__edge-path,
+.svelte-flow .svelte-flow__connection-path {
+	stroke-width: var(--flow-edge-stroke-width);
+}
+.svelte-flow .svelte-flow__edge.selected .svelte-flow__edge-path {
+	stroke-width: var(--flow-edge-selected-stroke-width);
+	filter: var(--flow-edge-selected-glow);
+}
+
+/* ===== MINIMAP ===== */
+/*
+ * Sits inside .svelte-flow__panel which is absolutely positioned on top of
+ * the Svelte Flow SVG layer. The PixiJS overlay canvas is a sibling DIV
+ * behind the SvelteFlow root (z-index: 0, pointer-events: none) — since the
+ * minimap is rendered as a child of SvelteFlow, it stacks above both SVG
+ * edges and the Pixi WebGL layer without competing for pointer events.
+ */
+.svelte-flow .svelte-flow__minimap.flow-minimap {
+	background: var(--flow-minimap-bg);
+	border: 1px solid var(--flow-minimap-border);
+	border-radius: var(--flow-minimap-radius);
+	box-shadow: var(--flow-minimap-shadow);
+	backdrop-filter: blur(6px);
+	margin: 1rem;
+	width: 132px;
+	height: 92px;
+}
+
+/* ===== CANVAS PANELS / CONTROLS ===== */
+.svelte-flow .svelte-flow__controls.flow-controls {
+	overflow: hidden;
+	border: 1px solid var(--flow-controls-border);
+	border-radius: var(--flow-controls-radius);
+	background: var(--flow-controls-bg);
+	box-shadow: var(--flow-controls-shadow);
+	backdrop-filter: blur(10px);
+}
+
+.svelte-flow .svelte-flow__controls.flow-controls button {
+	width: var(--flow-control-size);
+	height: var(--flow-control-size);
+	border-bottom-color: oklch(var(--bc) / 0.1);
+	background: transparent;
+	color: oklch(var(--bc) / 0.72);
+}
+
+.svelte-flow .svelte-flow__controls.flow-controls button:hover {
+	background: oklch(var(--bc) / 0.07);
+	color: oklch(var(--bc));
+}
+
+.svelte-flow .svelte-flow__panel.flow-canvas-hint {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	border: 1px solid var(--flow-canvas-hint-border);
+	border-radius: var(--flow-canvas-hint-radius);
+	background: var(--flow-canvas-hint-bg);
+	padding: 0.4rem 0.65rem;
+	color: var(--flow-canvas-hint-text);
+	font-size: 0.68rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	box-shadow: var(--flow-canvas-hint-shadow);
+	backdrop-filter: blur(10px);
+}
+
+.flow-canvas-hint__dot {
+	width: 3px;
+	height: 3px;
+	border-radius: 999px;
+	background: var(--flow-canvas-hint-dot);
+}
+
+/* ===== WIZARD SHELL GOVERNANCE ===== */
+.campaign-wizard-surface .campaign-wizard-panel,
+.campaign-flow-token-scope .campaign-wizard-panel {
+	border-color: var(--flow-shell-panel-border);
+	border-radius: var(--flow-shell-panel-radius);
+	background: var(--flow-shell-panel-bg);
+}
+
+.campaign-wizard-surface .campaign-wizard-panel__header,
+.campaign-flow-token-scope .campaign-wizard-panel__header {
+	background: var(--flow-shell-panel-elevated-bg);
+}
+
+.campaign-wizard-surface .campaign-wizard-toolbar,
+.campaign-flow-token-scope .campaign-wizard-toolbar {
+	gap: var(--flow-shell-toolbar-gap);
+}
+
+.campaign-wizard-surface .campaign-wizard-palette,
+.campaign-flow-token-scope .campaign-wizard-palette {
+	width: var(--flow-shell-palette-width);
+	border-color: var(--flow-shell-panel-border);
+	border-radius: var(--flow-shell-panel-radius);
+	background: var(--flow-shell-panel-bg);
+}
+
+.campaign-wizard-surface .campaign-wizard-palette__body,
+.campaign-flow-token-scope .campaign-wizard-palette__body {
+	padding: var(--flow-shell-palette-density);
+}
+
+.campaign-wizard-surface .depth-card,
+.campaign-flow-token-scope .depth-card {
+	border-color: var(--flow-node-border);
+}
+
+.campaign-wizard-surface .depth-card:hover,
+.campaign-flow-token-scope .depth-card:hover {
+	box-shadow: var(--flow-depth-card-glow);
+}
+
+/*
+ * THEME OVERRIDES:
+ * [data-theme="dark"]  { --flow-branch-true: oklch(0.8 0.2 142.5); ... }
+ * [data-theme="sonik"] { --flow-accent-channel: oklch(var(--p)); ... }
+ */

@@ -24,6 +24,7 @@
   "dependencies": {
     "@json-render/core": "workspace:*",
     "@json-render/svelte": "workspace:*",
+    "@sonik-agent-ui/tool-contracts": "workspace:*",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.2.2"
   },

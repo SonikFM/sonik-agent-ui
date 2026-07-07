@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
+const hostAuthorityModule = await import("../../apps/standalone-sveltekit/src/lib/host-context-authority.ts");
 const pageLoadSource = await readFile("apps/standalone-sveltekit/src/routes/+page.ts", "utf8");
 const rootSource = await readFile("packages/workspace-core/src/components/WorkspaceRoot.svelte", "utf8");
 const generateRoute = await readFile("apps/standalone-sveltekit/src/routes/api/generate/+server.ts", "utf8");
@@ -27,11 +28,29 @@ const chatTextParserSource = await readFile("packages/chat-surface/src/chat-text
 const chatSurfaceIndexSource = await readFile("packages/chat-surface/src/index.ts", "utf8");
 const chatMessagePartsSource = await readFile("packages/chat-surface/src/message-parts.ts", "utf8");
 const agentObservabilitySource = await readFile("packages/agent-observability/src/index.ts", "utf8");
+const bookingContextSmokeSource = await readFile("scripts/agent-ui-booking-context-pipeb-smoke.mjs", "utf8");
 const canvasViewportSource = await readFile("packages/workspace-core/src/components/CanvasViewport.svelte", "utf8");
 const themeRuntimeSource = await readFile("apps/standalone-sveltekit/src/lib/theme/theme-runtime.ts", "utf8");
 const themePickerSource = await readFile("apps/standalone-sveltekit/src/lib/theme/ThemePicker.svelte", "utf8");
 const themeRegistrySource = await readFile("apps/standalone-sveltekit/src/lib/theme/theme-registry.ts", "utf8");
 const daisyThemeSource = await readFile("apps/standalone-sveltekit/src/lib/theme/foundations/themes/daisy.css", "utf8");
+const appThemeSurfacesSource = await readFile("apps/standalone-sveltekit/src/lib/theme/foundations/effects/app-theme-surfaces.css", "utf8");
+
+const boundInputComponents = [
+  "QuestionCard",
+  "ChoiceCards",
+  "SelectInput",
+  "RadioGroup",
+  "TextInput",
+  "EditableField",
+  "TextareaField",
+];
+const boundInputComponentSources = Object.fromEntries(
+  await Promise.all(boundInputComponents.map(async (name) => [
+    name,
+    await readFile(`apps/standalone-sveltekit/src/lib/render/components/${name}.svelte`, "utf8"),
+  ])),
+);
 
 assert.equal(rootSource.includes("rail?: Snippet"), true, "WorkspaceRoot should expose an optional rail snippet");
 assert.equal(rootSource.includes("{@render rail()}"), true, "WorkspaceRoot should render the session rail beside chat/artifacts");
@@ -40,6 +59,9 @@ assert.equal(rootSource.includes("layoutMode?: WorkspaceLayoutMode"), true, "Wor
 assert.equal(rootSource.includes("railMode?: WorkspaceRailMode"), true, "WorkspaceRoot should expose an embeddable rail mode seam");
 assert.equal(rootSource.includes("--workspace-pane-split"), true, "WorkspaceRoot should expose a CSS-variable seam for future pane resizing");
 assert.equal(agentObservabilitySource.includes("createSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the fresh-session semantic action");
+assert.equal(agentObservabilitySource.includes("sessionId?: string | null"), true, "agent page-control submit type should accept an expected session id");
+assert.equal(agentObservabilitySource.includes("expectedSessionId?: string | null"), true, "semantic action results should report the expected session id selected by createSession");
+assert.equal(agentObservabilitySource.includes("reloadSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the active-session reload action used by artifact persistence smokes");
 
 assert.equal(pageSource.includes("let sessions = $state<WorkspaceSessionSummary[]>([])"), true, "app shell should keep a visible session list state");
 assert.equal(pageSource.includes("let archivedSessionCount = $state(0)"), true, "app shell should make archived chat behavior visible");
@@ -48,9 +70,28 @@ assert.equal(pageSource.includes("/api/sessions"), true, "app shell should load 
 assert.equal(pageSource.includes("/api/session/${encodeURIComponent(sessionId)}/messages"), true, "app shell should persist chat history by session");
 assert.equal(pageSource.includes("{#snippet rail()}"), true, "top-level app should provide the WorkspaceRoot rail slot");
 assert.equal(pageSource.includes("sessionId: activeSessionId"), true, "generate requests should carry active session id");
-assert.equal(pageSource.includes('"createSession", "submitPrompt"'), true, "page context should expose a semantic createSession action before submitPrompt");
+assert.equal(pageSource.includes("...createWorkspaceRequestHeaders()"), true, "generate transport must use the same signed host-context headers as workspace persistence calls");
+assert.equal(pageSource.includes("function createWorkspaceRequestHeaders"), true, "workspace request headers should be centralized for generate/session/document/artifact calls");
+const visibleActionsBlock = pageSource.match(/visibleActions:\s*\[([\s\S]*?)\],\n\s*visibleWarnings:/)?.[1] ?? "";
+assert.equal(visibleActionsBlock.includes('"createSession"'), true, "page context should expose a semantic createSession action");
+assert.equal(visibleActionsBlock.includes('"submitPrompt"'), true, "page context should expose a semantic submitPrompt action");
+assert.equal(visibleActionsBlock.includes('"reloadSession"'), true, "page context should expose a semantic reloadSession action for persisted artifact hydration");
+assert.equal(
+  visibleActionsBlock.indexOf('"createSession"') < visibleActionsBlock.indexOf('"submitPrompt"'),
+  true,
+  "page context should expose createSession before submitPrompt",
+);
 assert.equal(pageSource.includes("createSession: async () =>"), true, "page-control contract should expose a deterministic fresh-session semantic action for smoke tests");
-assert.equal(pageSource.includes("await createSession({ force: true })"), true, "fresh-session semantic action should route through the same session creation path as the app shell");
+assert.equal(pageSource.includes("reloadSession: async () =>"), true, "page-control contract should expose a safe active-session reload action");
+assert.equal(pageSource.includes("if (!force && sessionId === activeSessionId"), true, "forced session reloads must bypass the same-session short-circuit and hydrate server-side active artifacts");
+assert.equal(pageSource.includes("const session = await createSession({ force: true })"), true, "fresh-session semantic action should route through the same session creation path as the app shell and capture the selected id");
+assert.equal(pageSource.includes("expectedSessionId: sessionId"), true, "fresh-session semantic action should return the created session id for deterministic smoke tests");
+assert.equal(pageSource.includes("submitPrompt: async ({ prompt, sessionId }) =>"), true, "page-control submit should accept an expected session id to prevent stale persisted-chat drift");
+assert.equal(pageSource.includes("active_session_mismatch"), true, "page-control submit should fail closed if the active session does not match the expected session");
+assert.equal(pageSource.includes("submit_not_appended"), true, "page-control submit should fail closed if the semantic action does not append a user turn");
+assert.equal(pageSource.includes("await tick()"), true, "page-control submit should wait one Svelte turn before claiming append success");
+assert.equal(pageSource.includes("let sessionSelectionRevision = 0"), true, "app shell should version session selection so bootstrap cannot overwrite explicit test/user selection");
+assert.equal(pageSource.includes("session.bootstrap.superseded"), true, "bootstrap selection races should be observable and non-destructive");
 assert.equal(pageSource.includes("function deriveChatTitle"), true, "app shell should derive deterministic first-message chat titles locally");
 assert.equal(pageSource.includes("maybeNameNewChat(trimmed)"), true, "app shell should name new chats before sending the first message");
 assert.equal(pageSource.includes('method: "PATCH"'), true, "app shell should call the session rename route");
@@ -72,7 +113,11 @@ assert.equal(sessionRailSource.includes("onclick={deleteContextSession}"), true,
 assert.equal(sessionRailSource.includes("disabled={busy}"), true, "session rail should disable context menu actions during busy/streaming transitions");
 assert.equal(sessionRailSource.includes("collapsed?: boolean"), true, "session rail should expose a collapsed mode for embedded canvas layouts");
 assert.equal(sessionRailSource.includes("session-rail-shell--collapsed"), true, "session rail should render a compact rail variant instead of forcing full chat navigation into embeds");
-assert.equal(sessionRailSource.includes("session-actions-button--collapsed"), true, "collapsed rail should keep a visible keyboard-accessible overflow affordance");
+assert.equal(sessionRailSource.includes("function compactSessionLabel"), true, "collapsed rail should derive compact readable labels instead of one-letter rows");
+assert.equal(sessionRailSource.includes("sessionKindShort(session)"), true, "collapsed rail should show short semantic session kind labels");
+assert.equal(sessionRailSource.includes("session-actions-button--compact"), true, "collapsed rail should keep a keyboard-accessible compact Menu action affordance");
+assert.equal(sessionRailSource.includes(">\n            Menu\n          </button>"), true, "collapsed rail action should use an explicit Menu label instead of ambiguous spinner-like dots");
+assert.equal(sessionRailSource.includes("session-actions-button--collapsed"), false, "collapsed rail should not keep the old confusing ellipsis affordance class");
 assert.equal(sessionRailSource.includes("session-meta"), false, "session rail rows should stay slim and avoid card-style metadata clutter");
 assert.equal(sessionRailSource.includes("{archivedCount} archived"), true, "session rail should show archived chat count instead of silently losing archived records");
 assert.equal(sessionRailSource.includes("formatSessionTime"), true, "session rail should own session timestamp formatting");
@@ -114,8 +159,15 @@ assert.equal(generateRoute.includes("hostSession: hostSession ?? undefined"), tr
 assert.equal(generateRoute.includes('hostSessionMode: hostSession ? undefined : "standalone-demo"'), true, "generate route should fall back to explicit standalone fixture auth only without a trusted host session");
 assert.equal(generateRoute.includes("createBookingRuntimeAuthContextFromTrustedHostHeader"), true, "generate route should prefer the signed embedded host context for booking runtime auth");
 assert.equal(generateRoute.includes("fallback: createBookingRuntimeAuthContextFromEnv(env)"), true, "generate route should fall back to server env runtime auth when no signed host context is donated");
+assert.equal(generateRoute.includes("const APPROVED_COMMAND_IDS_MAX_ITEMS = 128"), true, "generate route should preserve generated booking command grants beyond the old demo-only 20-id cap");
+assert.equal(generateRoute.includes(".slice(0, APPROVED_COMMAND_IDS_MAX_ITEMS)"), true, "generate route should still bound trusted approved command ids with a named guardrail");
 assert.equal(generateRoute.includes("bookingRuntimeCredentialed"), true, "generate telemetry should expose credential posture without logging credentials");
-assert.equal(generateRoute.includes("createAgent({ activeDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, persistence: requestPersistence })"), true, "agent tools should receive active workspace session id, page context, trusted host session, approval grants, configured booking runtime base URL, and server-side auth mode");
+assert.equal(generateRoute.includes("createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings })"), true, "agent tools should receive the selection-gated active document, active workspace session id, page context, trusted host session, approval grants, configured booking runtime base URL, server-side auth mode, injectable runtime fetcher, the per-turn composed skill ids, and sanitized Agent Settings");
+assert.equal(generateRoute.includes("sanitizeAgentRuntimeSettings"), true, "generate route should sanitize Agent Settings at the server boundary before model/tool use");
+assert.equal(generateRoute.includes("resolveAgentContextSelection(runContextSelection)"), true, "generate route should resolve the explicit composer context selection");
+assert.equal(generateRoute.includes("includeActiveDocument: selectionResolution.includeActiveDocument"), true, "generate route should gate the effective document on the composer selection (authoritative removal at the server boundary when the chip is deselected)");
+assert.equal(generateRoute.includes("selectedDocumentId: selectionResolution.documentIds[0]"), true, "generate route should feed the chip-selected document rather than always the request's active document");
+assert.equal(generateRoute.includes("contextSelection: runContextSelection ?? null"), true, "generate route should persist the composer selection on the run record");
 assert.equal(generateRoute.includes("CURRENT HOST/PAGE CONTEXT:"), true, "generate route should inject host page context as first-class model context, not only telemetry/tool metadata");
 assert.equal(generateRoute.includes("If the user asks where they are"), true, "generate route should instruct page-location questions to answer from the donated page context");
 assert.equal(generateRoute.includes("visibleActions: routeStringArray(record.visibleActions"), true, "generate route should preserve host-visible action labels in the page context summary");
@@ -156,8 +208,12 @@ assert.equal(appCss.includes("--sonik-border-color"), true, "standalone app shou
 assert.equal(appCss.includes("--border: color-mix"), false, "standalone app should not overwrite DaisyUI\'s --border width token as a color");
 assert.equal(daisyThemeSource.includes('themes: all'), true, "DaisyUI should compile the full built-in theme library");
 assert.equal(themeRegistrySource.includes('CUSTOM_DOCUMENT_THEME_IDS'), true, "theme registry should include Amplify custom themes");
+assert.equal(themeRegistrySource.includes('"sonik-operator-dark"'), true, "theme registry should include the Booking operator dark theme id");
+assert.equal(appCss.includes('@import "./lib/theme/foundations/themes/custom/sonik-operator-dark.css"'), true, "standalone app should import the Booking operator dark theme");
+assert.equal(appThemeSurfacesSource.includes('[data-theme="sonik-operator-dark"]'), true, "surface projection should include the Booking operator dark theme after generic app surface defaults");
+assert.equal(appThemeSurfacesSource.includes('--app-shell-bg: #0e1013'), true, "operator dark surface projection should preserve the Booking shell token");
 assert.equal(themeRegistrySource.includes('DAISY_BUILTIN_THEME_IDS'), true, "theme registry should expose DaisyUI built-in themes");
-assert.equal(themeRuntimeSource.includes('THEME_STORAGE_KEY = "amplify.documentTheme"'), true, "theme runtime should use the Amplify theme storage key");
+assert.equal(themeRuntimeSource.includes('THEME_STORAGE_KEY = "amplify.documentTheme.v2"'), true, "theme runtime should use the Amplify v2 theme storage key");
 assert.equal(themeRuntimeSource.includes('DEFAULT_THEME_SETTING: ThemeSetting = "system"'), true, "standalone app should not hardcode a gunmetal default and should support system preference");
 assert.equal(themeRuntimeSource.includes('THEME_CHANGE_EVENT = "amplify:document-theme-change"'), true, "theme runtime should emit the Amplify theme change event");
 assert.equal(layoutSource.includes("initializeTheme()"), true, "layout should initialize through the shared theme runtime instead of hand-writing data-theme");
@@ -198,7 +254,7 @@ assert.equal(pageSource.includes("chat.activity.status"), true, "client should e
 assert.equal(pageSource.includes("Waiting for model response"), true, "chat UI should show a sanitized wait status for long silent model spans");
 assert.equal(pageSource.includes("client.performance.long_task"), true, "dev browser long tasks should emit telemetry for page-unresponsive triage");
 assert.equal(pageSource.includes("browser_main_thread_blocked"), true, "long-task telemetry should classify main-thread stalls without raw browser internals");
-assert.equal(pageSource.includes("formatToolActivityDetail"), true, "tool activity details should be human labels instead of raw tool slugs");
+assert.equal(pageSource.includes("resolveToolActivity(latestTool.type, latestTool.state)"), true, "tool activity details should use the shared friendly projection resolver instead of raw tool slugs");
 assert.equal(pageSource.includes("detail: activity.detail,"), false, "activity telemetry signature should not emit every second during long waits");
 assert.equal(pageSource.includes("activity={agentActivity}"), true, "top-level app should pass activity status into the chat surface");
 assert.equal(agentConversationSource.includes("AgentActivityStatus"), true, "chat surface should define a reusable activity status contract");
@@ -239,6 +295,8 @@ const sessionsRouteSource = await readFile("apps/standalone-sveltekit/src/routes
 const observabilityPackageSource = await readFile("packages/agent-observability/src/index.ts", "utf8");
 const evidenceServerSource = await readFile("scripts/agent-ui-dev-evidence-server.mjs", "utf8");
 const smokeHarnessSource = await readFile("scripts/agent-ui-smoke.mjs", "utf8");
+const smokeHostContextRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/dev/smoke-host-context/+server.ts", "utf8");
+const bookingReservationSmokeSource = await readFile("scripts/agent-ui-booking-reservation-pipeb-smoke.mjs", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const agentEmbedSource = await readFile("packages/agent-embed/src/index.ts", "utf8");
 const agentEmbedPackageSource = await readFile("packages/agent-embed/package.json", "utf8");
@@ -271,7 +329,15 @@ assert.equal(pageSource.includes("host.page_context.requested"), true, "embedded
 assert.equal(pageSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "embedded app should use a stable page-context request message type");
 assert.equal(pageSource.includes("sessionBootstrapPromise"), true, "embedded session bootstrap should guard repeated host page-context messages while initialization is in flight");
 assert.equal(pageSource.includes("if (!authenticated || !organizationId || !userId || !hostSession) return {}"), true, "workspace authority headers should require an authenticated donated hostSession, not display-only page context");
-assert.equal(pageSource.includes("signature: hostPageContext?.signature ?? null"), true, "workspace authority headers should forward signed host-context proof into cloud API requests");
+assert.equal(pageSource.includes("signature: context?.signature ?? null"), true, "workspace authority headers should forward signed host-context proof into cloud API requests");
+assert.equal(pageSource.includes("lastSignedHostPageContext"), true, "embedded workspace requests should cache the last valid signed host context until it expires");
+assert.equal(pageSource.includes("selectSignedWorkspaceHostContext({ current: hostPageContext, cached: lastSignedHostPageContext })"), true, "embedded workspace requests should delegate signed-context selection to the fail-closed authority helper");
+assert.equal(pageSource.includes("lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext })"), true, "host-context updates must refresh or clear the signed-context cache through the authority helper");
+assert.equal(pageSource.includes("workspace.fetch.blocked_missing_host_context"), true, "workspace calls should fail closed before reaching cloud APIs without signed host context");
+assert.equal(pageSource.includes("session.bootstrap.embedded_fresh_session"), true, "embedded bootstrap should start a fresh chat instead of silently jumping into the latest persisted session");
+assert.equal(pageSource.includes("function createSignedWorkspaceHostSession"), true, "workspace authority headers should canonicalize the signed hostSession envelope before re-encoding it");
+assert.equal(pageSource.includes("...hostSession,"), false, "workspace authority headers must not spread sanitized display-only hostSession fields into the HMAC-covered envelope");
+assert.equal(pageSource.includes("hostSession.theme"), true, "the regression guard should document that display-only hostSession.theme exists outside the signed workspace header");
 assert.equal(agentEmbedSource.includes("signatureVersion"), true, "agent embed sanitizer should preserve signed host-context proof fields across postMessage donation");
 assert.equal(pageSource.includes("workspace.persistence.runtime"), true, "embedded app should log safe runtime persistence diagnostics from response headers");
 assert.equal(pageSource.includes("readWorkspaceResponseError"), true, "client workspace fetch failures should parse structured error envelopes before falling back to bounded text");
@@ -295,10 +361,30 @@ assert.equal(fakeBookingHostSource.includes("fake booking host") || fakeBookingH
 assert.equal(fakeBookingHostSource.includes("postMessage"), true, "static fake host should donate page context through postMessage");
 assert.equal(fakeBookingHostSource.includes("booking-console"), true, "static fake host should donate booking surface context");
 assert.equal(fakeBookingHostSource.includes("Summer Jazz Night"), true, "static fake host should donate active entity label");
+
+const { selectSignedWorkspaceHostContext, nextSignedWorkspaceHostContextCache } = hostAuthorityModule;
+const signedContext = {
+  authenticated: true,
+  organizationId: "org_1",
+  signatureVersion: "v1",
+  issuedAt: "2026-07-06T00:00:00.000Z",
+  expiresAt: "2026-07-06T01:00:00.000Z",
+  signature: "sig_1",
+  hostSession: { source: "amplify-embedded", authenticated: true, organizationId: "org_1", scopes: ["booking"], expiresAt: "2026-07-06T01:00:00.000Z" },
+};
+const unsignedContext = { authenticated: true, organizationId: "org_2", route: "/different" };
+const nowMs = Date.parse("2026-07-06T00:30:00.000Z");
+assert.equal(selectSignedWorkspaceHostContext({ current: null, cached: signedContext, nowMs }), signedContext, "a cached signed context is usable only while no current host context exists");
+assert.equal(selectSignedWorkspaceHostContext({ current: unsignedContext, cached: signedContext, nowMs }), null, "a current unsigned host context must fail closed instead of reusing stale signed context");
+assert.equal(nextSignedWorkspaceHostContextCache({ next: unsignedContext, nowMs }), null, "unsigned host-context updates must clear signed-context cache");
+assert.equal(nextSignedWorkspaceHostContextCache({ next: signedContext, nowMs }), signedContext, "signed host-context updates should refresh signed-context cache");
+assert.equal(selectSignedWorkspaceHostContext({ current: null, cached: signedContext, nowMs: Date.parse("2026-07-06T00:59:56.000Z") }), null, "near-expired signed host contexts should be rejected before workspace calls");
 assert.equal(fakeBookingHostSource.includes("org_fake_booking") || fakeBookingHostSource.includes("user_fake_booking"), false, "static fake host should keep browser-donated page context display-only and not carry org/user authority");
 assert.equal(fakeBookingHostSource.includes("mountSonikAgentUI"), true, "static fake host should consume the one-call SDK mount helper instead of handwritten iframe glue");
+assert.equal(fakeBookingHostSource.includes('theme: () => url.searchParams.get("theme") ?? "sonik-operator-dark"'), true, "fake booking host smoke fixture should donate the Booking operator dark theme by default");
 assert.equal(agentEmbedSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "host embed helper should define a stable page-context request message type");
 assert.equal(agentEmbedSource.includes("onRequestPageContext"), true, "host embed helper should respond to page context request messages from the iframe");
+assert.equal(fakeBookingHostSource.includes("launcher: \"#agent-fab-main\""), true, "static fake host should expose the visible FAB launcher through the SDK element map");
 assert.equal(fakeBookingHostSource.includes("openChat: \"#open-chat\""), true, "static fake host should expose a compact chat launcher through the SDK element map");
 assert.equal(fakeBookingHostSource.includes("openCanvas: \"#open-canvas\""), true, "static fake host should expose a canvas workspace launcher through the SDK element map");
 assert.equal(fakeBookingHostSource.includes("agentUrl: \"/\""), true, "static fake host should pass the agent URL through the SDK mount helper");
@@ -329,6 +415,8 @@ assert.equal(pageSource.includes("$state.snapshot"), true, "page-control snapsho
 assert.equal(pageSource.includes("submitPrompt"), true, "page-control contract should expose a semantic submit action backed by existing handlers");
 assert.equal(pageSource.includes("function getSubmitDisabledReason"), true, "page-control submit and manual submit should share one disabled-reason gate");
 assert.equal(pageSource.includes("createDevSmokeHeaders"), true, "dev smoke mode should be transported as headers from the local smoke URL");
+assert.equal(pageSource.includes('"x-sonik-agent-ui-smoke-persistence-mode": "auto"'), true, "local dev smoke should be able to use auto persistence without requiring a live cloud DB");
+assert.equal(pageSource.includes("...createDevSmokeHeaders(),\n        ...createWorkspaceRequestHeaders()"), true, "workspaceFetch should forward dev smoke headers before signed host-context headers");
 assert.equal(pageSource.includes("devSmokeMockStream"), false, "page should not put smoke-only mode flags into the application request body");
 assert.equal(pageSource.includes("openWorkspaceDocument"), true, "page-control contract should expose document host action without DOM scraping");
 assert.equal(pageSource.includes("async function createInitialWorkspaceDocument"), true, "parent app should create initial workspace documents through signed workspaceFetch before mounting the static document iframe");
@@ -338,6 +426,15 @@ assert.equal(openDocumentEditorSource.includes("const document = await createIni
 assert.equal(openDocumentEditorSource.indexOf("documentEditorOpen = true;") > openDocumentEditorSource.indexOf("const document = await createInitialWorkspaceDocument();"), true, "document iframe should open only after openDocumentEditor has created or selected a document snapshot");
 assert.equal(pageSource.includes("if (/\\b(document|markdown|html|code|editor|workspace)\\b/i.test(trimmed))"), false, "chat submit should not prematurely open the document iframe before a tool-created document exists");
 assert.equal(pageSource.includes("lastPersistStatus"), true, "page assertions should track post-stream persistence state for crash regression gates");
+assert.equal(pageSource.includes("runRecovery={runRecovery}"), true, "chat shell should pass resumable run recovery into the conversation surface");
+assert.equal(pageSource.includes("onContinue={handleContinue}"), true, "chat shell should wire Continue to the canonical resume prompt handler");
+assert.equal(agentConversationSource.includes("data-run-recovery-action=\"continue\""), true, "conversation surface should expose a machine-readable Continue affordance");
+assert.equal(agentConversationSource.indexOf("data-run-recovery") < agentConversationSource.indexOf("{#if isEmpty}"), true, "Continue recovery should render before the empty/non-empty split so embedded sidecars can resume even without rebuilt messages");
+assert.equal(pageSource.includes("refreshActiveSessionRunState(\"chat.stop\")"), true, "client Stop should refresh the active session so a canceled resumable run immediately shows Continue");
+for (const [componentName, componentSource] of Object.entries(boundInputComponentSources)) {
+  assert.equal(componentSource.includes("function valueBinding()"), false, `${componentName} must not recreate bound props in handlers because getBoundProp reads Svelte context`);
+  assert.equal(componentSource.includes("valueBinding().current"), false, `${componentName} must not call getBoundProp from click/input handlers`);
+}
 assert.equal(pageContextRouteSource.includes("client.page_context.updated"), true, "dev page context endpoint should persist a telemetry breadcrumb");
 assert.equal(pageContextRouteSource.includes("Dev page context is disabled"), true, "dev page context endpoint should be gated outside local/dev observability mode");
 assert.equal(pageSource.includes("if (!dev) return"), true, "client page context posting should be disabled outside SvelteKit dev mode");
@@ -346,9 +443,21 @@ assert.equal(evidenceServerSource.includes("127.0.0.1"), true, "local evidence s
 assert.equal(evidenceServerSource.includes('access-control-allow-origin"] = origin'), true, "local evidence server should echo only allowed localhost origins instead of wildcard CORS");
 assert.equal(evidenceServerSource.includes("AGENT_UI_EVIDENCE_ALLOW_LAN"), true, "local evidence server LAN exposure should be explicit opt-in");
 assert.equal(evidenceServerSource.includes("/stream"), true, "local evidence server should expose an SSE tail for future live log streaming");
+assert.equal(smokeHostContextRouteSource.includes("isLocalSmokeRequest(request)"), true, "smoke host-context signer must reject non-local requests before reading signer env/secrets");
+assert.equal(smokeHostContextRouteSource.includes("LOCAL_SMOKE_HOSTS"), true, "smoke host-context signer should keep its local-only host allowlist explicit");
+assert.equal(smokeHostContextRouteSource.indexOf("isLocalSmokeRequest(request)") < smokeHostContextRouteSource.indexOf("SONIK_AGENT_UI_ENABLE_SMOKE_HOST_CONTEXT_SIGNER"), true, "smoke signer should prove local request origin before evaluating signer enablement");
 assert.equal(smokeHarnessSource.includes('page.on("crash"'), true, "smoke harness should explicitly catch browser page crashes");
 assert.equal(smokeHarnessSource.includes("x-sonik-request-id"), true, "smoke harness should verify generate correlation headers");
 assert.equal(smokeHarnessSource.includes("window.__sonikAgentUI"), true, "smoke harness should require canonical page-control state/actions instead of DOM synthesis");
+assert.equal(bookingReservationSmokeSource.includes("activeSessionStable"), true, "booking reservation smoke should fail when a fresh session drifts into an old persisted chat");
+assert.equal(bookingReservationSmokeSource.includes("sessionId: evidence.sessionId"), true, "booking reservation smoke should pass the expected fresh session id into submitPrompt");
+assert.equal(bookingReservationSmokeSource.includes("restart_after_disconnect"), true, "booking reservation smoke should restart wrangler tail after transient disconnects");
+assert.equal(bookingReservationSmokeSource.includes("wrangler.jsonc"), true, "booking reservation smoke R2 fetches should use the app wrangler config deterministically");
+assert.equal(bookingContextSmokeSource.includes("reloadSession"), true, "booking context smoke should reload the active session after signed artifact persistence");
+assert.equal(bookingContextSmokeSource.includes("&& evidence.pipeB.requiredEvidence.skillSearchOk === true"), true, "booking context smoke should fail unless the agent proves searchSkillCatalog before learning the context-create skill");
+assert.equal(bookingContextSmokeSource.includes("commitActiveIntakeCommand"), true, "booking context smoke should prove the dedicated intake commit tool instead of generic commitCommand");
+assert.equal(bookingContextSmokeSource.includes("booking.create.context"), true, "booking context smoke should require Pipe-B evidence for booking.create.context");
+assert.equal(packageSource.includes("smoke:agent-ui:booking-pipeb:context"), true, "package scripts should expose the booking context Pipe-B smoke lane");
 assert.equal(smokeHarnessSource.includes("api.generate.stream_finished"), true, "smoke harness should require server stream completion telemetry");
 assert.equal(smokeHarnessSource.includes("api.generate.dev_smoke_stream"), true, "smoke harness should prove deterministic smoke mode was actually used");
 assert.equal(smokeHarnessSource.includes("serverDevSmokeStream"), true, "smoke harness should classify deterministic smoke telemetry separately from stream finish");
@@ -364,7 +473,9 @@ assert.equal(agentTelemetrySource.includes("Cloudflare Workers do not provide a 
 const artifactToolSource = await readFile("apps/standalone-sveltekit/src/lib/tools/artifact.ts", "utf8");
 const jsonArtifactSpecSource = await readFile("apps/standalone-sveltekit/src/lib/artifacts/json-artifact-spec.ts", "utf8");
 const artifactGuidanceSource = await readFile("apps/standalone-sveltekit/src/lib/artifacts/artifact-generation-guidance.ts", "utf8");
-const agentSource = await readFile("apps/standalone-sveltekit/src/lib/agent.ts", "utf8");
+const agentPromptSource = await readFile("apps/standalone-sveltekit/src/lib/agent-prompt.ts", "utf8");
+const componentRegistrySource = await readFile("apps/standalone-sveltekit/src/lib/render/component-registry.ts", "utf8");
+const rootReadmeSource = await readFile("README.md", "utf8");
 assert.equal(artifactToolSource.includes("validateSpec"), true, "artifact tool should use shared json-render structural validation");
 assert.equal(artifactToolSource.includes("explorerCatalog.validate"), true, "artifact tool should validate against the component catalog");
 assert.equal(artifactToolSource.includes("Object.keys(elements).length > 0"), true, "artifact tool schema should reject empty elements maps");
@@ -384,11 +495,17 @@ assert.equal(artifactGuidanceSource.includes("getJsonArtifactToolDescription"), 
 assert.equal(artifactGuidanceSource.includes("JSON.stringify(starterToolInput"), true, "artifact guidance should derive the minimal prompt example from the validated starter object");
 assert.equal(artifactGuidanceSource.includes("JSON.stringify(dashboardToolInput"), true, "artifact guidance should derive the dashboard prompt example from the validated dashboard object");
 assert.equal(artifactToolSource.includes("getJsonArtifactToolDescription()"), true, "artifact tool should consume centralized generation guidance instead of duplicating examples");
-assert.equal(agentSource.includes("JSON_ARTIFACT_TOOL_OBJECT_GUIDANCE"), true, "agent instructions should include object-form artifact examples for live model generation quality");
-assert.equal(agentSource.includes("ARTIFACT TOOL OBJECT EXAMPLES"), true, "agent instructions should have a dedicated artifact tool object section");
-assert.equal(agentSource.includes("DATA BINDING FOR INLINE SPEC FENCES AND NON-TOOL UI SPECS"), true, "agent instructions should scope broad $state guidance away from strict tool input");
-assert.equal(agentSource.includes("For inline JSON-render responses outside createJsonArtifact"), true, "agent instructions should keep generic $state data guidance outside strict createJsonArtifact input");
+assert.equal(agentPromptSource.includes("JSON_ARTIFACT_TOOL_OBJECT_GUIDANCE"), true, "agent instructions should include object-form artifact examples for live model generation quality");
+assert.equal(agentPromptSource.includes("ARTIFACT TOOL OBJECT EXAMPLES"), true, "agent instructions should have a dedicated artifact tool object section");
+assert.equal(agentPromptSource.includes("DATA BINDING FOR INLINE SPEC FENCES AND NON-TOOL UI SPECS"), true, "agent instructions should scope broad $state guidance away from strict tool input");
+assert.equal(agentPromptSource.includes("For inline JSON-render responses outside createJsonArtifact"), true, "agent instructions should keep generic $state data guidance outside strict createJsonArtifact input");
 assert.equal(artifactToolSource.includes("Intentional contract mirror"), true, "artifact tool should document catalog-to-tool schema coupling as an intentional contract");
+assert.equal(componentRegistrySource.includes("JSON_RENDER_COMPONENT_GROUPS"), true, "json-render components should have a human/agent-readable grouped registry map");
+assert.equal(componentRegistrySource.includes("JSON_RENDER_COMPONENT_REGISTRY_PATHS"), true, "json-render component registry should document the catalog/registry/runtime paths");
+assert.equal(componentRegistrySource.includes("QuestionCard"), true, "json-render registry map should include stateful intake components");
+assert.equal(componentRegistrySource.includes("durable effects require a trusted controller"), true, "json-render action components should document the controller boundary");
+assert.equal(rootReadmeSource.includes("## JSON-render component registry"), true, "core README should point humans and agents to the JSON-render component registry");
+assert.equal(rootReadmeSource.includes("component-registry.ts"), true, "core README should include the component registry map path");
 
 const artifactWarehouseSource = await readFile("apps/standalone-sveltekit/src/lib/artifacts/artifact-warehouse.ts", "utf8");
 const canvasToolbarSource = await readFile("packages/workspace-core/src/components/CanvasToolbar.svelte", "utf8");

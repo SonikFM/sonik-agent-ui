@@ -1,0 +1,214 @@
+{
+	"name": "amplify-campaign-flow-for-sonik-workspace-workflow-builder-design-handoff",
+	"upstream": {
+		"repoPath": "/Users/danielletterio/Documents/GitHub/sonik-dev/amplify/amplify",
+		"gitRemote": "https://github.com/SonikFM/amplify.git",
+		"revision": "fb115de82e4177f4669ea69a4cee10786a096978",
+		"license": "Sonik internal"
+	},
+	"entries": [
+		{
+			"source": "src/campaign-canvas",
+			"destination": "docs/handoffs/workspace-creation-tool-design-handoff-2026-07-06/source-copies/amplify/src/campaign-canvas",
+			"ignore": [
+				"**/node_modules/**",
+				"**/dist/**",
+				"**/.svelte-kit/**"
+			],
+			"integrity": {
+				"files": [
+					{
+						"path": "CampaignCanvas.svelte",
+						"sha256": "dc616d06e07de6e10801eef54b9878365ca662d10b0b2de3a0e15978f78c2231"
+					},
+					{
+						"path": "adapters/SvelteCanvasAdapter.tsx",
+						"sha256": "438be021f947e8ad0ec8c977f1cd2206763770afcbc0a35ed8334d011a85089f"
+					},
+					{
+						"path": "components/FlowContextMenu.svelte",
+						"sha256": "f91f28c172f2eec0c4f844e40bf49a63e4799ea7771e88651a35c7ecfa76192a"
+					},
+					{
+						"path": "components/FlowViewportBridge.svelte",
+						"sha256": "79b8984fee2be55bbb3b7529bc7e07f1124be276e28e7601c5f6948197a67556"
+					},
+					{
+						"path": "components/NodeValidationBadge.svelte",
+						"sha256": "f6e8d7dd9a7136bdd5c7454863bafb2de7165a4b799928d43aa80324d0b21fc9"
+					},
+					{
+						"path": "debug/DebugPanel.svelte",
+						"sha256": "4afbb2380ca1ef7341edbae55446f8464b65b1557876253ce27ff0a19febfa7f"
+					},
+					{
+						"path": "edges/AIActionEdge.svelte",
+						"sha256": "a2c927b76326064f7bc71381a3358ec1b38ac39b1c014217e2fa935b671f0b8c"
+					},
+					{
+						"path": "edges/ConditionalBranchEdge.svelte",
+						"sha256": "eb131fc0d09abab5f284b750bd78f4b1af6a34d77bbee6da6ed78d49c4cb96b3"
+					},
+					{
+						"path": "edges/EventTriggerEdge.svelte",
+						"sha256": "993b3ab88f513617a6a4695affff14d34e701fbdc129d5b142d450e868552156"
+					},
+					{
+						"path": "edges/FlowEdge.svelte",
+						"sha256": "9efd00acf431fc5a95b8014463f940ed78f109bf02bd4ed54600e945b41e37ed"
+					},
+					{
+						"path": "edges/LogicHookEdge.svelte",
+						"sha256": "3aa5dce40a5a81445377ce763f9657c1deee2e3075130b9ad6feaf12ff97571e"
+					},
+					{
+						"path": "edges/pixi-layer.ts",
+						"sha256": "fb1b39d4ce1f610890cb7664d77b1a7ed68c001ab7a1b79133763c2b1c2f0929"
+					},
+					{
+						"path": "lib/auto-layout.ts",
+						"sha256": "fa83b32a1f072c5e7988d4817425b703bc74e42f65558012b4cbecf21ea48e3e"
+					},
+					{
+						"path": "lib/canvas-keyboard.ts",
+						"sha256": "ebc0044a97666bead8e5b43627b54bc15dde03a05bab5dfa4b228b3983023244"
+					},
+					{
+						"path": "lib/connection-utils.ts",
+						"sha256": "c7a350b42b7c9e7f5947453f2b710d8ac91c270889c895b8e4c536657f69847f"
+					},
+					{
+						"path": "lib/grid-snap.ts",
+						"sha256": "95018f0053181a55e51d8acb93db4bf64ac0c8333b421914f8811741dd5eb184"
+					},
+					{
+						"path": "lib/gsap-setup.ts",
+						"sha256": "4b3c4fd615ec265b5ca7b7e6a8904dcf1c2d2c2e3999fd157bf54d4ae2d8a827"
+					},
+					{
+						"path": "lib/haptics.ts",
+						"sha256": "a105f7aab267438688c0e4b71ab24fdbc84185679075955ff33221b4ab09192e"
+					},
+					{
+						"path": "lib/seamless-loop.ts",
+						"sha256": "21ed2039e6cfc1c5ffb7dc8c922ed9531d3e16dac3f5d4a58332715b74bb4ecc"
+					},
+					{
+						"path": "lib/video-manager.ts",
+						"sha256": "3e94c00fff4aca357bbfcd21d3f793fb39492bf5f89000a28a149e8e16ec45a8"
+					},
+					{
+						"path": "lib/zoom-levels.ts",
+						"sha256": "edf3bee156f973b07835f371ce9e6532cc2e71b2146ee119a10b445b449177de"
+					},
+					{
+						"path": "nodes/AIActionNode.svelte",
+						"sha256": "1b477dae6b545a48b4592b0f4c458e2ed92c7418af52c6b6178edd2df4ca81b3"
+					},
+					{
+						"path": "nodes/ChannelNode.svelte",
+						"sha256": "8934073b73c06b5311787a6bf67147ea2ec139fa15d4c7ced3ee3a7a07f0790c"
+					},
+					{
+						"path": "nodes/DepthCard.svelte",
+						"sha256": "5f489ae9b49fe722bdc64708b9cf2d5d1f570c5847e772d458633412021bdb4e"
+					},
+					{
+						"path": "nodes/EventNode.svelte",
+						"sha256": "b5bc6a5ded5e6a4c12418c768e711e4149e1ffa1c213751564d44289f6f3a6b9"
+					},
+					{
+						"path": "nodes/LogicNode.svelte",
+						"sha256": "15290f3bfb780d6a36a337090ad97dcd4bc12cace30dfa0eaa5c55791a42ffac"
+					},
+					{
+						"path": "nodes/SpotlightModal.svelte",
+						"sha256": "c7176ad8fe154d05a6834263934cb0e6a1ec704a1ecd42ae23c7f961b717f570"
+					},
+					{
+						"path": "stores/canvas-history.svelte.ts",
+						"sha256": "59d0a070921dcb5ead174a411301de086af82babd0ccf66af5ab3efce52677bd"
+					},
+					{
+						"path": "stores/canvas-store.svelte.ts",
+						"sha256": "c386d3bb0ab772c9929c696ee56d25c640bc041fed062b8fec7811f31a39034d"
+					}
+				]
+			}
+		},
+		{
+			"source": "src/design-system/patterns/CampaignFlow",
+			"destination": "docs/handoffs/workspace-creation-tool-design-handoff-2026-07-06/source-copies/amplify/src/design-system/patterns/CampaignFlow",
+			"ignore": [
+				"**/node_modules/**",
+				"**/dist/**",
+				"**/.svelte-kit/**"
+			],
+			"integrity": {
+				"files": [
+					{
+						"path": "CampaignFlowDesignGovernance.stories.tsx",
+						"sha256": "e414c88399b903e132b04ad2a277a2a011753c975ad4a19d7923b20ec310d609"
+					},
+					{
+						"path": "DeviceEmulator.stories.tsx",
+						"sha256": "b85cffb99c9b0a10ef2b6180d8b9e5f222094e69b86103f6640d565712b8e464"
+					},
+					{
+						"path": "DeviceEmulator.tsx",
+						"sha256": "a02d3916087a72af4d23c5817c129a6be236b76a7ca63a909bdc4212db6e74de"
+					},
+					{
+						"path": "README.md",
+						"sha256": "77eec1aa67a337a0bece26528caa2f8e0b6bf0dbd568acf2bd40f6fc4a0885fd"
+					},
+					{
+						"path": "__fixtures__/mockFlow.ts",
+						"sha256": "8271faa8accb0cf969720c9bae24da7fdaf94b03a6fea28c586696d8a13b5ac4"
+					},
+					{
+						"path": "edges/shared/edge-styles.ts",
+						"sha256": "d2cc459ffc1c0eecb99287657836dadbf91dab78da1d78cad38ac40d2756558f"
+					},
+					{
+						"path": "theme/campaign-flow-controls.ts",
+						"sha256": "0e403a71b3173f5329896374902a2f509620c3a3445fde9069e6f0eea3ba8641"
+					},
+					{
+						"path": "theme/flow-token-registry.ts",
+						"sha256": "b3564e7693bcdd2cb28dc5877a86143e7d83340fb620e985320fbb90d6d1919a"
+					},
+					{
+						"path": "theme/flow-tokens.css",
+						"sha256": "ae5962dc55521b2a80bac447b64328d274f3f9b02406f5a2412c47d1565c19d9"
+					},
+					{
+						"path": "theme/index.ts",
+						"sha256": "4c2636449cae15aa26539e84bba6dfb83cd537cb3a09e547bf197370743ff2d4"
+					},
+					{
+						"path": "types/edges.ts",
+						"sha256": "4599bf0afe121ad83880ffe73600ff549d62ab8fe5e16e8622d7725381dd020c"
+					},
+					{
+						"path": "types/flow.ts",
+						"sha256": "539b763567111901c22548d27e12a0b75ae24a576a2a79c62a4a5df93159ffb2"
+					},
+					{
+						"path": "types/index.ts",
+						"sha256": "ed1cbbdf8b5d8b3ae1a8a29e4a5ca9e40943434448bab153e98e37225c78defd"
+					},
+					{
+						"path": "types/nodes.ts",
+						"sha256": "c38bf6401e89c6ccc9a2f9b4ab1ce3aaa7af9dca87712d02fc808a9fb8de788d"
+					},
+					{
+						"path": "types/validation.ts",
+						"sha256": "fba9025e4c829f033f1ca897f7a760b59fb2dd86b4c7046da0b1c6c6e655bd5d"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": []
+}

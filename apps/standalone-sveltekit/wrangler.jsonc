@@ -10,6 +10,12 @@
     "binding": "ASSETS",
     "directory": ".svelte-kit/cloudflare"
   },
+  "services": [
+    {
+      "binding": "BOOKING_SERVICE",
+      "service": "sonik-booking-service-pipe-b"
+    }
+  ],
   "observability": {
     "logs": {
       "enabled": true,
@@ -30,11 +36,11 @@
   ],
   "vars": {
     "PUBLIC_AGENT_UI_ALLOWED_HOST_ORIGINS": "https://*.workers.dev,https://*.sonik.fm",
-    "AI_GATEWAY_MODEL": "deepseek/deepseek-v4-flash",
     "RATE_LIMIT_PER_MINUTE": "10",
     "RATE_LIMIT_PER_DAY": "100",
-    "SONIK_BOOKING_API_BASE_URL": "https://sonik-booking-app.liam-trampota.workers.dev",
+    "SONIK_BOOKING_API_BASE_URL": "https://sonik-booking-service-pipe-b.liam-trampota.workers.dev",
     "SONIK_BOOKING_AUTH_MODE": "anonymous",
-    "SONIK_AGENT_UI_PERSISTENCE_MODE": "cloud"
+    "SONIK_AGENT_UI_PERSISTENCE_MODE": "cloud",
+    "SONIK_AGENT_UI_ENABLE_SMOKE_HOST_CONTEXT_SIGNER": "true"
   }
 }

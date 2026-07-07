@@ -46,6 +46,28 @@ describe("StateProvider", () => {
       expect(ctx.state).toEqual({});
     }),
   );
+
+  it(
+    "reports changed entries for external StateStore batch updates",
+    (() => {
+      const store = createStateStore({ a: 1, b: 2 });
+      const onStateChange = vi.fn();
+      return component(
+        () => {
+          const ctx = getStateContext();
+          ctx.update({ "/a": 10, "/b": 2, "/c": 30 });
+          expect(store.get("/a")).toBe(10);
+          expect(store.get("/b")).toBe(2);
+          expect(store.get("/c")).toBe(30);
+          expect(onStateChange).toHaveBeenCalledWith([
+            { path: "/a", value: 10 },
+            { path: "/c", value: 30 },
+          ]);
+        },
+        { store, onStateChange },
+      );
+    })(),
+  );
 });
 
 describe("StateContext.get", () => {
@@ -198,10 +220,33 @@ describe("controlled mode", () => {
           expect(ctx.get("/count")).toBe(1);
           ctx.set("/count", 2);
           expect(store.get("/count")).toBe(2);
-          expect(onStateChange).not.toHaveBeenCalled();
+          expect(onStateChange).toHaveBeenCalledWith([{ path: "/count", value: 2 }]);
         },
         { store, onStateChange },
       );
     })(),
   );
+
+  it(
+    "reports changed entries for external StateStore batch updates",
+    (() => {
+      const store = createStateStore({ a: 1, b: 2 });
+      const onStateChange = vi.fn();
+      return component(
+        () => {
+          const ctx = getStateContext();
+          ctx.update({ "/a": 10, "/b": 2, "/c": 30 });
+          expect(store.get("/a")).toBe(10);
+          expect(store.get("/b")).toBe(2);
+          expect(store.get("/c")).toBe(30);
+          expect(onStateChange).toHaveBeenCalledWith([
+            { path: "/a", value: 10 },
+            { path: "/c", value: 30 },
+          ]);
+        },
+        { store, onStateChange },
+      );
+    })(),
+  );
+
 });

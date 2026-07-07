@@ -60,14 +60,208 @@ try {
   const validDashboard = createJsonArtifact.inputSchema.safeParse({ title: "Dashboard", spec: JSON_ARTIFACT_DASHBOARD_SPEC });
   assert.equal(validDashboard.success, true, validDashboard.success ? "" : JSON.stringify(validDashboard.error.issues));
 
+  const interactiveSetStateArtifact = {
+    title: "Interactive",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Button",
+          props: { label: "Save", variant: "default", size: "default", disabled: false },
+          on: {
+            press: {
+              action: "setState",
+              params: { statePath: "/saved", value: true },
+            },
+          },
+          children: [],
+        },
+      },
+      state: { saved: false },
+    },
+  };
+  const validInteractive = createJsonArtifact.inputSchema.safeParse(interactiveSetStateArtifact);
+  assert.equal(validInteractive.success, true, validInteractive.success ? "" : JSON.stringify(validInteractive.error.issues));
+  const storedInteractive = await createJsonArtifact.execute(validInteractive.data);
+  assert.deepEqual(
+    storedInteractive.spec.elements.main.on,
+    interactiveSetStateArtifact.spec.elements.main.on,
+    "on.press setState binding must survive createJsonArtifact validation into the stored spec",
+  );
+
+
+  const bookingIntakeQuestionArtifact = {
+    title: "Booking Context Intake",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Stack",
+          props: { direction: "vertical", gap: "lg", wrap: null },
+          children: ["header", "progress-bar", "question-card", "manifest-preview"],
+        },
+        header: {
+          type: "Stack",
+          props: { direction: "vertical", gap: "sm", wrap: null },
+          children: ["title-heading", "description-text"],
+        },
+        "title-heading": { type: "Heading", props: { text: "Create Booking Context", level: "h1" }, children: [] },
+        "description-text": {
+          type: "Text",
+          props: {
+            content: "Collect the operational facts needed to draft a bookable venue schedule, resource, and service-period manifest.",
+            muted: true,
+          },
+          children: [],
+        },
+        "progress-bar": {
+          type: "Stack",
+          props: { direction: "vertical", gap: "sm", wrap: null },
+          children: ["progress-label", "progress"],
+        },
+        "progress-label": { type: "Text", props: { content: "Progress: 0 of 8 questions answered", muted: true }, children: [] },
+        progress: { type: "Progress", props: { value: 0, max: 8 }, children: [] },
+        "question-card": {
+          type: "QuestionCard",
+          props: {
+            questionId: "q_intake_mode",
+            title: "What are we configuring?",
+            body: "Are we creating a recurring venue schedule, a one-time event, or a hybrid event with bookable sub-inventory?",
+            whyThisMatters: "This controls which manifest fields and command previews become relevant later.",
+            answerType: "choice_cards",
+            choices: [
+              { value: "venue_schedule", label: "Venue schedule", description: "Recurring inventory such as tee times, tables, rooms, classes, rentals, or reservations." },
+              { value: "event", label: "Event", description: "A one-time event with a fixed date and time." },
+              { value: "hybrid", label: "Hybrid", description: "An event that also has bookable sub-inventory." },
+            ],
+            required: true,
+            allowSkip: false,
+            writesTo: "/manifest/intakeMode",
+            submitLabel: "Continue",
+          },
+          on: {
+            submit: { action: "submitAnswer", params: { questionId: "q_intake_mode", value: { $state: "/draftAnswers/q_intake_mode" }, skipped: false, writesTo: "/manifest/intakeMode" } },
+            skip: { action: "submitAnswer", params: { questionId: "q_intake_mode", value: { $state: "/draftAnswers/q_intake_mode" }, skipped: true, writesTo: "/manifest/intakeMode" } },
+          },
+          children: [],
+        },
+        "manifest-preview": { type: "ManifestPreview", props: { title: "Manifest draft", manifest: { $bindState: "/manifest" } }, children: [] },
+      },
+      state: { manifest: { intakeMode: "unknown" }, draftAnswers: { q_intake_mode: null } },
+    },
+  };
+  const validBookingIntakeQuestion = createJsonArtifact.inputSchema.safeParse(bookingIntakeQuestionArtifact);
+  assert.equal(validBookingIntakeQuestion.success, true, validBookingIntakeQuestion.success ? "" : JSON.stringify(validBookingIntakeQuestion.error.issues));
+  const storedBookingIntakeQuestion = await createJsonArtifact.execute(validBookingIntakeQuestion.data);
+  assert.deepEqual(storedBookingIntakeQuestion.spec.elements["question-card"].on, bookingIntakeQuestionArtifact.spec.elements["question-card"].on, "QuestionCard submit/skip bindings must survive createJsonArtifact validation");
+
+  const validStringifiedBookingIntakeQuestion = createJsonArtifact.inputSchema.safeParse({
+    title: "Booking Context Intake",
+    spec: JSON.stringify(bookingIntakeQuestionArtifact.spec),
+  });
+  assert.equal(validStringifiedBookingIntakeQuestion.success, true, validStringifiedBookingIntakeQuestion.success ? "" : JSON.stringify(validStringifiedBookingIntakeQuestion.error.issues));
+  const storedStringifiedBookingIntakeQuestion = await createJsonArtifact.execute(validStringifiedBookingIntakeQuestion.data);
+  assert.equal(storedStringifiedBookingIntakeQuestion.spec.root, "main", "stringified spec tool input must parse into the same strict object spec");
+  assert.deepEqual(storedStringifiedBookingIntakeQuestion.spec.elements["question-card"].on, bookingIntakeQuestionArtifact.spec.elements["question-card"].on, "stringified spec normalization must preserve QuestionCard bindings");
+
+  const validFencedBookingIntakeQuestion = createJsonArtifact.inputSchema.safeParse({
+    title: "Booking Context Intake",
+    spec: `Here is the spec:
+\`\`\`json
+${JSON.stringify(bookingIntakeQuestionArtifact.spec)}
+\`\`\``,
+  });
+  assert.equal(validFencedBookingIntakeQuestion.success, true, validFencedBookingIntakeQuestion.success ? "" : JSON.stringify(validFencedBookingIntakeQuestion.error.issues));
+  const storedFencedBookingIntakeQuestion = await createJsonArtifact.execute(validFencedBookingIntakeQuestion.data);
+  assert.equal(storedFencedBookingIntakeQuestion.spec.root, "main", "fenced/labeled string spec must parse into the same strict object spec");
+
+  const doubleEncodedBookingIntakeQuestion = createJsonArtifact.inputSchema.safeParse({
+    title: "Booking Context Intake",
+    spec: JSON.stringify(JSON.stringify(bookingIntakeQuestionArtifact.spec)),
+  });
+  assert.equal(doubleEncodedBookingIntakeQuestion.success, true, doubleEncodedBookingIntakeQuestion.success ? "" : JSON.stringify(doubleEncodedBookingIntakeQuestion.error.issues));
+  const storedDoubleEncodedBookingIntakeQuestion = await createJsonArtifact.execute(doubleEncodedBookingIntakeQuestion.data);
+  assert.equal(storedDoubleEncodedBookingIntakeQuestion.spec.root, "main", "double-encoded string spec must parse into the same strict object spec");
+
+  const unparseableBookingIntakeQuestion = createJsonArtifact.inputSchema.safeParse({
+    title: "Venue Booking Setup",
+    spec: "the canonical booking intake artifact",
+  });
+  assert.equal(unparseableBookingIntakeQuestion.success, true, unparseableBookingIntakeQuestion.success ? "" : JSON.stringify(unparseableBookingIntakeQuestion.error.issues));
+  await assert.rejects(
+    () => createJsonArtifact.execute(unparseableBookingIntakeQuestion.data),
+    /Invalid JSON-render artifact spec/,
+    "unparseable booking-intake spec strings must preserve failure evidence instead of silently promoting a canonical fallback",
+  );
+
+  const textOnlyQuestionCardArtifact = {
+    title: "Venue Basics",
+    spec: {
+      root: "main",
+      elements: {
+        main: { type: "QuestionCard", props: { questionId: "venue-name", title: "Venue name", body: "What should guests see?", whyThisMatters: "Used in confirmations.", answerType: "short_text", required: true, submitLabel: "Save Name" }, children: [] },
+      },
+      state: {},
+    },
+  };
+  const validTextOnlyQuestionCard = createJsonArtifact.inputSchema.safeParse(textOnlyQuestionCardArtifact);
+  assert.equal(validTextOnlyQuestionCard.success, true, validTextOnlyQuestionCard.success ? "" : JSON.stringify(validTextOnlyQuestionCard.error.issues));
+  const storedTextOnlyQuestionCard = await createJsonArtifact.execute(validTextOnlyQuestionCard.data);
+  assert.equal(storedTextOnlyQuestionCard.spec.elements.main.type, "QuestionCard", "short_text QuestionCard without choices must pass execute-time catalog validation");
+
+  const validActionArray = createJsonArtifact.inputSchema.safeParse({
+    title: "Interactive array",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Button",
+          props: { label: "Save", variant: "default", size: "default", disabled: false },
+          on: {
+            press: [
+              { action: "setState", params: { statePath: "/saved", value: true } },
+              { action: "setState", params: { statePath: "/submitted", value: true } },
+            ],
+          },
+          children: [],
+        },
+      },
+      state: { saved: false, submitted: false },
+    },
+  });
+  assert.equal(validActionArray.success, true, validActionArray.success ? "" : JSON.stringify(validActionArray.error.issues));
+  const storedActionArray = await createJsonArtifact.execute(validActionArray.data);
+  assert.equal(storedActionArray.spec.elements.main.on.press.length, 2, "action-array bindings must pass execute-time catalog validation and survive promotion");
+
+  const arbitraryOnObject = createJsonArtifact.inputSchema.safeParse({
+    title: "Bad",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Button",
+          props: { label: "Bad", variant: "default", size: "default", disabled: false },
+          on: { press: { arbitrary: true } },
+          children: [],
+        },
+      },
+      state: {},
+    },
+  });
+  assert.equal(arbitraryOnObject.success, true, "tool input accepts model-shaped specs before strict execute-time validation");
+  await assert.rejects(() => createJsonArtifact.execute(arbitraryOnObject.data), /Invalid JSON-render artifact spec/, "on.* values must be action objects or arrays before promotion");
+
   const emptyElements = createJsonArtifact.inputSchema.safeParse({ title: "Bad", spec: { root: "main", elements: {}, state: {} } });
-  assert.equal(emptyElements.success, false, "empty element maps must be rejected");
+  assert.equal(emptyElements.success, true, "tool input accepts model-shaped specs before strict execute-time validation");
+  await assert.rejects(() => createJsonArtifact.execute(emptyElements.data), /Invalid JSON-render artifact spec/, "empty element maps must be rejected before promotion");
 
   const missingCardProps = createJsonArtifact.inputSchema.safeParse({ title: "Bad", spec: { root: "main", elements: { main: { type: "Card", props: {}, children: [] } }, state: {} } });
-  assert.equal(missingCardProps.success, false, "catalog-derived props must reject empty Card props");
+  assert.equal(missingCardProps.success, true, "tool input accepts model-shaped specs before strict execute-time validation");
+  await assert.rejects(() => createJsonArtifact.execute(missingCardProps.data), /Invalid JSON-render artifact spec/, "catalog-derived props must reject empty Card props before promotion");
 
   const danglingChild = createJsonArtifact.inputSchema.safeParse({ title: "Bad", spec: { root: "main", elements: { main: { type: "Card", props: { title: "Bad", description: "Bad" }, children: ["missing"] } }, state: {} } });
-  assert.equal(danglingChild.success, false, "dangling child ids must be rejected");
+  assert.equal(danglingChild.success, true, "tool input accepts model-shaped specs before strict execute-time validation");
+  await assert.rejects(() => createJsonArtifact.execute(danglingChild.data), /Invalid JSON-render artifact spec/, "dangling child ids must be rejected before promotion");
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

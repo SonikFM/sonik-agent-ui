@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createInteractiveSurfaceJsonRenderSpec } from "../../packages/json-ui-runtime/src/intake.ts";
 import {
   createCommandCatalog,
   createCommandFamilyRegistry,
@@ -11,12 +12,18 @@ import {
   learnCommandDescriptor,
   searchCommandCatalog,
   searchCommandCatalogWithMetadata,
+  createAskUserQuestionSpec,
+  createAskUserQuestionsFromQuestionForm,
+  createInteractiveSurfaceSpec,
+  createQuestionAnswerStateUpdates,
+  createQuestionAnswerStateUpdateRecord,
   createToolManifest,
   evaluateToolPolicy,
   filterAvailableTools,
   inferEffectFromHttpMethod,
   inferEffectFromProcedureId,
   isValidOrpcProcedureId,
+  validateQuestionAnswer,
 } from "../../packages/tool-contracts/src/index.ts";
 import {
   createCommandIndexContext,
@@ -57,6 +64,245 @@ assert.equal(inferEffectFromProcedureId("booking.contexts.delete"), "destructive
 assert.equal(isValidOrpcProcedureId("booking.contexts.list"), true);
 assert.equal(isValidOrpcProcedureId("GET /api/v1/booking/contexts"), false, "ORPC procedure ids must not be arbitrary endpoint strings");
 assert.equal(isValidOrpcProcedureId("https://api.sonik.fm/rpc"), false, "ORPC procedure ids must not be URLs");
+
+const confirmationQuestion = createAskUserQuestionSpec({
+  question_id: "q_confirmation_mode",
+  title: "How should bookings be confirmed?",
+  body: "Should customers receive instant confirmation, require manual approval, join a waitlist, or submit a request before staff confirms?",
+  why_this_matters: "This controls whether Sonik can issue a booking confirmation immediately or must create a pending request.",
+  answer_type: "single_choice",
+  choices: [
+    "instant_confirm",
+    { value: "manual_approval", label: "Manual approval", description: "Staff must approve first." },
+  ],
+  required: true,
+  allow_skip: false,
+  writes_to: "inventory.items[].confirmation_mode",
+});
+assert.equal(confirmationQuestion.id, "q_confirmation_mode", "snake_case question_id should normalize to canonical id");
+assert.equal(confirmationQuestion.answerType, "single_choice", "snake_case answer_type should normalize to canonical answerType");
+assert.deepEqual(confirmationQuestion.choices.map((choice) => choice.value), ["instant_confirm", "manual_approval"], "string/object choices normalize to stable values");
+assert.equal(confirmationQuestion.writesTo, "inventory.items[].confirmation_mode", "writes_to should normalize to writesTo");
+
+assert.throws(() => createAskUserQuestionSpec({
+  id: "q_bad_required_skip",
+  title: "Bad",
+  body: "Bad",
+  answerType: "short_text",
+  required: true,
+  allowSkip: true,
+}), /Required questions must not allow skip/, "required questions cannot be skippable");
+assert.throws(() => createAskUserQuestionSpec({
+  id: "q_duplicate_choices",
+  title: "Bad choices",
+  body: "Bad choices",
+  answerType: "single_choice",
+  choices: ["yes", { value: "yes", label: "Yes again" }],
+}), /unique/, "choice values must remain stable and unique after normalization");
+assert.throws(() => createAskUserQuestionSpec({
+  id: "q_text_with_choices",
+  title: "Bad text",
+  body: "Bad text",
+  answerType: "short_text",
+  choices: ["a"],
+}), /must not include choices/, "free-text questions should not carry choice options");
+
+assert.throws(() => createAskUserQuestionSpec({
+  id: "__proto__",
+  title: "Unsafe id",
+  body: "Unsafe id",
+  answerType: "short_text",
+}), /prototype-polluting/, "question ids must reject prototype-polluting path segments before state paths are generated");
+assert.throws(() => createAskUserQuestionSpec({
+  id: "manifest/constructor/name",
+  title: "Unsafe nested id",
+  body: "Unsafe nested id",
+  answerType: "short_text",
+}), /prototype-polluting/, "question ids must reject nested prototype-polluting path segments");
+
+const validAnswer = validateQuestionAnswer(confirmationQuestion, {
+  question_id: "q_confirmation_mode",
+  value: "manual_approval",
+  artifact_id: "artifact-intake-1",
+});
+assert.equal(validAnswer.ok, true, "valid single_choice answer should pass");
+assert.equal(validAnswer.ok && validAnswer.writesTo, "inventory.items[].confirmation_mode", "answer validation should retain state write target");
+const invalidAnswer = validateQuestionAnswer(confirmationQuestion, { questionId: "q_confirmation_mode", value: "waitlist" });
+assert.equal(invalidAnswer.ok, false, "undeclared single_choice values should fail");
+assert.equal(!invalidAnswer.ok && invalidAnswer.errors.some((error) => error.code === "invalid_choice"), true);
+const skippedRequired = validateQuestionAnswer(confirmationQuestion, { questionId: "q_confirmation_mode", skipped: true });
+assert.equal(skippedRequired.ok, false, "required non-skippable questions should reject skipped submissions");
+
+const requiredTextQuestion = createAskUserQuestionSpec({
+  id: "q_required_text",
+  title: "Required text",
+  body: "Required text",
+  answerType: "short_text",
+  required: true,
+  allowSkip: false,
+});
+const blankRequiredText = validateQuestionAnswer(requiredTextQuestion, { questionId: "q_required_text", value: "   " });
+assert.equal(blankRequiredText.ok, false, "required text answers should reject blank strings");
+assert.equal(!blankRequiredText.ok && blankRequiredText.errors.some((error) => error.code === "answer_required"), true);
+
+const disabledChoiceQuestion = createAskUserQuestionSpec({
+  id: "q_disabled_choice",
+  title: "Disabled choice",
+  body: "Disabled choice",
+  answerType: "single_choice",
+  choices: ["enabled", { value: "disabled", label: "Disabled", disabled: true }],
+});
+const disabledChoiceAnswer = validateQuestionAnswer(disabledChoiceQuestion, { questionId: "q_disabled_choice", value: "disabled" });
+assert.equal(disabledChoiceAnswer.ok, false, "disabled single-choice answers should be rejected by the controller, not only by UI affordances");
+assert.equal(!disabledChoiceAnswer.ok && disabledChoiceAnswer.errors.some((error) => error.code === "disabled_choice"), true);
+
+const disabledMultiChoiceQuestion = createAskUserQuestionSpec({
+  id: "q_disabled_multi_choice",
+  title: "Disabled multi choice",
+  body: "Disabled multi choice",
+  answerType: "multi_choice",
+  choices: ["enabled", { value: "disabled", label: "Disabled", disabled: true }],
+  required: true,
+  allowSkip: false,
+});
+const emptyRequiredMultiChoice = validateQuestionAnswer(disabledMultiChoiceQuestion, { questionId: "q_disabled_multi_choice", value: [] });
+assert.equal(emptyRequiredMultiChoice.ok, false, "required multi-choice answers should reject an empty array even without an explicit minSelections");
+assert.equal(!emptyRequiredMultiChoice.ok && emptyRequiredMultiChoice.errors.some((error) => error.code === "answer_required" || error.code === "min_selections"), true);
+const disabledMultiChoiceAnswer = validateQuestionAnswer(disabledMultiChoiceQuestion, { questionId: "q_disabled_multi_choice", value: ["disabled"] });
+assert.equal(disabledMultiChoiceAnswer.ok, false, "disabled multi-choice answers should be rejected by controller validation");
+assert.equal(!disabledMultiChoiceAnswer.ok && disabledMultiChoiceAnswer.errors.some((error) => error.code === "disabled_choice"), true);
+
+const multiQuestion = createAskUserQuestionSpec({
+  id: "q_channels",
+  title: "Channels",
+  body: "Which channels should be enabled?",
+  answerType: "multi_choice",
+  choices: ["email", "sms", "whatsapp"],
+  minSelections: 1,
+  maxSelections: 2,
+});
+assert.equal(validateQuestionAnswer(multiQuestion, { questionId: "q_channels", value: ["email", "sms"] }).ok, true, "bounded multi-choice should accept declared values");
+const duplicateChannels = validateQuestionAnswer(multiQuestion, { questionId: "q_channels", value: ["email", "email"] });
+assert.equal(duplicateChannels.ok, false, "multi_choice should reject duplicate submitted choices");
+assert.equal(!duplicateChannels.ok && duplicateChannels.errors.some((error) => error.code === "duplicate_selection"), true);
+const tooManyChannels = validateQuestionAnswer(multiQuestion, { questionId: "q_channels", value: ["email", "sms", "whatsapp"] });
+assert.equal(tooManyChannels.ok, false, "multi_choice should enforce maxSelections");
+assert.equal(!tooManyChannels.ok && tooManyChannels.errors.some((error) => error.code === "max_selections"), true);
+
+const questionSurface = createInteractiveSurfaceSpec({
+  id: "surface_booking_intake_question",
+  kind: "ask_user_question",
+  title: "Booking intake question",
+  questions: [confirmationQuestion],
+  actions: [{ id: "submit", label: "Submit", kind: "submit_answer", requiresConfirmation: false }],
+});
+assert.equal(questionSurface.questions[0]?.id, "q_confirmation_mode", "interactive question surface should embed canonical question specs");
+assert.throws(() => createInteractiveSurfaceSpec({
+  id: "surface_empty_question",
+  kind: "ask_user_question",
+  title: "Empty",
+  questions: [],
+}), /require at least one question/, "question surfaces must not render empty shells");
+assert.throws(() => createInteractiveSurfaceSpec({
+  id: "surface_duplicate_questions",
+  kind: "question_group",
+  title: "Dupes",
+  questions: [confirmationQuestion, confirmationQuestion],
+}), /unique/, "question ids must be unique within a surface");
+assert.throws(() => createInteractiveSurfaceSpec({
+  id: "surface_unconfirmed_tool_call",
+  kind: "intake_artifact",
+  title: "Unsafe action",
+  actions: [{ id: "analyze", label: "Analyze", kind: "tool_call", toolRef: "$analyze-copy-retrofit" }],
+}), /Invalid option/, "interactive surfaces must not expose executable tool_call actions; command tools own execution");
+assert.throws(() => createInteractiveSurfaceSpec({
+  id: "surface_bound_submit",
+  kind: "ask_user_question",
+  title: "Bound submit",
+  questions: [confirmationQuestion],
+  actions: [{ id: "submit", label: "Submit", kind: "submit_answer", commandId: "booking.create.booking" }],
+}), /preview command\/tool targets only/, "submit actions must not bind directly to executable commands");
+
+
+const answerUpdates = createQuestionAnswerStateUpdates(confirmationQuestion, {
+  questionId: "q_confirmation_mode",
+  value: "manual_approval",
+  artifactId: "artifact-intake-1",
+}, { now: "2026-06-30T12:00:00.000Z" });
+assert.equal(answerUpdates.ok, true, "state controller should accept validated question answers");
+assert.deepEqual(answerUpdates.ok && answerUpdates.updates.map((update) => update.path), [
+  "/answers/q_confirmation_mode",
+  "/questionStates/q_confirmation_mode",
+  "/questionSubmissions/q_confirmation_mode",
+  "/lastQuestionSubmission",
+  "/answerWrites/q_confirmation_mode",
+], "non-pointer writesTo targets are tracked as manifest writes without blindly mutating a dot-path");
+assert.equal(answerUpdates.ok && answerUpdates.receipt.execution, "none", "answer receipt must not imply command execution");
+assert.equal(answerUpdates.ok && answerUpdates.receipt.approval, "not_granted", "answer receipt must not imply tool approval");
+assert.equal(answerUpdates.ok && answerUpdates.submission.metadata.controller, "sonik-agent-ui.question-answer-state.v1");
+
+const directWriteQuestion = createAskUserQuestionSpec({
+  id: "q_business_name",
+  title: "Business name",
+  body: "What is the business name?",
+  answerType: "short_text",
+  writesTo: "/manifest/business/name",
+});
+const directWriteRecord = createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: "Sonik Golf",
+}, { now: "2026-06-30T12:01:00.000Z" });
+assert.equal(directWriteRecord["/answers/q_business_name"], "Sonik Golf", "answers are always captured under question id");
+assert.equal(directWriteRecord["/manifest/business/name"], "Sonik Golf", "JSON Pointer writesTo targets can update the manifest draft directly");
+
+assert.throws(() => createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: "Unsafe",
+  writesTo: "/answers/q_business_name",
+}), /unsafe_writes_to/, "direct JSON Pointer writes must not target renderer bookkeeping state");
+assert.throws(() => createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: "Unsafe",
+  writesTo: "/manifest/__proto__/polluted",
+}), /unsafe_writes_to/, "direct JSON Pointer writes must reject prototype-polluting segments");
+assert.throws(() => createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: "Unsafe",
+  writesTo: "/manifest/constructor/polluted",
+}), /unsafe_writes_to/, "direct JSON Pointer writes must reject constructor segments");
+assert.throws(() => createQuestionAnswerStateUpdateRecord(directWriteQuestion, {
+  questionId: "q_business_name",
+  value: 123,
+}), /invalid_text/, "state controller should remain schema-aware and reject malformed values");
+
+const surfaceJsonSpec = createInteractiveSurfaceJsonRenderSpec(questionSurface);
+assert.equal(surfaceJsonSpec.root, "main", "interactive surfaces should convert into a JSON-render root");
+const surfaceQuestionElementEntry = Object.entries(surfaceJsonSpec.elements).find(([, element]) => element.type === "QuestionCard");
+assert.equal(surfaceQuestionElementEntry?.[1].type, "QuestionCard", "question surfaces should use the trusted Svelte QuestionCard adapter");
+assert.equal(surfaceQuestionElementEntry?.[1].props.value?.$bindState, "/draftAnswers/q_confirmation_mode", "question card values should bind to draft answer state before submission");
+assert.equal(surfaceJsonSpec.state.questionStates.q_confirmation_mode, "draft", "question state should start as draft");
+assert.equal(Object.values(surfaceJsonSpec.elements).filter((element) => element.type === "QuestionCard").length, 1, "generated question specs should include exactly one QuestionCard for this surface");
+assert.deepEqual(Object.values(surfaceJsonSpec.elements).map((element) => element.type).sort(), ["Card", "QuestionCard", "Stack"], "generated question specs should not inject executable tool/action elements");
+
+const questionFormQuestions = createAskUserQuestionsFromQuestionForm({
+  id: "discovery",
+  title: "Quick brief",
+  questions: [
+    { id: "platform", label: "Primary surface", type: "radio", options: ["Responsive", { label: "Mobile", value: "mobile" }, { label: "Desktop web", description: "Browser-first." }], required: true, help: "Choose the main surface." },
+    { id: "notes", label: "Notes", type: "textarea", placeholder: "Add context" },
+    { id: "channels", label: "Channels", type: "checkbox", options: ["Email", "SMS"], maxSelections: 1 },
+    { id: "layout", label: "Choose layout", type: "direction-cards", options: [{ label: "Wizard" }, { label: "Canvas", value: "canvas" }] },
+  ],
+});
+assert.deepEqual(questionFormQuestions.map((question) => `${question.id}:${question.answerType}:${question.allowSkip}`), [
+  "platform:single_choice:false",
+  "notes:long_text:true",
+  "channels:multi_choice:true",
+  "layout:choice_cards:true",
+], "Question-form parsed interactions should map into Sonik canonical question specs without importing React UI");
+assert.deepEqual(questionFormQuestions[0]?.choices.map((choice) => choice.value), ["Responsive", "mobile", "Desktop web"], "Question-form option values remain stable through Sonik mapping");
+assert.equal(questionFormQuestions[0]?.choices[2]?.description, "Browser-first.", "Question-form object options without value should preserve description and default value from label");
+assert.deepEqual(questionFormQuestions[3]?.choices.map((choice) => choice.value), ["Wizard", "canvas"], "direction-cards should retain card-like choice semantics for later JSON-render adapters");
 
 const mixedManifest = createToolManifest("policy-test", [
   {
@@ -801,7 +1047,7 @@ const anonymousHostRuntimeBundle = createStandaloneHostCommandRuntimeBundle({
 }, "2026-06-20T00:00:00.000Z");
 assert.equal(anonymousHostRuntimeBundle.catalog.commands.some((command) => command.id === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID), false, "anonymous host runtime bundle should not compose host-scoped booking commands");
 assert.equal(anonymousHostRuntimeBundle.runtimeAdapters.some((adapter) => adapter.bindings.some((binding) => binding.commandId === STANDALONE_DEMO_BOOKING_CONTEXTS_COMMAND_ID)), false, "anonymous host runtime bundle should not mount scoped demo booking adapters");
-assert.equal(anonymousHostRuntimeBundle.catalog.commands.some((command) => command.id === GENERATED_BOOKING_PING_COMMAND_ID), true, "anonymous host runtime bundle may expose public generated booking health commands");
+assert.equal(anonymousHostRuntimeBundle.catalog.commands.some((command) => command.id === GENERATED_BOOKING_PING_COMMAND_ID), false, "anonymous host runtime bundle should not expose generated booking runtime commands without trusted auth/org context");
 assert.equal(createStandaloneHostCommandIndex({
   sessionId: "s-anon",
   pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
@@ -841,6 +1087,7 @@ const generatedLiveBundle = createStandaloneHostCommandRuntimeBundle({
   sessionId: "s-generated-live",
   hostSessionMode: "standalone-demo",
   bookingServiceBaseUrl: "https://booking.test/root/",
+  bookingRuntimeAuth: { mode: "bearer", token: "generated-live-token", source: "test" },
   fetcher: async (url, init) => new Response(JSON.stringify({ service: "sonik-booking-service", ok: true, url: String(url), requestId: init?.headers?.["x-sonik-request-id"] }), { status: 200, headers: { "content-type": "application/json" } }),
   pageContext: { surface: "booking-console", commandFamilies: ["booking"], skillFamilies: ["booking-ops"] },
 }, "2026-06-20T00:00:00.000Z");
@@ -873,8 +1120,8 @@ const generatedContextsReceipt = await executeHostCatalogCommand({
   runtimeAdapters: generatedLiveBundle.runtimeAdapters,
   execution: { ...generatedLiveBundle.executionContext, requestId: "req_generated_contexts" },
 });
-assert.equal(generatedContextsReceipt.ok, false, "protected generated booking reads need configured runtime auth credentials");
-assert.equal(generatedContextsReceipt.policy.reasons.includes("runtime_unavailable"), true);
+assert.equal(generatedContextsReceipt.ok, true, "credentialed generated booking reads execute through generated runtime bindings");
+assert.equal(generatedContextsReceipt.trace.provider, GENERATED_BOOKING_RUNTIME_PROVIDER);
 const generatedCookieOnlyBundle = createStandaloneHostCommandRuntimeBundle({
   sessionId: "s-generated-cookie-only",
   hostSessionMode: "standalone-demo",
@@ -937,7 +1184,9 @@ const generatedInvalidContextReceipt = await executeHostCatalogCommand({
   execution: { ...generatedCredentialedLiveBundle.executionContext, requestId: "req_generated_contexts_invalid" },
 });
 assert.equal(generatedInvalidContextReceipt.ok, false, "generated booking runtime should reject undeclared enum-like query values");
-assert.match(generatedInvalidContextReceipt.summary.error, /Unsupported generated booking query value/);
+assert.equal(generatedInvalidContextReceipt.summary.kind, "command_input_preflight_failed", "invalid enum-like query values are rejected by schema preflight before runtime fetch");
+assert.equal(generatedInvalidContextReceipt.policy.reasons.includes("invalid_input_fields"), true);
+assert.deepEqual(generatedInvalidContextReceipt.summary.invalidFields, [{ path: "kind", message: "Expected one of event, venue_schedule, resource" }]);
 const generatedTemplateReceipt = await executeHostCatalogCommand({
   catalog: generatedLiveBundle.catalog,
   commandId: GENERATED_BOOKING_TEMPLATE_COMMAND_ID,

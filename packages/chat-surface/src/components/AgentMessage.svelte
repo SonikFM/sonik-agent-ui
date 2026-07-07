@@ -1,6 +1,8 @@
 <script lang="ts" module>
   import type { DataPart, Spec } from "@json-render/svelte";
   import type { Snippet } from "svelte";
+  import type { AgentContextItem } from "@sonik-agent-ui/tool-contracts/run-context";
+  import type { ToolActivityLabelOverrides } from "../tool-activity.js";
 
   export interface AgentChatMessage {
     id: string;
@@ -12,7 +14,9 @@
     message: AgentChatMessage;
     isLast?: boolean;
     isStreaming?: boolean;
-    toolLabels?: Record<string, [string, string]>;
+    toolLabels?: ToolActivityLabelOverrides;
+    /** Persisted context selection to render as read-only provenance on this turn. */
+    contextItems?: AgentContextItem[];
     renderArtifact: Snippet<[Spec, boolean]>;
     shouldRenderArtifact?: (message: AgentChatMessage) => boolean;
   }
@@ -22,12 +26,14 @@
   import { getSegments, getSpec, getText, hasSpec, snapshotDataParts } from "../message-parts.js";
   import ChatText from "./ChatText.svelte";
   import ToolCallBlock from "./ToolCallBlock.svelte";
+  import ContextChip from "./ContextChip.svelte";
 
   let {
     message,
     isLast = false,
     isStreaming = false,
     toolLabels = {},
+    contextItems = [],
     renderArtifact,
     shouldRenderArtifact,
   }: AgentMessageProps = $props();
@@ -51,6 +57,13 @@
         <div class="agent-message__user-content">
           {text}
         </div>
+      </div>
+    {/if}
+    {#if contextItems.length > 0}
+      <div class="agent-message__context" data-testid={`message-context-${message.id}`}>
+        {#each contextItems as item (item.id)}
+          <ContextChip {item} testId={`message-context-chip-${item.id}`} />
+        {/each}
       </div>
     {/if}
   {:else}
@@ -101,6 +114,14 @@
   .agent-message__user {
     display: flex;
     justify-content: flex-end;
+  }
+
+  .agent-message__context {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.375rem;
+    margin-top: 0.4rem;
   }
 
   .agent-message__user-content {

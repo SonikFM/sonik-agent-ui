@@ -10,6 +10,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./run-context": {
+      "types": "./dist/run-context.d.ts",
+      "default": "./dist/run-context.js"
+    },
+    "./target-registry": {
+      "types": "./dist/target-registry.d.ts",
+      "default": "./dist/target-registry.js"
     }
   },
   "files": ["dist"],

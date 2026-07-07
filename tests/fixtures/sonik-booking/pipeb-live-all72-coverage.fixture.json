@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "sonik.agent_ui.test.booking_live_coverage_fixture.v2",
+  "sourceRunId": "mounted53-runtime-coverage-20260630",
+  "sourceEvidence": "deterministic host runtime proof: all 53 source-mounted generated Booking commands executed through generated runtime bindings; 19 source-shadow commands remained non-mounted/non-executable",
+  "environment": "deterministic_host_runtime",
+  "commandCount": 72,
+  "successCommandIds": [
+    "booking.add.party.member",
+    "booking.assign.resource",
+    "booking.cancel.booking",
+    "booking.commit.hold",
+    "booking.confirm.booking",
+    "booking.create.booking",
+    "booking.create.context",
+    "booking.create.guest",
+    "booking.create.hold",
+    "booking.create.policy",
+    "booking.create.rate.plan",
+    "booking.create.resource.block",
+    "booking.create.resource.combination",
+    "booking.create.resource.type",
+    "booking.create.resource.unit",
+    "booking.create.schedule.rule",
+    "booking.delete.media.asset",
+    "booking.delete.schedule.rule",
+    "booking.dry.run.organizer.template",
+    "booking.extend.hold",
+    "booking.get.availability",
+    "booking.get.booking",
+    "booking.get.context",
+    "booking.get.hold",
+    "booking.get.media.asset",
+    "booking.get.media.asset.variant",
+    "booking.get.organizer.template",
+    "booking.get.organizer.template.browser.handoff",
+    "booking.list.bookings",
+    "booking.list.contexts",
+    "booking.list.media.assets",
+    "booking.list.organizer.templates",
+    "booking.list.party.members",
+    "booking.list.policies",
+    "booking.list.rate.plans",
+    "booking.list.resource.assignments",
+    "booking.list.resource.blocks",
+    "booking.list.resource.combinations",
+    "booking.list.resource.types",
+    "booking.list.resource.units",
+    "booking.list.schedule.rules",
+    "booking.ping",
+    "booking.project.event.context",
+    "booking.release.hold",
+    "booking.remove.party.member",
+    "booking.reschedule.booking",
+    "booking.search.guests",
+    "booking.unassign.resource",
+    "booking.update.context",
+    "booking.update.policy",
+    "booking.update.rate.plan",
+    "booking.update.schedule.rule",
+    "booking.upload.media.asset"
+  ],
+  "failedCommandIds": [
+    "booking.add.house.account.entry",
+    "booking.claim.waitlist.offer",
+    "booking.create.quote",
+    "booking.create.waitlist.entry",
+    "booking.delete.waitlist.entry",
+    "booking.expire.waitlist.entry",
+    "booking.get.customer",
+    "booking.get.customer.insights",
+    "booking.get.customer.profile",
+    "booking.get.house.account",
+    "booking.get.house.account.statement",
+    "booking.get.quote",
+    "booking.get.waitlist.entry",
+    "booking.list.house.account.entries",
+    "booking.list.waitlist.entries",
+    "booking.offer.waitlist.entry",
+    "booking.open.house.account",
+    "booking.update.customer",
+    "booking.update.customer.profile"
+  ],
+  "knownBlockers": [
+    {
+      "id": "source-shadow-customers",
+      "kind": "source-shadow-route-group",
+      "commands": [
+        "booking.get.customer",
+        "booking.get.customer.insights",
+        "booking.get.customer.profile",
+        "booking.update.customer",
+        "booking.update.customer.profile"
+      ]
+    },
+    {
+      "id": "source-shadow-house-accounts",
+      "kind": "source-shadow-route-group",
+      "commands": [
+        "booking.add.house.account.entry",
+        "booking.get.house.account",
+        "booking.get.house.account.statement",
+        "booking.list.house.account.entries",
+        "booking.open.house.account"
+      ]
+    },
+    {
+      "id": "source-shadow-waitlist",
+      "kind": "source-shadow-route-group",
+      "commands": [
+        "booking.claim.waitlist.offer",
+        "booking.create.waitlist.entry",
+        "booking.delete.waitlist.entry",
+        "booking.expire.waitlist.entry",
+        "booking.get.waitlist.entry",
+        "booking.list.waitlist.entries",
+        "booking.offer.waitlist.entry"
+      ]
+    },
+    {
+      "id": "source-shadow-quotes",
+      "kind": "source-shadow-route-group",
+      "commands": [
+        "booking.create.quote",
+        "booking.get.quote"
+      ]
+    }
+  ],
+  "sourceEvidenceFile": ".omx/logs/mounted53-runtime-coverage-20260630.json",
+  "sourceEvidenceSha256": "4c64220aedfe765e1891ffc830fd392f6675953947e715a337d397e1a43a34a0"
+}

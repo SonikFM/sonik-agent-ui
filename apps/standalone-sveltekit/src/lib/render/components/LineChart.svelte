@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
+  import { createLineChartData } from "./line-chart-data";
 
   interface Props extends BaseComponentProps<{
     title?: string | null;
@@ -23,45 +24,8 @@
   );
 
   const processedData = $derived(() => {
-    if (rawItems.length === 0) return [];
-    
     const { xKey, yKey, aggregate } = props;
-    
-    if (!aggregate) {
-      return rawItems.map((item) => ({
-        label: String(item[xKey] ?? ""),
-        value: typeof item[yKey] === "number" ? item[yKey] : parseFloat(String(item[yKey])) || 0,
-      }));
-    }
-
-    const groups = new Map<string, Array<Record<string, unknown>>>();
-    for (const item of rawItems) {
-      const groupKey = String(item[xKey] ?? "unknown");
-      const group = groups.get(groupKey) ?? [];
-      group.push(item);
-      groups.set(groupKey, group);
-    }
-
-    const aggregated: Array<{ label: string; value: number }> = [];
-    for (const [key, group] of Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
-      let value: number;
-      if (aggregate === "count") {
-        value = group.length;
-      } else if (aggregate === "sum") {
-        value = group.reduce((sum, item) => {
-          const v = item[yKey];
-          return sum + (typeof v === "number" ? v : parseFloat(String(v)) || 0);
-        }, 0);
-      } else {
-        const sum = group.reduce((s, item) => {
-          const v = item[yKey];
-          return s + (typeof v === "number" ? v : parseFloat(String(v)) || 0);
-        }, 0);
-        value = group.length > 0 ? sum / group.length : 0;
-      }
-      aggregated.push({ label: key, value });
-    }
-    return aggregated;
+    return createLineChartData({ rawItems, xKey, yKey, aggregate });
   });
 
   const chartData = $derived(processedData());

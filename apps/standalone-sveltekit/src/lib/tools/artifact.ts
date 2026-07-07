@@ -14,12 +14,18 @@ type CatalogComponentDefinition = {
 
 // Intentional contract mirror: createJsonArtifact uses the same catalog prop schemas that the renderer uses, so catalog edits are agent tool-contract edits too.
 const catalogComponents = (explorerCatalog.data as { components: Record<string, CatalogComponentDefinition> }).components;
+const actionParamsSchema = z.record(z.string(), z.unknown());
+const actionBindingSchema = z.object({
+  action: z.string().describe("Renderer action name, for example setState."),
+  params: actionParamsSchema.optional().describe("Object payload passed to the renderer action."),
+}).strict();
+const actionBindingValueSchema = z.union([actionBindingSchema, z.array(actionBindingSchema)]);
 const elementControlSchema = {
   children: z.array(z.string()).optional().describe("Child element ids. Use [] for simple artifacts; if an id is listed here, it must also exist in spec.elements."),
   visible: z.unknown().optional(),
-  on: z.record(z.string(), z.unknown()).optional(),
+  on: z.record(z.string(), actionBindingValueSchema).optional(),
   repeat: z.object({ statePath: z.string(), key: z.string().optional() }).optional(),
-  watch: z.record(z.string(), z.unknown()).optional(),
+  watch: z.record(z.string(), actionBindingValueSchema).optional(),
 };
 
 const catalogElementSchemas = catalogComponentNames.map((name) => {
@@ -74,6 +80,38 @@ const specSchema = z.object({
   }
 });
 
+function parseJsonObjectText(value: string, depth = 0): unknown {
+  if (depth > 2) return value;
+  const trimmed = value.trim();
+  const candidates = [trimmed];
+  const fenced = trimmed.match(/^```(?:json|spec)?\s*([\s\S]*?)\s*```$/i);
+  if (fenced?.[1]) candidates.push(fenced[1].trim());
+  const firstBrace = value.indexOf("{");
+  const lastBrace = value.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(value.slice(firstBrace, lastBrace + 1).trim());
+  if (trimmed.includes('\\"')) candidates.push(trimmed.replace(/\\"/g, '"').replace(/\\n/g, "\n"));
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") return parsed;
+      if (typeof parsed === "string") {
+        const reparsed = parseJsonObjectText(parsed, depth + 1);
+        if (reparsed && typeof reparsed === "object") return reparsed;
+      }
+    } catch {
+      // Try the next recovery candidate.
+    }
+  }
+  return value;
+}
+
+function parseStringifiedSpecForExecution(value: unknown): unknown {
+  return typeof value === "string" ? parseJsonObjectText(value) : value;
+}
+
+const createJsonArtifactSpecInputSchema = z.unknown().describe("Complete json-render flat spec object, or JSON-stringified spec object. The tool accepts flexible model input but execute strictly parses and validates against the renderer catalog before promotion.");
+
 /**
  * Agent-facing canvas creation seam.
  *
@@ -85,10 +123,23 @@ export const createJsonArtifact = tool({
   description: getJsonArtifactToolDescription(),
   inputSchema: z.object({
     title: z.string().describe("Short human-readable title for the artifact."),
-    spec: specSchema.describe("Complete json-render flat spec to render in the artifact canvas."),
+    spec: createJsonArtifactSpecInputSchema.describe("Complete json-render flat spec to render in the artifact canvas. JSON-stringified object specs are parsed, then validated against the same strict renderer catalog schema."),
   }),
   execute: async ({ title, spec }) => {
-    const normalized = normalizeJsonArtifactSpec(spec, title);
+    const parsedSpec = parseStringifiedSpecForExecution(spec);
+    const strictSpec = specSchema.safeParse(parsedSpec);
+    if (!strictSpec.success) {
+      const message = strictSpec.error.issues.map((issue) => `${issue.path.join(".") || "spec"}: ${issue.message}`).join("; ") || "invalid_spec";
+      logArtifactTelemetry({
+        source: "server",
+        event: "tool.createJsonArtifact.rejected_invalid_spec",
+        title,
+        ok: false,
+        error: message,
+      });
+      throw new Error(`Invalid JSON-render artifact spec: ${message}`);
+    }
+    const normalized = normalizeJsonArtifactSpec(strictSpec.data, title);
     if (normalized.recovered) {
       logArtifactTelemetry({
         source: "server",

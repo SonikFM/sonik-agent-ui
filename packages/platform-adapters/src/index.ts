@@ -32,6 +32,7 @@ export type PlatformAdapterContext = {
   organizationId?: string | null;
   authenticated?: boolean;
   scopes?: string[];
+  theme?: string | null;
 };
 
 export type HostSessionSource = "anonymous" | "standalone-demo" | "embedded-host" | "amplify-embedded";
@@ -44,6 +45,7 @@ export type HostSessionEnvelope = {
   organizationId?: string | null;
   authenticated: boolean;
   scopes: string[];
+  theme?: string | null;
   expiresAt?: string | null;
   metadata?: Record<string, unknown>;
 };
@@ -59,6 +61,7 @@ export function createAnonymousHostSessionEnvelope(input: Partial<HostSessionEnv
     organizationId: null,
     authenticated: false,
     scopes: [],
+    theme: input.theme ?? null,
     expiresAt: input.expiresAt ?? null,
     metadata: input.metadata,
   };
@@ -71,6 +74,7 @@ export function createTrustedHostSessionEnvelope(input: {
   principalId?: string | null;
   organizationId: string;
   scopes: string[];
+  theme?: string | null;
   expiresAt?: string | null;
   metadata?: Record<string, unknown>;
 }): HostSessionEnvelope {
@@ -82,6 +86,7 @@ export function createTrustedHostSessionEnvelope(input: {
     organizationId: input.organizationId,
     authenticated: true,
     scopes: [...new Set(input.scopes)].sort(),
+    theme: input.theme ?? null,
     expiresAt: input.expiresAt ?? null,
     metadata: input.metadata,
   };
@@ -94,6 +99,7 @@ export function createEmbeddedHostSessionEnvelope(input: {
   organizationId?: string | null;
   authenticated?: boolean;
   scopes?: string[];
+  theme?: string | null;
   expiresAt?: string | null;
   source?: "embedded-host" | "amplify-embedded";
   metadata?: Record<string, unknown>;
@@ -104,6 +110,7 @@ export function createEmbeddedHostSessionEnvelope(input: {
       sessionId: input.sessionId,
       userId: input.userId,
       principalId: input.principalId,
+      theme: input.theme,
       expiresAt: input.expiresAt,
       metadata: input.metadata,
     });
@@ -116,6 +123,7 @@ export function createEmbeddedHostSessionEnvelope(input: {
     principalId: input.principalId,
     organizationId: input.organizationId,
     scopes: input.scopes ?? [],
+    theme: input.theme,
     expiresAt: input.expiresAt,
     metadata: input.metadata,
   });
@@ -128,6 +136,7 @@ export function platformAdapterContextFromHostSession(session: HostSessionEnvelo
     authenticated: session.authenticated,
     organizationId: session.authenticated ? session.organizationId ?? null : null,
     scopes: session.authenticated ? session.scopes : [],
+    theme: session.theme ?? null,
   };
 }
 
@@ -328,15 +337,46 @@ export async function executeHostCatalogCommand(input: {
     });
   }
 
+  const commandInputForRuntime = bindTrustedHostCommandInput(input.commandInput, execution);
+  const preflight = preflightCommandInput(runtimeCommand, commandInputForRuntime);
+  if (!preflight.ok) {
+    return commandReceiptSchema.parse({
+      ok: false,
+      commandId: command.id,
+      summary: {
+        message: `Command ${command.id} needs valid structured input before runtime execution`,
+        kind: "command_input_preflight_failed",
+        input: input.commandInput ?? {},
+        missingRequiredFields: preflight.missingRequiredFields,
+        unsupportedFields: preflight.unsupportedFields,
+        invalidFields: preflight.invalidFields,
+        requiredFields: preflight.requiredFields,
+        exampleInput: command.examples[0]?.input,
+        inputConvention: typeof command.metadata.inputConvention === "string" ? command.metadata.inputConvention : undefined,
+        commonErrors: Array.isArray(command.metadata.commonErrors) ? command.metadata.commonErrors : undefined,
+      },
+      nextActions: ["learnCommand"],
+      policy: { decision: "deny", reasons: ["command_input_preflight_failed", ...preflight.reasons] },
+      trace: { requestId, sessionId: execution.sessionId, durationMs: Date.now() - startedAt, provider: binding.adapter.provider, cache: "miss", source },
+      errors: preflight.reasons.map((reason) => ({
+        code: reason.toUpperCase().replace(/[^A-Z0-9]+/g, "_"),
+        message: preflightMessageForReason(reason, preflight),
+        retryable: true,
+      })),
+    });
+  }
+
   const handler = action === "commit" ? binding.binding.commit : binding.binding.execute;
   if (!handler) {
     return deniedRuntimeReceipt(input.catalog, command, action, input.commandInput, { ...execution, requestId, source }, startedAt, binding.adapter.provider, [`runtime_handler_missing_for_${action}`]);
   }
 
   try {
-    const result = await handler(input.commandInput, { command: runtimeCommand, execution: { ...execution, requestId, source, action }, action });
+    const result = await handler(commandInputForRuntime, { command: runtimeCommand, execution: { ...execution, requestId, source, action }, action });
+    const runtimeSummary = result.summary && typeof result.summary === "object" && !Array.isArray(result.summary) ? result.summary as Record<string, unknown> : {};
+    const runtimeOk = runtimeSummary.ok !== false;
     return commandReceiptSchema.parse({
-      ok: true,
+      ok: runtimeOk,
       commandId: command.id,
       summary: result.summary,
       handle: result.handle,
@@ -344,6 +384,7 @@ export async function executeHostCatalogCommand(input: {
       nextActions: result.nextActions ?? runtimeCommand.output.resources,
       policy,
       trace: { requestId, sessionId: execution.sessionId, durationMs: Date.now() - startedAt, provider: binding.adapter.provider, cache: "miss", source },
+      errors: runtimeOk ? [] : [{ code: "HOST_RUNTIME_RESPONSE_NOT_OK", message: `Host runtime returned a non-success response for ${command.id}`, retryable: true }],
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -361,6 +402,103 @@ export async function executeHostCatalogCommand(input: {
 
 export function createStandaloneCommandFamilyRegistry(generatedAt = new Date().toISOString()): CommandFamilyRegistry {
   return createDefaultCommandFamilyRegistry(generatedAt);
+}
+
+
+function preflightMessageForReason(reason: string, preflight: CommandInputPreflightFailure): string {
+  if (reason === "missing_required_fields") return `Missing required command input fields: ${preflight.missingRequiredFields.join(", ")}`;
+  if (reason === "unsupported_input_fields") return `Unsupported command input fields: ${preflight.unsupportedFields.join(", ")}`;
+  if (reason === "invalid_input_fields") return `Invalid command input fields: ${preflight.invalidFields.map((field) => field.path).join(", ")}`;
+  if (reason === "input_must_be_object") return "Command input must be a JSON object.";
+  return reason;
+}
+
+type CommandInputPreflightSuccess = { ok: true };
+type CommandInputPreflightFailure = {
+  ok: false;
+  reasons: string[];
+  requiredFields: string[];
+  missingRequiredFields: string[];
+  unsupportedFields: string[];
+  invalidFields: Array<{ path: string; message: string }>;
+};
+
+
+
+function bindTrustedHostCommandInput(rawInput: unknown, execution: CommandExecutionContext): unknown {
+  if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) return rawInput;
+  const input = { ...(rawInput as Record<string, unknown>) };
+  const trustedPrincipal = typeof execution.principalId === "string" && execution.principalId.trim() ? execution.principalId.trim() : null;
+  if (trustedPrincipal) {
+    for (const key of ["userId", "principalId"]) {
+      if (input[key] === "CURRENT_HOST_PRINCIPAL_ID") input[key] = trustedPrincipal;
+    }
+  }
+  return input;
+}
+
+function schemaObjectFromCommandInput(schema: unknown): Record<string, unknown> | undefined {
+  return schema && typeof schema === "object" && !Array.isArray(schema) ? schema as Record<string, unknown> : undefined;
+}
+
+function preflightCommandInput(command: CommandDescriptor, rawInput: unknown): CommandInputPreflightSuccess | CommandInputPreflightFailure {
+  const schema = command.inputSchemaJson ?? schemaObjectFromCommandInput(command.input.schema);
+  if (!schema || schema.type !== "object") return { ok: true };
+  const requiredFields = Array.isArray(schema.required) ? schema.required.filter((field): field is string => typeof field === "string") : [];
+  const input = rawInput ?? {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, reasons: ["input_must_be_object"], requiredFields, missingRequiredFields: requiredFields, unsupportedFields: [], invalidFields: [] };
+  }
+
+  const record = input as Record<string, unknown>;
+  const properties = schema.properties && typeof schema.properties === "object" && !Array.isArray(schema.properties)
+    ? schema.properties as Record<string, unknown>
+    : {};
+  const propertyNames = new Set(Object.keys(properties));
+  const missingRequiredFields = requiredFields.filter((field) => !hasUsableCommandInputValue(record[field]));
+  const unsupportedFields = schema.additionalProperties === false
+    ? Object.keys(record).filter((field) => !propertyNames.has(field))
+    : [];
+  const invalidFields = Object.entries(record)
+    .filter(([field]) => propertyNames.has(field))
+    .flatMap(([field, value]) => validateCommandInputValue(field, value, properties[field]));
+
+  const reasons: string[] = [];
+  if (missingRequiredFields.length > 0) reasons.push("missing_required_fields");
+  if (unsupportedFields.length > 0) reasons.push("unsupported_input_fields");
+  if (invalidFields.length > 0) reasons.push("invalid_input_fields");
+  return reasons.length === 0
+    ? { ok: true }
+    : { ok: false, reasons, requiredFields, missingRequiredFields, unsupportedFields, invalidFields };
+}
+
+function hasUsableCommandInputValue(value: unknown): boolean {
+  return value !== undefined && value !== null && !(typeof value === "string" && value.trim() === "");
+}
+
+function validateCommandInputValue(path: string, value: unknown, schema: unknown): Array<{ path: string; message: string }> {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema) || value === undefined || value === null) return [];
+  const record = schema as Record<string, unknown>;
+  const type = typeof record.type === "string" ? record.type : undefined;
+  const invalid: Array<{ path: string; message: string }> = [];
+  if (Array.isArray(record.enum) && !record.enum.includes(value)) invalid.push({ path, message: `Expected one of ${record.enum.map(String).join(", ")}` });
+  if (type === "string" && typeof value !== "string") invalid.push({ path, message: "Expected string" });
+  if (type === "integer" && !(typeof value === "number" && Number.isInteger(value))) invalid.push({ path, message: "Expected integer" });
+  if (type === "number" && typeof value !== "number") invalid.push({ path, message: "Expected number" });
+  if (type === "boolean" && typeof value !== "boolean") invalid.push({ path, message: "Expected boolean" });
+  if (type === "array" && !Array.isArray(value)) invalid.push({ path, message: "Expected array" });
+  if (type === "object" && (!value || typeof value !== "object" || Array.isArray(value))) invalid.push({ path, message: "Expected object" });
+  if (typeof value === "string") {
+    if (record.format === "uuid" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) invalid.push({ path, message: "Expected UUID string" });
+    if (record.format === "date-time" && Number.isNaN(Date.parse(value))) invalid.push({ path, message: "Expected ISO date-time string" });
+    if (typeof record.minLength === "number" && value.length < record.minLength) invalid.push({ path, message: `Expected at least ${record.minLength} characters` });
+    if (typeof record.maxLength === "number" && value.length > record.maxLength) invalid.push({ path, message: `Expected at most ${record.maxLength} characters` });
+  }
+  if (typeof value === "number") {
+    if (typeof record.minimum === "number" && value < record.minimum) invalid.push({ path, message: `Expected >= ${record.minimum}` });
+    if (typeof record.maximum === "number" && value > record.maximum) invalid.push({ path, message: `Expected <= ${record.maximum}` });
+  }
+  return invalid;
 }
 
 function findRuntimeBinding(adapters: HostCommandRuntimeAdapter[], commandId: string): { adapter: HostCommandRuntimeAdapter; binding: HostCommandRuntimeBinding } | undefined {

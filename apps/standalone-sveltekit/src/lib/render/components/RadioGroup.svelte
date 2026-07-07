@@ -12,19 +12,17 @@
 
   let { props, bindings }: Props = $props();
 
-  function valueBinding() {
-    return getBoundProp<string>(
-      () => (props.value ?? undefined) as string | undefined,
-      () => bindings?.value,
-    );
-  }
+  const valueBinding = getBoundProp<string>(
+    () => (props.value ?? undefined) as string | undefined,
+    () => bindings?.value,
+  );
 
   let value = $derived(
-    valueBinding().current ?? ""
+    valueBinding.current ?? ""
   );
 
   function handleChange(newValue: string) {
-    valueBinding().current = newValue;
+    valueBinding.current = newValue;
   }
 </script>
 
