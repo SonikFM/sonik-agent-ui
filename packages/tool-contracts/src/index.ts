@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { HostUiTarget, HostUiTargetRegistry } from "./target-registry.js";
+
 
 export const toolSourceSchema = z.enum(["orpc", "openapi", "mcp", "sandbox", "local-ui"]);
 export const toolEffectSchema = z.enum(["read", "write", "destructive", "environment", "unknown"]);
@@ -959,6 +961,31 @@ export type SkillIndexSummary = z.infer<typeof skillIndexSummarySchema>;
 export type SkillIndex = z.infer<typeof skillIndexSchema>;
 export type SkillLearnAspect = "description" | "workflow" | "examples" | "policy" | "context" | "commands";
 
+export type ToolPolicyMode = "off" | "ask" | "allow";
+export type ToolPolicyInput = {
+  familyModes?: Record<string, ToolPolicyMode>;
+  commandModes?: Record<string, ToolPolicyMode>;
+};
+
+const TOOL_POLICY_MODE_RANK: Record<ToolPolicyMode, number> = { off: 0, ask: 1, allow: 2 };
+
+/**
+ * Resolves the effective policy for a command across the family-level and per-command
+ * policy layers. Most-restrictive-wins: off > ask > allow. Absence of `input`, or of any
+ * layer within it, is skipped rather than treated as `off` — no policy input means "allow"
+ * (today's behavior, before this policy layer existed).
+ */
+export function resolveEffectiveToolPolicy(command: CommandDescriptor, input?: ToolPolicyInput): ToolPolicyMode {
+  if (!input) return "allow";
+  const candidates: ToolPolicyMode[] = [];
+  const familyMode = input.familyModes?.[command.familyId];
+  if (familyMode) candidates.push(familyMode);
+  const commandMode = input.commandModes?.[command.id];
+  if (commandMode) candidates.push(commandMode);
+  if (candidates.length === 0) return "allow";
+  return candidates.reduce((mostRestrictive, mode) => (TOOL_POLICY_MODE_RANK[mode] < TOOL_POLICY_MODE_RANK[mostRestrictive] ? mode : mostRestrictive));
+}
+
 export type CommandExecutionContext = {
   action?: CommandAction;
   source?: CommandExecutionSource;
@@ -972,6 +999,7 @@ export type CommandExecutionContext = {
   authenticated?: boolean;
   organizationId?: string | null;
   scopes?: string[];
+  toolPolicy?: ToolPolicyInput;
 };
 
 export type CommandLearnAspect = "description" | "schema" | "examples" | "policy" | "output" | "surfaces" | "transport" | "auth";
@@ -991,11 +1019,19 @@ export type AgentPageContext = {
   surface?: string;
   pageType?: string;
   title?: string;
+  theme?: string;
   activeEntity?: { type: string; id: string; label?: string };
   activeArtifactId?: string;
   activeDocumentId?: string;
   artifactType?: string;
   visibleActions?: string[];
+  /**
+   * Optional semantic target inventory exposed by the trusted host/page.
+   * Agents may reference these target ids; they must not receive raw CSS selectors.
+   */
+  hostUiTargets?: HostUiTarget[];
+  /** Full registry envelope when the host wants to expose route/surface provenance. */
+  hostUiTargetRegistry?: HostUiTargetRegistry;
   skillFamilies?: string[];
   commandFamilies?: string[];
 };
@@ -1294,8 +1330,11 @@ export function evaluateCommandPolicy(command: CommandDescriptor, context: Comma
   if (action === "commit" && command.approval === "required" && context.approved !== true) reasons.push("approval_required");
   if (command.approval === "denied") reasons.push("command_denied_by_manifest");
   if (command.effect === "destructive" && context.approved !== true) reasons.push("destructive_requires_explicit_approval");
+  const effectiveToolPolicy = resolveEffectiveToolPolicy(command, context.toolPolicy);
+  if (effectiveToolPolicy === "off") reasons.push("tool_policy_off");
+  if (effectiveToolPolicy === "ask" && context.approved !== true) reasons.push("tool_policy_requires_approval");
   if (reasons.length === 0) return { decision: "allow", reasons: ["policy_allowed"] };
-  if (reasons.every((reason) => reason === "approval_required" || reason === "use_commit_for_mutation_command")) return { decision: "needs_approval", reasons };
+  if (reasons.every((reason) => reason === "approval_required" || reason === "use_commit_for_mutation_command" || reason === "tool_policy_requires_approval")) return { decision: "needs_approval", reasons };
   if (reasons.length === 1 && reasons[0] === "approval_required") return { decision: "needs_approval", reasons };
   return { decision: "deny", reasons };
 }
@@ -1757,3 +1796,268 @@ function collectPolicyWarnings(manifest: IntakeManifest): IntakeManifestIssue[] 
   }
   return warnings;
 }
+
+// Run lifecycle contract for the Sonik Agent UI streaming endpoint.
+//
+// A "run" is one agent turn treated as a persisted, resumable object: it has a
+// status, correlation ids, a per-run event log mirroring the UI-message stream,
+// and — on transient failures — a `resumable` flag that drives a Continue
+// affordance distinct from retry-from-scratch. Modelled on Open Design's
+// `ChatRunStatusResponse` / `PersistedAgentEvent` (packages/contracts), reshaped
+// for Sonik's persistence and json-render stream. Kept dependency-light (no AI
+// SDK / observability imports) so both the producer (api/generate) and the
+// consumers (persistence adapter, chat UI) share one type and cannot drift.
+
+export const RUN_STATUSES = ["running", "succeeded", "failed", "canceled"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export function isRunStatus(value: unknown): value is RunStatus {
+  return typeof value === "string" && (RUN_STATUSES as readonly string[]).includes(value);
+}
+
+export function isTerminalRunStatus(status: RunStatus): boolean {
+  return status !== "running";
+}
+
+// Structured failure codes surfaced on `error` status events so the UI can
+// render error-specific affordances instead of a dead chat. `UNKNOWN` is the
+// catch-all for opaque runtime failures (mirrors Open Design's
+// classify-opaque-runtime-failure work).
+export const RUN_ERROR_CODES = [
+  "MISSING_HOST_CONTEXT",
+  "RATE_LIMITED",
+  "STALE_DEPLOYMENT",
+  "AGENT_STREAM_FAILED",
+  "UNKNOWN",
+] as const;
+export type RunErrorCode = (typeof RUN_ERROR_CODES)[number];
+
+export function isRunErrorCode(value: unknown): value is RunErrorCode {
+  return typeof value === "string" && (RUN_ERROR_CODES as readonly string[]).includes(value);
+}
+
+/** Correlation ids reused from the request's telemetry correlation. Structurally
+ *  identical to `AgentTelemetryCorrelation` so callers can pass it straight
+ *  through without a new cross-package dependency. */
+export interface RunCorrelation {
+  requestId: string;
+  traceId: string;
+  traceparent: string;
+}
+
+export interface RunRecord {
+  id: string;
+  session_id: string;
+  /** The assistant message id this run produces, when the client supplied one. */
+  message_id: string | null;
+  status: RunStatus;
+  /** True when a failed run can be recovered by continuing rather than only
+   *  restarting from scratch. Absent/false on success and non-resumable
+   *  failures. Mirrors Open Design's `ChatRunStatusResponse.resumable`. */
+  resumable: boolean;
+  error: string | null;
+  error_code: RunErrorCode | null;
+  request_id: string | null;
+  trace_id: string | null;
+  traceparent: string | null;
+  started_at: string;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Persisted, mapped event union mirroring the live UI-message stream — NOT raw
+// transport chunks. `daemonAgentPayloadToPersistedAgentEvent` in Open Design
+// draws the same producer/persisted line; here the mapping lives in the app's
+// run-event-log (it needs the AI SDK chunk types). Reattach replays these in
+// `seq` order to rebuild the assistant message including tool/artifact parts.
+export type PersistedRunEvent =
+  | { kind: "status"; label: string; detail?: string; code?: RunErrorCode }
+  | { kind: "text"; text: string }
+  | { kind: "reasoning"; text: string }
+  | { kind: "tool_use"; id: string; name: string; input: unknown }
+  | { kind: "tool_result"; toolCallId: string; toolName?: string; output: unknown; isError: boolean }
+  | { kind: "artifact"; spec: unknown; dataPart?: unknown }
+  | { kind: "usage"; inputTokens?: number; outputTokens?: number; totalTokens?: number }
+  | { kind: "error"; message: string; code?: RunErrorCode };
+
+export type PersistedRunEventKind = PersistedRunEvent["kind"];
+
+export interface RunEventRecord {
+  id: string;
+  run_id: string;
+  session_id: string | null;
+  seq: number;
+  event: PersistedRunEvent;
+  created_at: string;
+}
+
+// Canonical prompt sent by the "Continue" affordance on a resumable failed run.
+// Adapted from Open Design's RESUME_CONTINUE_PROMPT: worded as a continuation of
+// interrupted work, deliberately NOT a re-send of the original user turn (that
+// is the from-scratch Retry path).
+export const RESUME_CONTINUE_PROMPT =
+  "The previous turn was interrupted before it finished. " +
+  "If your last response was cut off, continue it from where you left off and " +
+  "keep any work already produced; otherwise complete the original request. " +
+  "Review the current workspace document and artifact state before making " +
+  "further changes.";
+
+export interface RunErrorAffordance {
+  code: RunErrorCode;
+  /** Short user-facing headline. */
+  title: string;
+  /** One-line guidance describing the specific recovery path. */
+  guidance: string;
+  /** Label for the primary recovery action, when one applies. */
+  actionLabel: string | null;
+  /** Whether the failure is transient and the run should offer Continue. */
+  resumable: boolean;
+}
+
+const RUN_ERROR_AFFORDANCES: Record<RunErrorCode, RunErrorAffordance> = {
+  MISSING_HOST_CONTEXT: {
+    code: "MISSING_HOST_CONTEXT",
+    title: "Host connection lost",
+    guidance: "The signed host session expired or was not attached. Reconnect the host context, then continue the run.",
+    actionLabel: "Reconnect and continue",
+    resumable: true,
+  },
+  RATE_LIMITED: {
+    code: "RATE_LIMITED",
+    title: "Rate limit reached",
+    guidance: "Requests are being throttled. Wait a moment, then continue the run.",
+    actionLabel: "Continue",
+    resumable: true,
+  },
+  STALE_DEPLOYMENT: {
+    code: "STALE_DEPLOYMENT",
+    title: "Deployment changed mid-run",
+    guidance: "A new version deployed while this run was streaming. Continue to resume against the current deployment.",
+    actionLabel: "Continue",
+    resumable: true,
+  },
+  AGENT_STREAM_FAILED: {
+    code: "AGENT_STREAM_FAILED",
+    title: "Run interrupted",
+    guidance: "The stream dropped before the turn finished. Continue to pick up where it left off.",
+    actionLabel: "Continue",
+    resumable: true,
+  },
+  UNKNOWN: {
+    code: "UNKNOWN",
+    title: "Run failed",
+    guidance: "The run stopped for an unexpected reason. Retry to start the turn again.",
+    actionLabel: null,
+    resumable: false,
+  },
+};
+
+export function describeRunError(code: RunErrorCode | null | undefined): RunErrorAffordance {
+  if (code && isRunErrorCode(code)) return RUN_ERROR_AFFORDANCES[code];
+  return RUN_ERROR_AFFORDANCES.UNKNOWN;
+}
+
+export function isResumableErrorCode(code: RunErrorCode | null | undefined): boolean {
+  return describeRunError(code).resumable;
+}
+
+// Best-effort mapping from a raw failure (error message / HTTP status) to a
+// structured code. Server-side classification; deliberately conservative so an
+// unrecognised failure falls through to UNKNOWN rather than mislabelling.
+export function classifyRunErrorCode(input: {
+  message?: string | null;
+  status?: number | null;
+  cause?: string | null;
+} = {}): RunErrorCode {
+  const status = input.status ?? null;
+  if (status === 429) return "RATE_LIMITED";
+  const haystack = `${input.message ?? ""} ${input.cause ?? ""}`.toLowerCase();
+  if (!haystack.trim()) return "UNKNOWN";
+  if (haystack.includes("missing-host-context") || haystack.includes("host context") || haystack.includes("host session")) {
+    return "MISSING_HOST_CONTEXT";
+  }
+  if (haystack.includes("rate limit") || haystack.includes("rate-limit") || haystack.includes("too many requests") || haystack.includes("429")) {
+    return "RATE_LIMITED";
+  }
+  if (haystack.includes("stale") || haystack.includes("deployment") || haystack.includes("worker was updated") || haystack.includes("script updated")) {
+    return "STALE_DEPLOYMENT";
+  }
+  return "UNKNOWN";
+}
+
+// Where a generate turn started, from the client's point of view. Mirrors Open
+// Design's `ChatAnalyticsEntryFrom`, retargeted to Sonik's actual entry points.
+// Analytics-only: the server NEVER trusts these for behavior — they only shape
+// run/telemetry analytics props (see AgentAnalyticsHints).
+export const AGENT_ANALYTICS_ENTRY_FROM = [
+  // A turn launched from a workflow launcher chip (the "Set up a venue" /
+  // "Create an event" suggestion buttons on the empty-state composer). The chip
+  // prefills a skill-composed prompt; the run fires on that chip's send.
+  "workflow_launcher",
+  // A plain composer send: the user typed a prompt and submitted it. This is the
+  // default entry point when nothing more specific applies.
+  "composer",
+  // A turn that submits answers to an inline question-form clarification (the
+  // user answering an ask-user-question surface, still clarifying the current
+  // intent rather than a fresh create/edit request). Lets analytics separate
+  // clarification turns from initiating turns.
+  "question_answer",
+  // A turn started by the "Continue the run" affordance on a resumable failed
+  // run (Phase 1). Sends RESUME_CONTINUE_PROMPT rather than the original user
+  // turn, so isolating it makes the recovery mechanism's usage and success rate
+  // measurable — deliberately distinct from retry-from-scratch.
+  "resume_continue",
+] as const;
+export type AgentAnalyticsEntryFrom = (typeof AGENT_ANALYTICS_ENTRY_FROM)[number];
+
+export function isAgentAnalyticsEntryFrom(value: unknown): value is AgentAnalyticsEntryFrom {
+  return typeof value === "string" && (AGENT_ANALYTICS_ENTRY_FROM as readonly string[]).includes(value);
+}
+
+/**
+ * Session-dimension analytics hints stamped onto a run and its telemetry so a
+ * session's run sequence is analysable ("did this session reach an artifact, and
+ * on which turn?"). Computed client-side and sent with the generate request.
+ *
+ * IMPORTANT: hints are analytics-only. They are NEVER trusted for behavior and
+ * are kept out of the agent/tool inputs entirely — the server sanitizes them and
+ * records them alongside the run (as an `analytics_hints` status event) and on
+ * the run telemetry, but never feeds them into prompt composition, tool
+ * selection, or command policy. Absent/dropped hints reproduce today's behavior.
+ */
+export interface AgentAnalyticsHints {
+  /** How this turn started (see AGENT_ANALYTICS_ENTRY_FROM). */
+  entryFrom?: AgentAnalyticsEntryFrom;
+  /** 0-based turn index within the client analytics session. Lets a run be
+   *  placed in its session's turn sequence ("reached an artifact on turn N"). */
+  turnIndex?: number;
+  /** True when this is the first run of the session; equals `turnIndex === 0`. */
+  isFirstRun?: boolean;
+  /** True when the session already had a generated artifact when this run
+   *  started — the run is an edit/iteration rather than a first creation. */
+  hasExistingArtifact?: boolean;
+}
+
+const MAX_ANALYTICS_TURN_INDEX = 100_000;
+
+/**
+ * Validate + bound an untrusted analytics-hints payload (e.g. from the request
+ * body). Drops any field that is malformed rather than throwing, so a bad hint
+ * never breaks a turn. Returns undefined when nothing usable remains, so the
+ * caller can treat "no hints" as today's behavior (hints are droppable).
+ */
+export function sanitizeAgentAnalyticsHints(value: unknown): AgentAnalyticsHints | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const hints: AgentAnalyticsHints = {};
+  if (isAgentAnalyticsEntryFrom(record.entryFrom)) hints.entryFrom = record.entryFrom;
+  if (typeof record.turnIndex === "number" && Number.isFinite(record.turnIndex) && record.turnIndex >= 0) {
+    hints.turnIndex = Math.min(Math.floor(record.turnIndex), MAX_ANALYTICS_TURN_INDEX);
+  }
+  if (typeof record.isFirstRun === "boolean") hints.isFirstRun = record.isFirstRun;
+  if (typeof record.hasExistingArtifact === "boolean") hints.hasExistingArtifact = record.hasExistingArtifact;
+  return Object.keys(hints).length > 0 ? hints : undefined;
+}
+
+export * from "./target-registry.js";

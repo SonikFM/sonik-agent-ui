@@ -2,8 +2,11 @@
   import type { BaseComponentProps } from "@json-render/svelte";
   import { getBoundProp } from "@json-render/svelte";
   import { Badge } from "$lib/components/ui/badge";
-
-  type Choice = { value: string | number | boolean; label?: string | null; description?: string | null; disabled?: boolean | null };
+  import {
+    emitComponentPropValidationTelemetry,
+    sanitizeChoiceCardsProps,
+    type Choice,
+  } from "../component-prop-safety";
 
   interface Props extends BaseComponentProps<{
     label?: string | null;
@@ -14,14 +17,24 @@
   }> {}
 
   let { props, bindings }: Props = $props();
+  let normalized = $derived(sanitizeChoiceCardsProps(props));
+  let safeProps = $derived(normalized.props);
+  let lastTelemetryKey = $state<string | null>(null);
+
+  $effect(() => {
+    const telemetry = normalized.telemetry;
+    const key = telemetry ? `${telemetry.component}:${telemetry.reason}:${telemetry.issuePaths.join(",")}` : null;
+    if (telemetry && key !== lastTelemetryKey) emitComponentPropValidationTelemetry(telemetry);
+    lastTelemetryKey = key;
+  });
 
   const valueBinding = getBoundProp<unknown>(
-    () => props.value,
+    () => safeProps.value,
     () => bindings?.value,
   );
 
   let current = $derived(valueBinding.current);
-  const isMultiple = $derived(props.mode === "multiple");
+  const isMultiple = $derived(safeProps.mode === "multiple");
 
   function selected(value: Choice["value"]) {
     return Array.isArray(current) ? current.includes(value) : current === value;
@@ -39,14 +52,14 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  {#if props.label}
+  {#if safeProps.label}
     <div>
-      <p class="text-sm font-medium">{props.label}</p>
-      {#if props.helperText}<p class="text-xs text-muted-foreground">{props.helperText}</p>{/if}
+      <p class="text-sm font-medium">{safeProps.label}</p>
+      {#if safeProps.helperText}<p class="text-xs text-muted-foreground">{safeProps.helperText}</p>{/if}
     </div>
   {/if}
   <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-    {#each props.options ?? [] as option}
+    {#each safeProps.options as option (option.value)}
       <button
         type="button"
         class="rounded-xl border bg-card p-4 text-left shadow-sm transition hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-50 {selected(option.value) ? 'border-primary ring-2 ring-primary/20' : 'border-border'}"

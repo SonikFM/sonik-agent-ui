@@ -2,6 +2,7 @@ import type { Spec } from "@json-render/core";
 import type { WorkspaceDocumentRecord } from "$lib/server/workspace-store";
 
 export const CREATE_JSON_ARTIFACT_TOOL_PART_TYPE = "tool-createJsonArtifact";
+export const CREATE_BOOKING_INTAKE_ARTIFACT_TOOL_PART_TYPE = "tool-createBookingIntakeArtifact";
 export const CREATE_DOCUMENT_ARTIFACT_TOOL_PART_TYPE = "tool-createDocumentArtifact";
 export const UPDATE_DOCUMENT_ARTIFACT_TOOL_PART_TYPE = "tool-updateDocumentArtifact";
 
@@ -48,7 +49,7 @@ export function findJsonArtifactToolCandidate(
 ): JsonArtifactToolCandidate | null {
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index] as ToolPartLike;
-    if (!part || part.type !== CREATE_JSON_ARTIFACT_TOOL_PART_TYPE) continue;
+    if (!part || !isJsonArtifactToolPartType(part.type)) continue;
 
     const output = part.output as JsonArtifactToolOutput;
     if (!isJsonArtifactToolOutput(output)) continue;
@@ -102,6 +103,10 @@ export function isDocumentArtifactToolOutput(
   if (output.kind !== "document-artifact") return false;
   if (output.action !== "create" && output.action !== "update") return false;
   return isWorkspaceDocumentRecord(output.document);
+}
+
+function isJsonArtifactToolPartType(type: unknown): boolean {
+  return type === CREATE_JSON_ARTIFACT_TOOL_PART_TYPE || type === CREATE_BOOKING_INTAKE_ARTIFACT_TOOL_PART_TYPE;
 }
 
 function isDocumentArtifactToolPartType(type: unknown): boolean {

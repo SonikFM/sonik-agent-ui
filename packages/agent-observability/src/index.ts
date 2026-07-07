@@ -3,6 +3,45 @@ export const AGENT_UI_TELEMETRY_SCHEMA_VERSION = "sonik.agent_ui.telemetry.v1";
 export type AgentTelemetrySource = "server" | "client" | "workspace-host" | "system" | "playwright" | "dev-server";
 export type LegacyAgentTelemetrySource = string;
 
+export type AgentUiWorkflowPhase = "idle" | "intake" | "saving" | "preview_ready" | "approval_requested" | "approved" | "committing" | "committed" | "error";
+
+export interface AgentUiWorkflowQuestionSnapshot {
+  id: string;
+  title: string;
+  required: boolean;
+  answerType: string;
+  choices?: Array<{ value: string | number | boolean; label: string; disabled?: boolean }>;
+}
+
+export interface AgentUiWorkflowVisibleError {
+  field?: string;
+  code: string;
+  message: string;
+}
+
+export interface AgentUiWorkflowCommandPreviewSnapshot {
+  commandId: string;
+  stableInputHash: string;
+  effect: "read" | "write" | "destructive";
+  approvalRequired: boolean;
+}
+
+export interface AgentUiWorkflowSnapshot {
+  activeWorkflowId: string | null;
+  activeArtifactId: string | null;
+  phase: AgentUiWorkflowPhase;
+  currentQuestion?: AgentUiWorkflowQuestionSnapshot | null;
+  answeredCount: number;
+  requiredCount: number;
+  unansweredRequiredIds: string[];
+  visibleErrors: AgentUiWorkflowVisibleError[];
+  canSubmitAnswer: boolean;
+  canRequestApproval: boolean;
+  canApproveAndRun: boolean;
+  disabledReasons: string[];
+  commandPreview?: AgentUiWorkflowCommandPreviewSnapshot | null;
+}
+
 export interface AgentUiPageContextSnapshot {
   route?: string;
   surface?: string;
@@ -20,6 +59,11 @@ export interface AgentUiPageContextSnapshot {
   visibleActions?: string[];
   visibleWarnings?: string[];
   visibleErrors?: string[];
+  workflow?: AgentUiWorkflowSnapshot;
+  /** Sanitized semantic targets exposed by the trusted host/page; never raw selectors. */
+  hostUiTargets?: unknown[];
+  /** Optional full target registry envelope for agent/action runtimes. */
+  hostUiTargetRegistry?: unknown;
   commandFamilies?: string[];
   skillFamilies?: string[];
   at?: string;
@@ -43,6 +87,10 @@ export interface AgentUiSemanticActionResult<TState = AgentUiPageAssertions> {
   state: TState;
   message?: string;
   disabledReason?: string;
+  /** Current active session at the time the semantic action returns. */
+  activeSessionId?: string | null;
+  /** Session that the caller requested or that createSession selected. */
+  expectedSessionId?: string | null;
 }
 
 /**
@@ -56,11 +104,29 @@ export interface AgentUiPageControl {
   getAssertions: () => AgentUiPageAssertions;
   actions: {
     createSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
-    submitPrompt: (input: { prompt?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    submitPrompt: (input: { prompt?: string; sessionId?: string | null }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     stop: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     clearChat: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     clearArtifact: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    reloadSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     openWorkspaceDocument: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    submitAnswer: (input: { questionId?: string; value?: unknown }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    markUnknown: (input: { questionId?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    saveDraft: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    requestApproval: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    approveAndRun: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    cancelApproval: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    requestHostAction?: (input: {
+      actionKey?: string;
+      targetId?: string;
+      targetInstanceId?: string;
+      entityRef?: unknown;
+      input?: unknown;
+      intentLabel?: string;
+    }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
+    openCanvas?: () => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
+    highlightTarget?: (input: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
+    requestApprovalPreview?: (input?: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
   };
 }
 
@@ -245,12 +311,92 @@ export function sanitizePageContext(value: unknown): AgentUiPageContextSnapshot 
     visibleActions: sanitizeTelemetryStringList(record.visibleActions),
     visibleWarnings: sanitizeTelemetryStringList(record.visibleWarnings),
     visibleErrors: sanitizeTelemetryStringList(record.visibleErrors),
+    workflow: sanitizeWorkflowSnapshot(record.workflow),
+    // Host UI target data carries action-routing and locator semantics. Keep it out
+    // of the generic telemetry sanitizer so embedders must opt into the stricter
+    // target-registry sanitizer before anything target-like reaches the agent.
     commandFamilies: sanitizeTelemetryStringList(record.commandFamilies),
     skillFamilies: sanitizeTelemetryStringList(record.skillFamilies),
     at: cleanOptionalString(record.at),
   };
   const clean = Object.fromEntries(Object.entries(context).filter(([, entry]) => entry !== undefined && entry !== "")) as AgentUiPageContextSnapshot;
   return Object.keys(clean).length > 0 ? clean : undefined;
+}
+
+
+function sanitizeWorkflowSnapshot(value: unknown): AgentUiWorkflowSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const phase = typeof record.phase === "string" && ["idle", "intake", "saving", "preview_ready", "approval_requested", "approved", "committing", "committed", "error"].includes(record.phase)
+    ? record.phase as AgentUiWorkflowPhase
+    : "idle";
+  const question = sanitizeWorkflowQuestion(record.currentQuestion);
+  const preview = sanitizeWorkflowCommandPreview(record.commandPreview);
+  return {
+    activeWorkflowId: cleanNullableString(record.activeWorkflowId) ?? null,
+    activeArtifactId: cleanNullableString(record.activeArtifactId) ?? null,
+    phase,
+    currentQuestion: question ?? null,
+    answeredCount: cleanOptionalNumber(record.answeredCount) ?? 0,
+    requiredCount: cleanOptionalNumber(record.requiredCount) ?? 0,
+    unansweredRequiredIds: sanitizeTelemetryStringList(record.unansweredRequiredIds) ?? [],
+    visibleErrors: sanitizeWorkflowErrors(record.visibleErrors),
+    canSubmitAnswer: record.canSubmitAnswer === true,
+    canRequestApproval: record.canRequestApproval === true,
+    canApproveAndRun: record.canApproveAndRun === true,
+    disabledReasons: sanitizeTelemetryStringList(record.disabledReasons) ?? [],
+    commandPreview: preview ?? null,
+  };
+}
+
+function sanitizeWorkflowQuestion(value: unknown): AgentUiWorkflowQuestionSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const id = cleanOptionalString(record.id);
+  const title = cleanOptionalString(record.title);
+  const answerType = cleanOptionalString(record.answerType);
+  if (!id || !title || !answerType) return undefined;
+  return {
+    id,
+    title,
+    required: record.required === true,
+    answerType,
+    choices: sanitizeWorkflowChoices(record.choices),
+  };
+}
+
+function sanitizeWorkflowChoices(value: unknown): AgentUiWorkflowQuestionSnapshot["choices"] {
+  if (!Array.isArray(value)) return undefined;
+  return value.slice(0, MAX_LIST_ITEMS).flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    const rawValue = record.value;
+    if (typeof rawValue !== "string" && typeof rawValue !== "number" && typeof rawValue !== "boolean") return [];
+    const label = cleanOptionalString(record.label) ?? String(rawValue);
+    return [{ value: rawValue, label, disabled: record.disabled === true }];
+  });
+}
+
+function sanitizeWorkflowErrors(value: unknown): AgentUiWorkflowVisibleError[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, MAX_LIST_ITEMS).flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    const code = cleanOptionalString(record.code);
+    const message = cleanOptionalString(record.message);
+    if (!code || !message) return [];
+    return [{ code, message, field: cleanOptionalString(record.field) }];
+  });
+}
+
+function sanitizeWorkflowCommandPreview(value: unknown): AgentUiWorkflowCommandPreviewSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const commandId = cleanOptionalString(record.commandId);
+  const stableInputHash = cleanOptionalString(record.stableInputHash);
+  const effect = record.effect === "read" || record.effect === "write" || record.effect === "destructive" ? record.effect : undefined;
+  if (!commandId || !stableInputHash || !effect) return undefined;
+  return { commandId, stableInputHash, effect, approvalRequired: record.approvalRequired === true };
 }
 
 export function sanitizeTelemetryValue(value: unknown, depth = 0): unknown {

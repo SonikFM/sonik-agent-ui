@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en" data-theme="sonik-operator-dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sonik Agent UI Tool Creation System Map</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0e1013;
+      --panel: #14171a;
+      --panel-2: #191c20;
+      --panel-3: #21252b;
+      --ink: #e7eaee;
+      --body: #c3c9d1;
+      --muted: #99a1ab;
+      --faint: #6e757e;
+      --line: rgba(255, 255, 255, 0.1);
+      --line-strong: rgba(255, 255, 255, 0.18);
+      --blue: #4c9df0;
+      --blue-soft: rgba(76, 157, 240, 0.14);
+      --green: #3fbf7f;
+      --green-soft: rgba(63, 191, 127, 0.13);
+      --amber: #e0a63c;
+      --amber-soft: rgba(224, 166, 60, 0.15);
+      --red: #ef5a52;
+      --red-soft: rgba(239, 90, 82, 0.13);
+      --violet: #a78bfa;
+      --violet-soft: rgba(167, 139, 250, 0.13);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --r-sm: 8px;
+      --r-md: 12px;
+      --r-lg: 16px;
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--body);
+      font-family: var(--sans);
+      line-height: 1.55;
+    }
+
+    a { color: var(--blue); text-underline-offset: 0.2em; }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(224px, 280px) minmax(0, 1fr);
+    }
+
+    .rail {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 24px 18px;
+      border-right: 1px solid var(--line);
+      background: #0b0d10;
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 26px;
+    }
+
+    .brand strong {
+      color: var(--ink);
+      font-size: 15px;
+      letter-spacing: -0.01em;
+    }
+
+    .brand span,
+    .nav-note {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    nav { display: grid; gap: 6px; }
+
+    nav a {
+      display: block;
+      border-radius: var(--r-sm);
+      padding: 8px 10px;
+      color: var(--body);
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    nav a:hover,
+    nav a:focus-visible {
+      outline: none;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--ink);
+    }
+
+    main {
+      min-width: 0;
+      padding: 42px clamp(20px, 5vw, 72px) 80px;
+    }
+
+    .hero {
+      max-width: 1180px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: clamp(24px, 5vw, 56px);
+      background:
+        radial-gradient(circle at 10% 15%, rgba(76, 157, 240, 0.14), transparent 32%),
+        linear-gradient(135deg, rgba(255,255,255,0.04), transparent 36%),
+        var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 10px;
+      color: var(--muted);
+      font: 600 12px/1 var(--mono);
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: var(--ink);
+      margin: 0;
+      letter-spacing: -0.025em;
+      text-wrap: balance;
+    }
+
+    h1 {
+      max-width: 1000px;
+      font-size: clamp(36px, 6vw, 76px);
+      line-height: 0.98;
+    }
+
+    h2 {
+      font-size: clamp(25px, 3vw, 38px);
+      line-height: 1.08;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      font-size: 18px;
+      line-height: 1.25;
+      margin-bottom: 8px;
+    }
+
+    p { margin: 0; }
+
+    .lede {
+      max-width: 780px;
+      margin-top: 20px;
+      color: var(--body);
+      font-size: 18px;
+    }
+
+    section {
+      max-width: 1180px;
+      margin-top: 34px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 16px;
+    }
+
+    .section-head p {
+      max-width: 620px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    .panel.pad { padding: 22px; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(132px, 1fr));
+      gap: 12px;
+      padding: 18px;
+    }
+
+    .step {
+      position: relative;
+      min-height: 148px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--r-md);
+      background: var(--panel-2);
+    }
+
+    .step::after {
+      content: "";
+      position: absolute;
+      top: 28px;
+      right: -12px;
+      width: 12px;
+      height: 1px;
+      background: var(--line-strong);
+    }
+
+    .step:last-child::after { display: none; }
+
+    .step code,
+    code.inline {
+      font-family: var(--mono);
+      color: var(--ink);
+      font-size: 12px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 6px;
+      padding: 2px 5px;
+    }
+
+    .step p { color: var(--muted); font-size: 13px; }
+
+    .matrix {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .matrix th,
+    .matrix td {
+      padding: 13px 14px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .matrix th {
+      color: var(--ink);
+      font-size: 12px;
+      font-family: var(--mono);
+      font-weight: 650;
+      background: var(--panel-2);
+    }
+
+    .matrix tr:last-child td { border-bottom: 0; }
+
+    .matrix td:first-child {
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    .tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 8px;
+      color: var(--body);
+      font: 600 11px/1.2 var(--mono);
+      white-space: nowrap;
+    }
+
+    .tag.blue { border-color: rgba(76,157,240,0.35); background: var(--blue-soft); color: #cfe6ff; }
+    .tag.green { border-color: rgba(63,191,127,0.38); background: var(--green-soft); color: #c6f4dc; }
+    .tag.amber { border-color: rgba(224,166,60,0.42); background: var(--amber-soft); color: #f5dfb2; }
+    .tag.red { border-color: rgba(239,90,82,0.42); background: var(--red-soft); color: #ffd2cf; }
+    .tag.violet { border-color: rgba(167,139,250,0.38); background: var(--violet-soft); color: #ded5ff; }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.78fr);
+      gap: 16px;
+    }
+
+    .stack { display: grid; gap: 12px; }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-radius: var(--r-md);
+      padding: 16px;
+      background: var(--panel-2);
+    }
+
+    .callout strong {
+      display: block;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+
+    .callout p,
+    .callout li { color: var(--muted); font-size: 13px; }
+
+    .callout ul { margin: 10px 0 0; padding-left: 18px; }
+
+    .audit-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .audit-item {
+      border: 1px solid var(--line);
+      border-radius: var(--r-md);
+      padding: 16px;
+      background: var(--panel-2);
+    }
+
+    .audit-item .status {
+      display: inline-flex;
+      margin-bottom: 12px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+      counter-reset: item;
+    }
+
+    .timeline-item {
+      counter-increment: item;
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .timeline-item::before {
+      content: counter(item);
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      border: 1px solid rgba(76, 157, 240, 0.44);
+      background: var(--blue-soft);
+      color: #d8ecff;
+      font: 700 12px/1 var(--mono);
+    }
+
+    .codeblock {
+      margin: 0;
+      padding: 16px;
+      overflow: auto;
+      border-radius: var(--r-md);
+      border: 1px solid var(--line);
+      background: #0a0c0f;
+      color: #dbe7f5;
+      font: 12px/1.65 var(--mono);
+    }
+
+    .diagram {
+      width: 100%;
+      min-height: 360px;
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      background: #0a0c0f;
+      overflow: hidden;
+    }
+
+    .diagram svg { display: block; width: 100%; height: auto; }
+
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer {
+      max-width: 1180px;
+      margin-top: 36px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 1fr; }
+      .rail { position: static; height: auto; }
+      .flow { grid-template-columns: 1fr; }
+      .step::after { display: none; }
+      .split, .audit-grid { grid-template-columns: 1fr; }
+      main { padding-top: 28px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail" aria-label="Document navigation">
+      <div class="brand">
+        <strong>Sonik Tool Creation Map</strong>
+        <span>Registry-backed tools, host actions, artifacts, skills, and command boundaries.</span>
+      </div>
+      <nav>
+        <a href="#summary">Executive summary</a>
+        <a href="#model">The one mental model</a>
+        <a href="#families">Tool families</a>
+        <a href="#lifecycle">Call lifecycle</a>
+        <a href="#differences">ORPC vs CLI vs artifacts</a>
+        <a href="#host-actions">Host action precursor</a>
+        <a href="#audit">Contradiction audit</a>
+        <a href="#inventory">Inventory and next steps</a>
+      </nav>
+      <p class="nav-note" style="margin-top: 22px;">Generated as a visual explainer, not runtime code. Commit separately from marketplace/runtime work.</p>
+    </aside>
+
+    <main>
+      <header class="hero" id="summary">
+        <div class="kicker">TOOL CREATION · SYSTEM EXPLAINER · 2026-07-07</div>
+        <h1>One registry. Many transports. One trusted execution boundary.</h1>
+        <p class="lede">Sonik Agent UI should treat every agent-callable capability as a registry-backed command contract: discovered compactly, learned just-in-time, executed through the correct adapter, approved only by trusted host/session state, and reported back as a typed receipt.</p>
+      </header>
+
+      <section id="model">
+        <div class="section-head">
+          <div>
+            <h2>The one mental model</h2>
+            <p>Tools are not arbitrary functions. They are command descriptors with provenance, policy, scope, transport, receipts, and telemetry.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="flow" aria-label="Tool lifecycle flow">
+            <div class="step">
+              <h3>1. Discover</h3>
+              <p>Use compact indexes: <code>searchCommandCatalog</code>, <code>searchSkillCatalog</code>, or marketplace/template search. No full schema flood.</p>
+            </div>
+            <div class="step">
+              <h3>2. Learn</h3>
+              <p>Load details only after selection: schema, examples, policy, transport, auth, output, and relevant surfaces.</p>
+            </div>
+            <div class="step">
+              <h3>3. Prepare</h3>
+              <p>Validate input, page context, active artifact state, required host session, and tool permission mode.</p>
+            </div>
+            <div class="step">
+              <h3>4. Execute</h3>
+              <p>Reads use <code>execute</code>. Writes use <code>commit</code> and derive approval from trusted host/session state.</p>
+            </div>
+            <div class="step">
+              <h3>5. Receipt</h3>
+              <p>Return command id, policy decision, trace/provider, safe output, next action, and telemetry.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="families">
+        <div class="section-head">
+          <div>
+            <h2>Tool families and ownership</h2>
+            <p>Families are registry-backed taxonomy. Core owns neutral families; hosts provide domain vocabulary.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th>Family / source</th>
+                <th>What it represents</th>
+                <th>Execution boundary</th>
+                <th>Current posture</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>local-ui</td>
+                <td>Artifact, document, canvas, layout, local state, future host-action requests.</td>
+                <td>Agent UI/controller. Durable mutation still needs commit/approval if stateful.</td>
+                <td><span class="tag green">EXISTS</span> <span class="tag amber">host actions pending</span></td>
+              </tr>
+              <tr>
+                <td>orpc / openapi</td>
+                <td>Typed app/business operations such as booking, campaigns, guests, reservations.</td>
+                <td>Generated descriptors remain shadow until mounted by a host runtime adapter.</td>
+                <td><span class="tag green">EXISTS</span> <span class="tag blue">generated</span></td>
+              </tr>
+              <tr>
+                <td>mcp</td>
+                <td>External/desktop tool projection with preserved provenance.</td>
+                <td>Search/learn/execute/commit/resource patterns; not first-party trusted by default.</td>
+                <td><span class="tag amber">surface-dependent</span></td>
+              </tr>
+              <tr>
+                <td>sandbox / cli</td>
+                <td>Environment, shell, filesystem, code, or external process work.</td>
+                <td>Deny by default; trusted host enablement and resource limits required.</td>
+                <td><span class="tag red">restricted</span></td>
+              </tr>
+              <tr>
+                <td>json-render artifact</td>
+                <td>Schema-backed UI, forms, dashboards, questions, previews.</td>
+                <td>Renderer emits typed answer/state events only; controller translates to commands.</td>
+                <td><span class="tag green">EXISTS</span> <span class="tag violet">needs richer action state</span></td>
+              </tr>
+              <tr>
+                <td>skill registry</td>
+                <td>Markdown process instructions and workflow recipes.</td>
+                <td>Skills teach the agent; they do not grant execution authority.</td>
+                <td><span class="tag green">EXISTS</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="lifecycle">
+        <div class="section-head">
+          <div>
+            <h2>Execution lifecycle and trust split</h2>
+            <p>The same registry model works across reads, writes, local UI, artifacts, and external commands because trust is separated from model text.</p>
+          </div>
+        </div>
+        <div class="diagram" role="img" aria-label="Agent UI tool lifecycle diagram">
+          <svg viewBox="0 0 1180 420" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 Z" fill="rgba(231,234,238,0.65)" />
+              </marker>
+            </defs>
+            <rect x="34" y="44" width="210" height="98" rx="14" fill="#14171a" stroke="rgba(255,255,255,0.13)" />
+            <text x="58" y="82" fill="#e7eaee" font-family="system-ui" font-size="20" font-weight="700">Agent reasoning</text>
+            <text x="58" y="112" fill="#99a1ab" font-family="system-ui" font-size="14">Chooses search → learn → act</text>
+
+            <rect x="302" y="44" width="230" height="98" rx="14" fill="#191c20" stroke="rgba(76,157,240,0.42)" />
+            <text x="326" y="82" fill="#e7eaee" font-family="system-ui" font-size="20" font-weight="700">Command catalog</text>
+            <text x="326" y="112" fill="#99a1ab" font-family="system-ui" font-size="14">Descriptors, policy, load mode</text>
+
+            <rect x="604" y="44" width="230" height="98" rx="14" fill="#191c20" stroke="rgba(63,191,127,0.38)" />
+            <text x="628" y="82" fill="#e7eaee" font-family="system-ui" font-size="20" font-weight="700">Runtime adapter</text>
+            <text x="628" y="112" fill="#99a1ab" font-family="system-ui" font-size="14">local-ui / ORPC / MCP / host</text>
+
+            <rect x="902" y="44" width="238" height="98" rx="14" fill="#191c20" stroke="rgba(224,166,60,0.42)" />
+            <text x="926" y="82" fill="#e7eaee" font-family="system-ui" font-size="20" font-weight="700">Trusted boundary</text>
+            <text x="926" y="112" fill="#99a1ab" font-family="system-ui" font-size="14">host/session/org approval</text>
+
+            <path d="M246 93 H292" stroke="rgba(231,234,238,0.65)" stroke-width="1.5" marker-end="url(#arrow)" />
+            <path d="M534 93 H594" stroke="rgba(231,234,238,0.65)" stroke-width="1.5" marker-end="url(#arrow)" />
+            <path d="M836 93 H892" stroke="rgba(231,234,238,0.65)" stroke-width="1.5" marker-end="url(#arrow)" />
+
+            <rect x="84" y="216" width="1012" height="132" rx="18" fill="#0e1013" stroke="rgba(255,255,255,0.10)" />
+            <text x="112" y="254" fill="#e7eaee" font-family="system-ui" font-size="18" font-weight="700">Invariant: renderer and model do not own authority</text>
+            <text x="112" y="286" fill="#c3c9d1" font-family="system-ui" font-size="15">JSON artifacts collect typed answers and render previews. Skills teach workflow. The model proposes inputs. Only the trusted host/controller can grant approval and execute mutating business commands.</text>
+            <text x="112" y="320" fill="#99a1ab" font-family="ui-monospace, Menlo, monospace" font-size="13">QuestionCard.submit → state update → previewActiveIntakeCommand → host approval → commitActiveIntakeCommand / commitCommand → receipt</text>
+          </svg>
+        </div>
+      </section>
+
+      <section id="differences">
+        <div class="section-head">
+          <div>
+            <h2>What is different between ORPC, CLI, registry, and artifacts?</h2>
+            <p>The apparent overlap is resolved by source ownership and execution authority.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th>Surface</th>
+                <th>Primary job</th>
+                <th>Can mutate business state?</th>
+                <th>Correct usage</th>
+                <th>Incorrect usage</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Command registry</td>
+                <td>Canonical index of agent-callable descriptors.</td>
+                <td>Only through mounted runtime + policy.</td>
+                <td>Search compactly, learn exact schema, execute/commit with receipt.</td>
+                <td>Hardcode all tools into prompt context.</td>
+              </tr>
+              <tr>
+                <td>ORPC/OpenAPI</td>
+                <td>Typed business contracts generated from host service truth.</td>
+                <td>Yes, when mounted and approved.</td>
+                <td>Generate descriptors; keep shadow until adapter is live.</td>
+                <td>Handwrite 72 endpoints from memory or call private service internals.</td>
+              </tr>
+              <tr>
+                <td>CLI/MCP projection</td>
+                <td>Alternate interface over the same search/learn/execute/commit semantics.</td>
+                <td>Maybe, but never by bypassing policy.</td>
+                <td>Preserve provenance, approval, receipts, and resource limits.</td>
+                <td>Create separate business logic that drifts from ORPC/registry.</td>
+              </tr>
+              <tr>
+                <td>Artifact creation</td>
+                <td>Create schema-backed UI and document/canvas state.</td>
+                <td>Artifact persistence yes; business mutation no.</td>
+                <td>Use forms/questions/previews to collect typed user input.</td>
+                <td>Embed executable endpoint strings or <code>commitCommand</code> payloads in JSON specs.</td>
+              </tr>
+              <tr>
+                <td>Host action channel</td>
+                <td>Safe UI control: highlight, focus, open panel, request approval card.</td>
+                <td>No business mutation directly.</td>
+                <td>Semantic target IDs + host validation + receipts.</td>
+                <td>Let the iframe click arbitrary DOM or treat tour steps as command approvals.</td>
+              </tr>
+              <tr>
+                <td>Skills</td>
+                <td>Teach process: what to search, learn, ask, preview, and avoid.</td>
+                <td>No.</td>
+                <td>Use with command catalog and artifact tools.</td>
+                <td>Assume a skill grants a command or approval.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="host-actions">
+        <div class="section-head">
+          <div>
+            <h2>Where Driver.js-style tours fit</h2>
+            <p>Driver.js is a behavior donor. The platform primitive is a host action channel, implemented as local-ui/host-adapter command descriptors.</p>
+          </div>
+        </div>
+        <div class="split">
+          <div class="panel pad stack">
+            <div class="timeline">
+              <div class="timeline-item">
+                <div class="callout">
+                  <strong>Define contract types</strong>
+                  <p><code class="inline">AgentHostActionRequest</code>, <code class="inline">AgentHostActionResult</code>, target registry, policy mode, and receipt shape.</p>
+                </div>
+              </div>
+              <div class="timeline-item">
+                <div class="callout">
+                  <strong>Expose as registry commands</strong>
+                  <p>Examples: <code class="inline">host.highlightTarget</code>, <code class="inline">host.openCanvas</code>, <code class="inline">host.requestApproval</code>.</p>
+                </div>
+              </div>
+              <div class="timeline-item">
+                <div class="callout">
+                  <strong>Host resolves semantic targets</strong>
+                  <p>The agent requests <code class="inline">booking-context.schedule</code>; the host maps it to the current DOM/component safely.</p>
+                </div>
+              </div>
+              <div class="timeline-item">
+                <div class="callout">
+                  <strong>Return receipts</strong>
+                  <p>The iframe must receive <code class="inline">ok</code>, <code class="inline">target_not_found</code>, <code class="inline">approval_required</code>, or <code class="inline">host_unavailable</code>. No silent pretend-success.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <pre class="codeblock" aria-label="Example host action descriptor"><code>{
+  id: "host.highlightTarget",
+  familyId: "ui",
+  source: "local-ui",
+  effect: "none",
+  approval: "none",
+  loadPolicy: { mode: "surface-eager" },
+  contextHints: {
+    surfaces: ["booking", "amplify"],
+    commandFamilies: ["ui"]
+  },
+  input: {
+    kind: "zod",
+    schema: {
+      targetId: "booking-context.schedule",
+      behavior: "scroll-and-highlight"
+    }
+  },
+  output: {
+    summary: "Host action receipt",
+    resources: ["target", "receipt"]
+  },
+  auth: {
+    required: false,
+    orgScoped: false,
+    scopes: []
+  },
+  transport: {
+    runtimeStatus: "mounted",
+    procedure: "postMessage.hostAction"
+  }
+}</code></pre>
+        </div>
+      </section>
+
+      <section id="audit">
+        <div class="section-head">
+          <div>
+            <h2>Contradiction audit</h2>
+            <p>This audit checks the logic against Sonik tool creation, Sonik accessibility, component design, and current repo behavior.</p>
+          </div>
+        </div>
+        <div class="audit-grid">
+          <div class="audit-item">
+            <span class="tag green status">PASS</span>
+            <h3>One command doctrine</h3>
+            <p>ORPC/OpenAPI, local UI, MCP, sandbox, artifacts, and future host actions can all sit behind one descriptor/search/learn/execute/commit/receipt model.</p>
+          </div>
+          <div class="audit-item">
+            <span class="tag green status">PASS</span>
+            <h3>Renderer authority boundary</h3>
+            <p>JSON-render components collect typed input and emit state/action events. They must not embed business endpoints or executable command payloads.</p>
+          </div>
+          <div class="audit-item">
+            <span class="tag green status">PASS</span>
+            <h3>Model cannot approve</h3>
+            <p>Approval must bind command id, target, input hash, actor/session/org, expiry, and idempotency. Chat text is only intent.</p>
+          </div>
+          <div class="audit-item">
+            <span class="tag amber status">WATCH</span>
+            <h3>Host action inventory missing</h3>
+            <p>We have business command inventory, but still need a first-class inventory of host UI targets and allowed host actions.</p>
+          </div>
+          <div class="audit-item">
+            <span class="tag amber status">WATCH</span>
+            <h3>Artifact actions need richer receipts</h3>
+            <p>QuestionCard and ActionRail exist, but the user-facing approval/save/submit model needs clearer state, disabled reasons, and action receipts.</p>
+          </div>
+          <div class="audit-item">
+            <span class="tag red status">DO NOT DO</span>
+            <h3>No vertical/event drift</h3>
+            <p>Restaurants, tee sheets, gyms, hotels, and resources should use <code class="inline">venue_schedule</code> or <code class="inline">resource</code>, not fake daily Events.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="inventory">
+        <div class="section-head">
+          <div>
+            <h2>Inventory and next steps</h2>
+            <p>The next implementation should start with contracts and tests, then mount runtime adapters. Do not start by styling a tour overlay.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th>Needed inventory</th>
+                <th>Where it should live</th>
+                <th>Why it matters</th>
+                <th>First test</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Host action contract</td>
+                <td><code class="inline">packages/tool-contracts/src/host-actions.ts</code></td>
+                <td>Gives agent UI and host apps one typed request/result protocol.</td>
+                <td>Unknown action fails closed with typed receipt.</td>
+              </tr>
+              <tr>
+                <td>Semantic UI target registry</td>
+                <td>Host adapter + page context envelope</td>
+                <td>Avoids brittle CSS selectors and lets hosts choose their own vocabulary.</td>
+                <td>Unknown target returns <code class="inline">target_not_found</code>.</td>
+              </tr>
+              <tr>
+                <td>Host action command descriptors</td>
+                <td>Command catalog adapter, family <code class="inline">ui</code></td>
+                <td>Keeps tours/page-control inside existing tool creation doctrine.</td>
+                <td>Surface-eager on matching host context only.</td>
+              </tr>
+              <tr>
+                <td>Approval card action</td>
+                <td>Host UI + Agent UI receipt view</td>
+                <td>Lets agents request approval UX without approving themselves.</td>
+                <td>Chat "approve" alone cannot execute command.</td>
+              </tr>
+              <tr>
+                <td>Driver-style tour adapter</td>
+                <td>Later UI layer behind host actions</td>
+                <td>Turns behavior parity into polish without making Driver.js the architecture.</td>
+                <td>Tour step succeeds only when target registry resolves.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>Final answer</h2>
+            <p>The current logic is directionally consistent if we keep the vocabulary strict.</p>
+          </div>
+        </div>
+        <div class="split">
+          <div class="callout">
+            <strong>What is already right</strong>
+            <ul>
+              <li>Search/learn avoids flooding context.</li>
+              <li>ORPC/OpenAPI commands are generated and mounted through adapters.</li>
+              <li>Writes go through commit and trusted approval, not model booleans.</li>
+              <li>Artifacts are schema-backed input/UI surfaces, not command authorities.</li>
+              <li>Skills guide process without granting execution rights.</li>
+            </ul>
+          </div>
+          <div class="callout">
+            <strong>What needs to be added next</strong>
+            <ul>
+              <li>Host action contract and receipt schema.</li>
+              <li>Semantic UI target inventory for Booking and Amplify.</li>
+              <li>Local-ui command descriptors for host page actions.</li>
+              <li>Tests for blocked/ask/allow/require policy behavior.</li>
+              <li>Approval card UX that is visibly separate from chat text.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <p class="footer">Sources used: <code>PRODUCT.md</code>, <code>sonik-tool-creation</code>, <code>sonik-accessibility</code>, <code>sonik-component-design</code>, <code>apps/standalone-sveltekit/src/lib/tools/*</code>, JSON-render component files, and current Driver/tour readiness artifacts. This file intentionally contains no external scripts.</p>
+    </main>
+  </div>
+</body>
+</html>

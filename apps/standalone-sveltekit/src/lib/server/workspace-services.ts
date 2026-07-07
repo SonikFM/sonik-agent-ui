@@ -108,7 +108,7 @@ export function resolveWorkspaceRuntime(input: {
   policy?: WorkspacePersistencePolicy;
   memoryReason?: MemoryWorkspaceRuntimeReason;
 } = {}): ResolvedWorkspaceRuntime {
-  const env = input.event?.platform?.env ?? null;
+  const env = createEffectiveWorkspaceEnv(input.event ?? null);
   const policy = resolveWorkspacePersistencePolicy({ env, override: input.policy });
 
   if (policy === "memory") {
@@ -132,7 +132,7 @@ export function createRequestWorkspaceServices(event?: WorkspaceRuntimeRequest |
   memoryReason?: MemoryWorkspaceRuntimeReason;
   persistence?: WorkspacePersistenceAdapter;
 } = {}): RequestWorkspaceServices {
-  const env = event?.platform?.env ?? null;
+  const env = createEffectiveWorkspaceEnv(event ?? null);
   const persistencePolicy = resolveWorkspacePersistencePolicy({ env, override: input.policy });
   if (persistencePolicy === "cloud") {
     // Test/local injection must not bypass the explicit cloud-mode fail-closed boundary.
@@ -152,7 +152,7 @@ export function createRequestWorkspaceServices(event?: WorkspaceRuntimeRequest |
 }
 
 export function resolveWorkspaceRuntimeDiagnostics(event?: WorkspaceRuntimeRequest | null, input: { policy?: WorkspacePersistencePolicy } = {}): WorkspaceRuntimeDiagnostics {
-  const env = event?.platform?.env ?? null;
+  const env = createEffectiveWorkspaceEnv(event ?? null);
   const hostSession = resolveTrustedHostSessionSnapshot(event);
   const hostContext = {
     hasHeader: Boolean(event?.request?.headers.get(AGENT_UI_HOST_CONTEXT_HEADER)),
@@ -285,7 +285,7 @@ function tryResolveCloudWorkspaceRuntime(event: WorkspaceRuntimeRequest | null, 
 }
 
 function resolveCloudWorkspaceRuntime(event: WorkspaceRuntimeRequest | null, requestId: string): ResolvedWorkspaceRuntime {
-  const env = event?.platform?.env ?? null;
+  const env = createEffectiveWorkspaceEnv(event);
   const databaseUrl = readFirstEnvString(env, ["SONIK_AGENT_UI_DATABASE_URL", "DATABASE_URL", "POSTGRES_URL", "NEON_DATABASE_URL"]);
   if (!databaseUrl) {
     throw new WorkspaceRuntimeResolutionError(
@@ -466,6 +466,26 @@ function cleanRuntimeString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, 256) : null;
+}
+
+function createEffectiveWorkspaceEnv(event: WorkspaceRuntimeRequest | null): Record<string, unknown> | null {
+  const env = event?.platform?.env ?? null;
+  const smokeOverride = readLocalSmokePersistenceModeOverride(event?.request ?? null);
+  if (!smokeOverride) return env;
+  return { ...(env ?? {}), SONIK_AGENT_UI_PERSISTENCE_MODE: smokeOverride };
+}
+
+function readLocalSmokePersistenceModeOverride(request?: Request | null): WorkspacePersistencePolicy | null {
+  if (!request) return null;
+  let hostname: string;
+  try {
+    hostname = new URL(request.url).hostname;
+  } catch {
+    return null;
+  }
+  if (!["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname)) return null;
+  const value = request.headers.get("x-sonik-agent-ui-smoke-persistence-mode");
+  return parseWorkspacePersistencePolicy(value, "local smoke persistence override");
 }
 
 function correlationIdFromRequest(request?: Request | null): string {

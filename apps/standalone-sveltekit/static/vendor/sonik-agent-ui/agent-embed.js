@@ -70,6 +70,7 @@ export function mountSonikAgentUI(options) {
   annotateHostElement(sidecar, "sidecar");
   annotateHostElement(canvasWindow, "canvas-window");
   annotateHostElement(resizeHandle, "resize-handle");
+  annotateHostElement(optionalElement(ownerDocument, options.elements.launcher), "launcher");
   annotateHostElement(optionalElement(ownerDocument, options.elements.openChat), "open-chat");
   annotateHostElement(optionalElement(ownerDocument, options.elements.openCanvas), "open-canvas");
   annotateHostElement(optionalElement(ownerDocument, options.elements.expandCanvas), "expand-canvas");

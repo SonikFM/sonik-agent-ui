@@ -1,5 +1,5 @@
 import { formatSpecIssues, validateSpec, type Spec } from "@json-render/core";
-import { explorerCatalog } from "../render/catalog";
+import { explorerCatalog } from "../render/catalog.ts";
 
 export const JSON_ARTIFACT_ALLOWED_COMPONENTS = explorerCatalog.componentNames as [string, ...string[]];
 export const JSON_ARTIFACT_COMPONENT_HINT = JSON_ARTIFACT_ALLOWED_COMPONENTS.join(", ");
@@ -127,6 +127,7 @@ export const JSON_ARTIFACT_TOOL_OBJECT_GUIDANCE = `CREATE JSON ARTIFACT TOOL FOR
 - Every child id listed in children must exist as a key in elements.
 - Component props must match the component catalog schema; never omit required props.
 - In createJsonArtifact tool input, put dashboard table/chart/accordion data directly in props; do not use { "$state": "/path" } for this strict tool schema yet.
+- createJsonArtifact supports interactive renderer actions on element-level event bindings: use on.press/on.change/etc. with { "action": "setState", "params": { "statePath": "/path", "value": ... } } or an array of those action objects. Put event bindings on the element, not inside props.
 - Component type must be one of: ${JSON_ARTIFACT_COMPONENT_HINT}.
 - Prefer a one-element Card for first-pass text artifacts; use Stack/Grid/Table/Metric only when the user needs a dashboard.
 - For explicit artifact/canvas/dashboard/report/page/workspace requests, call createJsonArtifact once with a complete object-form spec.
@@ -138,5 +139,5 @@ Dashboard createJsonArtifact input with inline data:
 ${JSON.stringify(dashboardToolInput, null, 2)}`;
 
 export function getJsonArtifactToolDescription(): string {
-  return `Create or replace the live canvas artifact with a COMPLETE json-render flat spec. Use this whenever the user explicitly asks to create an artifact, canvas, dashboard, report, page, or workspace. The spec must be renderable on the first call: elements cannot be empty; spec.root must be "main"; elements.main is required; child ids must exist; component types must be one of: ${JSON_ARTIFACT_COMPONENT_HINT}. createJsonArtifact takes object-form tool input, not JSONL patch lines. Use this one-element Card shape when uncertain: ${JSON.stringify(starterToolInput)}. Never call this with { "elements": {} }.`;
+  return `Create or replace the live canvas artifact with a COMPLETE json-render flat spec. Use this whenever the user explicitly asks to create an artifact, canvas, dashboard, report, page, or workspace. The spec must be renderable on the first call: elements cannot be empty; spec.root must be "main"; elements.main is required; child ids must exist; component types must be one of: ${JSON_ARTIFACT_COMPONENT_HINT}. Element-level on.* bindings may use renderer action objects such as { "action": "setState", "params": { "statePath": "/path", "value": true } } or arrays of those objects. createJsonArtifact takes object-form tool input, not JSONL patch lines. Use this one-element Card shape when uncertain: ${JSON.stringify(starterToolInput)}. Never call this with { "elements": {} }.`;
 }

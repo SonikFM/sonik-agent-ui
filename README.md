@@ -123,10 +123,21 @@ Browser page context is useful context for the model, but it must **never** be t
 ### 3. Streaming chat
 
 - `apps/standalone-sveltekit` uses the Vercel AI Gateway SDK through `@ai-sdk/gateway`.
-- Model selection is environment-driven through `AI_GATEWAY_MODEL`.
+- Default model selection is environment-driven through `AI_GATEWAY_MODEL`; Agent Settings can request an allowlisted per-run model through the same Gateway.
 - The AI Gateway token is a secret: `AI_GATEWAY_API_KEY`.
 - Streaming is guarded by app-side safety/telemetry paths so crashes are testable instead of silent.
 - The visible chat can stream normal text, tool call summaries, artifact creation, document creation, and command registry responses.
+
+### 3a. Agent settings gear
+
+The chat header includes an Agent Settings gear inspired by the Twenty AI settings donor pack preserved at `docs/upstream-proofs/twenty-ai-settings/`. The runtime retrofit is intentionally Sonik-native and lives outside the copied source island:
+
+- `packages/chat-surface/src/components/AgentSettingsPanel.svelte` renders model, skill, tool-family, context, and add-on tabs.
+- `apps/standalone-sveltekit/src/lib/agent-settings.ts` defines the type-safe model list, runtime skill options, and tool permission modes.
+- `/api/generate` sanitizes the submitted settings before composing the prompt or building tools.
+- Model selection is passed through to the Vercel AI Gateway per run; unknown model ids fall back to the server default.
+- Skill toggles append runtime skill ids for that run only. They do not persist hidden instructions onto the session.
+- Tool family modes are `off`, `ask`, and `allow`. `off` removes/blocks that family. `ask`/`allow` never bypass signed host context, org/user/session checks, scopes, or approved command ids for mutations.
 
 ### 4. Artifact canvas
 

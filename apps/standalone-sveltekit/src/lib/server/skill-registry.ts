@@ -12,6 +12,7 @@ import {
 } from "@sonik-agent-ui/tool-contracts";
 import { AMPLIFY_CAMPAIGN_TEMPLATE_CREATE_SURFACE_TEMPLATE, AMPLIFY_CAMPAIGN_TEMPLATE_CREATE_WORKFLOW } from "./amplify-workflows/campaign-template-create.ts";
 import { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE, BOOKING_CONTEXT_INTAKE_WORKFLOW } from "./booking-workflows/context-intake.ts";
+import { BOOKING_CONTEXT_CREATE_RECIPE } from "./booking-workflows/context-create.ts";
 import { BOOKING_EVENT_CREATE_SURFACE_TEMPLATE, BOOKING_EVENT_CREATE_WORKFLOW } from "./booking-workflows/event-create.ts";
 import { BOOKING_RESERVATION_CREATE_RECIPE } from "./booking-workflows/reservation-create.ts";
 
@@ -26,6 +27,7 @@ const generatedAt = "2026-06-30T00:00:00.000Z";
 export const RUNTIME_SKILL_FAMILIES = [
   "amplify-campaign-template",
   "booking-context-intake",
+  "booking-context-create",
   "booking-event",
   "booking-reservation",
 ] as const;
@@ -173,6 +175,50 @@ const catalog = createSkillCatalog("sonik-agent-ui-runtime", [
     },
   },
   {
+    id: BOOKING_CONTEXT_CREATE_RECIPE.id,
+    title: BOOKING_CONTEXT_CREATE_RECIPE.title,
+    description: BOOKING_CONTEXT_CREATE_RECIPE.description,
+    familyId: "booking-context-create",
+    loadPolicy: { mode: "surface-eager", priority: 99, profile: "booking" },
+    contextHints: {
+      routes: [],
+      surfaces: [],
+      pageTypes: [],
+      artifactTypes: ["booking-context-intake", "booking-context-manifest"],
+      skillFamilies: ["booking-context-create", "booking-ops"],
+      commandFamilies: ["booking"],
+      requiredScopes: ["booking:read", "booking:write"],
+    },
+    intentAliases: [...BOOKING_CONTEXT_CREATE_RECIPE.intentAliases],
+    commandSequence: [...BOOKING_CONTEXT_CREATE_RECIPE.commandSequence],
+    requiredCommands: [...BOOKING_CONTEXT_CREATE_RECIPE.requiredCommands],
+    forbiddenUnlessExplicit: [...BOOKING_CONTEXT_CREATE_RECIPE.forbiddenUnlessExplicit],
+    examples: [
+      {
+        title: "Approve and create the active booking context intake",
+        prompt: "Approve this manifest and create the booking context.",
+        expectedCommandPath: [...BOOKING_CONTEXT_CREATE_RECIPE.commandSequence],
+      },
+    ],
+    negativeExamples: [
+      {
+        title: "Do not create reservations while creating a context",
+        prompt: "Approve this venue manifest and book Dan for 1pm too.",
+        failIfCommandIds: ["booking.create.booking", "booking.create.hold"],
+        expectedCommandPath: [...BOOKING_CONTEXT_CREATE_RECIPE.commandSequence],
+      },
+    ],
+    metadata: {
+      workflowSteps: [...BOOKING_CONTEXT_CREATE_RECIPE.workflowSteps],
+      ontologyRules: [...BOOKING_CONTEXT_CREATE_RECIPE.ontologyRules],
+      trustedActorRules: [...BOOKING_CONTEXT_CREATE_RECIPE.trustedActorRules],
+      successEvidence: [...BOOKING_CONTEXT_CREATE_RECIPE.successEvidence],
+      execution: "trusted_command",
+      approval: "host_required",
+      telemetryEvents: ["tool.readActiveArtifactState", "tool.previewActiveIntakeCommand", "tool.commitActiveIntakeCommand"],
+    },
+  },
+  {
     id: "booking.reservation.create",
     title: BOOKING_RESERVATION_CREATE_RECIPE.title,
     description: BOOKING_RESERVATION_CREATE_RECIPE.description,
@@ -219,6 +265,131 @@ const catalog = createSkillCatalog("sonik-agent-ui-runtime", [
 
 export function getRuntimeSkillCatalog(): SkillCatalog {
   return catalog;
+}
+
+// Defensive caps for per-turn skill prompt composition, mirroring the
+// route-limits discipline: bound how many skills and how much text a single turn
+// can append to the system prompt so an over-eager (or hostile) selection cannot
+// balloon the prompt. Skills beyond the count cap are dropped; a rendered body is
+// truncated to the per-skill char cap; the join is bounded by the total cap.
+export const RUNTIME_SKILL_PROMPT_MAX_MODULES = 6;
+export const RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS = 2_000;
+export const RUNTIME_SKILL_PROMPT_MAX_TOTAL_CHARS = 8_000;
+
+export interface RuntimeSkillPromptModule {
+  id: string;
+  body: string;
+}
+
+function boundedBody(value: string): string {
+  return value.length > RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS
+    ? `${value.slice(0, RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS)}…`
+    : value;
+}
+
+function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
+  const lines = [`RUNTIME SKILL: ${skill.id} [${skill.familyId}]`, skill.title];
+  if (skill.description) lines.push(skill.description);
+  const commandPath = skill.commandSequence.join(" -> ");
+  if (commandPath) lines.push(`Command path: ${commandPath}`);
+  const metadata = isRecord(skill.metadata) ? skill.metadata : {};
+  if (metadata.execution === "none") {
+    lines.push("Execution mode: intake/preview only. For matching setup/intake prompts, the first user-visible action must be the deterministic registered intake artifact tool when one is mounted (for booking.context.intake, call createBookingIntakeArtifact exactly once). Do not improvise a generic createJsonArtifact spec for booking.context.intake, and do not answer by calling executeCommand to inspect existing records unless the user explicitly asks to audit existing records.");
+  }
+  if (Array.isArray(metadata.workflowSteps) && metadata.workflowSteps.length > 0) {
+    lines.push("Workflow steps:");
+    for (const step of metadata.workflowSteps.slice(0, 8)) {
+      if (typeof step === "string" && step.trim()) lines.push(`- ${step.trim()}`);
+    }
+  }
+  if (Array.isArray(metadata.ontologyRules) && metadata.ontologyRules.length > 0) {
+    lines.push("Booking ontology rules:");
+    for (const rule of metadata.ontologyRules.slice(0, 8)) {
+      if (typeof rule === "string" && rule.trim()) lines.push(`- ${rule.trim()}`);
+    }
+  }
+  if (Array.isArray(metadata.trustedActorRules) && metadata.trustedActorRules.length > 0) {
+    lines.push("Trusted execution rules:");
+    for (const rule of metadata.trustedActorRules.slice(0, 6)) {
+      if (typeof rule === "string" && rule.trim()) lines.push(`- ${rule.trim()}`);
+    }
+  }
+  if (isRecord(metadata.questionPolicy)) {
+    lines.push(`Question policy: ${JSON.stringify(metadata.questionPolicy)}`);
+  }
+  if (Array.isArray(metadata.telemetryEvents) && metadata.telemetryEvents.includes("tool.submitQuestionAnswer")) {
+    lines.push([
+      "Question-answer turns arrive as a fenced ```sonik_question_answer JSON block with version sonik-agent-ui.question-answer-turn.v1 and entryFrom=question_answer.",
+      "Consume the block as user input only: read submission.questionId, answer.value, answer.writesTo, artifact.id, and artifact.version; then ask the next highest-impact missing question for this same intake artifact.",
+      "Do not execute commands, do not call commitCommand, and do not treat the answer as approval. If the user later approves a validated manifest, switch to booking.context.create so the agent can readActiveArtifactState, previewActiveIntakeCommand, and run only host-approved booking.create.context.",
+    ].join(" "));
+  }
+  if (skill.forbiddenUnlessExplicit.length > 0) {
+    lines.push(`Do not (unless the user explicitly asks): ${skill.forbiddenUnlessExplicit.join(", ")}`);
+  }
+  return boundedBody(lines.join("\n"));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Resolves per-turn skill ids into prompt-ready bodies for {@link composeAgentSystemPrompt}.
+ * An id matches a skill by its exact skill id or by its family id (page-context
+ * `skillFamilies` and runtime-skill chips both surface family ids). Resolution is
+ * order-preserving and de-duplicated, and enforces the count/char caps above.
+ * Unknown ids are silently ignored so a stale chip never breaks a turn. Skills
+ * are only ever appended for the current run — never persisted onto the session.
+ *
+ * `overrides` (keyed by exact skill id, e.g. Agent Settings' `skillPromptOverrides`)
+ * lets operator-edited text replace a skill's default body before the per-body
+ * truncation cap is applied — the cap still bounds override text, it just isn't
+ * the source of the words. An override that is empty (or whitespace-only) after
+ * trimming suppresses that skill's body entirely, as if it had not matched. A
+ * skill with no entry in `overrides` renders its default body, so an empty (or
+ * omitted) overrides map reproduces today's output exactly.
+ */
+export function resolveRuntimeSkillPromptModules(skillIds: string[] = [], overrides: Record<string, string> = {}): RuntimeSkillPromptModule[] {
+  const modules: RuntimeSkillPromptModule[] = [];
+  const seen = new Set<string>();
+  let totalChars = 0;
+  for (const rawId of skillIds) {
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    if (!id) continue;
+    const matches = catalog.skills.filter((skill) => skill.id === id || skill.familyId === id);
+    for (const skill of matches) {
+      if (seen.has(skill.id)) continue;
+      if (modules.length >= RUNTIME_SKILL_PROMPT_MAX_MODULES) return modules;
+      const override = overrides[skill.id];
+      if (override !== undefined && override.trim().length === 0) {
+        seen.add(skill.id);
+        continue;
+      }
+      const body = boundedBody(override !== undefined ? override.trim() : renderSkillPromptBody(skill));
+      if (totalChars + body.length > RUNTIME_SKILL_PROMPT_MAX_TOTAL_CHARS) return modules;
+      seen.add(skill.id);
+      totalChars += body.length;
+      modules.push({ id: skill.id, body });
+    }
+  }
+  return modules;
+}
+
+/**
+ * Lists the default (un-overridden) prompt-ready body for every skill in the
+ * runtime catalog, regardless of per-turn selection or the count/char caps
+ * above. Used to populate the Agent Settings "Prompt" tab's skill-override
+ * editors with defaults to diff against — never appended to a live run's
+ * system prompt directly.
+ */
+export function listRuntimeSkillPromptDefaults(): Array<{ id: string; familyId: string; title: string; defaultBody: string }> {
+  return catalog.skills.map((skill) => ({
+    id: skill.id,
+    familyId: skill.familyId,
+    title: skill.title,
+    defaultBody: renderSkillPromptBody(skill),
+  }));
 }
 
 export function createRuntimeSkillIndex(context: RuntimeSkillRegistryContext = {}, input: { limit?: number } = {}): SkillIndex {

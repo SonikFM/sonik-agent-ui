@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   createInMemoryWorkspacePersistence,
   createLocalAuthAdapter,
+  extractWorkspaceSessionTitleMarker,
 } from "../../packages/workspace-session/src/index.ts";
 
 const boundedTelemetryStore = createInMemoryWorkspacePersistence({ maxTelemetryEvents: 2, maxTelemetryPayloadChars: 256 });
@@ -25,6 +26,30 @@ assert.equal(auth.authenticated, false, "local auth adapter must not claim authe
 assert.equal(auth.organizationId, null, "local auth adapter must not claim Amplify org authority");
 assert.equal(auth.scopes.includes("workspace:read"), true);
 assert.equal(auth.scopes.includes("workspace:write"), true);
+
+const generatedTitle = extractWorkspaceSessionTitleMarker(
+  "[[titleGeneration: Campaign Launch Plan]]\nHere is the plan.",
+  "Please help me plan our launch campaign for the fall menu.",
+);
+assert.equal(generatedTitle.title, "Campaign Launch Plan", "titleGeneration marker should provide the persisted session title");
+assert.equal(generatedTitle.visibleText, "Here is the plan.", "titleGeneration marker should be stripped from visible assistant text");
+assert.equal(generatedTitle.source, "marker", "valid titleGeneration markers should be reported as marker-sourced");
+
+const missingTitle = extractWorkspaceSessionTitleMarker(
+  "Here is the plan without a marker.",
+  "Please help me plan our launch campaign for the fall menu.",
+);
+assert.equal(missingTitle.title, "Help me plan our launch campaign for", "missing titleGeneration marker should fall back to the first user message");
+assert.equal(missingTitle.visibleText, "Here is the plan without a marker.", "fallback should not alter visible assistant text when no marker exists");
+assert.equal(missingTitle.source, "fallback", "missing marker should be reported as fallback-sourced");
+
+const malformedTitle = extractWorkspaceSessionTitleMarker(
+  "[[titleGeneration:   ]]\nHere is the plan.",
+  "Summarize the quarterly revenue dashboard for leadership.",
+);
+assert.equal(malformedTitle.title, "Summarize the quarterly revenue dashboard for leadership", "malformed titleGeneration marker should fall back to the first user message");
+assert.equal(malformedTitle.visibleText, "Here is the plan.", "malformed titleGeneration marker should still be stripped from visible assistant text");
+assert.equal(malformedTitle.markerMalformed, true, "empty titleGeneration marker should be reported as malformed");
 
 const session = store.createSession({ id: "local-session-a", name: "Local Session", mode: "chat" });
 assert.equal(session.id, "local-session-a");

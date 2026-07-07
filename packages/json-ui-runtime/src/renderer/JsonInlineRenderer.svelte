@@ -17,11 +17,12 @@
     loading?: boolean;
     store?: StateStore;
     onStateChange?: (changes: Array<{ path: string; value: unknown }>) => void;
+    onAction?: (actionName: string, params?: Record<string, unknown>) => void | Promise<void>;
   }
 
-  let { spec, registry, loading = false, store, onStateChange }: Props = $props();
+  let { spec, registry, loading = false, store, onStateChange, onAction }: Props = $props();
 </script>
 
 <div class="json-inline-renderer">
-  <JsonArtifactRenderer {spec} {registry} {loading} {store} {onStateChange} />
+  <JsonArtifactRenderer {spec} {registry} {loading} {store} {onStateChange} {onAction} />
 </div>

@@ -13,6 +13,9 @@ import {
   mountSonikAgentUI,
   sanitizeAgentHostPageContext,
 } from "../../packages/agent-embed/src/index.ts";
+import { createInteractiveSurfaceJsonRenderSpec } from "../../packages/json-ui-runtime/src/intake.ts";
+import { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE } from "../../apps/standalone-sveltekit/src/lib/server/booking-workflows/context-intake.ts";
+import { createAgentWorkflowSnapshot } from "../../apps/standalone-sveltekit/src/lib/agent-workflows/page-control-workflow.ts";
 
 const message = {
   source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
@@ -23,6 +26,7 @@ const message = {
     surface: "booking-console",
     pageType: "event-booking-detail",
     title: "Summer Jazz Night",
+    theme: "gunmetal-light",
     activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" },
     commandFamilies: ["booking", "event", "", "booking"],
     skillFamilies: ["booking-ops"],
@@ -37,6 +41,7 @@ assert.equal(isAgentHostPageContextMessage({ ...message, payload: null }), false
 
 const sanitized = sanitizeAgentHostPageContext(message.payload);
 assert.equal(sanitized?.surface, "booking-console");
+assert.equal(sanitized?.theme, "gunmetal-light", "host page theme should survive page-context sanitization");
 assert.equal(sanitized?.activeEntity?.label, "Summer Jazz Night");
 assert.equal(sanitized?.organizationId, "forged-org", "allowed hosts may donate sanitized org context for the host-asserted embed runtime");
 assert.deepEqual(sanitized?.scopes, ["admin:*"], "allowed hosts may donate sanitized scopes for the host-asserted embed runtime");
@@ -48,10 +53,33 @@ const merged = mergeAgentHostPageContext(
 );
 assert.equal(merged.route, "/booking/bookings/booking_123", "host page context should overlay local route");
 assert.equal(merged.surface, "booking-console", "host page context should overlay local surface");
+assert.equal(merged.theme, "gunmetal-light", "host page context should overlay local theme");
 assert.equal(merged.activeSessionId, "sess-local", "local app session state should be retained when host does not override it");
 assert.equal(merged.activeEntity?.id, "booking_123", "merged context should include active entity id");
 assert.equal(merged.organizationId, "org-trusted", "trusted context should be appended explicitly");
 assert.deepEqual(merged.scopes, ["booking:read"], "trusted scopes should come from trusted context only");
+
+// Regression: window.__sonikAgentUI.getPageContext() (the standalone route's createPageContextSnapshot)
+// always routes the local snapshot through mergeAgentHostPageContext/sanitizeAgentHostPageContext before
+// returning it, even with no embedding host present. The sanitizer's key allowlist previously omitted
+// "workflow", so the agent-readable workflow snapshot (currentQuestion, phase, etc.) was silently dropped
+// for every intake artifact, regardless of whether it was created via createBookingIntakeArtifact or a
+// hand-built manifest. Build the workflow snapshot from the same generator the live agent tool uses.
+const liveAgentIntakeSpec = createInteractiveSurfaceJsonRenderSpec(BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE);
+const liveAgentIntakeArtifact = { id: "artifact-live-agent-intake", title: "Booking intake", kind: "json-render", version: 1, content: liveAgentIntakeSpec };
+const liveAgentWorkflow = createAgentWorkflowSnapshot({
+  activeArtifact: liveAgentIntakeArtifact,
+  pendingChangeCount: 0,
+  isStreaming: false,
+  approvalReadiness: { ready: false, visible: true, reason: "Answer setup type and inventory before previewing." },
+});
+const mergedWithWorkflow = mergeAgentHostPageContext(
+  { route: "/", surface: "artifact", activeArtifactId: liveAgentIntakeArtifact.id, workflow: liveAgentWorkflow },
+  null,
+);
+assert.ok(mergedWithWorkflow.workflow, "page context returned by getPageContext() must retain the workflow snapshot after merge/sanitize");
+assert.equal(typeof mergedWithWorkflow.workflow?.phase, "string", "merged workflow snapshot must report a phase string");
+assert.equal(mergedWithWorkflow.workflow?.currentQuestion?.id, "q_intake_mode", "merged workflow snapshot must retain the current unanswered question for page-control submitAnswer/markUnknown");
 
 const redacted = sanitizeAgentHostPageContext({
   route: "/safe",
@@ -70,11 +98,13 @@ const trustedSession = sanitizeAgentHostPageContext({
     organizationId: "org_123",
     authenticated: true,
     scopes: ["booking:read"],
+    theme: "gunmetal-dark",
     metadata: { token: "vck_SHOULDNOTSURVIVE123456" },
   },
 });
 assert.equal(trustedSession?.authenticated, true, "trusted host authentication flag should survive sanitization");
 assert.equal(trustedSession?.hostSession?.source, "amplify-embedded", "known host session source should survive sanitization");
+assert.equal(trustedSession?.hostSession?.theme, "gunmetal-dark", "trusted host session theme should survive sanitization");
 assert.deepEqual(trustedSession?.hostSession?.metadata, { token: "[REDACTED]" }, "host session metadata should preserve signed-envelope shape with redacted string values");
 
 
@@ -98,6 +128,7 @@ assert.equal(signedTrustedSession?.signatureVersion, "sonik.agent_ui.host_contex
 assert.equal(signedTrustedSession?.signature, "abc123_signature", "signed host-context signature must survive postMessage donation");
 assert.equal(signedTrustedSession?.issuedAt, "2026-06-24T22:00:00.000Z", "signed host-context issuedAt must survive postMessage donation");
 assert.equal(signedTrustedSession?.expiresAt, "2026-06-24T22:10:00.000Z", "signed host-context expiresAt must survive postMessage donation");
+assert.equal(signedTrustedSession?.hostSession?.theme, undefined, "signed host-context sanitizer must not materialize display-only theme when the host did not sign it");
 
 const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
   authenticated: true,
@@ -166,8 +197,8 @@ assert.deepEqual(
 );
 assert.deepEqual(
   normalizeAgentEmbedIntent({ embedMode: "canvas" }),
-  { mode: "canvas", railMode: "collapsed" },
-  "canvas embed mode should default to collapsed rail",
+  { mode: "canvas", railMode: "expanded" },
+  "canvas embed mode should default to the expanded rail so pin/archive session management is reachable in embeds (host can override with railMode=collapsed)",
 );
 assert.deepEqual(
   normalizeAgentEmbedIntent({ agentUiMode: "workspace", rail: "expanded" }),
@@ -231,6 +262,9 @@ const fakeChatSlot = new FakeElement("chat-slot");
 const fakeCanvasSlot = new FakeElement("canvas-slot");
 const fakeSidecar = new FakeElement("sidecar");
 const fakeCanvas = new FakeElement("canvas");
+const fakeLauncher = new FakeElement("launcher");
+const fakeOpenChat = new FakeElement("open-chat");
+const fakeOpenCanvas = new FakeElement("open-canvas");
 const fakeDocumentElement = new FakeElement("html");
 const fakeBody = new FakeElement("body");
 const fakeWindow = {
@@ -254,6 +288,9 @@ const fakeDocument = {
     "#canvas-slot": fakeCanvasSlot,
     "#sidecar": fakeSidecar,
     "#canvas": fakeCanvas,
+    "#launcher": fakeLauncher,
+    "#open-chat": fakeOpenChat,
+    "#open-canvas": fakeOpenCanvas,
   })[selector] ?? null,
 };
 fakeWindow.document = fakeDocument;
@@ -265,7 +302,7 @@ const controller = mountSonikAgentUI({
   smokeMockStream: "1",
   smokeRunId: "mount-test",
   getPageContext: () => ({ surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], signatureVersion: "sonik.agent_ui.host_context.hmac.v1", issuedAt: "2026-06-24T22:00:00.000Z", expiresAt: "2026-06-24T22:10:00.000Z", signature: "abc123_signature", activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } }),
-  elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas" },
+  elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas", launcher: "#launcher", openChat: "#open-chat", openCanvas: "#open-canvas" },
   window: fakeWindow,
   document: fakeDocument,
 });
@@ -273,6 +310,16 @@ assert.equal(fakeIframe.parentElement, fakeChatSlot, "mount should park iframe i
 assert.equal(fakeWindow.__sonikAgentHost?.schemaVersion, "sonik.agent_ui.host_controller.v1", "mount should expose a stable host controller for embed automation and release gates");
 assert.equal(fakeIframe.dataset.sonikAgentUiControl, "iframe", "mount should annotate iframe with a stable Agent UI control attribute");
 assert.equal(fakeIframe.getAttribute("data-testid"), "sonik-agent-ui-iframe", "mount should annotate iframe with a stable test id");
+assert.equal(fakeLauncher.dataset.sonikAgentUiControl, "launcher", "mount should annotate a host-owned launcher for deterministic embed discovery");
+assert.equal(fakeLauncher.getAttribute("data-testid"), "sonik-agent-ui-launcher", "mount should annotate launcher with the release-gate test id");
+assert.equal(fakeOpenChat.dataset.sonikAgentUiControl, "open-chat", "mount should annotate open-chat controls for deterministic embed discovery");
+assert.equal(fakeOpenCanvas.dataset.sonikAgentUiControl, "open-canvas", "mount should annotate open-canvas controls for deterministic embed discovery");
+fakeOpenChat.dispatch("click");
+assert.equal(controller.getMode(), "chat", "annotated open-chat control should open chat via the SDK click handler");
+controller.close();
+fakeOpenCanvas.dispatch("click");
+assert.equal(controller.getMode(), "canvas", "annotated open-canvas control should open canvas via the SDK click handler");
+controller.close();
 fakeIframe.dispatch("load");
 assert.equal(fakeIframe.contentWindow.messages.length, 0, "parked about:blank iframe must not receive host context before it is navigated to the agent origin");
 fakeWindow.__sonikAgentHost.openChat();
@@ -333,6 +380,18 @@ timerController.destroy();
 assert.deepEqual(clearedTimers, queuedTimers.map((timer) => timer.id), "destroy should clear queued context-post timers");
 assert.equal(timerController.getMode(), null, "destroy should close active mode");
 
+const localEmbedSmokeSource = await readFile("scripts/agent-ui-embed-smoke.mjs", "utf8");
+const bookingContextSmokeSource = await readFile("scripts/agent-ui-booking-context-pipeb-smoke.mjs", "utf8");
+const bookingReservationSmokeSource = await readFile("scripts/agent-ui-booking-reservation-pipeb-smoke.mjs", "utf8");
+assert.equal(localEmbedSmokeSource.includes("session bootstrap reused stale active session"), true, "local embed smoke should prove a fresh session instead of accepting stale state");
+assert.equal(localEmbedSmokeSource.includes("evidence.sessionBootstrap"), true, "local embed smoke should record explicit session bootstrap evidence");
+assert.equal(bookingContextSmokeSource.includes("usedDeterministicHostController"), true, "booking context release gate should report deterministic host-controller opening");
+assert.equal(bookingContextSmokeSource.includes("Booking embed did not open through window.__sonikAgentHost"), true, "booking context release gate should fail if host controller opening is unavailable");
+assert.equal(bookingReservationSmokeSource.includes("usedDeterministicHostController"), true, "booking reservation release gate should report deterministic host-controller opening");
+assert.equal(bookingReservationSmokeSource.includes("Booking reservation embed did not open through window.__sonikAgentHost"), true, "booking reservation release gate should fail if host controller opening is unavailable");
+assert.equal(bookingReservationSmokeSource.includes("fake-booking-host.html?autoOpen=chat"), false, "booking reservation fake-host release gate should not auto-open before exercising host controller");
+assert.equal(bookingReservationSmokeSource.indexOf("const openResult = await page.evaluate") < bookingReservationSmokeSource.indexOf("const frame = page.frames().find"), true, "booking reservation release gate should call host controller before accepting an iframe frame");
+assert.equal(bookingContextSmokeSource.indexOf("const openResult = await page.evaluate") < bookingContextSmokeSource.indexOf("const frame = page.frames().find"), true, "booking context release gate should call host controller before accepting an iframe frame");
 const amplifySmokeSource = await readFile("scripts/agent-ui-amplify-smoke.mjs", "utf8");
 assert.equal(amplifySmokeSource.includes("page.mouse.click"), false, "authenticated release gate should not use coordinate-click fallback to open embeds");
 assert.equal(amplifySmokeSource.includes("__sonikAgentHost"), true, "authenticated release gate should prefer the deterministic host controller when available");

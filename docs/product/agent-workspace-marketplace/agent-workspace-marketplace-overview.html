@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Workspace + Marketplace — Product Corpus Briefing</title>
+  <meta name="description" content="Presentation-ready HTML briefing for the Sonik Agent UI Agent Workspace + Marketplace PRD corpus." />
+  <style>
+    :root {
+      color-scheme: light;
+      --background: oklch(1 0 0);
+      --foreground: oklch(0.129 0.042 264.695);
+      --card: oklch(1 0 0);
+      --primary: oklch(0.208 0.042 265.755);
+      --primary-foreground: oklch(0.984 0.003 247.858);
+      --secondary: oklch(0.968 0.007 247.896);
+      --muted: oklch(0.968 0.007 247.896);
+      --muted-foreground: oklch(0.554 0.046 257.417);
+      --border: oklch(0.929 0.013 255.508);
+      --ring: oklch(0.704 0.04 256.788);
+      --chart-1: oklch(0.646 0.222 41.116);
+      --chart-2: oklch(0.6 0.118 184.704);
+      --chart-3: oklch(0.398 0.07 227.392);
+      --chart-4: oklch(0.828 0.189 84.429);
+      --chart-5: oklch(0.769 0.188 70.08);
+      --danger: oklch(0.577 0.245 27.325);
+      --success: oklch(0.52 0.13 152);
+      --surface: oklch(0.984 0.003 247.858);
+      --surface-2: oklch(0.968 0.007 247.896);
+      --radius: 10px;
+      --radius-lg: 14px;
+      --max: 1180px;
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: var(--sans);
+      font-size: 15.5px;
+      line-height: 1.58;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0 0 auto;
+      height: 4px;
+      background: linear-gradient(90deg, var(--primary), var(--chart-2) 62%, var(--chart-1));
+      z-index: 100;
+    }
+    a { color: var(--chart-3); text-decoration-thickness: 0.08em; text-underline-offset: 0.18em; }
+    code {
+      font-family: var(--mono);
+      font-size: 0.91em;
+      background: var(--secondary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.08rem 0.28rem;
+      white-space: nowrap;
+    }
+    .shell { width: min(var(--max), calc(100% - 40px)); margin: 0 auto; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: color-mix(in oklch, var(--background) 92%, transparent);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: -0.01em; }
+    .brand-mark { width: 24px; height: 24px; border-radius: 7px; background: var(--primary); display: inline-grid; place-items: center; color: var(--primary-foreground); font: 800 12px/1 var(--mono); }
+    nav { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+    nav a { color: var(--muted-foreground); text-decoration: none; font-size: 0.86rem; padding: 7px 9px; border-radius: 8px; }
+    nav a:hover { background: var(--secondary); color: var(--foreground); }
+    .hero {
+      padding: clamp(54px, 8vw, 104px) 0 clamp(34px, 5vw, 68px);
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+      gap: clamp(26px, 5vw, 70px);
+      align-items: end;
+    }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .pill {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--secondary);
+      color: var(--primary);
+      font-size: 0.8rem;
+      font-weight: 750;
+    }
+    .pill.strong { background: var(--primary); color: var(--primary-foreground); }
+    h1, h2, h3 { margin: 0; letter-spacing: -0.025em; text-wrap: balance; color: var(--foreground); }
+    h1 { font-size: clamp(2.9rem, 7vw, 5.2rem); line-height: 0.98; font-weight: 850; max-width: 980px; }
+    h2 { font-size: clamp(1.8rem, 3.8vw, 2.75rem); line-height: 1.05; margin-bottom: 14px; }
+    h3 { font-size: 1.28rem; line-height: 1.18; margin: 26px 0 10px; }
+    p { margin: 0 0 1rem; max-width: 76ch; text-wrap: pretty; }
+    .dek { color: var(--muted-foreground); margin-top: 22px; font-size: clamp(1.06rem, 1.8vw, 1.28rem); }
+    .hero-card {
+      background: var(--primary);
+      color: var(--primary-foreground);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+    }
+    .hero-card .big { display: block; font-size: 2.1rem; line-height: 1.05; font-weight: 850; margin-bottom: 8px; }
+    .hero-card p { color: oklch(0.88 0.018 250); margin: 0; }
+    .hero-card code { background: oklch(1 0 0 / 0.1); border-color: oklch(1 0 0 / 0.18); color: var(--primary-foreground); }
+    .snapshot {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: clamp(46px, 7vw, 92px);
+    }
+    .snap { min-height: 126px; padding: 18px 18px 18px 0; }
+    .snap + .snap { border-left: 1px solid var(--border); padding-left: 18px; }
+    .snap span { display: block; color: var(--muted-foreground); font-size: 0.8rem; margin-bottom: 8px; }
+    .snap b { display: block; line-height: 1.15; font-size: 1.02rem; }
+    main { padding-bottom: 82px; }
+    section { margin: 0 0 clamp(56px, 8vw, 98px); scroll-margin-top: 84px; }
+    .section-head { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 30px; align-items: start; margin-bottom: 22px; }
+    .section-kicker { color: var(--muted-foreground); font: 750 0.84rem/1.3 var(--mono); padding-top: 10px; }
+    .lead { font-size: 1.08rem; color: var(--muted-foreground); }
+    .callout {
+      margin: 22px 0;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+    }
+    .callout strong { color: var(--primary); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--background); }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 0.94rem; }
+    th, td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: 0; }
+    th { background: var(--surface); color: var(--primary); font-size: 0.78rem; letter-spacing: 0.01em; }
+    td:first-child { font-weight: 760; }
+    .doc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+    .doc-card {
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 15px;
+    }
+    .doc-card b { display: block; margin-bottom: 5px; color: var(--primary); }
+    .doc-card span { display: block; color: var(--muted-foreground); font-size: 0.92rem; }
+    .stage-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+    .stage { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+    .stage .num { color: var(--chart-2); font: 850 0.78rem/1 var(--mono); margin-bottom: 9px; }
+    .stage b { display: block; line-height: 1.18; margin-bottom: 8px; }
+    .map-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow-x: auto; padding: 22px; }
+    .map-svg { width: 1080px; max-width: none; height: auto; display: block; }
+    .node rect { fill: var(--background); stroke: var(--border); stroke-width: 1.5; rx: 10; }
+    .node.dark rect { fill: var(--primary); stroke: var(--primary); }
+    .node.green rect { fill: var(--success); stroke: var(--success); }
+    .node.orange rect { fill: var(--chart-1); stroke: var(--chart-1); }
+    .node text { font: 750 14px/1 var(--sans); fill: var(--foreground); }
+    .node.dark text, .node.green text, .node.orange text { fill: var(--primary-foreground); }
+    .edge { stroke: var(--chart-3); stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+    .edge.soft { stroke: var(--ring); stroke-dasharray: 5 5; marker-end: url(#arrow-soft); }
+    .caption { color: var(--muted-foreground); margin-top: 12px; font-size: 0.92rem; }
+    .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; }
+    .panel h3 { margin-top: 0; }
+    .panel ul { margin: 0; padding-left: 1.1rem; }
+    .panel li + li { margin-top: 7px; }
+    .decision-list { display: grid; gap: 10px; }
+    .decision { display: grid; grid-template-columns: 72px minmax(0,1fr); gap: 12px; padding: 13px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); }
+    .decision .id { font: 850 0.88rem/1.2 var(--mono); color: var(--chart-3); }
+    .decision b { display: block; margin-bottom: 2px; }
+    .risk-high { color: var(--danger); font-weight: 800; }
+    .risk-med { color: var(--chart-1); font-weight: 800; }
+    .command-block {
+      background: var(--primary);
+      color: var(--primary-foreground);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      overflow-x: auto;
+    }
+    pre { margin: 0; font-family: var(--mono); font-size: 0.88rem; line-height: 1.6; white-space: pre; }
+    .footer-note { padding-top: 26px; border-top: 1px solid var(--border); color: var(--muted-foreground); }
+
+    @media (max-width: 980px) {
+      nav { display: none; }
+      .hero { grid-template-columns: 1fr; }
+      .snapshot { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .snap:nth-child(odd) { border-left: 0; padding-left: 0; }
+      .snap:nth-child(even) { border-left: 1px solid var(--border); padding-left: 18px; }
+      .section-head { grid-template-columns: 1fr; gap: 9px; }
+      .section-kicker { padding-top: 0; }
+      .stage-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .two-col { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      .shell, .topbar-inner { width: min(100% - 24px, var(--max)); }
+      h1 { font-size: clamp(2.45rem, 14vw, 3.7rem); }
+      .snapshot, .stage-row { grid-template-columns: 1fr; }
+      .snap, .snap + .snap, .snap:nth-child(even) { border-left: 0; padding-left: 0; border-bottom: 1px solid var(--border); }
+      table { min-width: 700px; }
+    }
+    @media print {
+      body::before, .topbar { display: none; }
+      .shell { width: 100%; max-width: none; padding: 0 16mm; }
+      section { break-inside: avoid; margin-bottom: 20mm; }
+      .map-wrap, .table-wrap { overflow: visible; }
+      .map-svg { width: 100%; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-mark">S</span> Agent Workspace + Marketplace</div>
+      <nav aria-label="Page navigation">
+        <a href="#corpus">Corpus</a>
+        <a href="#model">Model</a>
+        <a href="#trust">Trust</a>
+        <a href="#decisions">Decisions</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="#verify">Verify</a>
+      </nav>
+    </div>
+  </div>
+
+  <header class="shell hero">
+    <div>
+      <div class="meta">
+        <span class="pill strong">PRD corpus briefing</span>
+        <span class="pill">Status: draft corpus</span>
+        <span class="pill">D008–D017 ratified</span>
+        <span class="pill">2026-07-07</span>
+      </div>
+      <h1>A workspace where agents can install capabilities without inheriting blind trust.</h1>
+      <p class="dek">This is the presentation layer for the Sonik Agent UI Agent Workspace + Marketplace corpus: product strategy, package contracts, JSON-render apps, approval boundaries, endpoint plans, design handoff, risks, and prove-it commands.</p>
+    </div>
+    <aside class="hero-card">
+      <span class="big">JSON-first. Versioned installs. Trusted writes.</span>
+      <p>Packages declare descriptors mapped to approved components. Installs target immutable <code>packageVersionId</code>. Writes require preview → trusted approval → receipt.</p>
+    </aside>
+  </header>
+
+  <div class="shell snapshot" aria-label="Executive snapshot">
+    <div class="snap"><span>Source path</span><b><code>docs/product/agent-workspace-marketplace</code></b></div>
+    <div class="snap"><span>Core artifact</span><b>12-doc PRD / architecture corpus</b></div>
+    <div class="snap"><span>Direction layer</span><b>D008–D017 ratified by Dan</b></div>
+    <div class="snap"><span>Runtime status</span><b>Contracts planned; production endpoints not claimed</b></div>
+    <div class="snap"><span>Next proof</span><b>Tool-contract build + marketplace tests</b></div>
+  </div>
+
+  <main class="shell">
+    <section id="corpus">
+      <div class="section-head">
+        <div class="section-kicker">01 · corpus map</div>
+        <div>
+          <h2>What this corpus is for</h2>
+          <p class="lead">The corpus is the review surface before runtime, persistence, UI-builder, or marketplace endpoint implementation expands. It mirrors the booking-service architecture-doc pattern: indexed docs, explicit invariants, source-cited claims, and runnable prove-it blocks.</p>
+          <div class="doc-grid" aria-label="Document map">
+            <article class="doc-card"><b>00 · Product strategy</b><span>What product is being built, who it serves, and why now.</span></article>
+            <article class="doc-card"><b>01 · Story map</b><span>Journeys, MVP slices, opportunity tree, and release phases.</span></article>
+            <article class="doc-card"><b>02 · System map</b><span>Components, ownership boundaries, and non-runtime constraints.</span></article>
+            <article class="doc-card"><b>03 · Package contracts</b><span>Package/version/install/bundle semantics and install modes.</span></article>
+            <article class="doc-card"><b>04 · JSON-render apps</b><span>Stateful command-backed apps without a new runtime engine.</span></article>
+            <article class="doc-card"><b>05 · Workflows and packs</b><span>Workflow, agent, skill, tool-pack, MCP, and bundle composition.</span></article>
+            <article class="doc-card"><b>06 · Endpoint map</b><span>Planned ORPC routes and persistence model boundaries.</span></article>
+            <article class="doc-card"><b>07 · Trust boundary</b><span>Draft/input vs preview vs trusted approval vs write execution.</span></article>
+            <article class="doc-card"><b>08 · Readiness gates</b><span>Proof, telemetry, accessibility, and enterprise UX requirements.</span></article>
+            <article class="doc-card"><b>09 · Design handoff</b><span>Surfaces, component map, vocabulary, and UX constraints.</span></article>
+            <article class="doc-card"><b>10 · Roadmap risks</b><span>Open questions, risks, and next implementation slices.</span></article>
+            <article class="doc-card"><b>11 · Runbook</b><span>Verification, maintenance, and agent handoff instructions.</span></article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="model">
+      <div class="section-head">
+        <div class="section-kicker">02 · product model</div>
+        <div>
+          <h2>The workspace model</h2>
+          <p class="lead">Chat collaborates, canvas hosts live objects, contracts govern action, and marketplace packages install capabilities through versioned, reviewable envelopes.</p>
+          <div class="map-wrap" role="img" aria-label="System map from marketplace package to install preview to workspace canvas and approval receipts.">
+            <svg class="map-svg" viewBox="0 0 1080 430" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="oklch(0.398 0.07 227.392)"/></marker>
+                <marker id="arrow-soft" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="oklch(0.704 0.04 256.788)"/></marker>
+              </defs>
+              <g class="edge"><path d="M160 92 H245"/><path d="M405 92 H490"/><path d="M650 92 H735"/><path d="M895 92 H970 V174"/></g>
+              <g class="edge"><path d="M895 214 H735"/><path d="M735 252 V330 H650"/><path d="M490 330 H405"/><path d="M245 330 H160"/></g>
+              <g class="edge soft"><path d="M570 132 V190"/><path d="M570 252 V290"/><path d="M815 132 V174"/></g>
+              <g class="node dark"><rect x="20" y="52" width="140" height="80"/><text x="90" y="84" text-anchor="middle"><tspan x="90">Marketplace</tspan><tspan x="90" dy="18">package</tspan></text></g>
+              <g class="node"><rect x="245" y="52" width="160" height="80"/><text x="325" y="76" text-anchor="middle"><tspan x="325">Immutable</tspan><tspan x="325" dy="18">packageVersionId</tspan><tspan x="325" dy="18">install target</tspan></text></g>
+              <g class="node orange"><rect x="490" y="52" width="160" height="80"/><text x="570" y="84" text-anchor="middle"><tspan x="570">Fused install</tspan><tspan x="570" dy="18">preview + trust</tspan></text></g>
+              <g class="node"><rect x="735" y="52" width="160" height="80"/><text x="815" y="84" text-anchor="middle"><tspan x="815">Workspace</tspan><tspan x="815" dy="18">chat + canvas</tspan></text></g>
+              <g class="node"><rect x="930" y="174" width="130" height="80"/><text x="995" y="198" text-anchor="middle"><tspan x="995">JSON-render</tspan><tspan x="995" dy="18">app state</tspan><tspan x="995" dy="18">patches</tspan></text></g>
+              <g class="node green"><rect x="735" y="174" width="160" height="80"/><text x="815" y="198" text-anchor="middle"><tspan x="815">Preview →</tspan><tspan x="815" dy="18">trusted approval</tspan><tspan x="815" dy="18">→ receipt</tspan></text></g>
+              <g class="node"><rect x="490" y="290" width="160" height="80"/><text x="570" y="314" text-anchor="middle"><tspan x="570">Host context</tspan><tspan x="570" dy="18">+ command</tspan><tspan x="570" dy="18">preflight</tspan></text></g>
+              <g class="node"><rect x="245" y="290" width="160" height="80"/><text x="325" y="314" text-anchor="middle"><tspan x="325">Telemetry</tspan><tspan x="325" dy="18">approvalId</tspan><tspan x="325" dy="18">receiptId</tspan></text></g>
+              <g class="node"><rect x="20" y="290" width="140" height="80"/><text x="90" y="314" text-anchor="middle"><tspan x="90">Activity view</tspan><tspan x="90" dy="18">+ kill-switch</tspan></text></g>
+            </svg>
+          </div>
+          <p class="caption">The corpus explicitly does not claim production marketplace ORPC routes exist yet. Endpoint names are planning contracts until implemented and tested.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="contracts">
+      <div class="section-head">
+        <div class="section-kicker">03 · package contract</div>
+        <div>
+          <h2>Package and install semantics</h2>
+          <div class="two-col">
+            <article class="panel">
+              <h3>One envelope, first-class kinds</h3>
+              <ul>
+                <li><code>bundle</code>, <code>app</code>, <code>workflow</code>, <code>skill</code>, <code>command_tool_pack</code>, <code>agent</code>, <code>artifact_template</code>, <code>mcp_addon</code>, <code>provider_integration</code>, and <code>managed_internal</code> stay first-class.</li>
+                <li>Bundles compose package-version refs or embedded seed definitions; they are not wide nullable JSON blobs.</li>
+                <li>Compatibility aliases normalize before persistence/display.</li>
+              </ul>
+            </article>
+            <article class="panel">
+              <h3>Install behavior varies by kind</h3>
+              <ul>
+                <li>Installs target immutable <code>packageVersionId</code>, not mutable package ids.</li>
+                <li>Workflow and artifact templates are fork-and-own snapshots.</li>
+                <li>Provider integrations and MCP add-ons enable live connections with runtime credential resolution.</li>
+              </ul>
+            </article>
+          </div>
+          <h3>Install modes</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Mode</th><th>Product meaning</th><th>Use</th></tr></thead>
+              <tbody>
+                <tr><td><code>pinned</code></td><td>Fixed immutable upstream version.</td><td>Stable package consumption and audit.</td></tr>
+                <tr><td><code>copied</code></td><td>Editable local copy with source lineage.</td><td>Local ownership while retaining provenance.</td></tr>
+                <tr><td><code>forked</code></td><td>Editable copy designed for future upstream comparison.</td><td>Creator or org adaptation.</td></tr>
+                <tr><td><code>subscribed</code></td><td>Follows upstream updates for low-risk package types.</td><td>Deferred decision: which kinds may use this in v0.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="trust">
+      <div class="section-head">
+        <div class="section-kicker">04 · trust boundary</div>
+        <div>
+          <h2>Draft is not preview. Preview is not approval.</h2>
+          <p class="lead">The trust model separates user input, renderer state, command preview, trusted approval, and write execution. That separation is the product’s safety claim.</p>
+          <div class="stage-row">
+            <div class="stage"><div class="num">STATE 1</div><b>Draft / input</b><p>User answers, JSON-render state patches, form fields. Useful, but not authority.</p></div>
+            <div class="stage"><div class="num">STATE 2</div><b>Preview</b><p>Non-mutating plan with inputs, effects, host context, and expected receipts.</p></div>
+            <div class="stage"><div class="num">STATE 3</div><b>Trusted approval</b><p>Host-authorized approval for a specific command or workflow preview.</p></div>
+            <div class="stage"><div class="num">STATE 4</div><b>Receipt</b><p>Evidence that a committed write happened under known package/install context.</p></div>
+          </div>
+          <div class="callout"><strong>Non-negotiable:</strong> user text saying “approve,” artifact button clicks, and form submissions are not trusted approval grants. Write/destructive/external commands require preview, host context, trusted approval, and receipts.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <div class="section-head">
+        <div class="section-kicker">05 · decisions</div>
+        <div>
+          <h2>Ratified direction layer</h2>
+          <p class="lead">D008–D017 were ratified after a five-lane competitive research pass and internal recon supplement. These are the direction-setting decisions that should shape implementation and UI.</p>
+          <div class="decision-list">
+            <div class="decision"><div class="id">D008</div><div><b>Disambiguate marketplaces.</b> Agent/package marketplace ≠ future commerce marketplace ≠ WhatsApp templates.</div></div>
+            <div class="decision"><div class="id">D009</div><div><b>Resume amp.pkg v3 trust machinery.</b> Promotion ladder becomes trust tiers; Mockup #5 becomes install screen basis; command registry seeds capability namespace.</div></div>
+            <div class="decision"><div class="id">D010</div><div><b>Trust tier is visible at discovery.</b> Provenance and runtime permission are different questions.</div></div>
+            <div class="decision"><div class="id">D011</div><div><b>Fused intent-preview + trust screen.</b> Same execution plan renders the preview and requested permissions.</div></div>
+            <div class="decision"><div class="id">D012</div><div><b>Per-install kill-switch and activity view.</b> Install-time approval is never permanent trust.</div></div>
+            <div class="decision"><div class="id">D013</div><div><b>Registered capability-ID namespace.</b> Grants target stable capability ids, not free strings.</div></div>
+            <div class="decision"><div class="id">D014</div><div><b>Kind-varying install semantics.</b> Templates fork; live integrations enable connections.</div></div>
+            <div class="decision"><div class="id">D015</div><div><b>Curated review + publisher MFA.</b> Scanning assists; it does not approve third-party publishing.</div></div>
+            <div class="decision"><div class="id">D016</div><div><b>JSON-first descriptors-only.</b> HTML/custom UI is future exploration only if real needs require it.</div></div>
+            <div class="decision"><div class="id">D017</div><div><b>Freemium before take-rate.</b> Usage-metric boundaries are the near-term monetization primitive.</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="design">
+      <div class="section-head">
+        <div class="section-kicker">06 · design handoff</div>
+        <div>
+          <h2>Design surfaces that must be covered</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Surface</th><th>Must show</th><th>Cannot hide</th></tr></thead>
+              <tbody>
+                <tr><td>Workspace shell</td><td>Chat, canvas, inspector, subject/context chips.</td><td>Host context and active app/workflow state.</td></tr>
+                <tr><td>Marketplace package cards</td><td>Kind, version, trust tier, update policy.</td><td>Package version and permission requirements.</td></tr>
+                <tr><td>Install preview</td><td>Dependencies, permissions, install mode, packageVersionId.</td><td>Trust tier, requested capabilities, and source provenance.</td></tr>
+                <tr><td>JSON-render app editor</td><td>Deterministic form/state controls.</td><td>Difference between draft state and write authority.</td></tr>
+                <tr><td>Command preview card</td><td>Inputs, effects, host context, expected receipt.</td><td>The exact plan that will run.</td></tr>
+                <tr><td>Approval card</td><td>Request, approve, cancel, run result.</td><td>Trusted approval boundary.</td></tr>
+                <tr><td>Receipt/evidence panel</td><td>Command receipts, source provenance, package version.</td><td>Technical details needed for audit.</td></tr>
+                <tr><td>Update/fork/copy</td><td>Version change, lineage, ownership semantics.</td><td>Source lineage and install mode.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout"><strong>Vocabulary rule:</strong> say “App,” “Workflow,” “Bundle,” “Tool access,” “Request approval,” “Approve and run,” and “Receipt” in the UI. Keep technical objects available in the inspector and receipt details.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head">
+        <div class="section-kicker">07 · roadmap</div>
+        <div>
+          <h2>Recommended implementation sequence</h2>
+          <ol class="stage-row" style="counter-reset:item; list-style:none; padding:0;">
+            <li class="stage"><div class="num">SLICE 1</div><b>Review and merge corpus</b><p>Stabilize the contract docs before runtime PRs.</p></li>
+            <li class="stage"><div class="num">SLICE 2</div><b>Agent-readable state</b><p>Add active workflow/app/approval state contract.</p></li>
+            <li class="stage"><div class="num">SLICE 3</div><b>Persistence PRD</b><p>Define RLS/org-scoped marketplace tables and migrations.</p></li>
+            <li class="stage"><div class="num">SLICE 4</div><b>Read-only routes</b><p>Search, get package/version, validate manifest.</p></li>
+            <li class="stage"><div class="num">SLICE 5</div><b>Install preview</b><p>Show permissions, dependencies, trust, and update policy.</p></li>
+            <li class="stage"><div class="num">SLICE 6</div><b>Trusted writes</b><p>Install, copy, fork, pin, update endpoints.</p></li>
+            <li class="stage"><div class="num">SLICE 7</div><b>App + workflow actions</b><p>State patch, preview, approval request, and run-approved endpoints.</p></li>
+            <li class="stage"><div class="num">SLICE 8</div><b>Design-approved UI</b><p>Install, app, approval, receipt, inspector, and marketplace card surfaces.</p></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section id="risks">
+      <div class="section-head">
+        <div class="section-kicker">08 · risks</div>
+        <div>
+          <h2>Risk register</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Risk</th><th>Severity</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr><td>Agents cannot read workflow/app state and infer from UI text.</td><td class="risk-high">High</td><td>Add machine-readable workflow/app state before relying on agent execution.</td></tr>
+                <tr><td>Marketplace packages over-grant permissions.</td><td class="risk-high">High</td><td>Install preview must expose permissions; active write grants require trusted approval and host context.</td></tr>
+                <tr><td>Bundle model becomes an opaque mega-object.</td><td class="risk-med">Medium</td><td>Preserve selector validation and install-order constraints.</td></tr>
+                <tr><td>HTML escape hatch becomes default app runtime.</td><td class="risk-med">Medium</td><td>Guard JSON-render canonical invariant; no sandbox runtime approved.</td></tr>
+                <tr><td>Endpoint names drift from docs.</td><td class="risk-med">Medium</td><td>Route implementation must update doc 06 and tests.</td></tr>
+                <tr><td>UX remains too dev-speak heavy.</td><td class="risk-med">Medium</td><td>Use friendly labels by default, with receipts and inspector for exact details.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Open questions</h3>
+          <div class="two-col">
+            <div class="panel"><ul><li>What database/RLS table set owns packages, versions, installations, events, approvals, and receipts?</li><li>Should package publishing be internal-only for v0.2?</li><li>Which package kinds may use <code>subscribed</code> updates initially?</li><li>How much app state is copied into an install vs referenced from <code>packageVersionId</code>?</li></ul></div>
+            <div class="panel"><ul><li>Where should active app/workflow state appear in host page context?</li><li>Should workflow builder use a flow canvas in v0.2 or remain manifest-first?</li><li>What approval card UX should standardize across Booking, Amplify, and marketplace apps?</li><li>What language should replace dev-speak for installs, permissions, approvals, and receipts?</li></ul></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="verify">
+      <div class="section-head">
+        <div class="section-kicker">09 · prove it</div>
+        <div>
+          <h2>Verification sequence</h2>
+          <p class="lead">Passing these commands proves the current contract/test surface still enforces the package, bundle, approval, and command-catalog invariants the corpus cites. It does not prove planned marketplace ORPC routes exist.</p>
+          <div class="command-block">
+            <pre>pnpm --filter @sonik-agent-ui/tool-contracts build
+node tests/unit/marketplace-package-contracts.test.mjs
+node --experimental-strip-types tests/unit/marketplace-workflow-templates.test.mjs
+node --experimental-strip-types tests/unit/tool-contracts.test.mjs
+python3 scripts/check-markdown-trailing-whitespace.py docs/product/agent-workspace-marketplace</pre>
+          </div>
+          <h3>Source files</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Type</th><th>Location</th></tr></thead>
+              <tbody>
+                <tr><td>Corpus index</td><td><code>docs/product/agent-workspace-marketplace/INDEX.md</code></td></tr>
+                <tr><td>Decision log</td><td><code>docs/product/agent-workspace-marketplace/DECISIONS.md</code></td></tr>
+                <tr><td>Summary</td><td><code>docs/product/agent-workspace-marketplace/SUMMARY.md</code></td></tr>
+                <tr><td>Contracts</td><td><code>packages/tool-contracts/src/marketplace.ts</code></td></tr>
+                <tr><td>Fixtures</td><td><code>packages/tool-contracts/src/marketplace-fixtures.ts</code></td></tr>
+                <tr><td>Tests</td><td><code>tests/unit/marketplace-package-contracts.test.mjs</code>, <code>tests/unit/marketplace-workflow-templates.test.mjs</code>, <code>tests/unit/tool-contracts.test.mjs</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="footer-note"><strong>Stop condition for the next lane:</strong> the corpus is reviewed and merged, agent-readable active state is added, persistence/RLS is specified, and read-only marketplace routes plus install preview are implemented with the same proof discipline.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -38,7 +38,10 @@ try {
       window.__sonikAgentHost.openChat();
       return { target: 'host-controller' };
     }
-    const control = document.querySelector('#booking-agent-ui-open-chat, [data-sonik-agent-ui-control="open-chat"], [aria-label="Open Sonik chat sidecar"]');
+    const launcher = document.querySelector('#agent-fab-main, [data-sonik-agent-ui-control="launcher"], [data-testid="sonik-agent-ui-launcher"], [aria-label="Open Sonik agent launcher"], [aria-label="Open Sonik agent"]');
+    launcher?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const control = document.querySelector('#booking-agent-ui-open-chat, #open-chat, [data-sonik-agent-ui-control="open-chat"], [data-testid="sonik-agent-ui-open-chat"], [aria-label="Open Sonik chat sidecar"], [aria-label="Open Sonik chat"]');
     control?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     return { target: control ? 'dom-control' : 'none' };
   });

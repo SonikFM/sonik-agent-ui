@@ -9,9 +9,13 @@ import {
   listRequestWorkspaceDocuments,
   listRequestWorkspaceLayoutSnapshots,
   listRequestWorkspaceMessages,
+  listRequestWorkspaceRunEvents,
+  listRequestWorkspaceRuns,
   listRequestWorkspaceTelemetryEvents,
   patchRequestWorkspaceSession,
 } from "$lib/server/workspace-request-store";
+import { buildRunReattachMessage, runAssistantTurnPersisted, type RunReattachMessage } from "$lib/server/run-event-log";
+import type { PersistedRunEvent } from "@sonik-agent-ui/tool-contracts";
 import { routeString, WORKSPACE_TITLE_MAX_CHARS } from "$lib/server/workspace-route-limits";
 import type { RequestHandler } from "./$types";
 
@@ -19,21 +23,35 @@ export const GET: RequestHandler = async (event) => {
   const session = await getRequestWorkspaceSession(event, event.params.id);
   if (!session) error(404, "Session not found");
 
-  const [documents, activeDocument, messages, telemetry, activeArtifact, layoutSnapshots] = await Promise.all([
+  const [documents, activeDocument, messages, telemetry, activeArtifact, layoutSnapshots, runs] = await Promise.all([
     listRequestWorkspaceDocuments(event, session.id),
     session.active_document_id ? getRequestWorkspaceDocument(event, session.active_document_id) : Promise.resolve(null),
     listRequestWorkspaceMessages(event, session.id),
     listRequestWorkspaceTelemetryEvents(event, session.id),
     session.active_artifact_id ? getRequestWorkspaceArtifact(event, session.active_artifact_id) : Promise.resolve(null),
     listRequestWorkspaceLayoutSnapshots(event, session.id).catch(() => []),
+    listRequestWorkspaceRuns(event, session.id).catch(() => []),
   ]);
   const activeArtifactVersions = activeArtifact ? await listRequestWorkspaceArtifactVersions(event, activeArtifact.id) : [];
+
+  // Reattach: rebuild the latest run's assistant message from persisted events.
+  // Only for a non-succeeded latest run whose turn was not already persisted
+  // client-side (a tab that stayed alive persists the partial assistant message
+  // itself) — reattaching that would double the last turn.
+  const latestRun = runs.at(-1) ?? null;
+  let reattachMessage: RunReattachMessage | null = null;
+  if (latestRun && latestRun.status !== "succeeded" && !runAssistantTurnPersisted(latestRun, runs.length, messages)) {
+    const runEvents = await listRequestWorkspaceRunEvents<PersistedRunEvent>(event, latestRun.id).catch(() => []);
+    reattachMessage = buildRunReattachMessage({ run: latestRun, runCount: runs.length, messages, events: runEvents });
+  }
 
   return json({
     session,
     documents,
     activeDocument,
     messages,
+    runs,
+    reattach: latestRun ? { run: latestRun, message: reattachMessage } : null,
     telemetry: telemetry.slice(-50),
     artifactState: {
       persistence: "cloud-or-memory-v1",

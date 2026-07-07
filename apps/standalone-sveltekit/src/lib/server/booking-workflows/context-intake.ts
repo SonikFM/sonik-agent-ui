@@ -40,6 +40,18 @@ export const BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE: InteractiveSurfaceSpec = c
     },
 
     {
+      id: "q_business_name",
+      title: "What should this venue or context be called?",
+      body: "Use the operator-facing name customers and staff should recognize. Example: Dan's Club, Main Course Dining Room, or Summer Jazz Night.",
+      whyThisMatters: "The approved command preview uses this as the booking context name. If it is missing, the system may fall back to a generic inventory label.",
+      answerType: "short_text",
+      required: false,
+      allowSkip: true,
+      skipValue: "unknown",
+      writesTo: "/manifest/business/name",
+    },
+
+    {
       id: "q_open_days",
       title: "Which days are open for reservations?",
       body: "Select every day this venue accepts reservations. If hours differ by day, note the exceptions in the operating hours question next.",

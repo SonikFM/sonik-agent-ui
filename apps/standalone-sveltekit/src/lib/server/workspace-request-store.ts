@@ -10,6 +10,9 @@ import type {
   WorkspaceLayoutSnapshotRecord,
   WorkspaceMessageRecord,
   WorkspaceMode,
+  WorkspaceRunEventRecord,
+  WorkspaceRunRecord,
+  WorkspaceRunStatus,
   WorkspaceSessionRecord,
   WorkspaceTelemetryEventRecord,
   WorkspaceToolCallRecord,
@@ -140,6 +143,14 @@ export async function listRequestWorkspaceTelemetryEvents(event: RequestWorkspac
   }
 }
 
+export async function listRequestWorkspaceRuns(event: RequestWorkspaceEvent, sessionId: string): Promise<WorkspaceRunRecord[]> {
+  return getRequestWorkspacePersistence(event).listRuns(sessionId);
+}
+
+export async function listRequestWorkspaceRunEvents<TEvent = unknown>(event: RequestWorkspaceEvent, runId: string): Promise<WorkspaceRunEventRecord<TEvent>[]> {
+  return getRequestWorkspacePersistence(event).listRunEvents<TEvent>(runId);
+}
+
 export type {
   DocumentLibraryResult,
   WorkspaceArtifactKind,
@@ -149,6 +160,9 @@ export type {
   WorkspaceLayoutSnapshotRecord,
   WorkspaceMessageRecord,
   WorkspaceMode,
+  WorkspaceRunEventRecord,
+  WorkspaceRunRecord,
+  WorkspaceRunStatus,
   WorkspaceSessionRecord,
   WorkspaceTelemetryEventRecord,
   WorkspaceToolCallRecord,

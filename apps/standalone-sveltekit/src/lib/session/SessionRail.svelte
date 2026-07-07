@@ -5,6 +5,7 @@
     id: string;
     name: string;
     mode: "chat" | "artifact" | "document" | "research";
+    is_important?: boolean;
     message_count: number;
     updated_at: string;
     last_message_at: string | null;
@@ -15,6 +16,7 @@
     currentSession: WorkspaceSessionSummary | null;
     activeSessionId: string | null;
     archivedCount?: number;
+    archivedSessions?: WorkspaceSessionSummary[];
     busy?: boolean;
     error?: string | null;
     collapsed?: boolean;
@@ -22,6 +24,8 @@
     onSwitch: (sessionId: string) => void;
     onArchive: (sessionId: string) => void;
     onDelete: (sessionId: string) => void;
+    onToggleImportant?: (sessionId: string, important: boolean) => void;
+    onRestore?: (sessionId: string) => void;
   }
 
   let {
@@ -29,6 +33,7 @@
     currentSession,
     activeSessionId,
     archivedCount = 0,
+    archivedSessions = [],
     busy = false,
     error = null,
     collapsed = false,
@@ -36,9 +41,13 @@
     onSwitch,
     onArchive,
     onDelete,
+    onToggleImportant,
+    onRestore,
   }: Props = $props();
 
-  let contextMenu = $state<{ sessionId: string; sessionName: string; x: number; y: number } | null>(null);
+  const orderedSessions = $derived([...sessions].sort((a, b) => Number(b.is_important === true) - Number(a.is_important === true)));
+  let showArchived = $state(false);
+  let contextMenu = $state<{ sessionId: string; sessionName: string; important: boolean; x: number; y: number } | null>(null);
   let contextMenuElement = $state<HTMLDivElement | null>(null);
   let contextMenuTrigger: HTMLElement | null = null;
 
@@ -52,6 +61,22 @@
     if (session.mode === "document") return "Document";
     if (session.mode === "research") return "Research";
     return "Chat";
+  }
+
+  function sessionKindShort(session: WorkspaceSessionSummary): string {
+    if (session.mode === "artifact") return "Art";
+    if (session.mode === "document") return "Doc";
+    if (session.mode === "research") return "R&D";
+    return "Chat";
+  }
+
+  function compactSessionLabel(session: WorkspaceSessionSummary): string {
+    const name = displaySessionName(session).replace(/[•·|]/g, " ").replace(/\s+/g, " ").trim();
+    if (!name || isDefaultWorkspaceSessionName(name)) return sessionKindShort(session);
+    const words = name.split(" ").filter(Boolean);
+    const useful = words.filter((word) => !/^(the|and|for|with|from|into|live|artifact|draft|intake)$/i.test(word));
+    const selected = (useful.length > 0 ? useful : words).slice(0, 2);
+    return selected.map((word) => word.slice(0, 4)).join(" ");
   }
 
   function formatSessionTime(value: string | null): string {
@@ -71,6 +96,7 @@
     contextMenu = {
       sessionId: session.id,
       sessionName: displaySessionName(session),
+      important: session.is_important === true,
       x: event.clientX,
       y: event.clientY,
     };
@@ -87,6 +113,7 @@
     contextMenu = {
       sessionId: session.id,
       sessionName: displaySessionName(session),
+      important: session.is_important === true,
       x: rect ? rect.right - 190 : event.clientX,
       y: rect ? rect.bottom + 4 : event.clientY,
     };
@@ -117,6 +144,13 @@
     closeContextMenu(true);
     onDelete(sessionId);
   }
+
+  function toggleImportantContextSession(): void {
+    if (!contextMenu) return;
+    const { sessionId, important } = contextMenu;
+    closeContextMenu(true);
+    onToggleImportant?.(sessionId, !important);
+  }
 </script>
 
 <div class="session-rail-shell" class:session-rail-shell--collapsed={collapsed} onclick={() => closeContextMenu()} role="presentation">
@@ -137,33 +171,47 @@
   {/if}
 
   <div class="session-rail-list" aria-busy={busy}>
-    {#each sessions as session (session.id)}
+    {#each orderedSessions as session (session.id)}
       <article class:active-session={session.id === activeSessionId} oncontextmenu={(event) => openContextMenu(event, session)}>
         <button
           type="button"
           class="session-select"
           onclick={() => onSwitch(session.id)}
           disabled={busy || session.id === activeSessionId}
-          title={`${displaySessionName(session)} · ${sessionKind(session)}`}
-          aria-label={collapsed ? `${displaySessionName(session)} · ${sessionKind(session)}` : undefined}
+          aria-label={collapsed ? `${displaySessionName(session)} · ${sessionKind(session)}${session.is_important ? " · Pinned" : ""}` : undefined}
         >
-          <span>{collapsed ? displaySessionName(session).slice(0, 1).toUpperCase() : displaySessionName(session)}</span>
-          {#if !collapsed}
+          <span>{#if session.is_important}<span class="session-pin" aria-hidden="true">★</span>{/if}{collapsed ? compactSessionLabel(session) : displaySessionName(session)}</span>
+          {#if collapsed}
+            <small>{sessionKindShort(session)}</small>
+          {:else}
             <small>{formatSessionTime(session.last_message_at ?? session.updated_at)}</small>
           {/if}
         </button>
-        <button
-          type="button"
-          class="session-actions-button"
-          class:session-actions-button--collapsed={collapsed}
-          aria-haspopup="menu"
-          aria-expanded={contextMenu?.sessionId === session.id}
-          aria-label={`Actions for ${displaySessionName(session)}`}
-          onclick={(event) => openActionMenu(event, session)}
-          disabled={busy}
-        >
-          ⋯
-        </button>
+        {#if collapsed}
+          <button
+            type="button"
+            class="session-actions-button session-actions-button--compact"
+            aria-haspopup="menu"
+            aria-expanded={contextMenu?.sessionId === session.id}
+            aria-label={`Actions for ${displaySessionName(session)}`}
+            onclick={(event) => openActionMenu(event, session)}
+            disabled={busy}
+          >
+            Menu
+          </button>
+        {:else}
+          <button
+            type="button"
+            class="session-actions-button"
+            aria-haspopup="menu"
+            aria-expanded={contextMenu?.sessionId === session.id}
+            aria-label={`Actions for ${displaySessionName(session)}`}
+            onclick={(event) => openActionMenu(event, session)}
+            disabled={busy}
+          >
+            ⋯
+          </button>
+        {/if}
       </article>
     {:else}
       <p class="session-empty">No chats yet. Start one when you are ready.</p>
@@ -175,7 +223,28 @@
       <span>Current chat</span>
       <strong>{displaySessionName(currentSession)}</strong>
       {#if archivedCount > 0}
-        <small>{archivedCount} archived</small>
+        <button
+          type="button"
+          class="archived-toggle"
+          onclick={() => (showArchived = !showArchived)}
+          aria-expanded={showArchived}
+        >
+          {archivedCount} archived {showArchived ? "▾" : "▸"}
+        </button>
+        {#if showArchived}
+          <ul class="archived-list" aria-label="Archived chats">
+            {#each archivedSessions as archived (archived.id)}
+              <li>
+                <span class="archived-name">{displaySessionName(archived)}</span>
+                {#if onRestore}
+                  <button type="button" class="archived-restore" onclick={() => onRestore(archived.id)} disabled={busy}>Restore</button>
+                {/if}
+              </li>
+            {:else}
+              <li class="archived-name">Loading archived chats…</li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     </footer>
   {/if}
@@ -194,6 +263,9 @@
       }}
     >
       <p>{contextMenu.sessionName}</p>
+      {#if onToggleImportant}
+        <button type="button" role="menuitem" onclick={toggleImportantContextSession} disabled={busy}>{contextMenu.important ? "Unpin chat" : "Pin chat"}</button>
+      {/if}
       <button type="button" role="menuitem" onclick={archiveContextSession} disabled={busy}>Archive chat</button>
       <button type="button" role="menuitem" class="danger-action" onclick={deleteContextSession} disabled={busy}>Delete chat</button>
     </div>
@@ -278,7 +350,7 @@
   .session-select:disabled,
   .session-actions-button:disabled,
   .session-context-menu button:disabled {
-    cursor: wait;
+    cursor: not-allowed;
     opacity: 0.55;
   }
 
@@ -351,12 +423,14 @@
 
   .session-rail-shell--collapsed .session-select {
     display: inline-grid;
-    width: 2.35rem;
-    height: 2.35rem;
+    width: 3.8rem;
+    min-height: 2.45rem;
     grid-template-columns: 1fr;
     justify-content: center;
-    padding: 0;
-    border-radius: 999px;
+    align-content: center;
+    gap: 0.18rem;
+    padding: 0.3rem 0.24rem;
+    border-radius: 0.75rem;
     text-align: center;
   }
 
@@ -370,8 +444,24 @@
   }
 
   .session-rail-shell--collapsed .session-select span {
-    max-width: none;
+    max-width: 3.45rem;
     text-align: center;
+    font-size: 0.68rem;
+    line-height: 1.05;
+    white-space: normal;
+  }
+
+  .session-rail-shell--collapsed .session-select small {
+    overflow: hidden;
+    max-width: 3.45rem;
+    color: var(--muted-foreground);
+    font-size: 0.52rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .session-actions-button {
@@ -389,11 +479,17 @@
     opacity: 0.75;
   }
 
-  .session-actions-button--collapsed {
-    width: 2.35rem;
-    height: 1.6rem;
-    margin: -0.25rem auto 0.18rem;
-    font-size: 0.95rem;
+
+  .session-actions-button--compact {
+    width: 3.8rem;
+    height: auto;
+    min-height: 1.35rem;
+    margin: -0.1rem 0 0;
+    border-radius: 0.7rem;
+    font-size: 0.5rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .session-actions-button:hover,
@@ -431,9 +527,62 @@
     white-space: nowrap;
   }
 
-  footer small {
+  .session-pin {
+    margin-right: 0.3rem;
+    color: var(--primary, var(--foreground));
+    font-size: 0.75rem;
+  }
+
+  .archived-toggle {
+    justify-self: start;
+    border: none;
+    padding: 0;
+    background: none;
     color: var(--muted-foreground);
-    font-size: 0.68rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .archived-toggle:hover {
+    color: var(--foreground);
+  }
+
+  .archived-list {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0.35rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .archived-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .archived-name {
+    overflow: hidden;
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .archived-restore {
+    flex-shrink: 0;
+    border: 1px solid var(--sonik-border-color);
+    border-radius: 0.5rem;
+    padding: 0.1rem 0.5rem;
+    background: none;
+    color: var(--foreground);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .archived-restore:hover:not(:disabled) {
+    background: var(--app-control-bg, var(--card));
   }
 
   .session-context-menu {
