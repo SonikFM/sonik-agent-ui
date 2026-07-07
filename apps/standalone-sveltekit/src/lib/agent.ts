@@ -13,6 +13,7 @@ import { createToolManifestTools } from "./tools/tool-manifest";
 import { createCommandCatalogTools } from "./tools/command-catalog";
 import { createArtifactStateTools } from "./tools/artifact-state";
 import { createSkillCatalogTools } from "./tools/skill-catalog";
+import { createMarketplaceWorkflowTools } from "./tools/marketplace-workflows";
 import { gateway, resolveGatewayModelId } from "./ai-gateway";
 import type { AgentRuntimeSettings } from "./agent-settings";
 import type { SystemModelMessage } from "ai";
@@ -103,6 +104,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
     : createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, toolPermissionModes: context.agentSettings?.toolPermissionModes });
   const artifactStateTools = createArtifactStateTools({ sessionId: context.sessionId, pageContext: context.pageContext, persistence: context.persistence, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, allowIntakeCommandCommit: bookingContextCreateActive });
   const skillCatalogTools = createSkillCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
+  const marketplaceWorkflowTools = createMarketplaceWorkflowTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   return new ToolLoopAgent({
     model: gateway(resolveGatewayModelId(context.agentSettings?.modelId)),
     instructions: createAgentInstructions(context),
@@ -119,6 +121,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
       ...artifactStateTools,
       ...toolManifestTools,
       ...skillCatalogTools,
+      ...marketplaceWorkflowTools,
       ...commandCatalogTools,
     },
     stopWhen: stepCountIs(12),
