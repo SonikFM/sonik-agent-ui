@@ -22,26 +22,26 @@ assert.ok(DEFAULT_HOST_ACTION_ALLOWLIST.includes("tour.highlight"));
 
 const bookingEntity = { kind: "booking_context", id: "34bb4e79-95c6-46ae-bd03-25e0a108a7a8", label: "Main Course Tee Sheet" };
 const scheduleTarget = normalizeHostUiTarget({
-  targetId: "booking.context.schedule",
-  targetInstanceId: "booking.context.schedule:34bb4e79",
+  targetId: "booking.ui.schedulePanel",
+  targetInstanceId: "booking.ui.schedulePanel:34bb4e79",
   label: "Booking schedule",
   description: "Schedule editor for the active booking context.",
   surface: "booking-context",
   entityRef: bookingEntity,
   capabilities: ["highlight", "focus", "edit", "describe", "highlight"],
-  locator: { kind: "data-sonik-target", value: "booking.context.schedule" },
+  locator: { kind: "data-sonik-target", value: "booking.ui.schedulePanel" },
 });
 assert.deepEqual(scheduleTarget.capabilities, ["highlight", "focus", "edit", "describe"], "capabilities normalize to unique values in declaration order");
-assert.equal(createHostUiTargetKey(scheduleTarget), "booking.context.schedule#booking.context.schedule:34bb4e79");
+assert.equal(createHostUiTargetKey(scheduleTarget), "booking.ui.schedulePanel#booking.ui.schedulePanel:34bb4e79");
 assert.deepEqual(getHostUiTargetDomAttributes(scheduleTarget), {
-  "data-sonik-target": "booking.context.schedule",
-  "data-sonik-target-instance": "booking.context.schedule:34bb4e79",
+  "data-sonik-target": "booking.ui.schedulePanel",
+  "data-sonik-target-instance": "booking.ui.schedulePanel:34bb4e79",
   "data-sonik-entity-kind": "booking_context",
   "data-sonik-entity-id": bookingEntity.id,
 });
 
 assert.throws(() => hostUiTargetSchema.parse({
-  targetId: "booking.context.schedule",
+  targetId: "booking.ui.schedulePanel",
   label: "Bad selector",
   description: "Bad selector",
   surface: "booking-context",
@@ -77,7 +77,7 @@ assert.throws(() => hostUiTargetSchema.parse({
 }), /must not default to allow/, "approval targets cannot be allowed by default");
 
 assert.throws(() => hostUiTargetSchema.parse({
-  targetId: "booking.context.inventory",
+  targetId: "booking.ui.inventoryPanel",
   label: "Inventory",
   description: "Inventory",
   surface: "booking-context",
@@ -104,20 +104,20 @@ const registry = createHostUiTargetRegistry({
   targets: [scheduleTarget, virtualTarget],
 });
 assert.equal(registry.version, "sonik-agent-ui.target-registry.v0");
-assert.equal(findHostUiTarget(registry, { targetId: "booking.context.schedule", entityRef: bookingEntity, capability: "highlight" })?.label, "Booking schedule");
-assert.equal(findHostUiTarget(registry, { targetId: "booking.context.schedule", entityRef: { ...bookingEntity, id: "other" } }), undefined, "entity identity disambiguates repeated semantic targets");
+assert.equal(findHostUiTarget(registry, { targetId: "booking.ui.schedulePanel", entityRef: bookingEntity, capability: "highlight" })?.label, "Booking schedule");
+assert.equal(findHostUiTarget(registry, { targetId: "booking.ui.schedulePanel", entityRef: { ...bookingEntity, id: "other" } }), undefined, "entity identity disambiguates repeated semantic targets");
 assert.throws(() => createHostUiTargetRegistry({ provider: "dupe", generatedAt: "now", targets: [scheduleTarget, scheduleTarget] }), /Duplicate host UI target key/, "registry rejects duplicate semantic/entity target keys");
 
 const highlightRequest = createHostActionRequest({
   requestId: "req-highlight-1",
   actionKey: "tour.highlight",
-  targetId: "booking.context.schedule",
+  targetId: "booking.ui.schedulePanel",
   entityRef: bookingEntity,
 });
 const highlightResult = evaluateHostActionRequest({ request: highlightRequest, registry });
 assert.equal(highlightResult.ok, true);
 assert.equal(highlightResult.status, "executed");
-assert.equal(highlightResult.receipt?.targetId, "booking.context.schedule");
+assert.equal(highlightResult.receipt?.targetId, "booking.ui.schedulePanel");
 assert.deepEqual(highlightResult.receipt?.entityRef, bookingEntity);
 
 for (const actionKey of ["tour.highlight", "tour.focusTarget", "artifact.submitAnswer"]) {
@@ -127,26 +127,26 @@ for (const actionKey of ["tour.highlight", "tour.focusTarget", "artifact.submitA
   assert.equal(targetlessResult.disabledReason, "target_required");
 }
 
-const registryUnavailable = evaluateHostActionRequest({ request: createHostActionRequest({ requestId: "req-no-registry", actionKey: "tour.highlight", targetId: "booking.context.schedule" }) });
+const registryUnavailable = evaluateHostActionRequest({ request: createHostActionRequest({ requestId: "req-no-registry", actionKey: "tour.highlight", targetId: "booking.ui.schedulePanel" }) });
 assert.equal(registryUnavailable.ok, false);
 assert.equal(registryUnavailable.status, "unavailable");
 assert.equal(registryUnavailable.disabledReason, "target_registry_unavailable");
 
 const hiddenTarget = normalizeHostUiTarget({ ...scheduleTarget, targetInstanceId: "hidden-instance", visible: false });
 const hiddenRegistry = createHostUiTargetRegistry({ provider: "hidden", generatedAt: "2026-07-07T00:00:00.000Z", targets: [hiddenTarget] });
-const hiddenResult = evaluateHostActionRequest({ request: createHostActionRequest({ requestId: "req-hidden", actionKey: "tour.highlight", targetId: "booking.context.schedule", targetInstanceId: "hidden-instance" }), registry: hiddenRegistry });
+const hiddenResult = evaluateHostActionRequest({ request: createHostActionRequest({ requestId: "req-hidden", actionKey: "tour.highlight", targetId: "booking.ui.schedulePanel", targetInstanceId: "hidden-instance" }), registry: hiddenRegistry });
 assert.equal(hiddenResult.ok, false);
 assert.equal(hiddenResult.status, "requires_prerequisite");
 assert.equal(hiddenResult.disabledReason, "target_not_visible");
 
 const disabledTarget = normalizeHostUiTarget({ ...scheduleTarget, targetInstanceId: "disabled-instance", enabled: false, disabledReason: "schedule_locked" });
 const disabledRegistry = createHostUiTargetRegistry({ provider: "disabled", generatedAt: "2026-07-07T00:00:00.000Z", targets: [disabledTarget] });
-const disabledResult = evaluateHostActionRequest({ request: createHostActionRequest({ requestId: "req-disabled", actionKey: "tour.highlight", targetId: "booking.context.schedule", targetInstanceId: "disabled-instance" }), registry: disabledRegistry });
+const disabledResult = evaluateHostActionRequest({ request: createHostActionRequest({ requestId: "req-disabled", actionKey: "tour.highlight", targetId: "booking.ui.schedulePanel", targetInstanceId: "disabled-instance" }), registry: disabledRegistry });
 assert.equal(disabledResult.ok, false);
 assert.equal(disabledResult.status, "blocked");
 assert.equal(disabledResult.disabledReason, "schedule_locked");
 
-const missingResult = evaluateHostActionRequest({ request: createHostActionRequest({ requestId: "req-missing", actionKey: "tour.highlight", targetId: "booking.context.missing" }), registry });
+const missingResult = evaluateHostActionRequest({ request: createHostActionRequest({ requestId: "req-missing", actionKey: "tour.highlight", targetId: "booking.ui.missing" }), registry });
 assert.equal(missingResult.ok, false);
 assert.equal(missingResult.status, "requires_prerequisite");
 assert.equal(missingResult.disabledReason, "target_not_found_or_capability_unavailable");
@@ -173,10 +173,10 @@ const approvalPreviewRegistry = createDefaultHostUiTargetRegistry({
   generatedAt: "2026-07-07T00:00:00.000Z",
   activeBookingContext: { id: bookingEntity.id, label: bookingEntity.label },
 });
-const approvalTarget = findHostUiTarget(approvalPreviewRegistry, { targetId: "booking.command.approval-preview", entityRef: bookingEntity, capability: "approve" });
+const approvalTarget = findHostUiTarget(approvalPreviewRegistry, { targetId: "booking.ui.commandApprovalPanel", entityRef: bookingEntity, capability: "approve" });
 assert.equal(approvalTarget?.policy.actionMode, "ask", "default booking approval preview target is ask-gated");
 const previewResult = evaluateHostActionRequest({
-  request: createHostActionRequest({ requestId: "req-preview", actionKey: "approval.requestPreview", targetId: "booking.command.approval-preview", entityRef: bookingEntity }),
+  request: createHostActionRequest({ requestId: "req-preview", actionKey: "approval.requestPreview", targetId: "booking.ui.commandApprovalPanel", entityRef: bookingEntity }),
   registry: approvalPreviewRegistry,
 });
 assert.equal(previewResult.ok, false);
@@ -184,7 +184,7 @@ assert.equal(previewResult.status, "approval_required");
 assert.equal(previewResult.policyMode, "ask");
 
 const approvalPreviewAgainstNonApprovalTarget = evaluateHostActionRequest({
-  request: createHostActionRequest({ requestId: "req-preview-wrong-target", actionKey: "approval.requestPreview", targetId: "booking.context.schedule", entityRef: bookingEntity }),
+  request: createHostActionRequest({ requestId: "req-preview-wrong-target", actionKey: "approval.requestPreview", targetId: "booking.ui.schedulePanel", entityRef: bookingEntity }),
   registry: approvalPreviewRegistry,
 });
 assert.equal(approvalPreviewAgainstNonApprovalTarget.ok, false);

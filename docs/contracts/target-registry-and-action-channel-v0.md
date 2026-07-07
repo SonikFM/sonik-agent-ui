@@ -17,14 +17,14 @@ A single `targetId` is not enough. A safe agent UI target separates these identi
 | Identity | Purpose | Example |
 | --- | --- | --- |
 | Business entity id | The domain object being discussed. | `booking_context:34bb4e79-...` |
-| Semantic UI target id | The stable screen affordance/region. | `booking.context.schedule` |
-| Locator/bounds detail | How the host resolves the region. | `data-sonik-target="booking.context.schedule"` or renderer bounds |
+| Semantic UI target id | The stable screen affordance/region. | `booking.ui.schedulePanel` |
+| Locator/bounds detail | How the host resolves the region. | `data-sonik-target="booking.ui.schedulePanel"` or renderer bounds |
 
 The agent sees semantic targets and safe entity references. The host keeps locator implementation detail authoritative.
 
 ```ts
 {
-  targetId: "booking.context.schedule",
+  targetId: "booking.ui.schedulePanel",
   entityRef: {
     kind: "booking_context",
     id: "34bb4e79-95c6-46ae-bd03-25e0a108a7a8",
@@ -68,7 +68,7 @@ Validation rules in v0:
 Preferred path. Add attributes from `getHostUiTargetDomAttributes(target)`:
 
 ```html
-<section data-sonik-target="booking.context.schedule" data-sonik-entity-kind="booking_context" data-sonik-entity-id="34bb4e79-...">
+<section data-sonik-target="booking.ui.schedulePanel" data-sonik-entity-kind="booking_context" data-sonik-entity-id="34bb4e79-...">
   ...
 </section>
 ```
@@ -105,7 +105,7 @@ Request shape:
   version: "sonik.agent_ui.host_action.v1",
   requestId: "req_123",
   actionKey: "tour.highlight",
-  targetId: "booking.context.schedule",
+  targetId: "booking.ui.schedulePanel",
   entityRef: { kind: "booking_context", id: "34bb..." },
   input: {},
   requiresReceipt: true
@@ -126,7 +126,7 @@ Result shape:
   policyMode: "allow",
   receipt: {
     actionKey: "tour.highlight",
-    targetId: "booking.context.schedule",
+    targetId: "booking.ui.schedulePanel",
     entityRef: { kind: "booking_context", id: "34bb..." },
     effect: "ui"
   }
@@ -188,10 +188,10 @@ Hosts should prefer `AgentPageContext.hostUiTargetRegistry` for route/surface pr
 
 Booking examples:
 
-- `booking.context.header`
-- `booking.context.schedule`
-- `booking.context.inventory`
-- `booking.command.approval-preview`
+- `booking.ui.contextHeader`
+- `booking.ui.schedulePanel`
+- `booking.ui.inventoryPanel`
+- `booking.ui.commandApprovalPanel`
 
 Amplify examples:
 
@@ -228,7 +228,7 @@ JSON-render artifacts may request host actions with a renderer action such as:
   "action": "requestHostAction",
   "params": {
     "actionKey": "approval.requestPreview",
-    "targetId": "booking.command.approval-preview",
+    "targetId": "booking.ui.commandApprovalPanel",
     "intentLabel": "Show the booking setup approval preview."
   }
 }
@@ -248,7 +248,7 @@ The renderer does not execute the business action. Agent UI forwards the request
       "status": "approval_required",
       "policyMode": "ask",
       "requestId": "...",
-      "targetId": "booking.command.approval-preview"
+      "targetId": "booking.ui.commandApprovalPanel"
     }
   }
 }

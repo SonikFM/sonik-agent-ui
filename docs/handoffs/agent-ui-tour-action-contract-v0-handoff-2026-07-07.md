@@ -30,8 +30,8 @@ From the embedded iframe, an ultratest can:
 ```js
 const actions = await pageControl.getActions();
 const registry = await pageControl.getTargetRegistry();
-await pageControl.callAction('highlightTarget', { targetId: 'booking.context.schedule' });
-await pageControl.callAction('focusTarget', { targetId: 'booking.context.schedule' });
+await pageControl.callAction('highlightTarget', { targetId: 'booking.ui.schedulePanel' });
+await pageControl.callAction('focusTarget', { targetId: 'booking.ui.schedulePanel' });
 ```
 
 Expected: semantic receipts, no DOM scraping, controlled failures when the host has not mounted a target/action handler.
