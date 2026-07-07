@@ -58,7 +58,7 @@
     >
       {label}
     </span>
-    <span class="ml-auto hidden text-[11px] uppercase tracking-[0.12em] text-muted-foreground/70 group-open:inline">Details</span>
+    <span class="ml-auto hidden text-[11px] uppercase tracking-[0.12em] text-muted-foreground/70 group-open:inline">Receipt</span>
   </summary>
 
   <dl class="mt-2 grid gap-1 border-t border-border pt-2 text-xs text-muted-foreground" aria-label="Technical tool receipt">
