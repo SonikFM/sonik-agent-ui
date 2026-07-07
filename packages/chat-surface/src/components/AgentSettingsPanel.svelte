@@ -32,6 +32,15 @@
     enabled: boolean;
   }
 
+  export interface AgentSettingsPromptModule {
+    id: string;
+    label: string;
+    defaultBody: string;
+    /** undefined = using the default body; any string (including "") is an
+     *  active override. An empty override suppresses the module/skill. */
+    overrideBody?: string;
+  }
+
   export interface AgentSettingsToolFamily {
     id: string;
     label: string;
@@ -69,6 +78,16 @@
     systemPrompt?: string;
     addons?: AgentSettingsAddon[];
     embedded?: boolean;
+    /** Always-on core plus the seedable prompt modules, in composition order. */
+    promptModules?: AgentSettingsPromptModule[];
+    /** Runtime-skill prompt bodies available to override, independent of which
+     *  skills are enabled for the next run. */
+    skillPromptModules?: AgentSettingsPromptModule[];
+    /** Read-only preview of the full composed system-prompt text for the
+     *  current override state. Composed by the host page, never by this panel. */
+    composedPromptPreview?: string;
+    skillPromptModulesStatus?: "idle" | "loading" | "ready" | "error";
+    promptOverrideMaxChars?: number;
     onModelChange?: (modelId: string) => void;
     onModelCatalogRefresh?: () => void;
     onRequireZdrChange?: (required: boolean) => void;
@@ -77,6 +96,9 @@
     onCustomSkillUpdate?: (skillId: string, patch: Partial<Pick<AgentSettingsCustomSkill, "label" | "markdown" | "enabled">>) => void;
     onSystemPromptChange?: (prompt: string) => void;
     onToolPermissionChange?: (familyId: string, mode: AgentToolPermissionMode) => void;
+    /** `overrideBody === undefined` resets the module/skill to its default. */
+    onPromptModuleOverrideChange?: (moduleId: string, overrideBody: string | undefined) => void;
+    onSkillPromptOverrideChange?: (skillId: string, overrideBody: string | undefined) => void;
   }
 
   let {
@@ -93,6 +115,11 @@
     systemPrompt = "",
     addons = [],
     embedded = false,
+    promptModules = [],
+    skillPromptModules = [],
+    composedPromptPreview = "",
+    skillPromptModulesStatus = "idle",
+    promptOverrideMaxChars = 4_000,
     onModelChange,
     onModelCatalogRefresh,
     onRequireZdrChange,
@@ -101,9 +128,11 @@
     onCustomSkillUpdate,
     onSystemPromptChange,
     onToolPermissionChange,
+    onPromptModuleOverrideChange,
+    onSkillPromptOverrideChange,
   }: AgentSettingsPanelProps = $props();
 
-  const tabs = ["model", "skills", "tools", "context", "addons"] as const;
+  const tabs = ["model", "skills", "prompt", "tools", "context", "addons"] as const;
   type AgentSettingsTab = typeof tabs[number];
 
   let open = $state(false);
@@ -212,6 +241,7 @@
             >
               <span>{tab === "model" ? "Models" : tab}</span>
               {#if tab === "skills" && (enabledSkillIds.length + customSkills.filter((skill) => skill.enabled).length) > 0}<span class="text-xs">{enabledSkillIds.length + customSkills.filter((skill) => skill.enabled).length}</span>{/if}
+              {#if tab === "prompt" && (promptModules.filter((module) => module.overrideBody !== undefined).length + skillPromptModules.filter((module) => module.overrideBody !== undefined).length) > 0}<span class="text-xs">{promptModules.filter((module) => module.overrideBody !== undefined).length + skillPromptModules.filter((module) => module.overrideBody !== undefined).length}</span>{/if}
             </button>
           {/each}
         </nav>
@@ -319,6 +349,75 @@
                   {/each}
                 </div>
               {/if}
+            </section>
+          {:else if activeTab === "prompt"}
+            <section class="space-y-4" aria-labelledby="agent-prompt-heading">
+              <div>
+                <h3 id="agent-prompt-heading" class="font-semibold text-foreground">Prompt & skill overrides</h3>
+                <p class="text-sm text-muted-foreground">Edit the standing instructions this agent composes each turn. Clearing an editor to empty suppresses that module for this session; Reset restores the shipped default.</p>
+              </div>
+              <div class="rounded-xl border border-border bg-background/60">
+                <div class="border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Composed preview</div>
+                <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs text-muted-foreground">{composedPromptPreview || "No preview available."}</pre>
+              </div>
+              <div class="rounded-xl border border-border bg-background/60">
+                <div class="border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Prompt modules</div>
+                {#each promptModules as promptModule (promptModule.id)}
+                  {@const effective = promptModule.overrideBody ?? promptModule.defaultBody}
+                  {@const dirty = promptModule.overrideBody !== undefined}
+                  <div class="border-b border-border p-4 last:border-b-0">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <div class="min-w-0">
+                        <p class="font-medium text-foreground">{promptModule.label}</p>
+                        <p class="text-xs text-muted-foreground">{promptModule.id} · {dirty ? (effective.trim() ? "edited" : "suppressed") : "default"}</p>
+                      </div>
+                      <div class="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>{effective.length}/{promptOverrideMaxChars} chars</span>
+                        <button type="button" class="rounded-lg border border-border px-2 py-1 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={!dirty} onclick={() => onPromptModuleOverrideChange?.(promptModule.id, undefined)}>Reset</button>
+                      </div>
+                    </div>
+                    <textarea
+                      class="mt-3 min-h-28 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                      value={effective}
+                      maxlength={promptOverrideMaxChars}
+                      aria-label={`Edit ${promptModule.label} prompt text`}
+                      oninput={(event) => onPromptModuleOverrideChange?.(promptModule.id, (event.currentTarget as HTMLTextAreaElement).value)}
+                    ></textarea>
+                  </div>
+                {/each}
+              </div>
+              <div class="rounded-xl border border-border bg-background/60">
+                <div class="border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  Runtime skill bodies{#if skillPromptModulesStatus === "loading"} · loading…{:else if skillPromptModulesStatus === "error"} · unavailable{/if}
+                </div>
+                {#if skillPromptModules.length === 0}
+                  <p class="p-4 text-sm text-muted-foreground">{skillPromptModulesStatus === "loading" ? "Loading skill defaults…" : "No runtime skill bodies available to override yet."}</p>
+                {:else}
+                  {#each skillPromptModules as skillModule (skillModule.id)}
+                    {@const effective = skillModule.overrideBody ?? skillModule.defaultBody}
+                    {@const dirty = skillModule.overrideBody !== undefined}
+                    <div class="border-b border-border p-4 last:border-b-0">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="min-w-0">
+                          <p class="font-medium text-foreground">{skillModule.label}</p>
+                          <p class="text-xs text-muted-foreground">{skillModule.id} · {dirty ? (effective.trim() ? "edited" : "suppressed") : "default"}</p>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{effective.length}/{promptOverrideMaxChars} chars</span>
+                          <button type="button" class="rounded-lg border border-border px-2 py-1 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={!dirty} onclick={() => onSkillPromptOverrideChange?.(skillModule.id, undefined)}>Reset</button>
+                        </div>
+                      </div>
+                      <textarea
+                        class="mt-3 min-h-28 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        value={effective}
+                        maxlength={promptOverrideMaxChars}
+                        aria-label={`Edit ${skillModule.label} skill prompt text`}
+                        oninput={(event) => onSkillPromptOverrideChange?.(skillModule.id, (event.currentTarget as HTMLTextAreaElement).value)}
+                      ></textarea>
+                    </div>
+                  {/each}
+                {/if}
+              </div>
             </section>
           {:else if activeTab === "tools"}
             <section class="space-y-4" aria-labelledby="agent-tools-heading">

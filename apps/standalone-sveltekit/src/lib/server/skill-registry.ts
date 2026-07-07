@@ -341,8 +341,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * order-preserving and de-duplicated, and enforces the count/char caps above.
  * Unknown ids are silently ignored so a stale chip never breaks a turn. Skills
  * are only ever appended for the current run — never persisted onto the session.
+ *
+ * `overrides` (keyed by exact skill id, e.g. Agent Settings' `skillPromptOverrides`)
+ * lets operator-edited text replace a skill's default body before the per-body
+ * truncation cap is applied — the cap still bounds override text, it just isn't
+ * the source of the words. An override that is empty (or whitespace-only) after
+ * trimming suppresses that skill's body entirely, as if it had not matched. A
+ * skill with no entry in `overrides` renders its default body, so an empty (or
+ * omitted) overrides map reproduces today's output exactly.
  */
-export function resolveRuntimeSkillPromptModules(skillIds: string[] = []): RuntimeSkillPromptModule[] {
+export function resolveRuntimeSkillPromptModules(skillIds: string[] = [], overrides: Record<string, string> = {}): RuntimeSkillPromptModule[] {
   const modules: RuntimeSkillPromptModule[] = [];
   const seen = new Set<string>();
   let totalChars = 0;
@@ -353,7 +361,12 @@ export function resolveRuntimeSkillPromptModules(skillIds: string[] = []): Runti
     for (const skill of matches) {
       if (seen.has(skill.id)) continue;
       if (modules.length >= RUNTIME_SKILL_PROMPT_MAX_MODULES) return modules;
-      const body = renderSkillPromptBody(skill);
+      const override = overrides[skill.id];
+      if (override !== undefined && override.trim().length === 0) {
+        seen.add(skill.id);
+        continue;
+      }
+      const body = boundedBody(override !== undefined ? override.trim() : renderSkillPromptBody(skill));
       if (totalChars + body.length > RUNTIME_SKILL_PROMPT_MAX_TOTAL_CHARS) return modules;
       seen.add(skill.id);
       totalChars += body.length;
@@ -361,6 +374,22 @@ export function resolveRuntimeSkillPromptModules(skillIds: string[] = []): Runti
     }
   }
   return modules;
+}
+
+/**
+ * Lists the default (un-overridden) prompt-ready body for every skill in the
+ * runtime catalog, regardless of per-turn selection or the count/char caps
+ * above. Used to populate the Agent Settings "Prompt" tab's skill-override
+ * editors with defaults to diff against — never appended to a live run's
+ * system prompt directly.
+ */
+export function listRuntimeSkillPromptDefaults(): Array<{ id: string; familyId: string; title: string; defaultBody: string }> {
+  return catalog.skills.map((skill) => ({
+    id: skill.id,
+    familyId: skill.familyId,
+    title: skill.title,
+    defaultBody: renderSkillPromptBody(skill),
+  }));
 }
 
 export function createRuntimeSkillIndex(context: RuntimeSkillRegistryContext = {}, input: { limit?: number } = {}): SkillIndex {

@@ -84,6 +84,7 @@
     AGENT_SKILL_OPTIONS,
     AGENT_TOOL_FAMILY_OPTIONS,
     DEFAULT_AGENT_MODEL_ID,
+    MAX_AGENT_PROMPT_OVERRIDE_CHARS,
     createDefaultAgentToolPermissionModes,
     sanitizeAgentRuntimeSettings,
     createAgentCustomSkillId,
@@ -91,6 +92,7 @@
     type AgentModelOption,
     type AgentRuntimeSettings,
   } from "$lib/agent-settings";
+  import { AGENT_PROMPT_CORE, AGENT_PROMPT_MODULES, CORE_MODULE_ID, composeAgentSystemPrompt } from "$lib/agent-prompt";
 
   interface ActiveDocumentSnapshot {
     id: string;
@@ -227,6 +229,13 @@
   let agentCustomSkills = $state<AgentCustomSkill[]>([]);
   let agentAdditionalSystemPrompt = $state("");
   let agentToolPermissionModes = $state<Record<string, AgentToolPermissionMode>>(createDefaultAgentToolPermissionModes());
+  let agentPromptModuleOverrides = $state<Record<string, string>>({});
+  let agentSkillPromptOverrides = $state<Record<string, string>>({});
+  // Runtime-skill default bodies live under $lib/server (skill-registry.ts) and
+  // can't be imported into this client component, so they're fetched once from
+  // /api/agent-prompt-preview to populate the Prompt tab's skill-override editors.
+  let agentSkillPromptDefaults = $state<{ id: string; familyId: string; title: string; defaultBody: string }[]>([]);
+  let agentSkillPromptDefaultsStatus = $state<"idle" | "loading" | "ready" | "error">("idle");
   // Composer context selection for the next turn (chips + authoritative dismissals).
   let runContextSelection = $state<AgentRunContextSelection>(createEmptyAgentRunContextSelection());
   // Analytics-only run hints, computed client-side at send time. `analyticsTurnIndex`
@@ -1819,6 +1828,7 @@
       }, 1_500);
     }
     void refreshAgentModelCatalog();
+    void loadAgentSkillPromptDefaults();
     return () => {
       stopLongTaskTelemetry?.();
       window.clearInterval(activityTimer);
@@ -2559,7 +2569,76 @@
       additionalSystemPrompt: agentAdditionalSystemPrompt,
       requireZdr: agentRequireZdr,
       toolPermissionModes: agentToolPermissionModes,
+      promptModuleOverrides: agentPromptModuleOverrides,
+      skillPromptOverrides: agentSkillPromptOverrides,
     });
+  }
+
+  // Prompt tab: always-on core plus the seedable modules, merged with any
+  // session overrides, for the Agent Settings "Prompt" tab editors.
+  const agentPromptModules = $derived(
+    [
+      { id: CORE_MODULE_ID, label: "Core identity & workflow", defaultBody: AGENT_PROMPT_CORE },
+      ...AGENT_PROMPT_MODULES.map((module) => ({ id: module.id, label: module.title, defaultBody: module.body })),
+    ].map((module) => ({ ...module, overrideBody: agentPromptModuleOverrides[module.id] })),
+  );
+  const agentSkillPromptModules = $derived(
+    agentSkillPromptDefaults.map((skill) => ({
+      id: skill.id,
+      label: `${skill.title} (${skill.familyId})`,
+      defaultBody: skill.defaultBody,
+      overrideBody: agentSkillPromptOverrides[skill.id],
+    })),
+  );
+  // Composed with composeAgentSystemPrompt (the same pure function `createAgent`
+  // uses) so this preview never reimplements composition logic. It only
+  // approximates the skill-body portion (fetched defaults + local overrides,
+  // not this turn's actual skill selection/caps) since that depends on
+  // per-turn state this static preview doesn't have.
+  const composedPromptPreview = $derived(
+    composeAgentSystemPrompt({
+      promptModuleOverrides: agentPromptModuleOverrides,
+      skillModules: agentSkillPromptDefaults
+        .filter((skill) => enabledAgentSkillIds.includes(skill.id))
+        .map((skill) => ({ id: skill.id, body: agentSkillPromptOverrides[skill.id] ?? skill.defaultBody }))
+        .filter((module) => module.body.trim().length > 0),
+    }).prompt,
+  );
+
+  async function loadAgentSkillPromptDefaults(): Promise<void> {
+    if (agentSkillPromptDefaultsStatus === "loading" || agentSkillPromptDefaultsStatus === "ready") return;
+    agentSkillPromptDefaultsStatus = "loading";
+    try {
+      const response = await fetch("/api/agent-prompt-preview");
+      if (!response.ok) throw new Error(`agent_prompt_preview_http_${response.status}`);
+      const payload = await response.json() as { skillModules?: typeof agentSkillPromptDefaults };
+      agentSkillPromptDefaults = Array.isArray(payload.skillModules) ? payload.skillModules : [];
+      agentSkillPromptDefaultsStatus = "ready";
+    } catch {
+      agentSkillPromptDefaultsStatus = "error";
+    }
+  }
+
+  function handleAgentPromptModuleOverrideChange(moduleId: string, overrideBody: string | undefined): void {
+    if (overrideBody === undefined) {
+      const next = { ...agentPromptModuleOverrides };
+      delete next[moduleId];
+      agentPromptModuleOverrides = next;
+    } else {
+      agentPromptModuleOverrides = { ...agentPromptModuleOverrides, [moduleId]: overrideBody };
+    }
+    logArtifactTelemetry({ source: "client", event: "agent_settings.prompt_module_override.change", sessionId: activeSessionId ?? undefined, reason: moduleId, ok: true });
+  }
+
+  function handleAgentSkillPromptOverrideChange(skillId: string, overrideBody: string | undefined): void {
+    if (overrideBody === undefined) {
+      const next = { ...agentSkillPromptOverrides };
+      delete next[skillId];
+      agentSkillPromptOverrides = next;
+    } else {
+      agentSkillPromptOverrides = { ...agentSkillPromptOverrides, [skillId]: overrideBody };
+    }
+    logArtifactTelemetry({ source: "client", event: "agent_settings.skill_prompt_override.change", sessionId: activeSessionId ?? undefined, reason: skillId, ok: true });
   }
 
   function handleAgentModelChange(modelId: string): void {
@@ -3209,6 +3288,11 @@
           contextItems={runContextSelection.items}
           systemPrompt={agentAdditionalSystemPrompt}
           embedded={isEmbeddedHostContextExpected()}
+          promptModules={agentPromptModules}
+          skillPromptModules={agentSkillPromptModules}
+          composedPromptPreview={composedPromptPreview}
+          skillPromptModulesStatus={agentSkillPromptDefaultsStatus}
+          promptOverrideMaxChars={MAX_AGENT_PROMPT_OVERRIDE_CHARS}
           onModelChange={handleAgentModelChange}
           onModelCatalogRefresh={() => void refreshAgentModelCatalog()}
           onRequireZdrChange={handleAgentRequireZdrChange}
@@ -3217,6 +3301,8 @@
           onCustomSkillUpdate={handleAgentCustomSkillUpdate}
           onSystemPromptChange={handleAgentPromptChange}
           onToolPermissionChange={handleAgentToolPermissionChange}
+          onPromptModuleOverrideChange={handleAgentPromptModuleOverrideChange}
+          onSkillPromptOverrideChange={handleAgentSkillPromptOverrideChange}
         />
         {#if !isEmbeddedHostContextExpected()}
           <ThemePicker />

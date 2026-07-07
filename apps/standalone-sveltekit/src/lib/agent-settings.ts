@@ -1,3 +1,5 @@
+import { AGENT_PROMPT_OVERRIDABLE_MODULE_IDS } from "./agent-prompt.ts";
+
 export type AgentToolPermissionMode = "off" | "ask" | "allow";
 export type AgentModelCatalogSource = "fallback" | "gateway";
 
@@ -48,6 +50,15 @@ export interface AgentRuntimeSettings {
   additionalSystemPrompt: string;
   requireZdr: boolean;
   toolPermissionModes: Record<string, AgentToolPermissionMode>;
+  /** Operator overrides for `composeAgentSystemPrompt` prompt modules, keyed by
+   *  module id (the five seedable module ids plus `"core"` for AGENT_PROMPT_CORE).
+   *  An empty string suppresses that module for this run; a missing key uses the
+   *  module's default body. See {@link sanitizeAgentRuntimeSettings}. */
+  promptModuleOverrides: Record<string, string>;
+  /** Operator overrides for runtime-skill prompt bodies resolved by
+   *  `resolveRuntimeSkillPromptModules`, keyed by exact skill id. Same empty-string
+   *  suppression rule as `promptModuleOverrides`. */
+  skillPromptOverrides: Record<string, string>;
 }
 
 export const AGENT_MODEL_OPTIONS: AgentModelOption[] = [
@@ -91,6 +102,7 @@ export const FALLBACK_AGENT_MODEL_ID = "anthropic/claude-haiku-4.5";
 export const MAX_AGENT_CUSTOM_SKILLS = 8;
 export const MAX_AGENT_CUSTOM_SKILL_MARKDOWN_CHARS = 4_000;
 export const MAX_AGENT_SYSTEM_PROMPT_CHARS = 2_000;
+export const MAX_AGENT_PROMPT_OVERRIDE_CHARS = 4_000;
 
 export const AGENT_SKILL_OPTIONS: AgentSkillOption[] = [
   {
@@ -171,6 +183,11 @@ export const AGENT_TOOL_FAMILY_OPTIONS: AgentToolFamilyOption[] = [
 const STATIC_MODEL_IDS = new Set(AGENT_MODEL_OPTIONS.map((option) => option.id));
 const SKILL_IDS = new Set(AGENT_SKILL_OPTIONS.map((option) => option.id));
 const TOOL_FAMILY_IDS = new Set(AGENT_TOOL_FAMILY_OPTIONS.map((option) => option.id));
+// AGENT_SKILL_OPTIONS ids are kept identical to the runtime skill catalog's
+// workflow ids (see server/skill-registry.ts) by convention, so this set also
+// doubles as "known runtime skill ids" for skillPromptOverrides validation
+// without pulling the server-only registry into a module client code imports.
+const PROMPT_MODULE_IDS = new Set<string>(AGENT_PROMPT_OVERRIDABLE_MODULE_IDS);
 const PERMISSION_MODES = new Set<AgentToolPermissionMode>(["off", "ask", "allow"]);
 const MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
 
@@ -222,6 +239,25 @@ function sanitizeCustomSkill(value: unknown): AgentCustomSkill | null {
   return { id, label, markdown, enabled: record.enabled !== false };
 }
 
+/**
+ * Sanitizes a raw prompt/skill override map: only keys present in `knownIds`
+ * survive, values are coerced to trimmed, control-char-stripped strings capped
+ * at {@link MAX_AGENT_PROMPT_OVERRIDE_CHARS}. An empty string is a valid,
+ * intentional value (it suppresses the target module/skill) and is preserved
+ * rather than dropped. Unknown keys and non-string values are dropped silently
+ * so a stale override never breaks a run.
+ */
+function sanitizePromptOverrideMap(value: unknown, knownIds: ReadonlySet<string>): Record<string, string> {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  if (!record) return {};
+  const result: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (!knownIds.has(key) || typeof raw !== "string") continue;
+    result[key] = sanitizeBoundedString(raw, MAX_AGENT_PROMPT_OVERRIDE_CHARS).trim();
+  }
+  return result;
+}
+
 export function sanitizeAgentRuntimeSettings(value: unknown): AgentRuntimeSettings {
   const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const defaultToolModes = createDefaultAgentToolPermissionModes();
@@ -243,7 +279,9 @@ export function sanitizeAgentRuntimeSettings(value: unknown): AgentRuntimeSettin
       toolPermissionModes[familyId] = mode as AgentToolPermissionMode;
     }
   }
-  return { modelId, skillIds, customSkills, additionalSystemPrompt, requireZdr, toolPermissionModes };
+  const promptModuleOverrides = sanitizePromptOverrideMap(record.promptModuleOverrides, PROMPT_MODULE_IDS);
+  const skillPromptOverrides = sanitizePromptOverrideMap(record.skillPromptOverrides, SKILL_IDS);
+  return { modelId, skillIds, customSkills, additionalSystemPrompt, requireZdr, toolPermissionModes, promptModuleOverrides, skillPromptOverrides };
 }
 
 export function resolveAgentToolPermissionMode(familyId: string | undefined, modes: Record<string, AgentToolPermissionMode> | undefined): AgentToolPermissionMode {
