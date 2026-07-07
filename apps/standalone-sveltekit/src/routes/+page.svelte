@@ -2982,7 +2982,7 @@
       {/snippet}
 
       {#snippet renderArtifact(spec, loading)}
-        <JsonArtifactRenderer {spec} {registry} {loading} />
+        <JsonArtifactRenderer {spec} {registry} {loading} onAction={handleJsonRenderAction} />
       {/snippet}
     </AgentConversation>
   {/snippet}
