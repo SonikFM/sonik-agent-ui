@@ -63,6 +63,7 @@ assert.doesNotMatch(toolCallBlockSource, /title=\{.*technicalLabel/);
 assert.doesNotMatch(toolCallBlockSource, /title=\{title\}/);
 assert.match(toolCallBlockSource, /<details/);
 assert.match(toolCallBlockSource, /Technical tool receipt/);
+assert.match(toolCallBlockSource, />Receipt<\/span>/);
 assert.doesNotMatch(toolCallBlockSource, /return\s+tool\.toolName/);
 assert.doesNotMatch(toolCallBlockSource, /\?\?\s*tool\.toolName/);
 

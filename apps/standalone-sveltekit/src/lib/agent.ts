@@ -74,7 +74,8 @@ export function resolveAgentPromptComposition(context: AgentRuntimeContext = {})
       hasPageContext: Boolean(context.pageContext),
       previewOnlySkillActive: hasPreviewOnlyRuntimeSkill(context.skillIds),
     },
-    skillModules: resolveRuntimeSkillPromptModules(context.skillIds),
+    skillModules: resolveRuntimeSkillPromptModules(context.skillIds, context.agentSettings?.skillPromptOverrides),
+    promptModuleOverrides: context.agentSettings?.promptModuleOverrides,
   });
 }
 

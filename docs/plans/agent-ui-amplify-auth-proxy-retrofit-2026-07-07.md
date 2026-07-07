@@ -246,3 +246,17 @@ direction is set.
   the *same* secret value provisioned to Amplify (if Amplify ever needs to
   validate agent-ui-minted envelopes directly) was not verified in this pass
   — Amplify's repo was read-only and no secret material was inspected.
+
+---
+
+## Implementation status (updated 2026-07-07)
+
+**P1 IMPLEMENTED** on worktree branch `worktree-agent-af43718a4fad3f6b8` (commit `4d65e38`; branch also carries a merge of `feat/analytics-hints-release-gate-20260702`). All gates green in the worktree (check-types 0 errors, full test chain incl. the new cross-signing parity test, autofixer clean). NOT yet merged anywhere — integrate after the PR #5 merge lands.
+
+Delivered: `amplify-session-proxy.ts` (donor adaptation + new server-side sign-in), `amplify-login-proxy.ts` (envelope mint/refresh/cookie-seal via the EXISTING signer — one-envelope invariant held), `hooks.server.ts` header injection (flag-gated, pure passthrough when unset), plain `/login` route, `tests/unit/amplify-login-proxy.test.mjs` (cross-sign both directions, TTL/skew edges, tamper rejection, embed-fixture field parity), `.env.example` vars. `wrangler.jsonc` deliberately untouched — flag OFF in deploy config.
+
+**P1-EXIT checklist (live validation, requires Dan/deploy):**
+1. `wrangler secret put` on staging: `AMPLIFY_AUTH_BASE_URL`, `SONIK_AGENT_UI_LOGIN_SESSION_SECRET`; confirm `SONIK_AGENT_UI_HOST_CONTEXT_SECRET` matches Amplify/booking.
+2. Set `SONIK_AGENT_UI_ENABLE_AMPLIFY_LOGIN_PROXY=true` on staging only.
+3. Log in at `/login` with the test account → confirm persistence resolves `cloud`; verify org isolation with a second org's creds (expect empty/404, never cross-tenant data).
+4. Then and only then: retire the smoke-host-context signer (§4.2) and consider P2.

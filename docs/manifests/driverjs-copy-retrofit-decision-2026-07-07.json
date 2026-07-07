@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "sonik.analyze-copy-retrofit.decision.v1",
+  "createdAt": "2026-07-07",
+  "donor": {
+    "name": "driver.js",
+    "version": "1.6.0",
+    "license": "MIT",
+    "repository": "git+https://github.com/nilbuild/driver.js.git",
+    "tarball": "https://registry.npmjs.org/driver.js/-/driver.js-1.6.0.tgz",
+    "localAnalysisPath": "/tmp/driverjs-readiness/package",
+    "npmIntegrity": "sha512-gryo9QS7AZhz8J0bmdf42dwaTzcd1BgSJLnaSM7cPJbu8bTW8wIEuiGDy4MoCvB4Sr8wA9g5o2G9EFNVYZGeVQ==",
+    "npmShasum": "958a8912b7fc9026e3d65e8e541bd10d1f6daa23",
+    "localAnalysisPathNote": "Temporary analysis path only; durable source identity is npm version, tarball, integrity, shasum, and repository URL."
+  },
+  "decision": "analyze_only_no_production_copy",
+  "rationale": [
+    "The load-bearing Sonik seam is the cross-origin host action channel, not the spotlight runtime.",
+    "Driver.js uses direct selectors/elements while Sonik requires semantic target IDs resolved by the host.",
+    "Driver.js CSS/chrome would require theme quarantine before production use.",
+    "Sonik requires policy modes and receipts that Driver.js does not provide."
+  ],
+  "copiedSourceMappings": [],
+  "behaviorParityManifest": "docs/manifests/driverjs-tour-behavior-parity-2026-07-07.md",
+  "readinessReport": "docs/research/driverjs-tour-readiness-2026-07-07.md",
+  "futureCopyConditions": [
+    "Host action channel is implemented and verified.",
+    "Tour target registry is implemented and verified.",
+    "Native overlay/callout implementation proves insufficient or too slow.",
+    "Driver.js adapter can be isolated behind TourRuntimeAdapter without exposing DOM selectors to the agent.",
+    "Theme/accessibility/drift tests exist."
+  ]
+}

@@ -199,10 +199,19 @@ export interface ComposedAgentPrompt {
   skillIds: string[];
 }
 
-const CORE_MODULE_ID = "core";
+export const CORE_MODULE_ID = "core";
 
-function renderModule(module: AgentPromptModule): string {
-  return `${module.title}:\n${module.body}`;
+/** Every module id an Agent Settings override key may target: the always-on
+ *  core plus each seedable module, in composition order. Exported so callers
+ *  that build an override editor (e.g. Agent Settings) don't have to hardcode
+ *  or duplicate this list. */
+export const AGENT_PROMPT_OVERRIDABLE_MODULE_IDS: readonly string[] = [
+  CORE_MODULE_ID,
+  ...AGENT_PROMPT_MODULES.map((module) => module.id),
+];
+
+function renderModule(module: AgentPromptModule, body: string): string {
+  return `${module.title}:\n${body}`;
 }
 
 /**
@@ -213,19 +222,44 @@ function renderModule(module: AgentPromptModule): string {
  *
  * With no seed context and no skill modules, the result reproduces today's
  * effective monolith content (modulo section ordering and headers).
+ *
+ * `promptModuleOverrides` lets a caller replace a module's body (keyed by
+ * module id, `"core"` for {@link AGENT_PROMPT_CORE}) with operator-edited text
+ * for this run. An override value that is empty (or whitespace-only) after
+ * trimming suppresses that module entirely — it is dropped from both the
+ * prompt and `moduleIds`, as if it never seeded. A module with no entry in
+ * `promptModuleOverrides` uses its default body, so an empty overrides map
+ * reproduces today's output exactly.
  */
 export function composeAgentSystemPrompt(input: {
   context?: AgentPromptSeedContext;
   skillModules?: AgentPromptSkillModule[];
+  promptModuleOverrides?: Record<string, string>;
 } = {}): ComposedAgentPrompt {
   const context = input.context ?? {};
+  const overrides = input.promptModuleOverrides ?? {};
   const seeded = AGENT_PROMPT_MODULES.filter((module) => {
     if (context.previewOnlySkillActive && module.id === "booking-commands") return false;
     return module.seedWhen(context);
   });
   const skillModules = (input.skillModules ?? []).filter((module) => module.id && module.body.trim().length > 0);
 
-  const sections = [AGENT_PROMPT_CORE, ...seeded.map(renderModule)];
+  const sections: string[] = [];
+  const moduleIds: string[] = [];
+
+  const coreOverride = overrides[CORE_MODULE_ID];
+  if (coreOverride === undefined || coreOverride.trim().length > 0) {
+    sections.push(coreOverride !== undefined ? coreOverride : AGENT_PROMPT_CORE);
+    moduleIds.push(CORE_MODULE_ID);
+  }
+
+  for (const module of seeded) {
+    const override = overrides[module.id];
+    if (override !== undefined && override.trim().length === 0) continue;
+    sections.push(renderModule(module, override !== undefined ? override : module.body));
+    moduleIds.push(module.id);
+  }
+
   if (skillModules.length > 0) {
     const skillBlock = skillModules.map((module) => module.body.trim()).join("\n\n");
     sections.push(`RUNTIME SKILLS (attached for this turn only):\n${skillBlock}`);
@@ -233,7 +267,7 @@ export function composeAgentSystemPrompt(input: {
 
   return {
     prompt: sections.join("\n\n"),
-    moduleIds: [CORE_MODULE_ID, ...seeded.map((module) => module.id)],
+    moduleIds,
     skillIds: skillModules.map((module) => module.id),
   };
 }

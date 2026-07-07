@@ -120,6 +120,20 @@
     input = "";
     onClear?.();
   }
+
+  function approvalStatusLabel(status: AgentApprovalAffordance["status"] | undefined): string {
+    switch (status) {
+      case "blocked":
+        return "Needs input";
+      case "preview":
+        return "Preview ready";
+      case "approval_required":
+        return "Trusted approval";
+      case "draft":
+      default:
+        return "Draft preview";
+    }
+  }
 </script>
 
 <Conversation.Root class="bg-background text-foreground">
@@ -221,21 +235,24 @@
           <div
             class="rounded-2xl border border-primary/35 bg-primary/10 p-4 shadow-sm"
             data-chat-approval-card
-            data-command-id={approvalAffordance.commandId}
             data-status={approvalAffordance.status ?? "draft"}
           >
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div class="min-w-0 space-y-1">
                 <div class="flex flex-wrap items-center gap-2">
                   <p class="text-sm font-semibold text-foreground">{approvalAffordance.title}</p>
-                  <span class="rounded-full border border-primary/30 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-                    {approvalAffordance.commandId}
+                  <span class="rounded-full border border-primary/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
+                    {approvalStatusLabel(approvalAffordance.status)}
                   </span>
                 </div>
                 <p class="text-sm text-muted-foreground">{approvalAffordance.description}</p>
                 {#if approvalAffordance.artifactTitle}
                   <p class="text-xs text-muted-foreground">Active draft: {approvalAffordance.artifactTitle}</p>
                 {/if}
+                <details class="text-xs text-muted-foreground" data-approval-technical-details data-command-id={approvalAffordance.commandId}>
+                  <summary class="inline-flex cursor-pointer list-none rounded-full text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Technical command receipt</summary>
+                  <p class="mt-1 font-mono text-[11px] break-all">{approvalAffordance.commandId}</p>
+                </details>
                 {#if approvalAffordance.disabled && approvalAffordance.disabledReason}
                   <p class="text-xs font-medium text-destructive" data-approval-disabled-reason>{approvalAffordance.disabledReason}</p>
                 {/if}
