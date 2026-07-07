@@ -14,8 +14,8 @@
 const PAGE_CONTROL_SCHEMA_VERSION = "sonik.agent_ui.page_control.v1";
 const ASSERTIONS_SCHEMA_VERSION = "sonik.agent_ui.assertions.v1";
 
-// The 13 actions registered on `AgentUiPageControl["actions"]`. Keep this in
-// sync with packages/agent-observability/src/index.ts — the contract
+// The page-control actions registered on `AgentUiPageControl["actions"]`. Keep this
+// in sync with packages/agent-observability/src/index.ts — the contract
 // scenario asserts this exact set exists on the live page.
 const PAGE_CONTROL_ACTION_NAMES = [
   "createSession",
@@ -35,6 +35,7 @@ const PAGE_CONTROL_ACTION_NAMES = [
   "requestHostAction",
   "openCanvas",
   "highlightTarget",
+  "focusTarget",
   "requestApprovalPreview",
 ];
 
@@ -130,13 +131,13 @@ async function findAgentFrame(page, { attempts = 6, delayMs = 1500 } = {}) {
 /**
  * Wait until `window.__sonikAgentUI` is installed inside the iframe and
  * exposes the expected shape (schemaVersion + getPageContext/getAssertions +
- * all 13 actions as callables).
+ * the page-control action set as callables).
  */
 async function waitForPageControlReady(frame, { timeoutMs = 60_000 } = {}) {
   await frame.waitForFunction(
     (actionNames) => {
       const control = window.__sonikAgentUI;
-      if (!control || typeof control.getPageContext !== "function" || typeof control.getAssertions !== "function") return false;
+      if (!control || typeof control.getPageContext !== "function" || typeof control.getAssertions !== "function" || typeof control.getActions !== "function" || typeof control.getTargetRegistry !== "function" || typeof control.getActiveWorkflowState !== "function" || typeof control.getApprovalState !== "function") return false;
       return actionNames.every((name) => typeof control.actions?.[name] === "function");
     },
     PAGE_CONTROL_ACTION_NAMES,
@@ -163,6 +164,18 @@ function createPageControlClient(frame) {
     },
     async getActionNames() {
       return frame.evaluate(() => Object.keys(window.__sonikAgentUI.actions ?? {}).sort());
+    },
+    async getActions() {
+      return frame.evaluate(() => window.__sonikAgentUI.getActions());
+    },
+    async getTargetRegistry() {
+      return frame.evaluate(() => window.__sonikAgentUI.getTargetRegistry());
+    },
+    async getActiveWorkflowState() {
+      return frame.evaluate(() => window.__sonikAgentUI.getActiveWorkflowState());
+    },
+    async getApprovalState() {
+      return frame.evaluate(() => window.__sonikAgentUI.getApprovalState());
     },
     /** Call `window.__sonikAgentUI.actions[name](input)` and return its result verbatim. */
     async callAction(name, input) {
