@@ -557,7 +557,7 @@ function createGeneratedBookingRuntimeHeaders(authContext: BookingRuntimeAuthCon
   const token = safeSecretHeaderValue(authContext.token);
   if (token && authContext.mode === "bearer") headers.authorization = `Bearer ${token}`;
   if (token && authContext.mode === "service-token") headers["x-sonik-service-token"] = token;
-  const signedHostContextHeader = safeSecretHeaderValue(authContext.signedHostContextHeader);
+  const signedHostContextHeader = safeSignedEnvelopeHeaderValue(authContext.signedHostContextHeader);
   if (signedHostContextHeader && authContext.mode === "signed-host-context") {
     headers["x-sonik-agent-ui-host-context"] = signedHostContextHeader;
   }
@@ -591,6 +591,19 @@ function safeSecretHeaderValue(value: string | null | undefined): string | null 
   if (!value) return null;
   const trimmed = value.trim().replace(/[\r\n]/g, "");
   if (!trimmed || trimmed.length > 4096) return null;
+  return trimmed;
+}
+
+// The signed host-context envelope is a base64url JSON document (hostSession +
+// approvedCommandIds metadata + HMAC signature), not a bearer token — the
+// 4096-char secret cap silently downgraded the booking runtime to anonymous
+// once the envelope grew past it (113 approvedCommandIds ≈ 5.8k chars).
+export const SIGNED_HOST_CONTEXT_HEADER_MAX_CHARS = 16384;
+
+function safeSignedEnvelopeHeaderValue(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim().replace(/[\r\n]/g, "");
+  if (!trimmed || trimmed.length > SIGNED_HOST_CONTEXT_HEADER_MAX_CHARS) return null;
   return trimmed;
 }
 
@@ -744,7 +757,7 @@ export function createBookingRuntimeAuthContextFromTrustedHostHeader(input: {
   header: string | null | undefined;
   fallback?: BookingRuntimeAuthContext | null;
 }): BookingRuntimeAuthContext {
-  const signedHostContextHeader = safeSecretHeaderValue(input.header);
+  const signedHostContextHeader = safeSignedEnvelopeHeaderValue(input.header);
   if (!signedHostContextHeader) return resolveBookingRuntimeAuthContext(input.fallback);
   return {
     mode: "signed-host-context",
@@ -758,7 +771,7 @@ export function createBookingRuntimeAuthContextFromTrustedHostHeader(input: {
 export function hasBookingRuntimeCredential(authContext: BookingRuntimeAuthContext | null | undefined): boolean {
   if (!authContext) return false;
   const mode = normalizeBookingRuntimeAuthMode(authContext.mode) ?? "anonymous";
-  if (mode === "signed-host-context") return Boolean(safeSecretHeaderValue(authContext.signedHostContextHeader));
+  if (mode === "signed-host-context") return Boolean(safeSignedEnvelopeHeaderValue(authContext.signedHostContextHeader));
   if (mode !== "bearer" && mode !== "service-token") return false;
   return Boolean(safeSecretHeaderValue(authContext.token));
 }
@@ -779,7 +792,7 @@ function resolveBookingRuntimeAuthContext(input: BookingRuntimeAuthContext | nul
     mode,
     token: mode === "bearer" || mode === "service-token" ? token : null,
     includeCredentials: input.includeCredentials === true || mode === "cookie",
-    signedHostContextHeader: mode === "signed-host-context" ? safeSecretHeaderValue(input.signedHostContextHeader) : null,
+    signedHostContextHeader: mode === "signed-host-context" ? safeSignedEnvelopeHeaderValue(input.signedHostContextHeader) : null,
     source: input.source ?? "host",
   };
 }

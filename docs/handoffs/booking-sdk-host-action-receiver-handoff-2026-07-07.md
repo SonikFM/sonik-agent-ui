@@ -123,43 +123,43 @@ hostUiTargetRegistry: {
   surface: 'booking-context',
   targets: [
     {
-      targetId: 'booking.context.header',
+      targetId: 'booking.ui.contextHeader',
       label: 'Booking context header',
       description: 'Header for the active booking context.',
       surface: 'booking-context',
       entityRef: { kind: 'booking_context', id: contextId, label: contextName },
       capabilities: ['highlight', 'scroll', 'describe', 'open'],
-      locator: { kind: 'data-sonik-target', value: 'booking.context.header' },
+      locator: { kind: 'data-sonik-target', value: 'booking.ui.contextHeader' },
       policy: { actionMode: 'allow' },
     },
     {
-      targetId: 'booking.context.schedule',
+      targetId: 'booking.ui.schedulePanel',
       label: 'Booking schedule',
       description: 'Schedule and operating hours for the active booking context.',
       surface: 'booking-context',
       entityRef: { kind: 'booking_context', id: contextId, label: contextName },
       capabilities: ['highlight', 'scroll', 'focus', 'edit', 'describe'],
-      locator: { kind: 'data-sonik-target', value: 'booking.context.schedule' },
+      locator: { kind: 'data-sonik-target', value: 'booking.ui.schedulePanel' },
       policy: { actionMode: 'allow' },
     },
     {
-      targetId: 'booking.context.inventory',
+      targetId: 'booking.ui.inventoryPanel',
       label: 'Booking inventory',
       description: 'Tables, resources, slots, and capacity for the active booking context.',
       surface: 'booking-context',
       entityRef: { kind: 'booking_context', id: contextId, label: contextName },
       capabilities: ['highlight', 'scroll', 'focus', 'edit', 'describe'],
-      locator: { kind: 'data-sonik-target', value: 'booking.context.inventory' },
+      locator: { kind: 'data-sonik-target', value: 'booking.ui.inventoryPanel' },
       policy: { actionMode: 'allow' },
     },
     {
-      targetId: 'booking.command.approval-preview',
+      targetId: 'booking.ui.commandApprovalPanel',
       label: 'Booking command approval preview',
       description: 'Preview and approval region for command-backed booking writes.',
       surface: 'booking-context',
       entityRef: { kind: 'booking_context', id: contextId, label: contextName },
       capabilities: ['highlight', 'scroll', 'approve', 'describe'],
-      locator: { kind: 'data-sonik-target', value: 'booking.command.approval-preview' },
+      locator: { kind: 'data-sonik-target', value: 'booking.ui.commandApprovalPanel' },
       policy: { actionMode: 'ask', reason: 'Booking mutations require trusted host approval.' },
     },
   ],
@@ -171,19 +171,19 @@ hostUiTargetRegistry: {
 Examples:
 
 ```svelte
-<header data-sonik-target="booking.context.header" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
+<header data-sonik-target="booking.ui.contextHeader" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
   ...
 </header>
 
-<section data-sonik-target="booking.context.schedule" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
+<section data-sonik-target="booking.ui.schedulePanel" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
   ...
 </section>
 
-<section data-sonik-target="booking.context.inventory" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
+<section data-sonik-target="booking.ui.inventoryPanel" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
   ...
 </section>
 
-<section data-sonik-target="booking.command.approval-preview" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
+<section data-sonik-target="booking.ui.commandApprovalPanel" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
   ...
 </section>
 ```
@@ -239,7 +239,7 @@ Do **not** treat chat text or JSON-render button clicks as command approval. A J
 ```js
 await window.__sonikAgentUI.actions.requestHostAction({
   actionKey: 'tour.highlight',
-  targetId: 'booking.context.schedule',
+  targetId: 'booking.ui.schedulePanel',
   intentLabel: 'Highlight the schedule editor.'
 })
 ```

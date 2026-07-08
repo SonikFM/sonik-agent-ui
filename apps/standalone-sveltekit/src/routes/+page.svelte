@@ -42,7 +42,7 @@
     type ArtifactStatus,
   } from "$lib/artifacts/artifact-observability";
   import { CanvasViewport, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
-  import type { AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult } from "@sonik-agent-ui/agent-observability";
+  import type { AgentUiActionDescriptor, AgentUiActionRegistrySnapshot, AgentUiApprovalStateSnapshot, AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult, AgentUiTargetRegistrySnapshot, AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
   import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
     isAgentHostPageContextMessage,
@@ -1410,13 +1410,17 @@
     });
   }
 
-  function createPageContextSnapshot(): AgentUiPageContextSnapshot {
-    const workflow = createAgentWorkflowSnapshot({
+  function createLocalWorkflowSnapshot(): AgentUiWorkflowSnapshot {
+    return createAgentWorkflowSnapshot({
       activeArtifact,
       pendingChangeCount: pendingActiveArtifactStateChanges.length,
       isStreaming,
       approvalReadiness: getActiveIntakeApprovalReadiness(),
     });
+  }
+
+  function createPageContextSnapshot(): AgentUiPageContextSnapshot {
+    const workflow = createLocalWorkflowSnapshot();
     const workflowVisibleErrors = workflow.visibleErrors.map((error) => error.message);
     const localTargetRegistry = createLocalHostUiTargetRegistry();
     const localContext: AgentUiPageContextSnapshot = {
@@ -1494,6 +1498,166 @@
 
   function snapshotAssertions(): AgentUiPageAssertions {
     return $state.snapshot(pageAssertions) as AgentUiPageAssertions;
+  }
+
+  function snapshotTargetRegistry(): AgentUiTargetRegistrySnapshot | null {
+    const hostRegistry = hostPageContext?.hostUiTargetRegistry;
+    if (hostRegistry) return $state.snapshot(hostRegistry) as AgentUiTargetRegistrySnapshot;
+    return $state.snapshot(createLocalHostUiTargetRegistry()) as AgentUiTargetRegistrySnapshot;
+  }
+
+  function snapshotHostTargetRegistry(): AgentUiTargetRegistrySnapshot | null {
+    return hostPageContext?.hostUiTargetRegistry ? $state.snapshot(hostPageContext.hostUiTargetRegistry) as AgentUiTargetRegistrySnapshot : null;
+  }
+
+  function isAgentHostActionChannelAvailable(): boolean {
+    return typeof window !== "undefined" && isEmbeddedHostContextExpected() && window.parent !== window;
+  }
+
+  function snapshotActiveWorkflowState(): AgentUiWorkflowSnapshot {
+    return $state.snapshot(createLocalWorkflowSnapshot()) as AgentUiWorkflowSnapshot;
+  }
+
+  function snapshotApprovalState(): AgentUiApprovalStateSnapshot {
+    const workflow = snapshotActiveWorkflowState();
+    return {
+      schemaVersion: "sonik.agent_ui.approval_state.v1",
+      phase: workflow.phase,
+      activeArtifactId: workflow.activeArtifactId,
+      canRequestApproval: workflow.canRequestApproval,
+      canApproveAndRun: workflow.canApproveAndRun,
+      disabledReasons: [...workflow.disabledReasons],
+      commandPreview: workflow.commandPreview ?? null,
+    };
+  }
+
+
+  function createActionDescriptor(
+    name: string,
+    label: string,
+    options: Partial<Omit<AgentUiActionDescriptor, "name" | "label">> = {},
+  ): AgentUiActionDescriptor {
+    return {
+      name,
+      label,
+      kind: options.kind ?? "semantic",
+      enabled: options.enabled ?? true,
+      disabledReason: options.disabledReason,
+      effect: options.effect ?? "ui",
+      policyMode: options.policyMode ?? "allow",
+      actionKey: options.actionKey,
+      requiresTarget: options.requiresTarget,
+      targetId: options.targetId,
+    };
+  }
+
+  function snapshotActionRegistry(): AgentUiActionRegistrySnapshot {
+    const workflow = snapshotActiveWorkflowState();
+    const targetRegistry = snapshotHostTargetRegistry();
+    const hostActionsAvailable = isAgentHostActionChannelAvailable();
+    const hostTargetDisabledReason = !hostActionsAvailable
+      ? "host_action_parent_unavailable"
+      : targetRegistry
+        ? undefined
+        : "target_registry_unavailable";
+    const descriptors: AgentUiActionDescriptor[] = [
+      createActionDescriptor("createSession", "New chat", {
+        enabled: !isStreaming,
+        disabledReason: isStreaming ? "streaming" : undefined,
+      }),
+      createActionDescriptor("submitPrompt", "Send message", {
+        enabled: !isStreaming,
+        disabledReason: isStreaming ? "streaming" : undefined,
+      }),
+      createActionDescriptor("stop", "Stop response", {
+        enabled: isStreaming,
+        disabledReason: isStreaming ? undefined : "not_streaming",
+      }),
+      createActionDescriptor("clearChat", "Clear chat", {
+        enabled: !isStreaming,
+        disabledReason: isStreaming ? "streaming" : undefined,
+        policyMode: "ask",
+      }),
+      createActionDescriptor("clearArtifact", "Clear artifact", {
+        enabled: Boolean(activeArtifact) && !isStreaming,
+        disabledReason: activeArtifact ? (isStreaming ? "streaming" : undefined) : "missing_active_artifact",
+        policyMode: "ask",
+      }),
+      createActionDescriptor("reloadSession", "Reload session", {
+        enabled: Boolean(activeSessionId) && !isStreaming,
+        disabledReason: activeSessionId ? (isStreaming ? "streaming" : undefined) : "missing_session",
+        effect: "read",
+      }),
+      createActionDescriptor("openWorkspaceDocument", "Open workspace document", {
+        enabled: !isStreaming,
+        disabledReason: isStreaming ? "streaming" : undefined,
+      }),
+      createActionDescriptor("submitAnswer", "Submit question answer", {
+        enabled: workflow.canSubmitAnswer,
+        disabledReason: workflow.canSubmitAnswer ? undefined : workflow.disabledReasons[0] ?? "question_not_ready",
+      }),
+      createActionDescriptor("markUnknown", "Mark question unknown", {
+        enabled: workflow.canSubmitAnswer,
+        disabledReason: workflow.canSubmitAnswer ? undefined : workflow.disabledReasons[0] ?? "question_not_ready",
+      }),
+      createActionDescriptor("saveDraft", "Save draft", {
+        enabled: Boolean(activeArtifact) && !isStreaming,
+        disabledReason: activeArtifact ? (isStreaming ? "streaming" : undefined) : "missing_active_artifact",
+      }),
+      createActionDescriptor("requestApproval", "Request approval preview", {
+        enabled: workflow.canRequestApproval,
+        disabledReason: workflow.canRequestApproval ? undefined : workflow.disabledReasons[0] ?? "approval_not_ready",
+        effect: "write",
+        policyMode: "ask",
+      }),
+      createActionDescriptor("approveAndRun", "Approve and run trusted action", {
+        enabled: workflow.canApproveAndRun,
+        disabledReason: workflow.canApproveAndRun ? undefined : workflow.disabledReasons[0] ?? "approval_not_ready",
+        effect: "write",
+        policyMode: "require",
+      }),
+      createActionDescriptor("cancelApproval", "Cancel approval", {
+        enabled: Boolean(activeArtifact) && !isStreaming,
+        disabledReason: activeArtifact ? (isStreaming ? "streaming" : undefined) : "missing_active_artifact",
+      }),
+      createActionDescriptor("requestHostAction", "Request host action", {
+        kind: "host_action",
+        effect: "environment",
+        policyMode: "ask",
+        enabled: hostActionsAvailable,
+        disabledReason: hostActionsAvailable ? undefined : "host_action_parent_unavailable",
+      }),
+      createActionDescriptor("openCanvas", "Open canvas", {
+        kind: "host_action",
+        actionKey: "canvas.open",
+        enabled: hostActionsAvailable,
+        disabledReason: hostActionsAvailable ? undefined : "host_action_parent_unavailable",
+      }),
+      createActionDescriptor("highlightTarget", "Highlight host target", {
+        kind: "host_action",
+        actionKey: "tour.highlight",
+        requiresTarget: true,
+        enabled: hostActionsAvailable && Boolean(targetRegistry),
+        disabledReason: hostTargetDisabledReason,
+      }),
+      createActionDescriptor("focusTarget", "Focus host target", {
+        kind: "host_action",
+        actionKey: "tour.focusTarget",
+        requiresTarget: true,
+        enabled: hostActionsAvailable && Boolean(targetRegistry),
+        disabledReason: hostTargetDisabledReason,
+      }),
+      createActionDescriptor("requestApprovalPreview", "Preview trusted approval", {
+        kind: "host_action",
+        actionKey: "approval.requestPreview",
+        effect: "write",
+        policyMode: "ask",
+        enabled: hostActionsAvailable && workflow.canRequestApproval,
+        disabledReason: !hostActionsAvailable ? "host_action_parent_unavailable" : workflow.canRequestApproval ? undefined : workflow.disabledReasons[0] ?? "approval_not_ready",
+        targetId: "artifact.approval-card",
+      }),
+    ];
+    return { schemaVersion: "sonik.agent_ui.actions.v1", actions: descriptors };
   }
 
   function semanticActionResult(ok: boolean, message?: string, disabledReason?: string, extras: Partial<AgentUiSemanticActionResult> = {}): AgentUiSemanticActionResult {
@@ -1637,6 +1801,10 @@
       schemaVersion: "sonik.agent_ui.page_control.v1",
       getPageContext: snapshotPageContext,
       getAssertions: snapshotAssertions,
+      getActions: snapshotActionRegistry,
+      getTargetRegistry: snapshotTargetRegistry,
+      getActiveWorkflowState: snapshotActiveWorkflowState,
+      getApprovalState: snapshotApprovalState,
       actions: {
         createSession: async () => {
           if (isStreaming) return semanticActionResult(false, "Stop the current stream before creating a new session.", "streaming");
@@ -1722,6 +1890,9 @@
         },
         highlightTarget: async ({ targetId, targetInstanceId, entityRef }) => {
           return runPageControlHostAction({ actionKey: "tour.highlight", targetId, targetInstanceId, entityRef, intentLabel: "Highlight a semantic host UI target." });
+        },
+        focusTarget: async ({ targetId, targetInstanceId, entityRef }) => {
+          return runPageControlHostAction({ actionKey: "tour.focusTarget", targetId, targetInstanceId, entityRef, intentLabel: "Focus a semantic host UI target." });
         },
         requestApprovalPreview: async (input = {}) => {
           return runPageControlHostAction({ actionKey: "approval.requestPreview", targetId: input.targetId, targetInstanceId: input.targetInstanceId, entityRef: input.entityRef, intentLabel: "Request approval preview for a command-backed action." });
@@ -1903,11 +2074,9 @@
       logSessionTelemetry("session.bootstrap.superseded", { sessionId: activeSessionId, reason });
       return;
     }
-    if (isEmbeddedHostContextExpected()) {
-      logSessionTelemetry("session.bootstrap.embedded_fresh_session", { reason, mode: "embedded_new_chat" });
-      await createSession({ force: true });
-      return;
-    }
+    // Embedded no longer forces a fresh session per mount — reopening the
+    // widget resumed nothing, so every open/close lost the user's chat.
+    // Embedded and standalone both resume the most recent session.
     const firstSession = sessions[0];
     if (firstSession) {
       await switchSession(firstSession.id, { force: true });
@@ -3254,6 +3423,9 @@
   {#snippet chat()}
     <AgentConversation
       title="Sonik Chat"
+      sessionOptions={isEmbeddedHostContextExpected() ? sessions.map((session) => ({ id: session.id, title: session.name })) : undefined}
+      {activeSessionId}
+      onSessionSwitch={(sessionId) => void switchSession(sessionId)}
       messages={conversation.messages as AgentChatMessage[]}
       status={conversation.status}
       error={conversation.error}

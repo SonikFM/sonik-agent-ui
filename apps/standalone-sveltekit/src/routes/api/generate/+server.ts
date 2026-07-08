@@ -426,10 +426,15 @@ export const POST: RequestHandler = async (event) => {
   const pageContextSource = resolvePageContextSource(body, activeDocument);
   const bookingServiceBaseUrl = env.SONIK_BOOKING_API_BASE_URL ?? env.BOOKING_SERVICE_BASE_URL ?? null;
   const bookingRuntimeFetcher = createServiceBindingFetcher(event.platform?.env?.BOOKING_SERVICE);
+  const rawHostContextHeaderLength = request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER)?.length ?? 0;
   const bookingRuntimeAuth = createBookingRuntimeAuthContextFromTrustedHostHeader({
     header: request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER),
     fallback: createBookingRuntimeAuthContextFromEnv(env),
   });
+  // A present-but-rejected signed host-context header (oversized/malformed)
+  // silently downgrades the booking runtime to anonymous — that failure must
+  // be loud in telemetry, not discovered via runtime_unavailable denials.
+  const hostContextHeaderRejected = rawHostContextHeaderLength > 0 && bookingRuntimeAuth.mode !== "signed-host-context";
   const hostSession = createAgentHostSessionEnvelope(event);
   const approvedCommandIds = approvedCommandIdsFromHostSession(hostSession);
   // Analytics-only run hints (entryFrom / turnIndex / isFirstRun /
@@ -522,6 +527,8 @@ export const POST: RequestHandler = async (event) => {
     payload: {
       bookingRuntimeAuthMode: bookingRuntimeAuth.mode,
       bookingRuntimeCredentialed: hasBookingRuntimeCredential(bookingRuntimeAuth),
+      hostContextHeaderLength: rawHostContextHeaderLength,
+      hostContextHeaderRejected,
       hostSessionSource: hostSession?.source ?? null,
       approvedCommandCount: approvedCommandIds.length,
       // Analytics-only run hints, stamped onto the run telemetry / Pipe-B so a
@@ -531,6 +538,19 @@ export const POST: RequestHandler = async (event) => {
     },
     ok: true,
   }).catch(() => undefined);
+  if (hostContextHeaderRejected) {
+    void writeAgentTelemetry({
+      source: "server",
+      event: "api.generate.host_context_header_rejected",
+      requestId,
+      traceId,
+      traceparent,
+      sessionId: telemetrySessionId,
+      payload: { headerLength: rawHostContextHeaderLength, fallbackAuthMode: bookingRuntimeAuth.mode },
+      ok: false,
+      reason: "signed_host_context_header_present_but_rejected",
+    }).catch(() => undefined);
+  }
   void writeAgentTelemetry({
     source: "server",
     event: "api.generate.skill_index_context",

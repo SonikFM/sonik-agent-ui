@@ -63,7 +63,7 @@ const registry = createDefaultHostUiTargetRegistry({
 });
 const sanitized = sanitizeAgentHostPageContext({ surface: "booking-context", hostUiTargetRegistry: registry });
 assert.equal(sanitized?.hostUiTargetRegistry?.provider, "test-host", "embed sanitizer should preserve a valid host target registry");
-assert.equal(sanitized?.hostUiTargetRegistry?.targets.some((target) => target.targetId === "booking.context.schedule"), true, "target registry should retain semantic booking targets");
+assert.equal(sanitized?.hostUiTargetRegistry?.targets.some((target) => target.targetId === "booking.ui.schedulePanel"), true, "target registry should retain semantic booking targets");
 
 
 const unsafeRegistry = {
@@ -89,7 +89,7 @@ assert.equal(unsafeSanitized?.hostUiTargetRegistry?.targets[0].policy.reason, "[
 assert.deepEqual(unsafeSanitized?.hostUiTargets?.[0].metadata, {}, "standalone hostUiTargets metadata should also be stripped");
 
 const invalidRawTarget = {
-  targetId: "booking.context.private-invalid",
+  targetId: "booking.ui.privateInvalid",
   label: "Private invalid target",
   description: "This target should never leak through generic context sanitization",
   surface: "booking-context",
@@ -207,7 +207,7 @@ assert.equal(mountedDefault.iframe.contentWindow.messages.at(-1).message.ok, tru
 mountedDefault.window.dispatchMessage({
   origin: "https://agent.sonik.local",
   source: mountedDefault.iframe.contentWindow,
-  data: { source: "sonik-agent-ui", type: "sonik:agent-ui:action-request", version: "sonik.agent_ui.host_action.v1", requestId: "req-host-highlight", actionKey: "tour.highlight", targetId: "booking.context.schedule", requiresReceipt: true },
+  data: { source: "sonik-agent-ui", type: "sonik:agent-ui:action-request", version: "sonik.agent_ui.host_action.v1", requestId: "req-host-highlight", actionKey: "tour.highlight", targetId: "booking.ui.schedulePanel", requiresReceipt: true },
 });
 await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 assert.equal(mountedDefault.iframe.contentWindow.messages.at(-1).message.disabledReason, "host_action_handler_not_registered", "default SDK handler must not pretend tour/highlight executed without a host adapter");
@@ -237,7 +237,7 @@ const mountedTargetsOnly = createMountedHost({
 mountedTargetsOnly.window.dispatchMessage({
   origin: "https://agent.sonik.local",
   source: mountedTargetsOnly.iframe.contentWindow,
-  data: { source: "sonik-agent-ui", type: "sonik:agent-ui:action-request", version: "sonik.agent_ui.host_action.v1", requestId: "req-host-targets-only", actionKey: "tour.highlight", targetId: "booking.context.schedule", requiresReceipt: true },
+  data: { source: "sonik-agent-ui", type: "sonik:agent-ui:action-request", version: "sonik.agent_ui.host_action.v1", requestId: "req-host-targets-only", actionKey: "tour.highlight", targetId: "booking.ui.schedulePanel", requiresReceipt: true },
 });
 await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 assert.equal(mountedTargetsOnly.iframe.contentWindow.messages.at(-1).message.disabledReason, "host_action_handler_not_registered", "host SDK should synthesize an action registry from sanitized hostUiTargets when no envelope is provided");
