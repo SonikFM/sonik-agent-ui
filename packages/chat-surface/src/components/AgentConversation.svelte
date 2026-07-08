@@ -234,7 +234,7 @@
                       <span class="mt-1 block text-xs leading-5 text-muted-foreground">{suggestion.description}</span>
                     {/if}
                   </span>
-                  <span class="rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <span class="rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
                     {suggestion.readinessLabel ?? (suggestion.readiness === "needs_context" ? "Context" : suggestion.readiness === "approval_required" ? "Approval" : suggestion.readiness === "draft_only" ? "Draft" : "Ready")}
                   </span>
                 </span>
