@@ -65,7 +65,7 @@
   let lastDraftArtifactKey = $state("");
 
   const title = $derived(
-    artifact?.title ?? (documentAvailable ? (documentTitle ?? "Document workspace") : "Artifact workspace"),
+    artifact?.title ?? (documentAvailable ? (documentTitle ?? "Document") : "Canvas"),
   );
   const subtitle = $derived.by(() => {
     if (artifact) return `${artifact.kind} · v${artifact.version}`;
@@ -110,9 +110,13 @@
 <section
   class="canvas-viewport"
   class:canvas-viewport--fullscreen={isFullscreen}
+<<<<<<< HEAD
   class:canvas-viewport--floating={isFloating}
   style={isFloating ? windowController.style : undefined}
   aria-label="Artifact canvas viewport"
+=======
+  aria-label="Canvas viewport"
+>>>>>>> origin/main
 >
   <CanvasToolbar
     {title}
@@ -206,7 +210,7 @@
         {:else}
           <div class="canvas-viewport__empty-card">
             <p class="canvas-viewport__empty-title">Canvas viewport ready</p>
-            <p>Ask the agent to create a canvas artifact. Temporary JSON-render responses can still stay inline in chat.</p>
+            <p>Ask the agent to build something on the Canvas. Temporary responses can still stay inline in chat.</p>
           </div>
         {/if}
       </div>

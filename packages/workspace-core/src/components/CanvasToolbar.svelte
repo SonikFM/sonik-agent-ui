@@ -77,7 +77,7 @@
 >
   <div class="canvas-toolbar__title">
     <div class="canvas-toolbar__eyebrow-row">
-      <span class="canvas-toolbar__eyebrow">Artifact Canvas</span>
+      <span class="canvas-toolbar__eyebrow">Canvas</span>
       {#if loading}
         <span class="canvas-toolbar__streaming animate-shimmer">Streaming</span>
       {/if}
