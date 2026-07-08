@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 const [
   intakeModule,
@@ -113,5 +114,32 @@ for (const element of Object.values(created.content.elements)) {
   const pointerKey = boundPointer.slice("/draftAnswers/".length);
   assert.ok(pointerKey in created.content.state.draftAnswers, "bound pointer must resolve into initialized draftAnswers state");
 }
+
+// Telemetry regression guard (incident review 2026-07-07): a QuestionCard
+// submit/skip click did a local optimistic update but only recorded
+// telemetry on validation errors, so a click whose downstream persist never
+// fired or failed was indistinguishable from success on the wire. Source-pin
+// both the click-time "attempt" telemetry and the PATCH-outcome telemetry so
+// removing either fails this test.
+const questionCardSource = readFileSync("apps/standalone-sveltekit/src/lib/render/components/QuestionCard.svelte", "utf8");
+assert.match(
+  questionCardSource,
+  /function submit\(skipped = false\) \{\s*emitQuestionSubmitAttemptTelemetry\(\{ questionId: safeProps\.questionId, skipped \}\);/,
+  "QuestionCard submit() must emit a submit_attempt telemetry event unconditionally at click time, before any downstream persist can fail silently",
+);
+
+const propSafetySource = readFileSync("apps/standalone-sveltekit/src/lib/render/component-prop-safety.ts", "utf8");
+assert.match(
+  propSafetySource,
+  /export function emitQuestionSubmitAttemptTelemetry[\s\S]*?event: "artifact\.question\.submit_attempt"/,
+  "component-prop-safety.ts must define the submit_attempt telemetry emitter used by QuestionCard",
+);
+
+const pageSourceForTelemetry = readFileSync("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
+assert.match(
+  pageSourceForTelemetry,
+  /event: "artifact\.question\.persist_outcome"/,
+  "handleJsonRenderAction's submitAnswer branch must emit a persist_outcome telemetry event so a dead or failed persist is loud",
+);
 
 console.log("question-answer loop tests passed");

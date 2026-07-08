@@ -139,6 +139,21 @@ export function formatQuestionSubmitError(error: unknown): { message: string; te
   return { message: message || "Answer could not be saved.", telemetry: null };
 }
 
+// Incident review 2026-07-07: QuestionCard.submit() did a local optimistic
+// update and emitted the submitAnswer action, but recorded telemetry only in
+// the validation-error catch path. A click whose downstream persist never
+// fired (or failed) was indistinguishable from success. This fires
+// unconditionally at click time, before anything downstream can go silent.
+export function emitQuestionSubmitAttemptTelemetry(input: { questionId: string; skipped: boolean }): void {
+  logArtifactTelemetry({
+    source: "client",
+    event: "artifact.question.submit_attempt",
+    reason: input.questionId,
+    mode: input.skipped ? "skip" : "submit",
+    ok: true,
+  });
+}
+
 export function emitComponentPropValidationTelemetry(event: ComponentPropValidationTelemetry | null): void {
   if (!event) return;
   if (typeof window !== "undefined") {
