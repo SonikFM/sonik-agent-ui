@@ -477,30 +477,38 @@
     for (const message of messages) {
       if (!message || message.role !== "assistant") continue;
       for (const part of snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string }>) {
-        if (!part.type?.startsWith("tool-") || part.state !== "output-error") continue;
+        if (!part.type?.startsWith("tool-") || (part.state !== "output-error" && part.state !== "output-denied")) continue;
         keys.push(`${message.id}:${part.toolCallId ?? part.type}`);
       }
     }
     return keys;
   }
 
+  // Slice C (R2): a tool error is only reported once it has a final verdict --
+  // "recovered" (a later call for the same tool succeeded in this turn) or
+  // "terminal" (the turn ended and it never recovered). While the turn is
+  // still streaming and unrecovered, we wait rather than report a failure
+  // the UI is still presenting as a neutral retry.
   $effect(() => {
     for (const message of conversation.messages) {
       if (!message || message.role !== "assistant") continue;
-      for (const part of snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string; errorText?: string }>) {
-        if (!part.type?.startsWith("tool-") || part.state !== "output-error") continue;
+      const parts = snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string; errorText?: string }>;
+      parts.forEach((part, index) => {
+        if (!part.type?.startsWith("tool-") || (part.state !== "output-error" && part.state !== "output-denied")) return;
         const key = `${message.id}:${part.toolCallId ?? part.type}`;
-        if (reportedToolErrorKeys.has(key)) continue;
+        if (reportedToolErrorKeys.has(key)) return;
+        const recovered = parts.slice(index + 1).some((later) => later.type === part.type && later.state === "output-available");
+        if (!recovered && isStreaming) return;
         reportedToolErrorKeys.add(key);
         logArtifactTelemetry({
           source: "client",
-          event: "chat.tool.output_error",
+          event: recovered ? "tool.failure.recovered" : "tool.failure.terminal",
           messageId: message.id,
           reason: part.type.replace(/^tool-/, ""),
           error: part.errorText,
-          ok: false,
+          ok: recovered,
         });
-      }
+      });
     }
   });
 
@@ -1116,8 +1124,11 @@
     const latestTool = [...parts].reverse().find((part) => part.type?.startsWith("tool-")) as (DataPart & { state?: string }) | undefined;
 
     if (latestTool?.state === "output-error" || latestTool?.state === "output-denied") {
-      const activity = resolveToolActivity(latestTool.type, latestTool.state);
-      return { label: activity.label, detail: "Checking recovery path…", tone: "error" };
+      // Slice C: this branch only runs while isStreaming is true (guarded above),
+      // so the turn hasn't ended yet -- present the neutral retry copy, not the
+      // tool's scary error label.
+      const activity = resolveToolActivity(latestTool.type, latestTool.state, {}, { isTurnStreaming: true });
+      return { label: activity.label, detail: "Checking recovery path…", tone: "tool" };
     }
     if (latestTool && latestTool.state !== "output-available") {
       const activity = resolveToolActivity(latestTool.type, latestTool.state);

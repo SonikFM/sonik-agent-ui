@@ -37,6 +37,19 @@ export interface ToolActivityLabelOverride {
 
 export type ToolActivityLabelOverrides = Record<string, ToolActivityLabelOverride>;
 
+export interface ToolActivityOptions {
+  /** True while the turn that produced this tool call is still streaming. */
+  isTurnStreaming?: boolean;
+  /** True when a later tool call of the same name in this turn succeeded. */
+  recovered?: boolean;
+}
+
+// Slice C (R2): a tool call in an error state during an active turn is
+// presented as a neutral retry, not a scary failure -- it "asked", it
+// didn't "fail" (Dan's framing). Same copy regardless of tool; the
+// technical receipt (state, error text) stays available in the details.
+export const TOOL_ACTIVITY_RECOVERING_LABEL = "Retrying…";
+
 const FALLBACK_ACTIVITY: Omit<ToolActivityDescriptor, "technicalLabel"> = {
   pending: "Working",
   done: "Finished step",
@@ -219,6 +232,7 @@ export function resolveToolActivity(
   toolNameOrPartType: string,
   state: string | null | undefined,
   labelOverrides: ToolActivityLabelOverrides = {},
+  options: ToolActivityOptions = {},
 ): ToolActivityPresentation {
   const toolName = normalizeToolName(toolNameOrPartType);
   const registryDescriptor = TOOL_ACTIVITY_REGISTRY[toolName] ?? FALLBACK_ACTIVITY;
@@ -230,8 +244,20 @@ export function resolveToolActivity(
     error: override?.error ?? registryDescriptor.error,
     technicalLabel: toolName,
   };
-  const isError = isToolActivityError(state);
-  const isLoading = isToolActivityLoading(state);
-  const label = isError ? descriptor.error : isLoading ? descriptor.pending : descriptor.done;
+  const rawError = isToolActivityError(state);
+  const rawLoading = isToolActivityLoading(state);
+  // Slice C: an error is only a user-facing failure once the turn has ended
+  // without recovering. While the turn is still streaming, or once a later
+  // call for the same tool succeeded, present it as a neutral retry instead.
+  const isRecovering = rawError && (options.isTurnStreaming === true || options.recovered === true);
+  const isError = rawError && !isRecovering;
+  const isLoading = rawLoading || isRecovering;
+  const label = isError
+    ? descriptor.error
+    : isRecovering
+      ? TOOL_ACTIVITY_RECOVERING_LABEL
+      : rawLoading
+        ? descriptor.pending
+        : descriptor.done;
   return { ...descriptor, label, isLoading, isError };
 }

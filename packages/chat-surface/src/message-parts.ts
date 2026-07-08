@@ -12,6 +12,8 @@ export interface ToolInfo {
   state: string;
   output?: unknown;
   errorText?: string;
+  /** True when a later tool call of the same name in this message succeeded. */
+  recovered?: boolean;
 }
 
 export type ChatSegment =
@@ -49,6 +51,10 @@ export function hasSpec(parts: DataPart[]): boolean {
 export function getSegments(parts: DataPart[]): ChatSegmentsResult {
   const segments: ChatSegment[] = [];
   let specInserted = false;
+  // Flat, message-order list of every tool call, kept alongside the segments
+  // so a failed call can look ahead (across text/spec segments too) for a
+  // later same-named call that succeeded -- Slice C's "recovered" signal.
+  const allTools: ToolInfo[] = [];
 
   for (const part of parts) {
     if (part.type === "text" && part.text) {
@@ -81,10 +87,18 @@ export function getSegments(parts: DataPart[]): ChatSegmentsResult {
       } else {
         segments.push({ kind: "tools", tools: [toolInfo] });
       }
+      allTools.push(toolInfo);
     } else if (part.type === SPEC_DATA_PART_TYPE && !specInserted) {
       segments.push({ kind: "spec" });
       specInserted = true;
     }
+  }
+
+  for (const [i, tool] of allTools.entries()) {
+    if (tool.state !== "output-error" && tool.state !== "output-denied") continue;
+    tool.recovered = allTools
+      .slice(i + 1)
+      .some((later) => later.toolName === tool.toolName && later.state === "output-available");
   }
 
   return { segments, specInserted };

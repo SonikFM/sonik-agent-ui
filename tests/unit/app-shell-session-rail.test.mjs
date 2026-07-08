@@ -238,7 +238,8 @@ assert.equal(workspaceHostSource.includes("current_content: doc.current_content 
 assert.equal(agentMessageSource.includes("chat-bubble"), false, "chat message display should not use Daisy chat-bubble wrappers that add bubble tails");
 assert.equal(agentMessageSource.includes("MessagePrimitive"), false, "chat message display should not use Daisy chat primitives for flat Claude-style rows");
 assert.equal(agentMessageSource.includes("<ChatText"), true, "chat messages should render text through the safe rich-text renderer");
-assert.equal(agentMessageSource.includes("streaming={isLast && isStreaming}"), true, "assistant messages should pass streaming state into chat text rendering");
+assert.equal(agentMessageSource.includes("isTurnStreaming = isLast && isStreaming"), true, "assistant messages should derive a single turn-streaming flag from isLast/isStreaming");
+assert.equal(agentMessageSource.includes("streaming={isTurnStreaming}"), true, "assistant messages should pass streaming state into chat text rendering");
 assert.equal(agentMessageSource.includes("white-space: pre-wrap"), true, "user-authored chat text should preserve multiline prompt fidelity");
 assert.equal(agentMessageSource.includes("function snapshotDataParts"), false, "chat messages should import the shared data-part snapshot helper instead of duplicating clone logic");
 assert.equal(chatMessagePartsSource.includes("export function snapshotDataParts"), true, "chat surface should own a reusable data-part snapshot helper");

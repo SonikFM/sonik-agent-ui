@@ -191,6 +191,14 @@ function createDevSmokeArtifactInputStream(): ReadableStream<UIMessageChunk> {
 // (recoverable-looking failure), so the client renders today's immediate
 // error presentation for a mid-turn tool failure. Mirrors the real
 // "Canvas creation failed" case from the 2026-07-08 transcript.
+//
+// The stream stays open for DEV_SMOKE_TOOL_FAILURE_STREAM_HOLD_MS after the
+// error chunk lands so the E2E lane (Slice C) has an observable window where
+// the part is `output-error` but the turn is still streaming -- without the
+// hold, the HTTP response finishes in the same tick as the error and the
+// client never sees the "still streaming" state, only the terminal one.
+const DEV_SMOKE_TOOL_FAILURE_STREAM_HOLD_MS = 2_000;
+
 function createDevSmokeToolFailureStream(): ReadableStream<UIMessageChunk> {
   const toolCallId = "smoke-tool-failure-1";
   return createUIMessageStream({
@@ -203,6 +211,7 @@ function createDevSmokeToolFailureStream(): ReadableStream<UIMessageChunk> {
       writer.write({ type: "tool-input-available", toolCallId, toolName: "createJsonArtifact", input: DEV_SMOKE_ARTIFACT_INPUT });
       await sleep(50);
       writer.write({ type: "tool-output-error", toolCallId, errorText: "dev smoke injected tool failure" });
+      await sleep(DEV_SMOKE_TOOL_FAILURE_STREAM_HOLD_MS);
     },
     onError: (error) => error instanceof Error ? error.message : String(error),
   });
