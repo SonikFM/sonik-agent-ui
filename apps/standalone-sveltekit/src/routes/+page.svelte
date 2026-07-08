@@ -3524,6 +3524,7 @@
       showDeveloperPanels={showCanvasDeveloperPanels}
       documentTitle={documentFrameTitle}
       documentSubtitle={documentFrameSubtitle}
+      windowControlsEnabled={!isEmbeddedHostContextExpected()}
     >
       {#snippet document()}
         <WorkspaceDocumentFrame
