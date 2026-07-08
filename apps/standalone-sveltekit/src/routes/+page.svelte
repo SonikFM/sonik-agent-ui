@@ -2764,6 +2764,19 @@
     try {
       if (actionName === "submitAnswer") {
         const ok = await handleSubmitAnswerAction(params ?? {});
+        // Incident review 2026-07-07: the PATCH outcome for a question answer
+        // must be loud in both directions, not just on validation errors, or
+        // a dead/failed persist looks identical to success on the wire.
+        logArtifactTelemetry({
+          source: "client",
+          event: "artifact.question.persist_outcome",
+          sessionId: activeSessionId ?? undefined,
+          artifactId: activeArtifact?.id,
+          artifactVersion: activeArtifact?.version,
+          reason: typeof params?.questionId === "string" ? params.questionId : actionName,
+          ok,
+          error: ok ? undefined : "Answer could not be saved. Retry this question before continuing.",
+        });
         recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
           actionName,
           ok,
