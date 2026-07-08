@@ -325,8 +325,8 @@
     })),
   );
   const activeArtifactVersionNumber = $derived(activeArtifact?.version ?? null);
-  const initialWorkspaceDocumentContent = "# Workspace Document\n\nThis is the isolated workspace document editor running as a document island. Use the language selector to switch Markdown, HTML, JSON, CSV, code, and preview modes.";
-  const documentFrameTitle = $derived(documentSeed?.title ?? "Workspace Document");
+  const initialWorkspaceDocumentContent = "# Document\n\nThis is the isolated workspace document editor running as a document island. Use the language selector to switch Markdown, HTML, JSON, CSV, code, and preview modes.";
+  const documentFrameTitle = $derived(documentSeed?.title ?? "Document");
   const documentFrameLanguage = $derived(documentSeed?.language ?? "markdown");
   const documentFrameContent = $derived(documentSeed?.current_content ?? initialWorkspaceDocumentContent);
   const documentFrameId = $derived(documentSeed?.id);
@@ -3496,7 +3496,7 @@
         <button
           type="button"
           onclick={openDocumentEditor}
-          class="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           aria-label="Open workspace documents"
         >
           Documents

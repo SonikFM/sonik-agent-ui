@@ -16,7 +16,7 @@
   <div class="flex items-center justify-between border-b border-border px-3 py-2">
     <div class="min-w-0">
       <p class="truncate text-sm font-medium">
-        {artifact?.title ?? "Artifact workspace"}
+        {artifact?.title ?? "Canvas"}
       </p>
       {#if artifact}
         <p class="text-xs text-muted-foreground">
