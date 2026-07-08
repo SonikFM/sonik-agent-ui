@@ -16,6 +16,12 @@
     onArtifactVersionChange?: (version: number) => void;
     onClear?: () => void;
     showDeveloperPanels?: boolean;
+    /** Wired to the floating canvas window controller; omit to keep the toolbar static (e.g. embedded host contexts). */
+    onDragPointerDown?: (event: PointerEvent) => void;
+    onDragPointerMove?: (event: PointerEvent) => void;
+    onDragPointerUp?: (event: PointerEvent) => void;
+    onDragKeyDown?: (event: KeyboardEvent) => void;
+    onResetLayout?: () => void;
   }
 </script>
 
@@ -35,6 +41,11 @@
     onArtifactVersionChange,
     onClear,
     showDeveloperPanels = true,
+    onDragPointerDown,
+    onDragPointerMove,
+    onDragPointerUp,
+    onDragKeyDown,
+    onResetLayout,
   }: CanvasToolbarProps = $props();
 
   const allPanelButtons: Array<{ id: CanvasPanel; label: string; developer?: boolean }> = [
@@ -53,12 +64,34 @@
   }
 </script>
 
-<header class="canvas-toolbar">
+<header
+  class="canvas-toolbar"
+  class:canvas-toolbar--draggable={Boolean(onDragPointerDown)}
+  role={onDragPointerDown ? "group" : undefined}
+  aria-label={onDragPointerDown ? "Canvas window title bar. Drag to move." : undefined}
+  onpointerdown={onDragPointerDown}
+  onpointermove={onDragPointerMove}
+  onpointerup={onDragPointerUp}
+  onpointercancel={onDragPointerUp}
+  ondblclick={onResetLayout}
+>
   <div class="canvas-toolbar__title">
     <div class="canvas-toolbar__eyebrow-row">
       <span class="canvas-toolbar__eyebrow">Canvas</span>
       {#if loading}
         <span class="canvas-toolbar__streaming animate-shimmer">Streaming</span>
+      {/if}
+      {#if onDragKeyDown}
+        <!-- Keyboard alternative to pointer-drag: a real focusable button so arrow-key
+             nudge works without making the whole (button-containing) header focusable. -->
+        <button
+          type="button"
+          class="canvas-toolbar__move-handle"
+          onkeydown={onDragKeyDown}
+          aria-label="Move canvas window. Focus this control, then use arrow keys to reposition it. Double-click the title bar or use Reset layout to restore the default position."
+        >
+          Move
+        </button>
       {/if}
     </div>
     <p class="canvas-toolbar__heading">{title}</p>
@@ -95,6 +128,17 @@
       {/each}
     </div>
 
+    {#if onResetLayout}
+      <button
+        type="button"
+        class="canvas-toolbar__button"
+        onclick={onResetLayout}
+        aria-label="Reset the canvas window to its default position and size"
+      >
+        Reset layout
+      </button>
+    {/if}
+
     <button
       type="button"
       disabled={!hasArtifact && !documentAvailable}
@@ -120,18 +164,40 @@
 <style>
   .canvas-toolbar {
     display: flex;
+    flex-wrap: wrap;
     min-height: 3.25rem;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: 0.5rem 0.75rem;
     border-bottom: 1px solid var(--sonik-border-color);
     background: color-mix(in oklab, var(--card) 95%, transparent);
     padding: 0.5rem 0.75rem;
     backdrop-filter: blur(10px);
   }
 
+  .canvas-toolbar--draggable {
+    cursor: move;
+    touch-action: none;
+  }
+
+  .canvas-toolbar__move-handle {
+    border: 1px dashed var(--sonik-border-color);
+    border-radius: 0.375rem;
+    background: transparent;
+    padding: 0.125rem 0.5rem;
+    color: var(--muted-foreground);
+    font-size: 0.6875rem;
+    cursor: move;
+  }
+
+  .canvas-toolbar__move-handle:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+
   .canvas-toolbar__title {
-    min-width: 0;
+    min-width: 10rem;
+    flex: 1 1 12rem;
   }
 
   .canvas-toolbar__eyebrow-row {
@@ -176,7 +242,8 @@
 
   .canvas-toolbar__actions {
     display: flex;
-    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: 0.25rem;
   }
@@ -213,6 +280,7 @@
     padding: 0.375rem 0.55rem;
     color: var(--muted-foreground);
     font-size: 0.75rem;
+    cursor: pointer;
     transition: color 120ms ease, background 120ms ease, opacity 120ms ease;
   }
 

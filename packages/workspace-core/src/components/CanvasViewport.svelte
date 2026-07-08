@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
   import type { Artifact } from "@sonik-agent-ui/artifact-model";
   import type { CanvasPanel } from "./CanvasToolbar.svelte";
+  import type { ResizeEdge } from "../lib/window-geometry.js";
 
   export interface CanvasViewportProps {
     artifact: Artifact | null;
@@ -20,11 +21,16 @@
     activeArtifactVersion?: number | null;
     onArtifactVersionChange?: (version: number) => void;
     showDeveloperPanels?: boolean;
+    /** Pointer-drag reposition + edge/corner resize for the standalone canvas window. Off in embedded host contexts (the host owns window chrome there). */
+    windowControlsEnabled?: boolean;
   }
+
+  const RESIZE_EDGES: ResizeEdge[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 </script>
 
 <script lang="ts">
   import CanvasToolbar from "./CanvasToolbar.svelte";
+  import { createCanvasWindowController } from "../lib/window-drag.svelte.js";
 
   let {
     artifact,
@@ -43,10 +49,17 @@
     activeArtifactVersion = null,
     onArtifactVersionChange,
     showDeveloperPanels = true,
+    windowControlsEnabled = true,
   }: CanvasViewportProps = $props();
 
   let panel = $state<CanvasPanel>("canvas");
   let isFullscreen = $state(false);
+
+  const windowController = createCanvasWindowController({
+    storageKey: "sonik-agent-ui:canvas-window:v1",
+    isLocked: () => isFullscreen,
+  });
+  const isFloating = $derived(windowControlsEnabled && !windowController.docked && !isFullscreen);
   let draftRawSpec = $state("");
   let editMessage = $state<string | null>(null);
   let lastDraftArtifactKey = $state("");
@@ -97,6 +110,8 @@
 <section
   class="canvas-viewport"
   class:canvas-viewport--fullscreen={isFullscreen}
+  class:canvas-viewport--floating={isFloating}
+  style={isFloating ? windowController.style : undefined}
   aria-label="Canvas viewport"
 >
   <CanvasToolbar
@@ -114,7 +129,25 @@
     onPanelChange={(nextPanel) => (panel = nextPanel)}
     onToggleFullscreen={() => (isFullscreen = !isFullscreen)}
     {onClear}
+    onDragPointerDown={windowControlsEnabled ? windowController.onDragPointerDown : undefined}
+    onDragPointerMove={windowControlsEnabled ? windowController.onDragPointerMove : undefined}
+    onDragPointerUp={windowControlsEnabled ? windowController.onDragPointerUp : undefined}
+    onDragKeyDown={windowControlsEnabled ? windowController.onDragKeyDown : undefined}
+    onResetLayout={windowControlsEnabled ? windowController.reset : undefined}
   />
+
+  {#if windowControlsEnabled && !isFullscreen}
+    {#each RESIZE_EDGES as edge (edge)}
+      <div
+        class="canvas-viewport__resize-handle canvas-viewport__resize-handle--{edge}"
+        onpointerdown={windowController.onResizePointerDown(edge)}
+        onpointermove={windowController.onResizePointerMove}
+        onpointerup={windowController.onResizePointerUp}
+        onpointercancel={windowController.onResizePointerUp}
+        aria-hidden="true"
+      ></div>
+    {/each}
+  {/if}
 
   <div class="canvas-viewport__body">
     {#if hasWorkspaceContent}
@@ -183,6 +216,7 @@
 
 <style>
   .canvas-viewport {
+    position: relative;
     display: flex;
     height: 100%;
     min-height: 0;
@@ -200,6 +234,83 @@
     z-index: 1000;
     height: auto;
     background: var(--background);
+  }
+
+  .canvas-viewport--floating {
+    position: fixed;
+    z-index: 900;
+    height: auto;
+    box-shadow: 0 12px 32px color-mix(in oklab, var(--foreground) 22%, transparent);
+  }
+
+  .canvas-viewport__resize-handle {
+    position: absolute;
+    z-index: 5;
+    touch-action: none;
+  }
+
+  .canvas-viewport__resize-handle--n,
+  .canvas-viewport__resize-handle--s {
+    left: 0.75rem;
+    right: 0.75rem;
+    height: 8px;
+    cursor: ns-resize;
+  }
+
+  .canvas-viewport__resize-handle--n {
+    top: -4px;
+  }
+
+  .canvas-viewport__resize-handle--s {
+    bottom: -4px;
+  }
+
+  .canvas-viewport__resize-handle--e,
+  .canvas-viewport__resize-handle--w {
+    top: 0.75rem;
+    bottom: 0.75rem;
+    width: 8px;
+    cursor: ew-resize;
+  }
+
+  .canvas-viewport__resize-handle--e {
+    right: -4px;
+  }
+
+  .canvas-viewport__resize-handle--w {
+    left: -4px;
+  }
+
+  .canvas-viewport__resize-handle--ne,
+  .canvas-viewport__resize-handle--nw,
+  .canvas-viewport__resize-handle--se,
+  .canvas-viewport__resize-handle--sw {
+    width: 14px;
+    height: 14px;
+  }
+
+  .canvas-viewport__resize-handle--ne {
+    top: -4px;
+    right: -4px;
+    cursor: nesw-resize;
+  }
+
+  .canvas-viewport__resize-handle--nw {
+    top: -4px;
+    left: -4px;
+    cursor: nwse-resize;
+  }
+
+  .canvas-viewport__resize-handle--se {
+    bottom: -4px;
+    right: -4px;
+    cursor: nwse-resize;
+  }
+
+  .canvas-viewport__resize-handle--sw {
+    bottom: -4px;
+    left: -4px;
+    cursor: nesw-resize;
   }
 
   .canvas-viewport__body {
