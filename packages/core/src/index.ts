@@ -176,6 +176,8 @@ export type {
   SpecIssue,
   SpecValidationIssues,
   ValidateSpecOptions,
+  SpecFix,
+  AutoFixOptions,
 } from "./spec-validator";
 
 export { validateSpec, autoFixSpec, formatSpecIssues } from "./spec-validator";
