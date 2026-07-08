@@ -30,6 +30,10 @@ export interface ArtifactTelemetryEvent {
   ok?: boolean;
   error?: string;
   at?: string;
+  /** True when a spec repair (autoFixSpec) applied a lossy content-pruning fix. */
+  lossy?: boolean;
+  /** Number of autoFixSpec fixes applied by a repair pass. */
+  fixCount?: number;
 }
 
 const PREFIX = "[sonik-agent-ui]";

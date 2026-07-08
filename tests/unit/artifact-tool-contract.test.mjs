@@ -41,6 +41,10 @@ await mkdir(dirname(fixtureAppRoot), { recursive: true });
 await cp(resolve("apps/standalone-sveltekit/src/lib"), fixtureAppRoot, { recursive: true });
 await rewriteLocalTsImportsForNode(fixtureAppRoot);
 await symlink(resolve("apps/standalone-sveltekit/node_modules"), join(fixtureRoot, "apps/standalone-sveltekit/node_modules"), "dir");
+// tools/artifact.ts reaches into packages/json-ui-runtime/src (the shared
+// spec-repair choke point) via a relative import; symlink the real packages
+// dir into the fixture so that resolves the same way it does outside the sandbox.
+await symlink(resolve("packages"), join(fixtureRoot, "packages"), "dir");
 
 try {
   const artifactModuleUrl = new URL("./apps/standalone-sveltekit/src/lib/tools/artifact.ts", `file://${fixtureRoot}/`).href;
@@ -261,7 +265,12 @@ ${JSON.stringify(bookingIntakeQuestionArtifact.spec)}
 
   const danglingChild = createJsonArtifact.inputSchema.safeParse({ title: "Bad", spec: { root: "main", elements: { main: { type: "Card", props: { title: "Bad", description: "Bad" }, children: ["missing"] } }, state: {} } });
   assert.equal(danglingChild.success, true, "tool input accepts model-shaped specs before strict execute-time validation");
-  await assert.rejects(() => createJsonArtifact.execute(danglingChild.data), /Invalid JSON-render artifact spec/, "dangling child ids must be rejected before promotion");
+  // Phase 2.3: dangling child references are exactly what autoFixSpec's lossy
+  // pass repairs (it prunes the missing reference, which renders the same as
+  // if it were never there). The repair loop runs before Zod/catalog
+  // validation, so this now promotes a repaired artifact instead of throwing.
+  const repairedDanglingChild = await createJsonArtifact.execute(danglingChild.data);
+  assert.deepEqual(repairedDanglingChild.spec.elements.main.children, [], "the autoFixSpec repair loop must prune the dangling child reference instead of rejecting the whole artifact");
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { validateSpec, formatSpecIssues, type Spec } from "@json-render/core";
 import { createInteractiveSurfaceJsonRenderSpec } from "../../../../../packages/json-ui-runtime/src/intake.ts";
+import { repairSpec } from "../../../../../packages/json-ui-runtime/src/spec-repair.ts";
 import { z } from "zod";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { AsyncWorkspacePersistenceAdapter } from "@sonik-agent-ui/workspace-session";
@@ -20,16 +21,32 @@ function validatedBookingIntakeSpec(title?: string | null): Spec {
     }
   }
 
-  const structural = validateSpec(spec);
+  // The registered intake template is deterministic and always complete, so
+  // a repair pass here is always a terminal (stream-complete) attempt.
+  const repairAttempt = repairSpec(spec, { streamComplete: true });
+  const repairedSpec = repairAttempt ? repairAttempt.spec : spec;
+  if (repairAttempt?.repaired) {
+    logArtifactTelemetry({
+      source: "server",
+      event: "artifact.spec.autofix_applied",
+      title: safeTitle,
+      lossy: repairAttempt.lossy,
+      fixCount: repairAttempt.fixDetails.length,
+      reason: repairAttempt.fixDetails.map((fix) => fix.message).join("; "),
+      ok: true,
+    });
+  }
+
+  const structural = repairAttempt ? repairAttempt.validation : validateSpec(repairedSpec);
   if (!structural.valid) {
     throw new Error(formatSpecIssues(structural.issues));
   }
-  const catalog = explorerCatalog.validate(spec);
+  const catalog = explorerCatalog.validate(repairedSpec);
   const catalogError = catalog.success ? undefined : catalog.error;
   if (catalogError) {
     throw new Error(catalogError.issues.map((issue) => `${issue.path.join(".") || "spec"}: ${issue.message}`).join("; "));
   }
-  return spec;
+  return repairedSpec;
 }
 
 /**

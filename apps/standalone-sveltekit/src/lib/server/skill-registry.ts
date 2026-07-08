@@ -323,9 +323,9 @@ function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
   }
   if (Array.isArray(metadata.telemetryEvents) && metadata.telemetryEvents.includes("tool.submitQuestionAnswer")) {
     lines.push([
-      "Question-answer turns arrive as a fenced ```sonik_question_answer JSON block with version sonik-agent-ui.question-answer-turn.v1 and entryFrom=question_answer.",
-      "Consume the block as user input only: read submission.questionId, answer.value, answer.writesTo, artifact.id, and artifact.version; then ask the next highest-impact missing question for this same intake artifact.",
-      "Do not execute commands, do not call commitCommand, and do not treat the answer as approval. If the user later approves a validated manifest, switch to booking.context.create so the agent can readActiveArtifactState, previewActiveIntakeCommand, and run only host-approved booking.create.context.",
+      "Question-answer turns arrive as a fenced ```sonik_question_answer JSON block (version sonik-agent-ui.question-answer-turn.v1, entryFrom=question_answer).",
+      "Treat it as user input only: read submission.questionId, answer.value/writesTo, artifact.id/version; then ask the next highest-impact missing question for this artifact.",
+      "Do not execute commands or treat the answer as approval. After user approval, switch to booking.context.create for readActiveArtifactState/previewActiveIntakeCommand/commitActiveIntakeCommand.",
     ].join(" "));
   }
   if (skill.forbiddenUnlessExplicit.length > 0) {
