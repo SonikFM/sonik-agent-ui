@@ -13,6 +13,7 @@ import {
   type QuestionAnswerSubmission,
 } from "@sonik-agent-ui/tool-contracts";
 import { normalizeRenderedMaxSelections } from "../render/question-max-selections.ts";
+import type { AsyncWorkspacePersistenceAdapter } from "@sonik-agent-ui/workspace-session";
 import {
   createRequestWorkspaceArtifact,
   getRequestWorkspaceArtifact,
@@ -143,8 +144,29 @@ export async function recordIntakeQuestionAsked(event: RequestWorkspaceEvent | n
 }
 
 export async function updateIntakeArtifactState(event: RequestWorkspaceEvent | null | undefined, input: UpdateIntakeArtifactStateInput): Promise<IntakeArtifactRecord> {
-  const artifact = await requireIntakeArtifact(event, input.artifactId);
-  const latest = latestArtifactVersion(await listRequestWorkspaceArtifactVersions(event as RequestWorkspaceEvent, artifact.id));
+  return updateIntakeArtifactStateForPersistence(getRequestWorkspacePersistence(event), input);
+}
+
+/**
+ * Persistence-parametrized core of updateIntakeArtifactState (same question-answer patch
+ * semantics: questionAnswerSubmissionSchema parse -> resolvePersistedQuestion ->
+ * createQuestionAnswerStateUpdates -> JSON-pointer state writes -> persisted update). Exposed so
+ * callers that already hold a resolved AsyncWorkspacePersistenceAdapter -- e.g. the
+ * model-callable submitIntakeAnswer tool, which receives `context.persistence` from agent.ts
+ * rather than a raw SvelteKit request event -- can apply the exact same state patch as the
+ * QuestionCard UI without re-deriving persistence from an event. updateIntakeArtifactState above
+ * is now a thin wrapper around this function; behavior for existing callers is unchanged.
+ */
+export async function updateIntakeArtifactStateForPersistence(
+  persistence: AsyncWorkspacePersistenceAdapter,
+  input: UpdateIntakeArtifactStateInput,
+): Promise<IntakeArtifactRecord> {
+  const artifact = await persistence.getArtifact<Spec>(input.artifactId);
+  if (!artifact) throw new Error(`Intake artifact ${input.artifactId} was not found.`);
+  if (artifact.kind !== "json-render") throw new Error(`Intake artifact ${input.artifactId} must be a json-render artifact.`);
+
+  const versions = await persistence.listArtifactVersions<Spec>(artifact.id);
+  const latest = latestArtifactVersion(versions);
   const content = cloneSpec(latest.content);
   const submission = questionAnswerSubmissionSchema.parse(input.submission);
   const question = resolvePersistedQuestion(content, submission.questionId);
@@ -160,21 +182,21 @@ export async function updateIntakeArtifactState(event: RequestWorkspaceEvent | n
     writeJsonPointer(content.state, update.path, update.value);
   }
 
-  const updated = await updateRequestWorkspaceArtifact(event as RequestWorkspaceEvent, artifact.id, {
+  const updated = await persistence.updateArtifact<Spec>(artifact.id, {
     content,
     source: "user",
     summary: `Saved answer for ${updateResult.receipt.questionId}`,
   });
   if (!updated) throw new Error(`Intake artifact ${artifact.id} could not be updated.`);
 
-  await recordIntakeTelemetry(event, {
+  await recordIntakeTelemetryForPersistence(persistence, {
     sessionId: updated.session_id,
     requestId: input.requestId,
     event: "tool.submitQuestionAnswer",
     ok: true,
     payload: { artifactId: updated.id, version: updated.version, receipt: updateResult.receipt },
   });
-  await recordIntakeTelemetry(event, {
+  await recordIntakeTelemetryForPersistence(persistence, {
     sessionId: updated.session_id,
     requestId: input.requestId,
     event: "artifact.intake.version_created",
@@ -517,8 +539,12 @@ function decodeJsonPointerSegment(segment: string): string {
 }
 
 async function recordIntakeTelemetry(event: RequestWorkspaceEvent | null | undefined, input: { sessionId?: string | null; requestId?: string | null; event: string; ok: boolean; payload: unknown }): Promise<void> {
+  return recordIntakeTelemetryForPersistence(getRequestWorkspacePersistence(event as RequestWorkspaceEvent), input);
+}
+
+async function recordIntakeTelemetryForPersistence(persistence: AsyncWorkspacePersistenceAdapter, input: { sessionId?: string | null; requestId?: string | null; event: string; ok: boolean; payload: unknown }): Promise<void> {
   try {
-    await getRequestWorkspacePersistence(event as RequestWorkspaceEvent).recordTelemetryEvent({
+    await persistence.recordTelemetryEvent({
       session_id: input.sessionId ?? null,
       request_id: input.requestId ?? null,
       source: "server",

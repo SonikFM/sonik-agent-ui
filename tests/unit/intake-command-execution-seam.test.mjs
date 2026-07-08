@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 
-const [fsModule, intakeModule, contextIntakeModule, artifactStateModule, skillIntentModule, skillRegistryModule, workspaceStoreModule] = await Promise.all([
+const [fsModule, intakeModule, contextIntakeModule, artifactStateModule, intakeToolModule, skillIntentModule, skillRegistryModule, workspaceStoreModule] = await Promise.all([
   import("node:fs"),
   import("../../apps/standalone-sveltekit/src/lib/server/intake-artifacts.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/booking-workflows/context-intake.ts"),
   import("../../apps/standalone-sveltekit/src/lib/tools/artifact-state.ts"),
+  import("../../apps/standalone-sveltekit/src/lib/tools/intake-artifact.ts"),
   import("../../apps/standalone-sveltekit/src/lib/runtime-skill-intent.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/skill-registry.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/workspace-store.ts"),
@@ -14,6 +15,7 @@ const { readFileSync } = fsModule;
 const { createIntakeArtifact, updateIntakeArtifactState } = intakeModule;
 const { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE } = contextIntakeModule;
 const { createArtifactStateTools } = artifactStateModule;
+const { createSubmitIntakeAnswerTool } = intakeToolModule;
 const { resolveImplicitWorkflowSkillIds } = skillIntentModule;
 const { learnRuntimeSkill } = skillRegistryModule;
 const { getWorkspaceArtifact, updateWorkspaceArtifact } = workspaceStoreModule;
@@ -33,7 +35,6 @@ for (const [questionId, value] of [
   ["q_intake_mode", "venue_schedule"],
   ["q_inventory_core", "Restaurant reservations with 20 two-top tables"],
   ["q_business_name", "Dan's Club"],
-  ["q_confirmation_mode", "instant_confirm"],
 ]) {
   await updateIntakeArtifactState(null, {
     artifactId,
@@ -41,6 +42,16 @@ for (const [questionId, value] of [
     requestId: `req-answer-${questionId}`,
   });
 }
+
+// The final answer is recorded through submitIntakeAnswer -- the model-callable chat-answer tool
+// -- instead of the QuestionCard/updateIntakeArtifactState path used above, to prove the two
+// paths interoperate on the same artifact: the tool must patch the SAME artifact in place (no
+// recreate) so the rest of this seam (readActiveArtifactState, previewActiveIntakeCommand,
+// commitActiveIntakeCommand) keeps working unchanged on the result.
+const chatAnswerTool = createSubmitIntakeAnswerTool({ pageContext: { activeArtifactId: artifactId } });
+const chatAnswerReceipt = await chatAnswerTool.execute({ questionId: "q_confirmation_mode", value: "instant_confirm" });
+assert.equal(chatAnswerReceipt.ok, true, "submitIntakeAnswer must succeed for a valid in-seam chat answer");
+assert.equal(chatAnswerReceipt.artifact.id, artifactId, "submitIntakeAnswer must patch the same artifact the QuestionCard path was using, not recreate one");
 
 const pageContext = {
   surface: "booking-context-intake",
