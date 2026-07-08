@@ -159,8 +159,12 @@ assert.equal(generateRoute.includes("hostSession: hostSession ?? undefined"), tr
 assert.equal(generateRoute.includes('hostSessionMode: hostSession ? undefined : "standalone-demo"'), true, "generate route should fall back to explicit standalone fixture auth only without a trusted host session");
 assert.equal(generateRoute.includes("createBookingRuntimeAuthContextFromTrustedHostHeader"), true, "generate route should prefer the signed embedded host context for booking runtime auth");
 assert.equal(generateRoute.includes("fallback: createBookingRuntimeAuthContextFromEnv(env)"), true, "generate route should fall back to server env runtime auth when no signed host context is donated");
-assert.equal(generateRoute.includes("const APPROVED_COMMAND_IDS_MAX_ITEMS = 128"), true, "generate route should preserve generated booking command grants beyond the old demo-only 20-id cap");
-assert.equal(generateRoute.includes(".slice(0, APPROVED_COMMAND_IDS_MAX_ITEMS)"), true, "generate route should still bound trusted approved command ids with a named guardrail");
+// Draft-only invariant (Slice A, 2026-07-08): approvedCommandIdsFromHostSession
+// moved to host-command-runtime.ts so /api/generate and the deterministic
+// /api/intake/commit endpoint resolve the exact same trusted grant.
+assert.equal(hostCommandRuntimeSource.includes("const APPROVED_COMMAND_IDS_MAX_ITEMS = 128"), true, "shared host-session helper should preserve generated booking command grants beyond the old demo-only 20-id cap");
+assert.equal(hostCommandRuntimeSource.includes(".slice(0, APPROVED_COMMAND_IDS_MAX_ITEMS)"), true, "shared host-session helper should still bound trusted approved command ids with a named guardrail");
+assert.equal(generateRoute.includes("approvedCommandIdsFromHostSession"), true, "generate route should reuse the shared host-session helper instead of a local copy");
 assert.equal(generateRoute.includes("bookingRuntimeCredentialed"), true, "generate telemetry should expose credential posture without logging credentials");
 assert.equal(generateRoute.includes("createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec })"), true, "agent tools should receive the selection-gated active document, active workspace session id, page context, trusted host session, approval grants, configured booking runtime base URL, server-side auth mode, injectable runtime fetcher, the per-turn composed skill ids, sanitized Agent Settings, and the active intake artifact's current spec for the patch-first refinement contract");
 assert.equal(generateRoute.includes("sanitizeAgentRuntimeSettings"), true, "generate route should sanitize Agent Settings at the server boundary before model/tool use");
@@ -455,7 +459,8 @@ assert.equal(bookingReservationSmokeSource.includes("restart_after_disconnect"),
 assert.equal(bookingReservationSmokeSource.includes("wrangler.jsonc"), true, "booking reservation smoke R2 fetches should use the app wrangler config deterministically");
 assert.equal(bookingContextSmokeSource.includes("reloadSession"), true, "booking context smoke should reload the active session after signed artifact persistence");
 assert.equal(bookingContextSmokeSource.includes("&& evidence.pipeB.requiredEvidence.skillSearchOk === true"), true, "booking context smoke should fail unless the agent proves searchSkillCatalog before learning the context-create skill");
-assert.equal(bookingContextSmokeSource.includes("commitActiveIntakeCommand"), true, "booking context smoke should prove the dedicated intake commit tool instead of generic commitCommand");
+assert.equal(bookingContextSmokeSource.includes("approveAndRun"), true, "booking context smoke should exercise the real approveAndRun page-control action, not a model commit tool");
+assert.equal(bookingContextSmokeSource.includes("commit.human_approved"), true, "booking context smoke should prove the deterministic human-approved commit telemetry, not a model tool call");
 assert.equal(bookingContextSmokeSource.includes("booking.create.context"), true, "booking context smoke should require Pipe-B evidence for booking.create.context");
 assert.equal(packageSource.includes("smoke:agent-ui:booking-pipeb:context"), true, "package scripts should expose the booking context Pipe-B smoke lane");
 assert.equal(smokeHarnessSource.includes("api.generate.stream_finished"), true, "smoke harness should require server stream completion telemetry");

@@ -44,8 +44,11 @@ const MONOLITH_RULE_FRAGMENTS = [
   // page-context module
   "answer directly from the CURRENT HOST/PAGE CONTEXT system block.",
   // booking-commands module
-  "The command catalog is CLI-first and context-efficient: search, learn, then execute/commit.",
-  "prefer executeCommand/commitCommand with inputJson (a JSON string of the direct command input)",
+  "The command catalog is CLI-first and context-efficient: search, learn, then execute.",
+  "prefer executeCommand with inputJson (a JSON string of the direct command input)",
+  // Draft-only invariant (Slice A, 2026-07-08): commitCommand/commitActiveIntakeCommand are no
+  // longer mounted on the agent's tool set at all; the model can only ever produce a draft/preview.
+  "There is no model-callable commit tool for any write",
   "the canonical workflow is booking.get.availability -> booking.create.guest -> booking.create.booking.",
   "Do NOT use booking.create.hold for reservation, booking, or tee-time intents unless the user explicitly asks for a temporary hold.",
   "A standalone fixture-backed read-only booking host command may be mounted for local testing;",

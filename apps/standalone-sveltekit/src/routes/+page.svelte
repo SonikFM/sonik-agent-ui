@@ -3128,6 +3128,14 @@
 
     if (actionName === "saveDraft" || actionName === "editDraft") return true;
 
+    // Draft-only invariant (Slice A, 2026-07-08): approveAndRun is the human
+    // publish click. It does not send a model turn — the model never holds a
+    // commit tool for this flow. It calls the deterministic /api/intake/commit
+    // endpoint directly, exactly like a preview readiness check would.
+    if (actionName === "approveAndRun") {
+      return runIntakeCommitEndpoint(artifact);
+    }
+
     const prompt = createTrustedIntakeControllerPrompt(actionName, {
       artifactId: artifact.id,
       artifactVersion: artifact.version,
@@ -3137,8 +3145,81 @@
     return true;
   }
 
+  // Draft-only invariant (Slice A, 2026-07-08): calls the deterministic commit
+  // endpoint directly (no model turn) and renders the receipt through the same
+  // tool-output card the (now-removed) commitActiveIntakeCommand tool used to
+  // render, by appending a synthetic assistant message with a matching tool
+  // part. This keeps ToolCallBlock's commit-success rendering as the single
+  // source of truth for both the old model-driven path and this endpoint path.
+  async function runIntakeCommitEndpoint(artifact: { id: string; version: number }): Promise<boolean> {
+    try {
+      const response = await workspaceFetch("/api/intake/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ artifactId: artifact.id, sessionId: activeSessionId }),
+      });
+      const receipt = await response.json().catch(() => null) as { ok?: boolean; command?: { commandId?: string } } | null;
+      if (!receipt) {
+        logArtifactTelemetry({
+          source: "client",
+          event: "intake.commit_endpoint.error",
+          sessionId: activeSessionId ?? undefined,
+          artifactId: artifact.id,
+          artifactVersion: artifact.version,
+          ok: false,
+          error: `http_${response.status}`,
+        });
+        return false;
+      }
+      appendIntakeCommitReceiptMessage(receipt);
+      logArtifactTelemetry({
+        source: "client",
+        event: "intake.commit_endpoint.completed",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: artifact.id,
+        artifactVersion: artifact.version,
+        toolCallId: receipt.command?.commandId,
+        ok: receipt.ok === true,
+      });
+      return true;
+    } catch (error) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "intake.commit_endpoint.error",
+        sessionId: activeSessionId ?? undefined,
+        artifactId: artifact.id,
+        artifactVersion: artifact.version,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  // Reuses the existing "commitActiveIntakeCommand" tool-activity label and
+  // ToolCallBlock commit-success rendering (packages/chat-surface) — the receipt
+  // shape returned by /api/intake/commit is identical to what that tool used to
+  // return, so no new rendering surface is needed for the endpoint path.
+  function appendIntakeCommitReceiptMessage(receipt: unknown): void {
+    conversation.messages = [
+      ...conversation.messages,
+      {
+        id: `intake-commit-${crypto.randomUUID()}`,
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-commitActiveIntakeCommand",
+            toolCallId: `intake-commit-call-${crypto.randomUUID()}`,
+            state: "output-available",
+            output: receipt,
+          },
+        ],
+      },
+    ] as typeof conversation.messages;
+  }
+
   function createTrustedIntakeControllerPrompt(
-    actionName: Exclude<TrustedIntakeControllerAction, "saveDraft" | "editDraft">,
+    actionName: Exclude<TrustedIntakeControllerAction, "saveDraft" | "editDraft" | "approveAndRun">,
     input: { artifactId: string; artifactVersion: number; commandId: string },
   ): string {
     const artifactLine = `Active artifact: ${input.artifactId} v${input.artifactVersion}.`;
@@ -3164,18 +3245,10 @@
         "Call readActiveArtifactState, then previewActiveIntakeCommand. Do not call commitActiveIntakeCommand yet.",
       ].join(" ");
     }
-    if (actionName === "cancelApproval") {
-      return [
-        "Cancel the pending approval path and keep the active intake artifact as a saved draft.",
-        artifactLine,
-        "Call readActiveArtifactState and summarize that no booking mutation was executed. Ask what the user wants to revise next.",
-      ].join(" ");
-    }
     return [
-      "Approve this manifest and create the booking context from the active intake artifact.",
+      "Cancel the pending approval path and keep the active intake artifact as a saved draft.",
       artifactLine,
-      `Target command: ${input.commandId}.`,
-      "Use booking.context.create: call readActiveArtifactState, previewActiveIntakeCommand, then commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN. If trusted host approval is missing, report that blocker instead of searching repeatedly.",
+      "Call readActiveArtifactState and summarize that no booking mutation was executed. Ask what the user wants to revise next.",
     ].join(" ");
   }
 

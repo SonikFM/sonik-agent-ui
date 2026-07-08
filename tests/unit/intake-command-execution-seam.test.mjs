@@ -14,7 +14,7 @@ const [fsModule, intakeModule, contextIntakeModule, artifactStateModule, intakeT
 const { readFileSync } = fsModule;
 const { createIntakeArtifact, updateIntakeArtifactState } = intakeModule;
 const { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE } = contextIntakeModule;
-const { createArtifactStateTools } = artifactStateModule;
+const { createArtifactStateTools, commitBookingContextIntakeCommand } = artifactStateModule;
 const { createSubmitIntakeAnswerTool } = intakeToolModule;
 const { resolveImplicitWorkflowSkillIds } = skillIntentModule;
 const { learnRuntimeSkill } = skillRegistryModule;
@@ -47,7 +47,7 @@ for (const [questionId, value] of [
 // -- instead of the QuestionCard/updateIntakeArtifactState path used above, to prove the two
 // paths interoperate on the same artifact: the tool must patch the SAME artifact in place (no
 // recreate) so the rest of this seam (readActiveArtifactState, previewActiveIntakeCommand,
-// commitActiveIntakeCommand) keeps working unchanged on the result.
+// commitBookingContextIntakeCommand) keeps working unchanged on the result.
 const chatAnswerTool = createSubmitIntakeAnswerTool({ pageContext: { activeArtifactId: artifactId } });
 const chatAnswerReceipt = await chatAnswerTool.execute({ questionId: "q_confirmation_mode", value: "instant_confirm" });
 assert.equal(chatAnswerReceipt.ok, true, "submitIntakeAnswer must succeed for a valid in-seam chat answer");
@@ -73,14 +73,21 @@ assert.equal(learnedCreate.ok, true, "booking.context.create must be learnable")
 assert.ok(JSON.stringify(learnedCreate).includes("readActiveArtifactState"), "create skill must teach artifact-state read before commit");
 assert.ok(JSON.stringify(learnedCreate).includes("Resource/table = inventory inside the context"), "create skill must teach booking ontology guardrails");
 
+// Draft-only invariant (Slice A, 2026-07-08): commitActiveIntakeCommand is no
+// longer a model-callable tool at all -- createArtifactStateTools never mounts
+// it, under any context. Publishing runs through commitBookingContextIntakeCommand,
+// invoked only by the deterministic /api/intake/commit endpoint (a human click),
+// never by the agent's tool set. See command-catalog-tools-booking-runtime.test.mjs
+// for the structural invariant closure across every skill combination.
 const agentSource = readFileSync(new URL("../../apps/standalone-sveltekit/src/lib/agent.ts", import.meta.url), "utf8");
-assert.ok(agentSource.includes("allowIntakeCommandCommit: bookingContextCreateActive"), "commitActiveIntakeCommand must mount only for booking.context.create skill turns");
-assert.ok(agentSource.includes("previewOnlyRuntimeActive || bookingContextCreateActive"), "booking.context.create turns must not mount the generic executeCommand/commitCommand catalog tools");
+assert.ok(agentSource.includes("previewOnlyRuntimeActive || bookingContextCreateActive"), "booking.context.create turns must not mount the generic executeCommand catalog tools");
+assert.equal(agentSource.includes("allowIntakeCommandCommit"), false, "agent.ts must not thread an intake-commit-tool gate; the model never holds a commit tool");
 
-const previewOnlyTools = createArtifactStateTools({ sessionId, pageContext, allowIntakeCommandCommit: false });
+const previewOnlyTools = createArtifactStateTools({ sessionId, pageContext });
 assert.equal(typeof previewOnlyTools.readActiveArtifactState.execute, "function");
 assert.equal(typeof previewOnlyTools.previewActiveIntakeCommand.execute, "function");
-assert.equal(previewOnlyTools.commitActiveIntakeCommand, undefined, "preview-only intake mode must not mount the commit tool");
+assert.equal(previewOnlyTools.commitActiveIntakeCommand, undefined, "createArtifactStateTools must never mount a commit tool");
+assert.deepEqual(Object.keys(previewOnlyTools).sort(), ["previewActiveIntakeCommand", "readActiveArtifactState"], "the agent's mounted artifact-state tool set is exactly the draft/preview tools, nothing else");
 
 const readReceipt = await previewOnlyTools.readActiveArtifactState.execute({});
 assert.equal(readReceipt.ok, true);
@@ -149,7 +156,7 @@ const blockedContent = structuredClone(blockedArtifact.content);
 blockedContent.state.questionErrors = { q_open_days: "Answer could not be saved." };
 blockedContent.state.questionStates = { ...blockedContent.state.questionStates, q_open_days: "errored" };
 updateWorkspaceArtifact(blockedArtifactId, { content: blockedContent });
-const blockedTools = createArtifactStateTools({ sessionId, pageContext: { ...pageContext, activeArtifactId: blockedArtifactId }, allowIntakeCommandCommit: false });
+const blockedTools = createArtifactStateTools({ sessionId, pageContext: { ...pageContext, activeArtifactId: blockedArtifactId } });
 const blockedPreview = await blockedTools.previewActiveIntakeCommand.execute({});
 assert.equal(blockedPreview.ok, false, "intake previews must block unresolved QuestionCard save errors");
 assert.equal(blockedPreview.command, null, "blocked intake previews must not return an approvable command");
@@ -172,17 +179,19 @@ await createIntakeArtifact(null, {
   requestId: "req-event-intake-command-create",
 });
 updateWorkspaceArtifact(eventArtifactId, { content: eventContent });
-const unsupportedPreviewTools = createArtifactStateTools({ sessionId, pageContext: { ...pageContext, activeArtifactId: eventArtifactId }, allowIntakeCommandCommit: false });
+const unsupportedPreviewTools = createArtifactStateTools({ sessionId, pageContext: { ...pageContext, activeArtifactId: eventArtifactId } });
 const unsupportedPreview = await unsupportedPreviewTools.previewActiveIntakeCommand.execute({});
 assert.equal(unsupportedPreview.ok, false, "valid non-venue manifests must not return an approvable booking.create.context preview");
 assert.equal(unsupportedPreview.error, "unsupported_manifest_type");
 assert.equal(unsupportedPreview.command, null);
 
+// Draft-only invariant: commitBookingContextIntakeCommand is not a model tool.
+// It is the deterministic /api/intake/commit endpoint's implementation, called
+// directly here (as the endpoint would) instead of through a mounted tool.
 const unsupportedCommitFetchCalls = [];
-const unsupportedCommitTools = createArtifactStateTools({
+const unsupportedCommitContext = {
   sessionId,
   pageContext: { ...pageContext, activeArtifactId: eventArtifactId },
-  allowIntakeCommandCommit: true,
   approvedCommandIds: ["booking.create.context"],
   bookingServiceBaseUrl: "https://booking.example.test",
   bookingRuntimeAuth: { mode: "service-token", token: "test-service-token", source: "test" },
@@ -190,8 +199,8 @@ const unsupportedCommitTools = createArtifactStateTools({
     unsupportedCommitFetchCalls.push({ url: String(input), method: init.method });
     return new Response("{}", { status: 500, headers: { "content-type": "application/json" } });
   },
-});
-const unsupportedCommit = await unsupportedCommitTools.commitActiveIntakeCommand.execute({ confirmation: "APPROVE_AND_RUN" });
+};
+const unsupportedCommit = await commitBookingContextIntakeCommand(unsupportedCommitContext);
 assert.equal(unsupportedCommit.ok, false, "valid non-venue manifests must fail closed before runtime commit");
 assert.equal(unsupportedCommit.error, "unsupported_manifest_type");
 assert.equal(unsupportedCommit.command, null);
@@ -206,10 +215,9 @@ const fetcher = async (input, init = {}) => {
   });
 };
 
-const commitTools = createArtifactStateTools({
+const commitContext = {
   sessionId,
   pageContext,
-  allowIntakeCommandCommit: true,
   approvedCommandIds: ["booking.create.context"],
   bookingServiceBaseUrl: "https://booking.example.test",
   bookingRuntimeAuth: { mode: "service-token", token: "test-service-token", source: "test" },
@@ -225,10 +233,9 @@ const commitTools = createArtifactStateTools({
     expiresAt: null,
     metadata: { approvedCommandIds: ["booking.create.context"] },
   },
-});
-assert.equal(typeof commitTools.commitActiveIntakeCommand.execute, "function", "execution mode mounts commit seam");
+};
 
-const commit = await commitTools.commitActiveIntakeCommand.execute({ confirmation: "APPROVE_AND_RUN" });
+const commit = await commitBookingContextIntakeCommand(commitContext);
 assert.equal(commit.ok, true, "trusted approved command should commit through runtime");
 assert.equal(commit.command.commandId, "booking.create.context");
 assert.equal(fetchCalls.length, 1);
@@ -248,10 +255,9 @@ assert.equal("principal_id" in fetchCalls[0].body.config.manifest.business, fals
 assert.equal("userId" in fetchCalls[0].body.config.manifest.inventory.nested, false, "user scope must be stripped recursively from nested manifest payloads");
 assert.equal("current-user-id" in fetchCalls[0].body.config.manifest.inventory.nested, false, "kebab-case user scope must be stripped recursively from nested manifest payloads");
 
-const unapprovedTools = createArtifactStateTools({
+const unapprovedContext = {
   sessionId,
   pageContext,
-  allowIntakeCommandCommit: true,
   approvedCommandIds: [],
   bookingServiceBaseUrl: "https://booking.example.test",
   bookingRuntimeAuth: { mode: "service-token", token: "test-service-token", source: "test" },
@@ -267,18 +273,17 @@ const unapprovedTools = createArtifactStateTools({
     expiresAt: null,
     metadata: { approvedCommandIds: [] },
   },
-});
-const denied = await unapprovedTools.commitActiveIntakeCommand.execute({ artifactId, confirmation: "APPROVE_AND_RUN" });
+};
+const denied = await commitBookingContextIntakeCommand(unapprovedContext, artifactId);
 assert.equal(denied.ok, false, "user text alone must not bypass trusted approvedCommandIds");
 assert.equal(denied.receipt.policy.reasons.includes("approval_required"), true);
 
-// Agent Settings family mode "off" must block commitActiveIntakeCommand even with a full
-// trusted host approval grant (closes the hole: this path previously never consulted
-// toolPermissionModes at all).
-const familyOffTools = createArtifactStateTools({
+// Agent Settings family mode "off" must block the endpoint-side commit even with
+// a full trusted host approval grant (closes the hole: this path previously
+// never consulted toolPermissionModes at all).
+const familyOffContext = {
   sessionId,
   pageContext,
-  allowIntakeCommandCommit: true,
   approvedCommandIds: ["booking.create.context"],
   bookingServiceBaseUrl: "https://booking.example.test",
   bookingRuntimeAuth: { mode: "service-token", token: "test-service-token", source: "test" },
@@ -295,9 +300,9 @@ const familyOffTools = createArtifactStateTools({
     expiresAt: null,
     metadata: { approvedCommandIds: ["booking.create.context"] },
   },
-});
+};
 const familyOffFetchCallsBefore = fetchCalls.length;
-const familyOffDenied = await familyOffTools.commitActiveIntakeCommand.execute({ confirmation: "APPROVE_AND_RUN" });
+const familyOffDenied = await commitBookingContextIntakeCommand(familyOffContext);
 assert.equal(familyOffDenied.ok, false, "Agent Settings family mode off must refuse commitActiveIntakeCommand");
 assert.equal(familyOffDenied.receipt.policy.reasons.includes("tool_policy_off"), true, "refusal must name tool_policy_off");
 assert.equal(fetchCalls.length, familyOffFetchCallsBefore, "family-disabled commit must not reach the booking runtime");

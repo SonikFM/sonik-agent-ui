@@ -42,8 +42,13 @@ for (const action of ["saveDraft", "editDraft", "submitToAgent", "reviseWithAgen
   assert.ok(pageSource.includes(action), `page trusted controller must handle ${action}`);
 }
 assert.ok(pageSource.includes("persistActiveArtifactStatePatch"), "controller actions must flush artifact state before sending turns");
-assert.ok(pageSource.includes("commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN"), "approve action must route the agent to the dedicated trusted commit seam");
-assert.ok(pageSource.includes("trusted host approval"), "approve action must tell users/agents host approval is still required");
+// Draft-only invariant (Slice A, 2026-07-08): approveAndRun no longer sends a model
+// turn at all. It calls the deterministic /api/intake/commit endpoint directly —
+// publishing is a human click, not a model tool call.
+assert.ok(pageSource.includes("runIntakeCommitEndpoint"), "approve action must call the deterministic commit endpoint helper");
+assert.ok(pageSource.includes("workspaceFetch(\"/api/intake/commit\""), "approve action must POST to the deterministic commit endpoint");
+assert.equal(pageSource.includes("commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN"), false, "approve action must no longer instruct the model to call a commit tool");
+assert.ok(pageSource.includes("does not send a model turn") || pageSource.includes("no model turn"), "approve action must document that it does not send a model turn");
 assert.ok(pageSource.includes("recordJsonRenderActionReceipt"), "renderer actions must write user-facing action receipts into artifact state");
 assert.ok(pageSource.includes("requestHostAction"), "JSON-render artifacts must be able to request allowlisted host actions through the action channel");
 

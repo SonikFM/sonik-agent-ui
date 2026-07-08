@@ -20,7 +20,13 @@ const pipeBRawDir = path.resolve('.omx/logs', `${runId}.r2`);
 const timeoutMs = Number(process.env.AGENT_UI_BOOKING_CONTEXT_TIMEOUT_MS ?? 300_000);
 const artifactId = `booking-context-intake-smoke-${runId.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
 const contextName = `Agent UI Smoke Cafe ${Date.now()}`;
-const prompt = process.env.AGENT_UI_BOOKING_CONTEXT_PROMPT ?? `Approve this active booking intake manifest and create the context. You MUST call searchSkillCatalog as a separate visible tool call for booking.context.create before learnSkill. Then call learnSkill for workflow, policy, context, and commands. Follow the skill exactly: call readActiveArtifactState, then previewActiveIntakeCommand, then commitActiveIntakeCommand with confirmation APPROVE_AND_RUN. Do not use generic commitCommand and do not search repeatedly. Report the created booking context id and name.`;
+// Draft-only invariant (Slice A, 2026-07-08): the model can only ever produce a
+// preview. commitActiveIntakeCommand/commitCommand are no longer mounted tools,
+// so this prompt stops at previewActiveIntakeCommand; the actual publish is
+// exercised below via the real approveAndRun page-control action (the same
+// deterministic /api/intake/commit endpoint the Approve button calls), not a
+// model tool call.
+const prompt = process.env.AGENT_UI_BOOKING_CONTEXT_PROMPT ?? `Show the approval preview for this active booking intake manifest; do not create/commit the context yourself. You MUST call searchSkillCatalog as a separate visible tool call for booking.context.create before learnSkill. Then call learnSkill for workflow, policy, context, and commands. Follow the skill exactly: call readActiveArtifactState, then previewActiveIntakeCommand. Report the previewed command input and tell the user a human must click Approve to publish it. Do not search repeatedly.`;
 
 if (!email || !password) throw new Error('Missing TEST_EMAIL/TEST_PASSWORD for booking context smoke.');
 
@@ -326,6 +332,14 @@ try {
   await sleep(8000);
   const after = await frame.evaluate(() => ({ context: window.__sonikAgentUI.getPageContext(), assertions: window.__sonikAgentUI.getAssertions(), text: document.body.innerText.slice(0, 16000) }));
   evidence.after = after;
+  // Draft-only invariant: the model turn above only ever produces a preview.
+  // Publishing is exercised here through the real approveAndRun page-control
+  // action -- the same call the Approve button makes -- which now calls the
+  // deterministic /api/intake/commit endpoint directly, no model turn involved.
+  const approveAndRun = await frame.evaluate(async () => window.__sonikAgentUI.actions.approveAndRun());
+  evidence.approveAndRun = approveAndRun;
+  if (!approveAndRun?.ok) throw new Error(`approveAndRun failed: ${JSON.stringify(approveAndRun)}`);
+  await sleep(2000);
   await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
   const pipeText = await collectRawPipeBText();
   const pipeBMarkers = [runId, evidence.sessionId, artifactId, contextName];
@@ -343,7 +357,9 @@ try {
     skillLearnOk: hasTelemetryEvent(toolEvents, 'booking.context.create', 'tool.learnSkill', true),
     readActiveArtifactOk: hasEventName(toolEvents, 'tool.readActiveArtifactState', true),
     previewActiveIntakeOk: hasEventName(toolEvents, 'tool.previewActiveIntakeCommand', true),
-    commitActiveIntakeOk: hasEventName(toolEvents, 'tool.commitActiveIntakeCommand', true),
+    // Draft-only invariant: the commit is a human-clicked, deterministic endpoint
+    // call (approveAndRun above), never a model tool call.
+    commitHumanApprovedOk: hasEventName(toolEvents, 'commit.human_approved', true),
     contextRuntimeFetchOk: hasTelemetryEvent(toolEvents, 'booking.create.context', 'booking.runtime.fetch.end', true),
     contextRuntimeFetchFailed: hasTelemetryEvent(toolEvents, 'booking.create.context', 'booking.runtime.fetch.end', false),
   };
@@ -357,6 +373,7 @@ try {
     activeArtifactHydrated: afterReload.context?.activeArtifactId === artifactId,
     activeSessionStable: before.context?.activeSessionId !== evidence.sessionId && after.context?.activeSessionId === evidence.sessionId,
     submitOk: submit?.ok === true,
+    approveAndRunOk: approveAndRun?.ok === true,
     noAgentApiFailures: agentFailures.length === 0,
     serverTrustedHostBoundary,
     mentionsContextCreate: /booking\.create\.context|created booking context|context id|created context/i.test(text),
@@ -365,7 +382,7 @@ try {
       && evidence.pipeB.requiredEvidence.skillLearnOk === true
       && evidence.pipeB.requiredEvidence.readActiveArtifactOk === true
       && evidence.pipeB.requiredEvidence.previewActiveIntakeOk === true
-      && evidence.pipeB.requiredEvidence.commitActiveIntakeOk === true
+      && evidence.pipeB.requiredEvidence.commitHumanApprovedOk === true
       && evidence.pipeB.requiredEvidence.contextRuntimeFetchOk === true
       && evidence.pipeB.requiredEvidence.contextRuntimeFetchFailed === false,
     agentFailures,

@@ -113,7 +113,7 @@ assert.ok(reservationSkill.metadata.successEvidence.some((line) => /Pipe B telem
 const contextCreateSkill = catalog.skills.find((entry) => entry.id === "booking.context.create");
 assert.ok(contextCreateSkill, "booking context execution seam is registered");
 assert.equal(contextCreateSkill.familyId, "booking-context-create");
-assert.deepEqual(contextCreateSkill.commandSequence, ["readActiveArtifactState", "previewActiveIntakeCommand", "commitActiveIntakeCommand"]);
+assert.deepEqual(contextCreateSkill.commandSequence, ["readActiveArtifactState", "previewActiveIntakeCommand"]);
 assert.deepEqual(contextCreateSkill.requiredCommands, ["booking.create.context"]);
 assert.ok(contextCreateSkill.contextHints.requiredScopes.includes("booking:write"), "execution seam requires trusted write scope");
 assert.equal(contextCreateSkill.metadata.execution, "trusted_command");
@@ -228,7 +228,7 @@ assert.ok(learned.negativeExamples[0].failIfCommandIds.includes("booking.create.
 
 const learnedContextCreate = learnRuntimeSkill({ skillId: "booking.context.create", aspects: ["description", "workflow", "examples", "policy", "context", "commands"] });
 assert.equal(learnedContextCreate.ok, true);
-assert.deepEqual(learnedContextCreate.commandSequence, ["readActiveArtifactState", "previewActiveIntakeCommand", "commitActiveIntakeCommand"]);
+assert.deepEqual(learnedContextCreate.commandSequence, ["readActiveArtifactState", "previewActiveIntakeCommand"]);
 assert.deepEqual(learnedContextCreate.requiredCommands, ["booking.create.context"]);
 assert.ok(learnedContextCreate.forbiddenUnlessExplicit.includes("booking.create.booking"));
 assert.ok(learnedContextCreate.metadata.ontologyRules.some((rule) => /Menu = offer\/content metadata/i.test(rule)));

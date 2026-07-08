@@ -181,12 +181,12 @@ export const WORKFLOW_TEMPLATE_DEFINITIONS: Record<WorkflowTemplateDefinition["i
     readiness: "EXISTS",
     readinessLabel: "Approval",
     suggestionReadiness: "approval_required",
-    launchPrompt: "Use booking.context.create: call readActiveArtifactState, previewActiveIntakeCommand, then request approval. Only call commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN after trusted approval is present.",
+    launchPrompt: "Use booking.context.create: call readActiveArtifactState, then previewActiveIntakeCommand, then show the preview and stop. The saved draft only publishes when the user clicks Approve on the preview card, which runs a deterministic server endpoint outside this conversation — there is no commit tool to call.",
     nodes: [
       { id: "read", type: "tool_preview", title: "Read active intake state", commandId: "readActiveArtifactState", effect: "read", approval: "none", readiness: "EXISTS" },
       { id: "preview", type: "tool_preview", title: "Preview booking.create.context", commandId: "previewActiveIntakeCommand", effect: "read", approval: "preview", readiness: "EXISTS" },
       { id: "approval", type: "approval", title: "Request trusted approval", approval: "preview_then_trusted_approval", readiness: "EXISTS" },
-      { id: "commit", type: "tool_commit", title: "Commit approved context", commandId: "commitActiveIntakeCommand", effect: "write", approval: "preview_then_trusted_approval", readiness: "EXISTS" },
+      { id: "commit", type: "tool_commit", title: "Human clicks Approve — deterministic endpoint commits the context", effect: "write", approval: "preview_then_trusted_approval", readiness: "EXISTS" },
     ],
     edges: [
       { id: "e1", source: "read", target: "preview" },
