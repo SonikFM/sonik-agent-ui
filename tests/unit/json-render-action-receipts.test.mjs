@@ -28,7 +28,7 @@ const validation = explorerCatalog.validate({
             actionKey: "approval.requestPreview",
             status: "approval_required",
             policyMode: "ask",
-            targetId: "booking.command.approval-preview",
+            targetId: "booking.ui.commandApprovalPanel",
           },
         },
       },

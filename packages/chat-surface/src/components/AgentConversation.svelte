@@ -71,6 +71,12 @@
     onRemoveContext?: (id: string) => void;
     /** Resolves the persisted context selection to render as provenance on a past message. */
     messageContext?: (message: AgentChatMessage) => AgentContextItem[] | undefined;
+    /** Chat switcher rendered in place of the static title. Embedded widgets
+     *  have no session rail, so without this the user cannot reach any other
+     *  conversation. */
+    sessionOptions?: Array<{ id: string; title: string }>;
+    activeSessionId?: string | null;
+    onSessionSwitch?: (sessionId: string) => void;
     actions?: Snippet;
     renderArtifact: Snippet<[Spec, boolean]>;
     shouldRenderArtifact?: (message: AgentChatMessage) => boolean;
@@ -103,6 +109,9 @@
     onAttachContext,
     onRemoveContext,
     messageContext,
+    sessionOptions,
+    activeSessionId = null,
+    onSessionSwitch,
     actions,
     renderArtifact,
     shouldRenderArtifact,
@@ -138,8 +147,25 @@
 
 <Conversation.Root class="bg-background text-foreground">
   <header class="border-b border-border bg-card/95 px-8 py-4 flex items-center justify-between flex-shrink-0">
-    <div class="flex items-center gap-3">
-      <h1 class="text-lg font-semibold text-foreground">{title}</h1>
+    <div class="flex items-center gap-3 min-w-0">
+      {#if sessionOptions && sessionOptions.length > 0 && onSessionSwitch}
+        <select
+          aria-label="Switch chat"
+          data-testid="agent-session-switcher"
+          class="max-w-60 truncate rounded-md border border-border bg-card px-2 py-1.5 text-sm font-medium text-foreground"
+          value={activeSessionId ?? ""}
+          onchange={(event) => {
+            const nextId = event.currentTarget.value;
+            if (nextId && nextId !== activeSessionId) onSessionSwitch(nextId);
+          }}
+        >
+          {#each sessionOptions as option (option.id)}
+            <option value={option.id}>{option.title}</option>
+          {/each}
+        </select>
+      {:else}
+        <h1 class="text-lg font-semibold text-foreground">{title}</h1>
+      {/if}
     </div>
     <div class="flex items-center gap-2">
       {@render actions?.()}

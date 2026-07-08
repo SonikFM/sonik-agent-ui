@@ -63,7 +63,7 @@ export interface AgentUiPageContextSnapshot {
   /** Sanitized semantic targets exposed by the trusted host/page; never raw selectors. */
   hostUiTargets?: unknown[];
   /** Optional full target registry envelope for agent/action runtimes. */
-  hostUiTargetRegistry?: unknown;
+  hostUiTargetRegistry?: AgentUiTargetRegistrySnapshot;
   commandFamilies?: string[];
   skillFamilies?: string[];
   at?: string;
@@ -93,6 +93,55 @@ export interface AgentUiSemanticActionResult<TState = AgentUiPageAssertions> {
   expectedSessionId?: string | null;
 }
 
+export interface AgentUiActionDescriptor {
+  name: string;
+  label: string;
+  kind: "semantic" | "host_action";
+  enabled: boolean;
+  disabledReason?: string;
+  effect: "read" | "write" | "destructive" | "environment" | "ui";
+  policyMode: "block" | "ask" | "allow" | "require";
+  /** Host-action key for driver/tour-capable actions. */
+  actionKey?: string;
+  /** True when the action needs a semantic target id from getTargetRegistry(). */
+  requiresTarget?: boolean;
+  targetId?: string;
+}
+
+export interface AgentUiTargetRegistrySnapshot {
+  version: string;
+  generatedAt: string;
+  provider: string;
+  route?: string;
+  surface?: string;
+  targets: Array<{
+    targetId: string;
+    targetInstanceId?: string;
+    label: string;
+    description: string;
+    surface: string;
+    capabilities: string[];
+    visible: boolean;
+    enabled: boolean;
+    disabledReason?: string;
+  }>;
+}
+
+export interface AgentUiActionRegistrySnapshot {
+  schemaVersion: "sonik.agent_ui.actions.v1";
+  actions: AgentUiActionDescriptor[];
+}
+
+export interface AgentUiApprovalStateSnapshot {
+  schemaVersion: "sonik.agent_ui.approval_state.v1";
+  phase: AgentUiWorkflowPhase;
+  activeArtifactId: string | null;
+  canRequestApproval: boolean;
+  canApproveAndRun: boolean;
+  disabledReasons: string[];
+  commandPreview?: AgentUiWorkflowCommandPreviewSnapshot | null;
+}
+
 /**
  * Runtime-safe page-control surface for host adapters and local smoke tests.
  * The contract intentionally exposes snapshot reads and semantic actions only;
@@ -102,6 +151,10 @@ export interface AgentUiPageControl {
   schemaVersion: "sonik.agent_ui.page_control.v1";
   getPageContext: () => AgentUiPageContextSnapshot;
   getAssertions: () => AgentUiPageAssertions;
+  getActions: () => AgentUiActionRegistrySnapshot;
+  getTargetRegistry: () => AgentUiTargetRegistrySnapshot | null;
+  getActiveWorkflowState: () => AgentUiWorkflowSnapshot;
+  getApprovalState: () => AgentUiApprovalStateSnapshot;
   actions: {
     createSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     submitPrompt: (input: { prompt?: string; sessionId?: string | null }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
@@ -126,6 +179,7 @@ export interface AgentUiPageControl {
     }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
     openCanvas?: () => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
     highlightTarget?: (input: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
+    focusTarget?: (input: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
     requestApprovalPreview?: (input?: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
   };
 }

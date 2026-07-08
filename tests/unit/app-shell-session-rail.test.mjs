@@ -334,7 +334,7 @@ assert.equal(pageSource.includes("lastSignedHostPageContext"), true, "embedded w
 assert.equal(pageSource.includes("selectSignedWorkspaceHostContext({ current: hostPageContext, cached: lastSignedHostPageContext })"), true, "embedded workspace requests should delegate signed-context selection to the fail-closed authority helper");
 assert.equal(pageSource.includes("lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext })"), true, "host-context updates must refresh or clear the signed-context cache through the authority helper");
 assert.equal(pageSource.includes("workspace.fetch.blocked_missing_host_context"), true, "workspace calls should fail closed before reaching cloud APIs without signed host context");
-assert.equal(pageSource.includes("session.bootstrap.embedded_fresh_session"), true, "embedded bootstrap should start a fresh chat instead of silently jumping into the latest persisted session");
+assert.equal(pageSource.includes("session.bootstrap.embedded_fresh_session"), false, "embedded bootstrap must resume the most recent session — forcing a fresh chat per mount lost the user's conversation every time the widget reopened (2026-07-08 regression report)");
 assert.equal(pageSource.includes("function createSignedWorkspaceHostSession"), true, "workspace authority headers should canonicalize the signed hostSession envelope before re-encoding it");
 assert.equal(pageSource.includes("...hostSession,"), false, "workspace authority headers must not spread sanitized display-only hostSession fields into the HMAC-covered envelope");
 assert.equal(pageSource.includes("hostSession.theme"), true, "the regression guard should document that display-only hostSession.theme exists outside the signed workspace header");

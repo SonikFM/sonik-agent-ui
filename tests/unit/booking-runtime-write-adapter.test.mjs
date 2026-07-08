@@ -469,3 +469,19 @@ console.log(JSON.stringify({
   runtimeProvider: GENERATED_BOOKING_RUNTIME_PROVIDER,
   fetchCalls: calls.length,
 }));
+
+// Signed host-context envelopes are larger than bearer tokens (approvedCommandIds
+// metadata alone was ~3.5k chars at 113 commands). The old 4096-char secret cap
+// silently downgraded booking runtime auth to anonymous — every executeCommand
+// then denied with runtime_unavailable while the hostSession path kept working.
+{
+  const { createBookingRuntimeAuthContextFromTrustedHostHeader, hasBookingRuntimeCredential, SIGNED_HOST_CONTEXT_HEADER_MAX_CHARS } = await import(
+    "../../apps/standalone-sveltekit/src/lib/server/host-command-runtime.ts"
+  );
+  const largeEnvelope = "e".repeat(6000); // real prod envelope measured at 5,827 chars on 2026-07-08
+  const accepted = createBookingRuntimeAuthContextFromTrustedHostHeader({ header: largeEnvelope, fallback: null });
+  assert.equal(accepted.mode, "signed-host-context", "a ~6k signed host-context header must be accepted, not silently dropped to anonymous");
+  assert.equal(hasBookingRuntimeCredential(accepted), true, "an accepted signed host-context header must count as a runtime credential");
+  const oversized = createBookingRuntimeAuthContextFromTrustedHostHeader({ header: "e".repeat(SIGNED_HOST_CONTEXT_HEADER_MAX_CHARS + 1), fallback: null });
+  assert.notEqual(oversized.mode, "signed-host-context", "an envelope beyond the signed-envelope cap must still be rejected");
+}
