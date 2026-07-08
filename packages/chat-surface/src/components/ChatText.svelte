@@ -34,7 +34,7 @@
 
 <div class="chat-text" class:chat-text--compact={compact}>
   {#if streaming}
-    <p class="chat-text__streaming">{text}</p>
+    <p class="chat-text__streaming">{text}<span class="chat-text__cursor" aria-hidden="true"></span></p>
   {:else}
     {#each blocks as block, index (`${block.kind}-${index}`)}
       {#if block.kind === "paragraph"}
@@ -102,6 +102,34 @@
 
   .chat-text__streaming {
     white-space: pre-wrap;
+  }
+
+  .chat-text__cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    background: currentColor;
+    animation: chat-text-cursor-blink 1s step-end infinite;
+  }
+
+  @keyframes chat-text-cursor-blink {
+    0%,
+    50% {
+      opacity: 1;
+    }
+    51%,
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chat-text__cursor {
+      animation: none;
+      opacity: 0.6;
+    }
   }
 
   .chat-text :global(> * + *) {

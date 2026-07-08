@@ -19,17 +19,17 @@ test("canvas-auto-open: standalone workspace mode auto-shows the canvas once an 
   await expect(page.locator(".workspace-pane--artifact")).toBeVisible();
 });
 
-test.fixme(
+test(
   "canvas-auto-open: embedded chat mode (embedMode=chat) also auto-opens the canvas on artifact creation",
   async ({ page }) => {
-    // Today, `artifactOpen` is hard-forced to `false` whenever `embedMode === "chat"`
-    // (+page.svelte:337-343), regardless of whether an artifact exists -- the embedded
-    // chat surface never shows a canvas the agent created unless the host separately
-    // calls `canvas.open`. Slice B wires `artifact.stream.preview_mounted` to request
-    // `canvas.open` from the host (agent-embed already exposes the action at
-    // packages/agent-embed/src/index.ts:793) and/or relaxes this force-false so the
-    // rendered surface reflects "an artifact now exists" the same way workspace mode
-    // does. Flip this test (remove test.fixme) once that lands.
+    // Slice B (2026-07-08): `artifactOpen` no longer force-hides in `embedMode
+    // === "chat"` -- it follows the same "an artifact/document now exists" rule
+    // as workspace mode (+page.svelte's `artifactOpen` derivation), so the
+    // rendered surface never leaves a created artifact invisible. A real
+    // embedding host is separately, best-effort notified via `canvas.open`
+    // (packages/agent-embed/src/index.ts's host action channel) so it can make
+    // room around the iframe; that part isn't observable from this dev-smoke
+    // harness since there's no real parent host window here.
     await gotoFreshWorkspace(page, smokeUrl(ARTIFACT_INPUT_SCENARIO, { embedMode: "chat" }));
     await submitPrompt(page, "make a visual");
 
@@ -38,12 +38,11 @@ test.fixme(
   },
 );
 
-test("canvas-auto-open: embedded chat mode baseline -- canvas pane stays hidden today even with an active artifact", async ({ page }) => {
-  // Pins today's actual (buggy) behavior so a regression the other direction
-  // (canvas suddenly showing in chat mode without a deliberate fix) is still caught.
-  await gotoFreshWorkspace(page, smokeUrl(ARTIFACT_INPUT_SCENARIO, { embedMode: "chat" }));
-  await submitPrompt(page, "make a visual");
-  await page.waitForTimeout(1500);
+test("canvas-auto-open: embedded chat mode baseline -- canvas pane stays hidden before any artifact exists", async ({ page }) => {
+  // Guards the other regression direction: chat mode should not eagerly show
+  // the canvas pane just because it's embedded -- only once there is actually
+  // an artifact/document/pending intent to show.
+  await gotoFreshWorkspace(page, smokeUrl(null, { embedMode: "chat" }));
 
   await expect(page.locator(".workspace-root")).toHaveAttribute("data-artifact-open", "false");
   await expect(page.locator(".workspace-pane--artifact")).toHaveCount(0);
