@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Workspace Document Editor Island</title>
+    <title>Document Editor Island</title>
     <link rel="stylesheet" href="/vendor/workspace/static/style.css" />
     <script src="/static/lib/highlight.min.js"></script>
     <style>
@@ -88,7 +88,7 @@
     <button id="mode-chat-btn" type="button">Chat</button>
     <button id="overflow-doc-btn" type="button">Docs</button>
     <button id="doc-indicator-btn" type="button">Doc</button>
-    <div id="current-meta">Workspace Document Island</div>
+    <div id="current-meta">Document Island</div>
     <div id="chat-history"></div>
     <div id="workspace-host-loading" class="workspace-host-loading">Loading Workspace document editor…</div>
 
@@ -159,7 +159,7 @@
       function normalizePayload(payload = {}) {
         return {
           documentId: typeof payload.documentId === 'string' && payload.documentId.trim() ? payload.documentId.trim() : null,
-          title: typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Workspace Document',
+          title: typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Document',
           language: typeof payload.language === 'string' && payload.language.trim() ? payload.language.trim() : 'markdown',
           content: typeof payload.content === 'string' ? payload.content : '# Workspace document editor\n\nUse the language selector to switch Markdown, HTML, JSON, code, or CSV render modes.',
           preferredView: normalizePreferredView(payload.preferredView)
