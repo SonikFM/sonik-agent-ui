@@ -30,6 +30,72 @@ function elementKeyFromPatchPath(path: string): string | undefined {
 }
 
 /**
+ * Save-claim language that implies a state change was persisted. Deliberately
+ * excludes soft acknowledgments ("noted", "got it") — those are the CORRECT
+ * no-tool response when there is nothing to persist. Telemetry-only detector;
+ * some false positives are acceptable and the matched phrase is captured for
+ * tuning (pressure-test finding F1, 2026-07-08).
+ */
+const SAVE_CLAIM_PATTERN = /\brecorded\b|\bI['\u2019]ve (saved|recorded|captured|submitted|updated)\b|\bhas been (saved|recorded|updated|submitted)\b|\bmarked (it|that|this|[^.!?]{0,30}) as (answered|complete|done)\b|\bupdated (the|your) (form|intake|canvas|answers?)\b|\banswers? (is|are) (saved|recorded)\b/i;
+
+/** Tool-output kinds that prove a real state change happened this turn. */
+const STATE_CHANGING_OUTPUT_KINDS = new Set(["intake-answer-receipt", "json-render-artifact"]);
+
+/**
+ * Claim-vs-receipt drift detector (F1): if the assistant's text claims
+ * something was recorded/saved but the turn produced zero successful
+ * state-changing tool outputs, emit `api.generate.claim_without_receipt`.
+ * Detection only — never blocks, rewrites, or annotates the stream.
+ */
+function createClaimReceiptDetector<T>(
+  write: (event: AgentTelemetryEvent) => void,
+  telemetryBase: () => Record<string, unknown>,
+): TransformStream<T, T> {
+  let text = "";
+  let stateChangingReceipts = 0;
+  const toolOutputKinds = new Set<string>();
+  return new TransformStream<T, T>({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+      try {
+        const c = chunk as { type?: string; delta?: unknown; textDelta?: unknown; output?: unknown };
+        if (typeof c?.delta === "string") text += c.delta;
+        else if (typeof c?.textDelta === "string") text += c.textDelta;
+        if (c?.type === "tool-output-available" && c.output && typeof c.output === "object") {
+          const out = c.output as { kind?: unknown; ok?: unknown; receipt?: { ok?: unknown } };
+          const kind = typeof out.kind === "string" ? out.kind : "unknown";
+          if (toolOutputKinds.size < 12) toolOutputKinds.add(kind);
+          if (STATE_CHANGING_OUTPUT_KINDS.has(kind) && out.ok !== false) stateChangingReceipts += 1;
+          if (kind === "command-receipt" && out.receipt?.ok === true) stateChangingReceipts += 1;
+        }
+      } catch {
+        // The detector must never break the user-visible stream.
+      }
+    },
+    flush() {
+      try {
+        if (stateChangingReceipts > 0 || text.length === 0) return;
+        const match = SAVE_CLAIM_PATTERN.exec(text);
+        if (!match) return;
+        write({
+          ...telemetryBase(),
+          event: "api.generate.claim_without_receipt",
+          ok: false,
+          reason: "save_claim_with_no_state_changing_receipt",
+          payload: {
+            matchedPhrase: match[0].slice(0, 80),
+            textChars: text.length,
+            toolOutputKinds: Array.from(toolOutputKinds),
+          },
+        } as AgentTelemetryEvent);
+      } catch {
+        // Detection failures are silent by design.
+      }
+    },
+  });
+}
+
+/**
  * Wraps the `pipeJsonRender` output with the json-render devtools stream tap
  * so spec patches persist to telemetry (Pipe-B), without changing the
  * client-visible stream in any way (the tap forks a copy via `tee()`).
@@ -123,7 +189,8 @@ export function tapSpecStreamForTelemetry<T>(
       }
     });
 
-    return tapJsonRenderStream(stream as unknown as ReadableStream<StreamChunk>, events) as unknown as ReadableStream<T>;
+    const tapped = tapJsonRenderStream(stream as unknown as ReadableStream<StreamChunk>, events) as unknown as ReadableStream<T>;
+    return tapped.pipeThrough(createClaimReceiptDetector<T>(write, telemetryBase));
   } catch (err) {
     write({
       ...telemetryBase(),
