@@ -110,13 +110,9 @@
 <section
   class="canvas-viewport"
   class:canvas-viewport--fullscreen={isFullscreen}
-<<<<<<< HEAD
   class:canvas-viewport--floating={isFloating}
   style={isFloating ? windowController.style : undefined}
-  aria-label="Artifact canvas viewport"
-=======
   aria-label="Canvas viewport"
->>>>>>> origin/main
 >
   <CanvasToolbar
     {title}
