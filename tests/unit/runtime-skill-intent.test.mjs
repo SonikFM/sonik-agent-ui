@@ -87,4 +87,37 @@ assert.deepEqual(
   "the same answer-turn phrasing without an active artifact must not select booking.context.intake",
 );
 
+// F2 fix (2026-07-08, pressure-test finding): the structural guard above must only keep
+// booking.context.intake selected when the active artifact is a REGISTERED intake artifact
+// (has QuestionCard questions), not any active artifact (e.g. a generic createJsonArtifact
+// canvas), otherwise submitIntakeAnswer mounts and every chat turn fails with unknown_question_id.
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({
+    userMessage: "Open Tuesday to Sunday, 9 tables",
+    pageContext: { ...bookingPage, activeArtifactId: "artifact-1", artifactType: "json-render" },
+    activeArtifactIsRegisteredIntake: false,
+  }),
+  [],
+  "activeArtifactIsRegisteredIntake:false must narrow the guard so a generic active artifact does not keep booking.context.intake selected",
+);
+
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({
+    userMessage: "Open Tuesday to Sunday, 9 tables",
+    pageContext: { ...bookingPage, activeArtifactId: "artifact-1", artifactType: "json-render" },
+    activeArtifactIsRegisteredIntake: true,
+  }),
+  ["booking.context.intake"],
+  "activeArtifactIsRegisteredIntake:true must keep booking.context.intake selected",
+);
+
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({
+    userMessage: "Open Tuesday to Sunday, 9 tables",
+    pageContext: { ...bookingPage, activeArtifactId: "artifact-1", artifactType: "json-render" },
+  }),
+  ["booking.context.intake"],
+  "activeArtifactIsRegisteredIntake:undefined (caller couldn't tell) must preserve prior any-active-artifact behavior",
+);
+
 console.log("runtime-skill-intent tests passed");

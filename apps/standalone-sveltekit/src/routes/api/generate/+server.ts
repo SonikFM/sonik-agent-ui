@@ -30,6 +30,7 @@ import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
 import { resolveImplicitWorkflowSkillIds } from "$lib/runtime-skill-intent";
+import { listPersistedQuestionIds } from "$lib/server/intake-artifacts";
 import {
   createBookingRuntimeAuthContextFromEnv,
   createBookingRuntimeAuthContextFromTrustedHostHeader,
@@ -458,7 +459,28 @@ export const POST: RequestHandler = async (event) => {
   const lastMessage = uiMessages.at(-1);
   const firstUserMessage = resolveFirstUserMessage(uiMessages);
   const latestUserMessage = resolveLatestUserMessage(uiMessages);
-  const implicitSkillIds = resolveImplicitWorkflowSkillIds({ userMessage: latestUserMessage, pageContext });
+  // Load the active artifact's spec up front (F2 fix, 2026-07-08): the skill-intent guard needs
+  // to know whether the active artifact is a REGISTERED intake artifact (has QuestionCard
+  // questions) before deciding whether to keep booking.context.intake selected, otherwise a
+  // generic createJsonArtifact canvas keeps the intake skill (and submitIntakeAnswer) mounted and
+  // every chat turn fails with unknown_question_id. Loaded once here and reused below for
+  // currentIntakeArtifactSpec instead of a second persistence fetch.
+  const activeIntakeArtifactId = pageContext?.activeArtifactId?.trim();
+  let activeIntakeArtifactSpec: Spec | null = null;
+  let activeArtifactIsRegisteredIntake: boolean | undefined;
+  if (activeIntakeArtifactId) {
+    try {
+      const artifact = await requestPersistence.getArtifact<Spec>(activeIntakeArtifactId);
+      activeIntakeArtifactSpec = artifact?.kind === "json-render" ? artifact.content ?? null : null;
+      activeArtifactIsRegisteredIntake = activeIntakeArtifactSpec
+        ? listPersistedQuestionIds(activeIntakeArtifactSpec).length > 0
+        : false;
+    } catch {
+      // Load failure: caller can't tell, so preserve prior any-active-artifact behavior.
+      activeArtifactIsRegisteredIntake = undefined;
+    }
+  }
+  const implicitSkillIds = resolveImplicitWorkflowSkillIds({ userMessage: latestUserMessage, pageContext, activeArtifactIsRegisteredIntake });
   const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
   const skillIds = resolveRequestSkillIds({
     requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
@@ -466,14 +488,9 @@ export const POST: RequestHandler = async (event) => {
     implicitSkillIds,
   });
   // Patch-first refinement contract (Phase 2.1): when the intake skill is active over an
-  // already-active artifact, load its current spec so the composed prompt can tell the model
+  // already-active artifact, expose its current spec so the composed prompt can tell the model
   // to refine it via submitIntakeAnswer instead of regenerating it via createBookingIntakeArtifact.
-  const activeIntakeArtifactId = pageContext?.activeArtifactId?.trim();
-  const currentIntakeArtifactSpec = activeIntakeArtifactId && hasBookingContextIntakeSkill(skillIds)
-    ? await requestPersistence.getArtifact<Spec>(activeIntakeArtifactId)
-        .then((artifact) => (artifact?.kind === "json-render" ? artifact.content ?? null : null))
-        .catch(() => null)
-    : null;
+  const currentIntakeArtifactSpec = hasBookingContextIntakeSkill(skillIds) ? activeIntakeArtifactSpec : null;
   const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec });
   const fallbackConversationTitle = firstUserMessage ? deriveWorkspaceSessionTitle(firstUserMessage) : "";
   const titleSession = workspaceSessionId ? await requestPersistence.getSession(workspaceSessionId).catch(() => null) : null;

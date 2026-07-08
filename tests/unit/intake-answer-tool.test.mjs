@@ -17,7 +17,7 @@ const [
 
 const { createIntakeArtifact } = intakeModule;
 const { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE } = contextIntakeModule;
-const { getRequestWorkspaceArtifact, listRequestWorkspaceArtifactVersions } = storeModule;
+const { getRequestWorkspaceArtifact, listRequestWorkspaceArtifactVersions, createRequestWorkspaceArtifact } = storeModule;
 const { createSubmitIntakeAnswerTool } = toolModule;
 const { createQuestionAnswerStateChanges, createAgentWorkflowSnapshot } = workflowModule;
 
@@ -86,12 +86,38 @@ const snapshot = createAgentWorkflowSnapshot({
 assert.equal(snapshot.activeWorkflowId, "booking.context.intake", "resolveWorkflowId must resolve a real workflow id after a chat-answer patch");
 assert.notEqual(snapshot.phase, "idle", "phase must advance off idle once the model records a chat answer via submitIntakeAnswer");
 
-// --- 4. An invalid questionId must be rejected, not silently accepted or used to recreate.
+// --- 4. An invalid questionId must be rejected, not silently accepted or used to recreate. The
+//     rejection must be terminal-teaching: it must list the artifact's real registered question
+//     ids so the model can pick a valid one instead of retrying blind (F2 fix, 2026-07-08).
 const invalidAnswer = await tool.execute({ questionId: "not_a_real_question_id", value: "whatever" });
 assert.equal(invalidAnswer.ok, false, "an unknown questionId must be rejected");
 assert.equal(invalidAnswer.error, "unknown_question_id");
+assert.ok(Array.isArray(invalidAnswer.validQuestionIds), "unknown_question_id must include validQuestionIds");
+assert.ok(invalidAnswer.validQuestionIds.includes(firstQuestion.id), "validQuestionIds must include the artifact's real registered question ids");
+assert.ok(invalidAnswer.validQuestionIds.length <= 20, "validQuestionIds must be bounded to 20");
+assert.equal(typeof invalidAnswer.guidance, "string", "unknown_question_id must include one-line guidance to pick from validQuestionIds");
 const versionsAfterInvalid = await listRequestWorkspaceArtifactVersions(null, artifactId);
 assert.equal(versionsAfterInvalid.length, 2, "a rejected invalid-questionId call must not create a new version or a new artifact");
+
+// --- 4b. A GENERIC createJsonArtifact canvas (no registered QuestionCard questions at all) must
+//     be refused as not_an_intake_artifact -- a terminal, teaching refusal telling the model to
+//     stop calling submitIntakeAnswer for this artifact and acknowledge the user's info in chat
+//     instead, rather than repeatedly failing with unknown_question_id (pressure-test finding F2).
+const genericArtifactId = `artifact-generic-${Date.now()}`;
+await createRequestWorkspaceArtifact(null, {
+  id: genericArtifactId,
+  session_id: sessionId,
+  kind: "json-render",
+  title: "Generic Dashboard",
+  content: { root: "main", elements: { main: { type: "Card", props: { title: "Just a dashboard" } } }, state: {} },
+  source: "ai",
+});
+const genericTool = createSubmitIntakeAnswerTool({ pageContext: { activeArtifactId: genericArtifactId } });
+const genericAnswer = await genericTool.execute({ questionId: "anything", value: "whatever" });
+assert.equal(genericAnswer.ok, false, "submitIntakeAnswer against a generic non-intake artifact must be refused");
+assert.equal(genericAnswer.error, "not_an_intake_artifact");
+assert.equal(typeof genericAnswer.guidance, "string", "not_an_intake_artifact must include teaching guidance");
+assert.match(genericAnswer.guidance, /do not call submitIntakeAnswer again/i, "guidance must tell the model to stop calling submitIntakeAnswer for this artifact");
 
 // --- 5. Missing/absent active artifact must be rejected rather than silently recreating one.
 const noActiveArtifactTool = createSubmitIntakeAnswerTool({ pageContext: {} });

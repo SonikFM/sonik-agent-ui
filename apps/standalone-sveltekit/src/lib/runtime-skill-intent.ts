@@ -25,7 +25,19 @@ function contextText(pageContext?: AgentPageContext): string {
   ].map(normalize).filter(Boolean).join(" ");
 }
 
-export function resolveImplicitWorkflowSkillIds(input: { userMessage?: string | null; firstUserMessage?: string | null; pageContext?: AgentPageContext }): string[] {
+export function resolveImplicitWorkflowSkillIds(input: {
+  userMessage?: string | null;
+  firstUserMessage?: string | null;
+  pageContext?: AgentPageContext;
+  /**
+   * Whether the active artifact (pageContext.activeArtifactId) is a registered intake artifact
+   * (i.e. its spec has at least one QuestionCard question). false narrows the structural guard
+   * below so a generic createJsonArtifact canvas never keeps booking.context.intake selected
+   * (2026-07-08 pressure-test finding F2). undefined means the caller couldn't determine this
+   * (e.g. load failure) and preserves prior any-active-artifact behavior.
+   */
+  activeArtifactIsRegisteredIntake?: boolean;
+}): string[] {
   const message = normalize(input.userMessage ?? input.firstUserMessage);
   if (!message) return [];
   const context = contextText(input.pageContext);
@@ -83,6 +95,10 @@ export function resolveImplicitWorkflowSkillIds(input: { userMessage?: string | 
   ]);
 
   const hasActiveArtifact = typeof input.pageContext?.activeArtifactId === "string" && input.pageContext.activeArtifactId.trim().length > 0;
+  // Narrowed per F2: an active artifact only keeps the intake skill selected when the caller
+  // confirms it's a registered intake artifact (activeArtifactIsRegisteredIntake === false rules
+  // it out); undefined (caller couldn't tell) preserves the prior any-active-artifact behavior.
+  const activeArtifactKeepsIntake = hasActiveArtifact && input.activeArtifactIsRegisteredIntake !== false;
   const commitContext = `${message} ${context}`;
   const canCommitActiveBookingArtifact = !reservationExecutionIntent
     && bookingContextCommitIntent
@@ -93,7 +109,7 @@ export function resolveImplicitWorkflowSkillIds(input: { userMessage?: string | 
   }
 
   // structural guard specified by Dan (2026-07-08): keep intake skill active while an active intake artifact exists
-  if (((setupIntent && venueIntakeObject) || hasActiveArtifact) && !reservationExecutionIntent && !canCommitActiveBookingArtifact) {
+  if (((setupIntent && venueIntakeObject) || activeArtifactKeepsIntake) && !reservationExecutionIntent && !canCommitActiveBookingArtifact) {
     skills.push("booking.context.intake");
   }
 

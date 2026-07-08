@@ -452,12 +452,34 @@ function createIntakeSurfaceSpec(surface: InteractiveSurfaceSpec): Spec {
   } as Spec;
 }
 
-function resolvePersistedQuestion(content: Spec, questionId: string): AskUserQuestionSpec {
+/** Shared QuestionCard traversal: the single source of truth for "which questionIds does this
+ * persisted intake spec register" -- used both to resolve one question (resolvePersistedQuestion)
+ * and to enumerate all registered question ids (listPersistedQuestionIds, reused by the
+ * skill-intent guard and the submitIntakeAnswer tool's terminal-teaching errors). */
+function* questionCardProps(content: Spec): Generator<Record<string, unknown>> {
   for (const element of Object.values(content.elements ?? {})) {
     if (!element || typeof element !== "object" || Array.isArray(element)) continue;
     if ((element as { type?: unknown }).type !== "QuestionCard") continue;
     const props = (element as { props?: unknown }).props;
-    if (!isRecord(props) || props.questionId !== questionId) continue;
+    if (!isRecord(props)) continue;
+    yield props;
+  }
+}
+
+/** All registered questionIds for a persisted intake spec, in element order. Used to determine
+ * whether an artifact is a registered intake artifact at all (zero questions => not one) and to
+ * surface valid ids in unknown_question_id guidance. */
+export function listPersistedQuestionIds(content: Spec): string[] {
+  const ids: string[] = [];
+  for (const props of questionCardProps(content)) {
+    if (typeof props.questionId === "string") ids.push(props.questionId);
+  }
+  return ids;
+}
+
+function resolvePersistedQuestion(content: Spec, questionId: string): AskUserQuestionSpec {
+  for (const props of questionCardProps(content)) {
+    if (props.questionId !== questionId) continue;
     return createAskUserQuestionSpec({
       id: props.questionId,
       title: props.title,

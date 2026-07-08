@@ -9,7 +9,9 @@ import { logArtifactTelemetry, summarizeSpec } from "../artifacts/artifact-telem
 import { BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE } from "../server/booking-workflows/context-intake.ts";
 import { explorerCatalog } from "../render/catalog.ts";
 import { getRequestWorkspacePersistence } from "../server/workspace-request-store.ts";
-import { updateIntakeArtifactStateForPersistence } from "../server/intake-artifacts.ts";
+import { updateIntakeArtifactStateForPersistence, listPersistedQuestionIds } from "../server/intake-artifacts.ts";
+
+const MAX_VALID_QUESTION_IDS = 20;
 
 function validatedBookingIntakeSpec(title?: string | null): Spec {
   const spec = createInteractiveSurfaceJsonRenderSpec(BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE) as Spec;
@@ -181,6 +183,37 @@ export function createSubmitIntakeAnswerTool(context: SubmitIntakeAnswerToolCont
       }
 
       const persistence = context.persistence ?? getRequestWorkspacePersistence(null);
+
+      // Terminal-teaching guard (F2 fix, 2026-07-08): a generic createJsonArtifact canvas has no
+      // registered QuestionCard questions, so submitIntakeAnswer against it can only ever fail.
+      // Check that up front and refuse once with clear guidance instead of letting the model
+      // retry unknown_question_id in a loop. Load failure here is non-fatal: it just means we
+      // skip straight to the normal patch attempt below, which has its own error handling.
+      let knownQuestionIds: string[] | undefined;
+      try {
+        const artifact = await persistence.getArtifact<Spec>(target.artifactId);
+        const spec = artifact?.kind === "json-render" ? artifact.content ?? null : null;
+        knownQuestionIds = spec ? listPersistedQuestionIds(spec) : [];
+      } catch {
+        knownQuestionIds = undefined;
+      }
+
+      if (knownQuestionIds && knownQuestionIds.length === 0) {
+        logArtifactTelemetry({
+          source: "server",
+          event: "tool.submitIntakeAnswer",
+          ok: false,
+          error: "not_an_intake_artifact",
+          reason: questionId,
+        });
+        return {
+          ok: false,
+          error: "not_an_intake_artifact" as const,
+          message: `Artifact ${target.artifactId} has no registered intake questions.`,
+          guidance: "This artifact has no registered intake questions. Do NOT call submitIntakeAnswer again for it -- acknowledge the user's information in chat instead.",
+        };
+      }
+
       try {
         const updated = await updateIntakeArtifactStateForPersistence(persistence, {
           artifactId: target.artifactId,
@@ -210,6 +243,7 @@ export function createSubmitIntakeAnswerTool(context: SubmitIntakeAnswerToolCont
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const errorCode = classifyIntakeAnswerError(message);
         logArtifactTelemetry({
           source: "server",
           event: "tool.submitIntakeAnswer",
@@ -217,7 +251,17 @@ export function createSubmitIntakeAnswerTool(context: SubmitIntakeAnswerToolCont
           error: message,
           reason: questionId,
         });
-        return { ok: false, error: classifyIntakeAnswerError(message), message };
+        if (errorCode === "unknown_question_id") {
+          const validQuestionIds = (knownQuestionIds ?? []).slice(0, MAX_VALID_QUESTION_IDS);
+          return {
+            ok: false,
+            error: errorCode,
+            message,
+            validQuestionIds,
+            guidance: `Unknown questionId "${questionId}". Pick one of validQuestionIds instead of guessing.`,
+          };
+        }
+        return { ok: false, error: errorCode, message };
       }
     },
   });
