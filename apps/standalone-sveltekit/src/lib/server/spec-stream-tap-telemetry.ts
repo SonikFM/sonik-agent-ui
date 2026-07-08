@@ -49,7 +49,7 @@ const STATE_CHANGING_OUTPUT_KINDS = new Set(["intake-answer-receipt", "json-rend
  */
 function createClaimReceiptDetector<T>(
   write: (event: AgentTelemetryEvent) => void,
-  telemetryBase: () => Record<string, unknown>,
+  telemetryBase: () => { source: "server" } & Record<string, unknown>,
 ): TransformStream<T, T> {
   let text = "";
   let stateChangingReceipts = 0;
@@ -87,7 +87,7 @@ function createClaimReceiptDetector<T>(
             textChars: text.length,
             toolOutputKinds: Array.from(toolOutputKinds),
           },
-        } as AgentTelemetryEvent);
+        });
       } catch {
         // Detection failures are silent by design.
       }
