@@ -5,13 +5,17 @@
   export interface ToolCallBlockProps {
     tool: ToolInfo;
     labels?: ToolActivityLabelOverrides;
+    /** True while the turn that produced this tool call is still streaming. */
+    isTurnStreaming?: boolean;
   }
 </script>
 
 <script lang="ts">
-  let { tool, labels = {} }: ToolCallBlockProps = $props();
+  let { tool, labels = {}, isTurnStreaming = false }: ToolCallBlockProps = $props();
 
-  const activity = $derived(resolveToolActivity(tool.toolName, tool.state, labels));
+  const activity = $derived(
+    resolveToolActivity(tool.toolName, tool.state, labels, { isTurnStreaming, recovered: tool.recovered }),
+  );
   const isLoading = $derived(activity.isLoading);
   const isError = $derived(activity.isError);
   const label = $derived(activity.label);

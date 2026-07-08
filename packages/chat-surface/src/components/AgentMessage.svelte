@@ -68,25 +68,26 @@
     {/if}
   {:else}
     {@const hasAnything = segments.length > 0 || messageHasSpec}
-    {@const showLoader = isLast && isStreaming && !hasAnything}
+    {@const isTurnStreaming = isLast && isStreaming}
+    {@const showLoader = isTurnStreaming && !hasAnything}
     {@const showSpecAtEnd = messageHasSpec && !specInserted}
 
     <div class="agent-message__assistant">
       {#each segments as seg, i (`${seg.kind}-${i}`)}
         {#if seg.kind === "text"}
           <div class="agent-message__assistant-text">
-            <ChatText text={seg.text} streaming={isLast && isStreaming} />
+            <ChatText text={seg.text} streaming={isTurnStreaming} />
           </div>
         {:else if seg.kind === "spec"}
           {#if spec && canRenderArtifact}
             <div class="w-full">
-              {@render renderArtifact(spec, isLast && isStreaming)}
+              {@render renderArtifact(spec, isTurnStreaming)}
             </div>
           {/if}
         {:else if seg.kind === "tools"}
           <div class="flex flex-col gap-1">
             {#each seg.tools as tool, toolIndex (tool.toolCallId || `${tool.toolName}-${toolIndex}`)}
-              <ToolCallBlock {tool} labels={toolLabels} />
+              <ToolCallBlock {tool} labels={toolLabels} {isTurnStreaming} />
             {/each}
           </div>
         {/if}

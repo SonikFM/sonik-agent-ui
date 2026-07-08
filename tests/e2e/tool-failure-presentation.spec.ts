@@ -15,35 +15,33 @@ import { TOOL_FAILURE_SCENARIO, gotoFreshWorkspace, smokeUrl, submitPrompt } fro
 // `output-error` arrives -- there is no "recoverable during an active stream" grace
 // period today.
 
-test("tool-failure-presentation: a failed tool call renders as an immediate failure today", async ({ page }) => {
+test("tool-failure-presentation: recoverable tool failure stays neutral while the turn is still streaming", async ({ page }) => {
+  // Slice C: while a turn is streaming, collapse tool `output-error`/`output-denied`
+  // into a neutral "checking / retrying" activity label; only promote to a
+  // user-facing failure if the turn ends without recovery (plan section "Slice C —
+  // Recoverable-failure presentation policy (R2)").
   await gotoFreshWorkspace(page, smokeUrl(TOOL_FAILURE_SCENARIO));
   await submitPrompt(page, "make a visual");
 
   const toolBlock = page.locator("[data-tool-phase]").first();
   await expect(toolBlock).toHaveAttribute("data-tool-state", "output-error", { timeout: 10_000 });
-  await expect(toolBlock.locator("summary")).toContainText("Canvas creation failed");
+  await expect(toolBlock.locator("summary")).not.toContainText("failed");
+  await expect(toolBlock.locator("summary")).toContainText(/checking|retrying/i);
+});
+
+test("tool-failure-presentation: promotes to a real failure once the turn ends without recovery", async ({ page }) => {
+  await gotoFreshWorkspace(page, smokeUrl(TOOL_FAILURE_SCENARIO));
+  await submitPrompt(page, "make a visual");
+
+  const toolBlock = page.locator("[data-tool-phase]").first();
+  await expect(toolBlock).toHaveAttribute("data-tool-state", "output-error", { timeout: 10_000 });
+
+  // The dev-smoke scenario never retries, so once the stream fully settles the
+  // block should promote from the neutral retry copy to the real failure label.
+  await expect(toolBlock.locator("summary")).toContainText("Canvas creation failed", { timeout: 10_000 });
 
   // Technical receipt stays available (expandable), which Slice C keeps as-is --
   // only the default/collapsed-during-stream presentation changes.
   await toolBlock.click();
   await expect(toolBlock.locator("dd").last()).toContainText("dev smoke injected tool failure");
 });
-
-test.fixme(
-  "tool-failure-presentation (target state): recoverable tool failure stays neutral/collapsed while the turn is still streaming",
-  async ({ page }) => {
-    // Slice C: while a turn is streaming, collapse tool `output-error`/`output-denied`
-    // into a neutral "checking / retrying" activity label; only promote to a
-    // user-facing failure if the turn ends without recovery (plan section "Slice C —
-    // Recoverable-failure presentation policy (R2)"). Today ToolCallBlock has no
-    // streaming-aware grace period, so this assertion fails until that policy layer
-    // (and its `tool.failure.recovered` / `tool.failure.terminal` telemetry) exists.
-    await gotoFreshWorkspace(page, smokeUrl(TOOL_FAILURE_SCENARIO));
-    await submitPrompt(page, "make a visual");
-
-    const toolBlock = page.locator("[data-tool-phase]").first();
-    await expect(toolBlock).toHaveAttribute("data-tool-state", "output-error", { timeout: 10_000 });
-    await expect(toolBlock.locator("summary")).not.toContainText("failed");
-    await expect(toolBlock.locator("summary")).toContainText(/checking|retrying/i);
-  },
-);
