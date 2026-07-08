@@ -92,7 +92,8 @@ export function resolveImplicitWorkflowSkillIds(input: { userMessage?: string | 
     skills.push("booking.context.create");
   }
 
-  if (setupIntent && venueIntakeObject && !reservationExecutionIntent && !canCommitActiveBookingArtifact) {
+  // structural guard specified by Dan (2026-07-08): keep intake skill active while an active intake artifact exists
+  if (((setupIntent && venueIntakeObject) || hasActiveArtifact) && !reservationExecutionIntent && !canCommitActiveBookingArtifact) {
     skills.push("booking.context.intake");
   }
 

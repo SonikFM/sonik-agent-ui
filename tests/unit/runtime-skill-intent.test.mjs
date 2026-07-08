@@ -68,4 +68,23 @@ assert.deepEqual(
   "ordinary page questions must not inject workflow skills",
 );
 
+// Structural guard specified by Dan (2026-07-08): keep the intake skill active while an active
+// intake artifact exists, so conversational answer turns ("Open Tuesday to Sunday, 9 tables")
+// still mount submitIntakeAnswer instead of dropping the skill because the phrasing lacks a
+// setup/configure verb.
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({
+    userMessage: "Open Tuesday to Sunday, 9 tables",
+    pageContext: { ...bookingPage, activeArtifactId: "artifact-1", artifactType: "json-render" },
+  }),
+  ["booking.context.intake"],
+  "answer-turn phrasing over an active intake artifact must keep booking.context.intake selected",
+);
+
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({ userMessage: "Open Tuesday to Sunday, 9 tables", pageContext: bookingPage }),
+  [],
+  "the same answer-turn phrasing without an active artifact must not select booking.context.intake",
+);
+
 console.log("runtime-skill-intent tests passed");

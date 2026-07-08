@@ -17,6 +17,7 @@
 
 import { explorerCatalog } from "./render/catalog.ts";
 import { JSON_ARTIFACT_TOOL_OBJECT_GUIDANCE } from "./artifacts/artifact-generation-guidance.ts";
+import { buildUserPrompt, isNonEmptySpec, type Spec } from "@json-render/core";
 
 /** Context the composition seam evaluates each module's `seedWhen` against.
  *  Every field is optional; an empty context reproduces today's effective prompt
@@ -189,6 +190,22 @@ export const AGENT_PROMPT_MODULES: readonly AgentPromptModule[] = [
   DATA_BINDING_MODULE,
 ];
 
+/**
+ * Patch-first refinement contract (Phase 2.1). When an active intake artifact's
+ * spec is supplied, tells the model the artifact already exists so it must
+ * refine it in place rather than regenerate it: reuses the library's
+ * `buildUserPrompt` patch-mode composition (RFC 6902 framing + "CURRENT UI
+ * STATE, DO NOT recreate existing elements") for the currentSpec framing, then
+ * maps that patch semantics onto this surface's actual patch tool
+ * (submitIntakeAnswer is a tool call, not inline JSON Patch text). Returns null
+ * when there is no active spec to refine, so callers can omit the section.
+ */
+export function buildIntakeRefinementContractSection(currentSpec: Spec | null | undefined): string | null {
+  if (!isNonEmptySpec(currentSpec)) return null;
+  const editContext = buildUserPrompt({ prompt: "", currentSpec, editModes: ["patch"] });
+  return `REFINEMENT CONTRACT (active intake artifact):\n${editContext}\n\nFor this booking-context intake artifact, apply the patch above by calling submitIntakeAnswer(questionId, value) against the existing artifact. Never emit raw JSON Patch lines in chat text, and never call createBookingIntakeArtifact again while this artifact is active.`;
+}
+
 export interface ComposedAgentPrompt {
   /** The full system-prompt string to hand to the agent as `instructions`. */
   prompt: string;
@@ -235,6 +252,9 @@ export function composeAgentSystemPrompt(input: {
   context?: AgentPromptSeedContext;
   skillModules?: AgentPromptSkillModule[];
   promptModuleOverrides?: Record<string, string>;
+  /** Current spec of the active intake artifact, when one exists this turn.
+   *  Drives the patch-first refinement contract (see {@link buildIntakeRefinementContractSection}). */
+  currentIntakeArtifactSpec?: Spec | null;
 } = {}): ComposedAgentPrompt {
   const context = input.context ?? {};
   const overrides = input.promptModuleOverrides ?? {};
@@ -264,6 +284,9 @@ export function composeAgentSystemPrompt(input: {
     const skillBlock = skillModules.map((module) => module.body.trim()).join("\n\n");
     sections.push(`RUNTIME SKILLS (attached for this turn only):\n${skillBlock}`);
   }
+
+  const refinementSection = buildIntakeRefinementContractSection(input.currentIntakeArtifactSpec);
+  if (refinementSection) sections.push(refinementSection);
 
   return {
     prompt: sections.join("\n\n"),

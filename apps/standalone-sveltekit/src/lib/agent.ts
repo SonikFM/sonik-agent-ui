@@ -20,8 +20,9 @@ import type { SystemModelMessage } from "ai";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
+import type { Spec } from "@json-render/core";
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings };
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null };
 
 const PREVIEW_ONLY_RUNTIME_SKILL_IDS = new Set([
   "booking.context.intake",
@@ -48,7 +49,7 @@ function hasPreviewOnlyRuntimeSkill(skillIds: string[] | undefined): boolean {
   return ids.some((id) => PREVIEW_ONLY_RUNTIME_SKILL_IDS.has(id));
 }
 
-function hasBookingContextIntakeSkill(skillIds: string[] | undefined): boolean {
+export function hasBookingContextIntakeSkill(skillIds: string[] | undefined): boolean {
   const ids = normalizedSkillIds(skillIds);
   if (ids.some((id) => EXECUTION_RUNTIME_SKILL_IDS.has(id))) return false;
   return ids.some((id) => id === "booking.context.intake" || id === "booking-context-intake");
@@ -76,6 +77,7 @@ export function resolveAgentPromptComposition(context: AgentRuntimeContext = {})
     },
     skillModules: resolveRuntimeSkillPromptModules(context.skillIds, context.agentSettings?.skillPromptOverrides),
     promptModuleOverrides: context.agentSettings?.promptModuleOverrides,
+    currentIntakeArtifactSpec: context.currentIntakeArtifactSpec,
   });
 }
 
