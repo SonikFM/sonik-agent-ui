@@ -95,12 +95,6 @@ BUILT-IN ACTIONS (use with on.press):
 - pushState: Append to an array. params: { statePath: "/items", value: { ... } }
 - removeState: Remove by index. params: { statePath: "/items", index: 0 }
 
-INPUT COMPONENTS:
-- RadioGroup: Renders radio buttons. Writes selected value to statePath automatically.
-- SelectInput: Dropdown select. Writes selected value to statePath automatically.
-- TextInput: Text input field. Writes entered value to statePath automatically.
-- Button: Clickable button. Use on.press to trigger actions.
-
 ${explorerCatalog.prompt({
   mode: "inline",
   customRules: [
