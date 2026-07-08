@@ -3496,7 +3496,7 @@
         <button
           type="button"
           onclick={openDocumentEditor}
-          class="px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           aria-label="Open workspace documents"
         >
           Documents

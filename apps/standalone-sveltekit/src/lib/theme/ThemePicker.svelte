@@ -43,7 +43,7 @@
     align-items: center;
     gap: 0.375rem;
     color: var(--muted-foreground);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
   }
 
   .theme-picker__label {
@@ -51,7 +51,9 @@
   }
 
   .theme-picker__select {
-    min-height: 2rem;
+    min-height: 2.25rem;
+    padding-left: 0.75rem;
+    border-radius: 9999px;
     border-color: var(--app-card-border);
     background: var(--app-control-bg);
     color: var(--color-base-content);
