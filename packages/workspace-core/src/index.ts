@@ -21,7 +21,6 @@ export { closePane, focusArtifact, splitWorkspace } from "./layout/workspace-pat
 export type { WorkspaceRuntimeSnapshot } from "./state/workspace-state.js";
 export { createWorkspaceRuntimeSnapshot, withActiveArtifact } from "./state/workspace-state.js";
 
-export { default as ArtifactFrame } from "./components/ArtifactFrame.svelte";
 export { default as CanvasToolbar } from "./components/CanvasToolbar.svelte";
 export { default as CanvasViewport } from "./components/CanvasViewport.svelte";
 export { default as WorkspaceRoot } from "./components/WorkspaceRoot.svelte";

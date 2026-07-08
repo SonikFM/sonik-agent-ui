@@ -13,7 +13,7 @@ import {
   searchRuntimeSkillCatalog,
 } from "../../apps/standalone-sveltekit/src/lib/server/skill-registry.ts";
 import { createSkillCatalogTools } from "../../apps/standalone-sveltekit/src/lib/tools/skill-catalog.ts";
-import { createBookingIntakeArtifact } from "../../apps/standalone-sveltekit/src/lib/tools/intake-artifact.ts";
+import { createBookingIntakeArtifactTool } from "../../apps/standalone-sveltekit/src/lib/tools/intake-artifact.ts";
 
 const CONTEXT_ID = "22222222-2222-4222-8222-222222222222";
 const organizationId = "11111111-1111-4111-8111-111111111111";
@@ -387,7 +387,7 @@ console.log(JSON.stringify({
   intakeQuestionCount: learnedIntake.metadata.interactiveSurfaceTemplate.questions.length,
 }));
 
-const deterministicIntakeArtifact = await createBookingIntakeArtifact.execute({ title: "Venue Setup" });
+const deterministicIntakeArtifact = await createBookingIntakeArtifactTool().execute({ title: "Venue Setup" });
 assert.equal(deterministicIntakeArtifact.kind, "json-render-artifact", "booking intake tool should return a promotable JSON-render artifact");
 assert.equal(deterministicIntakeArtifact.spec.root, "main");
 assert.ok(Object.values(deterministicIntakeArtifact.spec.elements).some((element) => element.type === "QuestionCard"), "booking intake tool should use registered QuestionCard spec");

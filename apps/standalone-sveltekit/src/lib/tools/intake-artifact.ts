@@ -108,10 +108,6 @@ export function createBookingIntakeArtifactTool(context: CreateBookingIntakeArti
   });
 }
 
-// Bare unguarded export kept for existing imports/tests; the agent runtime
-// mounts the guarded factory with the request's pageContext.
-export const createBookingIntakeArtifact = createBookingIntakeArtifactTool();
-
 export type SubmitIntakeAnswerToolContext = {
   pageContext?: AgentPageContext;
   persistence?: AsyncWorkspacePersistenceAdapter | null;
