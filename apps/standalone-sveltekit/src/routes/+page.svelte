@@ -9,6 +9,7 @@
   import type { DataPart, Spec } from "@json-render/svelte";
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
+  import { JsonRenderDevtools } from "@json-render/devtools-svelte";
   import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
@@ -2933,6 +2934,19 @@
     try {
       if (actionName === "submitAnswer") {
         const ok = await handleSubmitAnswerAction(params ?? {});
+        // Incident review 2026-07-07: the PATCH outcome for a question answer
+        // must be loud in both directions, not just on validation errors, or
+        // a dead/failed persist looks identical to success on the wire.
+        logArtifactTelemetry({
+          source: "client",
+          event: "artifact.question.persist_outcome",
+          sessionId: activeSessionId ?? undefined,
+          artifactId: activeArtifact?.id,
+          artifactVersion: activeArtifact?.version,
+          reason: typeof params?.questionId === "string" ? params.questionId : actionName,
+          ok,
+          error: ok ? undefined : "Answer could not be saved. Retry this question before continuing.",
+        });
         recordJsonRenderActionReceipt(createJsonRenderActionReceipt({
           actionName,
           ok,
@@ -3542,6 +3556,9 @@
           onStateChange={handleActiveArtifactStateChange}
           onAction={handleJsonRenderAction}
         />
+      {/if}
+      {#if dev}
+        <JsonRenderDevtools spec={activeArtifact?.content ?? null} catalog={null} position="right" />
       {/if}
     </CanvasViewport>
   {/snippet}

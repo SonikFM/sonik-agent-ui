@@ -36,6 +36,11 @@ const SCENARIOS = [
     file: "tests/agent-eval/scenarios/renderer-no-ai.eval.mjs",
     loader: null,
   },
+  {
+    id: "embedded-experience",
+    file: "tests/agent-eval/scenarios/embedded-experience.eval.mjs",
+    loader: null,
+  },
 ];
 
 const requestedIds = process.argv.slice(2).filter((arg) => !arg.startsWith("--"));

@@ -7,6 +7,7 @@
   import { createQuestionStateUpdateRecord } from "../question-state";
   import {
     emitComponentPropValidationTelemetry,
+    emitQuestionSubmitAttemptTelemetry,
     formatQuestionSubmitError,
     sanitizeQuestionCardProps,
     type Choice,
@@ -131,6 +132,7 @@
   }
 
   function submit(skipped = false) {
+    emitQuestionSubmitAttemptTelemetry({ questionId: safeProps.questionId, skipped });
     try {
       const updates = createQuestionStateUpdateRecord({
         question: questionSpec(),
