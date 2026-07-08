@@ -21,6 +21,7 @@ import {
   type AgentRunContextSelection,
 } from "@sonik-agent-ui/tool-contracts/run-context";
 import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
+import { tapSpecStreamForTelemetry } from "$lib/server/spec-stream-tap-telemetry";
 import { createDevSmokeStream, readDevSmokeFailMode, readDevSmokeRunId, readDevSmokeScenario, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
 import { startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
 import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord, type WorkspaceSessionRecord } from "$lib/server/workspace-request-store";
@@ -631,7 +632,20 @@ export const POST: RequestHandler = async (event) => {
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
-        const parsedStream = pipeJsonRender<UIMessageChunk>(result.toUIMessageStream());
+        const parsedStream = tapSpecStreamForTelemetry(
+          pipeJsonRender<UIMessageChunk>(result.toUIMessageStream()),
+          {
+            requestId,
+            traceId,
+            traceparent,
+            runId: smokeRunId,
+            sessionId: telemetrySessionId,
+            messageId: lastMessage?.id,
+            documentId: activeDocument?.id,
+            documentVersion: activeDocument?.version_count,
+            startedAt,
+          },
+        );
         const aiStream = pipeUiMessageStreamSafety(
           pipeArtifactToolOutputsToSpecParts(parsedStream),
           {

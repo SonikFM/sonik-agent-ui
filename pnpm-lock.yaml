@@ -29,6 +29,9 @@ importers:
       '@json-render/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@json-render/devtools':
+        specifier: workspace:*
+        version: link:../../packages/devtools
       '@json-render/devtools-svelte':
         specifier: workspace:*
         version: link:../../packages/devtools-svelte
