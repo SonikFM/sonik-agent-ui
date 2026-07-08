@@ -37,7 +37,7 @@
   let {
     src = "/workspace-document-host.html",
     documentId,
-    title = "Workspace Document",
+    title = "Document",
     language = "markdown",
     content = "# Workspace document editor\n\nUse the language selector to switch Markdown, HTML, JSON, code, CSV, or other render modes.",
     preferredView = "auto",
