@@ -40,19 +40,6 @@ export async function startPipeBTail(repoRoot, batchId, { worker = "sonik-dev-ob
   return { pid: child.pid, logPath, stderrPath };
 }
 
-export async function stopPipeBTail(repoRoot, batchId) {
-  const { pidPath } = pipeBLogPaths(repoRoot, batchId);
-  const pidText = await readFile(pidPath, "utf8").catch(() => null);
-  if (!pidText) return { stopped: false, reason: "no pid file (tail was not started, or already stopped)" };
-  const pid = Number(pidText.trim());
-  try {
-    process.kill(pid, "SIGTERM");
-    return { stopped: true, pid };
-  } catch (error) {
-    return { stopped: false, reason: error instanceof Error ? error.message : String(error) };
-  }
-}
-
 /** Read the tail log (if any) and return raw lines mentioning any of `markers`. */
 export async function correlatePipeBEvidence(repoRoot, batchId, markers) {
   const { logPath } = pipeBLogPaths(repoRoot, batchId);
