@@ -29,8 +29,16 @@
 </script>
 
 <script lang="ts">
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import CanvasToolbar from "./CanvasToolbar.svelte";
   import { createCanvasWindowController } from "../lib/window-drag.svelte.js";
+
+  // Smooth rollout: a fast translate/opacity entrance for the canvas surface
+  // mounting (e.g. on auto-open). Instant for prefers-reduced-motion -- no
+  // GSAP, just a built-in Svelte transition.
+  const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const mountTransition = { y: 12, duration: prefersReducedMotion ? 0 : 240, easing: cubicOut };
 
   let {
     artifact,
@@ -113,6 +121,7 @@
   class:canvas-viewport--floating={isFloating}
   style={isFloating ? windowController.style : undefined}
   aria-label="Canvas viewport"
+  in:fly={mountTransition}
 >
   <CanvasToolbar
     {title}

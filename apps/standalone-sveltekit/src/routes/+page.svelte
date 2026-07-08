@@ -257,6 +257,11 @@
   // for. Non-reactive bookkeeping so the preview effect skips no-op re-runs.
   let lastStreamingPreviewSignature: string | null = null;
   let streamingPreviewMountedIds = new SvelteSet<string>();
+  // Slice B (canvas auto-open): dedupes host `canvas.open` requests per
+  // artifact/document id, and tracks whether the host declined/didn't answer
+  // so an inline "Open canvas" fallback can be offered in chat.
+  let hostCanvasOpenRequestedIds = new SvelteSet<string>();
+  let hostCanvasOpenDeclined = $state(false);
   let messagePersistInFlight = false;
   let pendingDocumentSnapshot: ActiveDocumentSnapshot | null = null;
   let documentPersistPromise: Promise<void> | null = null;
@@ -334,12 +339,16 @@
   const documentFrameSubtitle = $derived(`${documentFrameLanguage} · v${documentSeed?.version_count ?? 1}`);
   const workspaceLayoutMode = $derived<WorkspaceLayoutMode>(embedMode);
   const workspaceRailMode = $derived<WorkspaceRailMode>(embedRailMode);
+  // Slice B (R1): embedded chat mode used to force this false unconditionally,
+  // which left a created artifact invisible until the host separately called
+  // canvas.open. It now follows the same "an artifact/document now exists"
+  // rule as workspace mode -- the surface never renders nothing for a real
+  // artifact. `notifyHostCanvasOpen` (below) separately best-effort-asks the
+  // embedding host to make room around this iframe.
   const artifactOpen = $derived(
-    embedMode === "chat"
-      ? false
-      : embedMode === "canvas"
-        ? true
-        : Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen),
+    embedMode === "canvas"
+      ? true
+      : Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen),
   );
   const showCanvasDeveloperPanels = $derived(dev || !isEmbeddedHostContextExpected());
   const agentActivity = $derived<AgentActivityStatus | null>(createAgentActivityStatus());
@@ -459,6 +468,7 @@
       messageId: latestDocumentArtifact.id,
       ok: true,
     });
+    notifyHostCanvasOpen(`document:${latestDocumentArtifact.document.id}`, "A document was just promoted to the canvas.");
   });
 
 
@@ -609,6 +619,7 @@
         ...summarizeSpec(preview.spec),
         ok: true,
       });
+      notifyHostCanvasOpen(preview.id, "A new artifact preview just started rendering.");
     }
   });
 
@@ -1747,6 +1758,23 @@
       timeoutMs: 5_000,
     });
     return semanticHostActionResult(result, result.ok, result.message ?? hostActionStatusMessage(result), result.disabledReason);
+  }
+
+  // Slice B (R1): best-effort request that the embedding host make room for
+  // the canvas (agent-embed's `canvas.open` host action) whenever a renderable
+  // artifact/document mounts in embedded chat mode. Fire-and-forget -- our own
+  // canvas pane already opens locally via `artifactOpen` regardless, so this
+  // never blocks or gates local rendering. If the host declines, doesn't
+  // respond, or there is no real embedding host, `hostCanvasOpenDeclined`
+  // flips true so the inline "Open canvas" fallback pill shows in chat.
+  function notifyHostCanvasOpen(id: string, intentLabel: string): void {
+    if (!browser || embedMode !== "chat") return;
+    if (window.parent === window) return;
+    if (hostCanvasOpenRequestedIds.has(id)) return;
+    hostCanvasOpenRequestedIds.add(id);
+    void runPageControlHostAction({ actionKey: "canvas.open", intentLabel }).then((result) => {
+      hostCanvasOpenDeclined = !result.ok;
+    });
   }
 
   function semanticHostActionResult(
@@ -3574,6 +3602,17 @@
         >
           Documents
         </button>
+        {#if embedMode === "chat" && hostCanvasOpenDeclined && (activeArtifact || documentEditorOpen)}
+          <button
+            type="button"
+            onclick={() => void runPageControlHostAction({ actionKey: "canvas.open", intentLabel: "Open the Agent UI canvas." }).then((result) => { hostCanvasOpenDeclined = !result.ok; })}
+            class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            aria-label="Open canvas"
+            data-testid="open-canvas-fallback"
+          >
+            Open canvas
+          </button>
+        {/if}
       {/snippet}
 
       {#snippet renderArtifact(spec, loading)}

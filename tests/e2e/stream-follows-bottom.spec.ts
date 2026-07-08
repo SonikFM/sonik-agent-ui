@@ -6,18 +6,19 @@ import { gotoFreshWorkspace, smokeUrl, submitPrompt } from "./support/dev-smoke"
 // 'creating an artifact'." (docs/handoffs/streaming-canvas-artifact-ux-investigation-2026-07-08.md).
 //
 // Root cause (packages/chat-surface/src/vendor/amplify-chat/Conversation/ConversationContent.svelte):
-// the scroll container's ResizeObserver watches the CONTAINER's own box, not its
+// the scroll container's ResizeObserver watched the CONTAINER's own box, not its
 // children -- appending text-delta content grows `scrollHeight` without changing the
-// container's own bounding box, so the observer never fires during token streaming and
-// `scrollToBottom()` is never called mid-stream. This is the acceptance bar Slice B
-// ("follow while streaming" scroll mode) needs to satisfy; both cases are written now
-// and fixme'd until that lands.
+// container's own bounding box, so the observer never fired during token streaming and
+// `scrollToBottom()` was never called mid-stream. Slice B ports the onyx
+// ChatScrollContainer pattern: a MutationObserver (childList/subtree, not
+// characterData) + a ResizeObserver on the CONTENT wrapper, with a `followMode` state
+// that's on by default and only disabled by a deliberate upward scroll.
 //
 // No smoke scenario needed for text volume -- the default dev-smoke stream (no
 // `smokeScenario` param) emits three text deltas ~75ms apart, enough to exercise
 // mid-stream growth in a viewport short enough to overflow.
 
-test.fixme(
+test(
   "stream-follows-bottom: transcript stays scrolled to bottom while a response streams in",
   async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 420 });
@@ -45,7 +46,7 @@ test.fixme(
   },
 );
 
-test.fixme(
+test(
   "stream-follows-bottom: scrolling up mid-stream stops auto-follow (Scroll to bottom affordance appears)",
   async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 420 });
