@@ -115,3 +115,23 @@ assert.equal(toolSource.includes("APPROVE_AND_RUN"), false, "submitIntakeAnswer'
 assert.equal(toolSource.includes("approvedCommandIds"), false, "submitIntakeAnswer's module must not consult approval grants -- it is not an approval-gated seam");
 
 console.log("intake answer tool tests passed");
+
+// --- createBookingIntakeArtifact recreation guard (2026-07-08) ---
+// Prompt steering alone did not stop models from re-creating the intake canvas
+// on answer turns; the tool itself must refuse while an intake is active.
+{
+  const { createBookingIntakeArtifactTool } = toolModule;
+  const guarded = createBookingIntakeArtifactTool({ pageContext: { activeArtifactId: "artifact-active-1" } });
+  const refused = await guarded.execute({ title: "Second canvas" });
+  assert.equal(refused.ok, false, "create must refuse while an intake artifact is active");
+  assert.equal(refused.error, "active_intake_artifact_exists");
+  assert.equal(refused.activeArtifactId, "artifact-active-1");
+
+  const replaced = await guarded.execute({ title: "Start over", replaceActive: true });
+  assert.equal(replaced.kind, "json-render-artifact", "replaceActive:true must bypass the guard for explicit start-over");
+
+  const unguarded = createBookingIntakeArtifactTool({ pageContext: {} });
+  const fresh = await unguarded.execute({ title: "First canvas" });
+  assert.equal(fresh.kind, "json-render-artifact", "no active artifact -> create proceeds");
+}
+console.log("intake recreation-guard tests passed");
