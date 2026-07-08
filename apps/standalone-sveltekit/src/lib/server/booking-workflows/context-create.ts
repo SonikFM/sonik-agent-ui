@@ -13,15 +13,14 @@ export const BOOKING_CONTEXT_CREATE_RECIPE = {
     "create approved manifest",
     "create this booking context",
   ],
-  commandSequence: ["readActiveArtifactState", "previewActiveIntakeCommand", "commitActiveIntakeCommand"],
+  commandSequence: ["readActiveArtifactState", "previewActiveIntakeCommand"],
   requiredCommands: ["booking.create.context"],
   forbiddenUnlessExplicit: ["booking.create.booking", "booking.create.hold", "booking.release.hold"],
   workflowSteps: [
     "If no active intake artifact is selected, ask the user to create/fill one first; do not synthesize a generic artifact and commit in the same turn.",
     "When an active artifact exists and the user says approve/commit/run, call readActiveArtifactState first; never rely on stale chat summaries.",
-    "Then call previewActiveIntakeCommand and inspect the concrete booking.create.context input.",
-    "Only after preview succeeds and the user explicitly approves, call commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN. Do not repeatedly call searchSkillCatalog or use generic commitCommand here.",
-    "After commit, report the created context id/name and any remaining schedule/resource follow-up.",
+    "Then call previewActiveIntakeCommand and inspect the concrete booking.create.context input, then show it to the user and stop.",
+    "Draft-only: there is no commit tool here. The user's Approve click, not the model, publishes it. Do not claim the context was created; do not repeatedly call searchSkillCatalog.",
   ],
   ontologyRules: [
     "Booking context = the business surface (e.g. Dan's Joint, Main Course Tee Sheet).",
@@ -36,7 +35,7 @@ export const BOOKING_CONTEXT_CREATE_RECIPE = {
   ],
   successEvidence: [
     "readActiveArtifactState returns the latest active artifact state and manifest draft.",
-    "previewActiveIntakeCommand returns booking.create.context with concrete input.",
-    "commitActiveIntakeCommand returns an approved command receipt from the mounted booking runtime.",
+    "previewActiveIntakeCommand returns booking.create.context with concrete input, shown to the user as the approval preview.",
+    "commit.human_approved telemetry records the actual publish, fired by the /api/intake/commit endpoint on Approve — never a model tool call.",
   ],
 } as const;

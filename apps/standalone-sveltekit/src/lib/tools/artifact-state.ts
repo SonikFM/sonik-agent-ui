@@ -31,11 +31,7 @@ function normalizeTrustedScopeKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-const commitSchema = artifactIdSchema.extend({
-  confirmation: z.literal("APPROVE_AND_RUN").describe("Literal confirmation that the user requested trusted execution after preview."),
-});
-
-type ArtifactStateToolContext = {
+export type ArtifactStateToolContext = {
   sessionId?: string | null;
   pageContext?: AgentPageContext;
   persistence?: AsyncWorkspacePersistenceAdapter | null;
@@ -44,7 +40,6 @@ type ArtifactStateToolContext = {
   bookingServiceBaseUrl?: string | null;
   bookingRuntimeAuth?: BookingRuntimeAuthContext | null;
   bookingRuntimeFetcher?: typeof fetch;
-  allowIntakeCommandCommit?: boolean;
   // Optional Agent Settings family-mode input for the toolPolicy enforcement layer. Not yet
   // threaded from agent.ts (deferred to the marketplace lane); absence here resolves to
   // "allow" for every family, matching today's behavior exactly.
@@ -317,7 +312,7 @@ export function createArtifactStateTools(context: ArtifactStateToolContext = {})
         validation,
         command,
         nextAction: validation.ok
-          ? "Show the command input to the user. If they explicitly approve, call commitActiveIntakeCommand with confirmation=APPROVE_AND_RUN. Do not use generic commitCommand for booking.context.create."
+          ? "Show the command input to the user as the approval preview and stop. Publishing is not a model action: a human must click Approve on the preview card, which runs a deterministic server endpoint outside this conversation. Do not claim the context was created."
           : "Resolve blocking intake errors or ask the next highest-impact missing intake question before requesting approval.",
       };
     },
@@ -325,84 +320,92 @@ export function createArtifactStateTools(context: ArtifactStateToolContext = {})
 
   const tools: Record<string, Tool<any, any>> = { readActiveArtifactState, previewActiveIntakeCommand };
 
-  if (context.allowIntakeCommandCommit) {
-    tools.commitActiveIntakeCommand = tool({
-      description:
-        "Commit booking.create.context from the active validated intake artifact. This is approval-gated by trusted host approvedCommandIds; user text alone cannot grant approval.",
-      inputSchema: commitSchema,
-      execute: async ({ artifactId }) => {
-        const loaded = await loadActiveArtifact(context, artifactId);
-        if (!loaded.ok) return artifactLoadUnavailable(loaded);
-        const artifact = loaded.artifact;
-        const manifest = readManifest(artifact);
-        if (!manifest) return { ok: false, error: "missing_manifest", message: "The active artifact has no manifest draft in state." };
-        const validation = addArtifactStateBlockersToValidation(validateManifestContract(manifest), artifact);
-        if (validation.ok && validation.manifestType !== "venue_schedule") {
-          return {
-            ok: false,
-            error: "unsupported_manifest_type",
-            kind: "intake-command-commit" as const,
-            artifact: { id: artifact.id, title: artifact.title, version: artifact.version },
-            manifest,
-            validation,
-            command: null,
-            message: "This artifact validates, but it is not a venue_schedule manifest. Use the matching event/campaign export path instead of booking.create.context.",
-          };
-        }
-        if (!validation.ok) {
-          return { ok: false, error: "invalid_manifest", validation, message: "The manifest must validate as a venue_schedule before booking.create.context can commit." };
-        }
-        const command = createBookingContextCommandInput(artifact, manifest);
-        const hostSessionInput = context.hostSession ? { hostSession: context.hostSession } : { hostSessionMode: "standalone-demo" as const };
-        const { catalog, runtimeAdapters, executionContext } = createStandaloneHostCommandRuntimeBundle({
-          sessionId: context.sessionId,
-          pageContext: context.pageContext,
-          ...hostSessionInput,
-          bookingServiceBaseUrl: context.bookingServiceBaseUrl,
-          bookingRuntimeAuth: context.bookingRuntimeAuth,
-          fetcher: context.bookingRuntimeFetcher,
-        });
-        const receipt = await executeHostCatalogCommand({
-          catalog,
-          commandId: command.commandId,
-          commandInput: command.input,
-          runtimeAdapters,
-          execution: {
-            ...executionContext,
-            action: "commit",
-            source: "agent-ui",
-            sessionId: executionContext.sessionId ?? context.sessionId,
-            approved: context.approvedCommandIds?.includes(command.commandId) === true,
-            toolPolicy: { familyModes: context.toolPermissionModes },
-          },
-        });
-        const contextCommandIds = new Set(createStandaloneHostCommandIndex({
-          sessionId: context.sessionId,
-          pageContext: context.pageContext,
-          ...hostSessionInput,
-          bookingServiceBaseUrl: context.bookingServiceBaseUrl,
-          bookingRuntimeAuth: context.bookingRuntimeAuth,
-          fetcher: context.bookingRuntimeFetcher,
-        }).commands.map((entry) => entry.id));
-        await writeAgentTelemetry({
-          source: "server",
-          event: "tool.commitActiveIntakeCommand",
-          ok: receipt.ok,
-          sessionId: artifact.session_id ?? context.sessionId ?? undefined,
-          artifactId: artifact.id,
-          artifactVersion: artifact.version,
-          toolCallId: command.commandId,
-          mode: receipt.policy.decision,
-          policyReasons: receipt.policy.reasons,
-          runtimeProvider: receipt.trace.provider,
-          hostSessionSource: executionContext.hostSessionSource,
-          commandFamily: catalog.commands.find((entry) => entry.id === command.commandId)?.familyId,
-          runtimeStatus: contextCommandIds.has(command.commandId) ? "mounted" : "not_context_loaded",
-        }).catch(() => undefined);
-        return { ok: receipt.ok, kind: "intake-command-commit" as const, command, receipt };
-      },
-    });
-  }
-
   return tools;
+}
+
+/**
+ * Publishes booking.create.context from the active validated intake artifact.
+ *
+ * Draft-only invariant (Slice A, 2026-07-08): this is no longer a model-callable
+ * tool. The agent's ceiling for anything that creates or publishes is a
+ * submitted draft (previewActiveIntakeCommand); the only path that publishes is
+ * a human clicking Approve on the preview card, which calls the deterministic
+ * `/api/intake/commit` endpoint directly — no model turn in between. This
+ * function is that endpoint's implementation, factored out here so it can reuse
+ * the same manifest-validation and command-building logic the (removed)
+ * commitActiveIntakeCommand tool used, without duplicating it.
+ *
+ * Approval is resolved from trusted host/session state (approvedCommandIds),
+ * never from a model- or client-provided boolean.
+ */
+export async function commitBookingContextIntakeCommand(context: ArtifactStateToolContext, artifactId?: string) {
+  const loaded = await loadActiveArtifact(context, artifactId);
+  if (!loaded.ok) return artifactLoadUnavailable(loaded);
+  const artifact = loaded.artifact;
+  const manifest = readManifest(artifact);
+  if (!manifest) return { ok: false, error: "missing_manifest", message: "The active artifact has no manifest draft in state." };
+  const validation = addArtifactStateBlockersToValidation(validateManifestContract(manifest), artifact);
+  if (validation.ok && validation.manifestType !== "venue_schedule") {
+    return {
+      ok: false,
+      error: "unsupported_manifest_type",
+      kind: "intake-command-commit" as const,
+      artifact: { id: artifact.id, title: artifact.title, version: artifact.version },
+      manifest,
+      validation,
+      command: null,
+      message: "This artifact validates, but it is not a venue_schedule manifest. Use the matching event/campaign export path instead of booking.create.context.",
+    };
+  }
+  if (!validation.ok) {
+    return { ok: false, error: "invalid_manifest", validation, message: "The manifest must validate as a venue_schedule before booking.create.context can commit." };
+  }
+  const command = createBookingContextCommandInput(artifact, manifest);
+  const hostSessionInput = context.hostSession ? { hostSession: context.hostSession } : { hostSessionMode: "standalone-demo" as const };
+  const { catalog, runtimeAdapters, executionContext } = createStandaloneHostCommandRuntimeBundle({
+    sessionId: context.sessionId,
+    pageContext: context.pageContext,
+    ...hostSessionInput,
+    bookingServiceBaseUrl: context.bookingServiceBaseUrl,
+    bookingRuntimeAuth: context.bookingRuntimeAuth,
+    fetcher: context.bookingRuntimeFetcher,
+  });
+  const receipt = await executeHostCatalogCommand({
+    catalog,
+    commandId: command.commandId,
+    commandInput: command.input,
+    runtimeAdapters,
+    execution: {
+      ...executionContext,
+      action: "commit",
+      source: "agent-ui",
+      sessionId: executionContext.sessionId ?? context.sessionId,
+      approved: context.approvedCommandIds?.includes(command.commandId) === true,
+      toolPolicy: { familyModes: context.toolPermissionModes },
+    },
+  });
+  const contextCommandIds = new Set(createStandaloneHostCommandIndex({
+    sessionId: context.sessionId,
+    pageContext: context.pageContext,
+    ...hostSessionInput,
+    bookingServiceBaseUrl: context.bookingServiceBaseUrl,
+    bookingRuntimeAuth: context.bookingRuntimeAuth,
+    fetcher: context.bookingRuntimeFetcher,
+  }).commands.map((entry) => entry.id));
+  await writeAgentTelemetry({
+    source: "server",
+    event: "commit.human_approved",
+    ok: receipt.ok,
+    sessionId: artifact.session_id ?? context.sessionId ?? undefined,
+    artifactId: artifact.id,
+    artifactVersion: artifact.version,
+    toolCallId: command.commandId,
+    mode: receipt.policy.decision,
+    policyReasons: receipt.policy.reasons,
+    runtimeProvider: receipt.trace.provider,
+    hostSessionSource: executionContext.hostSessionSource,
+    commandFamily: catalog.commands.find((entry) => entry.id === command.commandId)?.familyId,
+    runtimeStatus: contextCommandIds.has(command.commandId) ? "mounted" : "not_context_loaded",
+  }).catch(() => undefined);
+  return { ok: receipt.ok, kind: "intake-command-commit" as const, command, receipt };
 }

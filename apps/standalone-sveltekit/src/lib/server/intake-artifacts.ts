@@ -300,7 +300,7 @@ function createTrustedIntakeControllerActionElements(elements: Spec["elements"])
         {
           id: "approveAndRun",
           label: "Approve & run",
-          description: "Submit an explicit approval turn; execution still requires trusted host/session approval.",
+          description: "Publishes the approved draft — runs without the model. Calls the deterministic commit endpoint directly; execution still requires trusted host/session approval.",
           status: "requires_confirmation",
           commandId: "booking.create.context",
           effect: "trusted_write_request",

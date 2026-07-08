@@ -88,13 +88,35 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
     }),
     executeCommand: tool({
       description:
-        "Execute a mounted read-only command from the Sonik command catalog. Mutations must use commitCommand and require explicit approval.",
+        "Execute a mounted read-only command from the Sonik command catalog. This tool can only run reads: the agent's ceiling for anything that creates or publishes is a submitted draft, and the only path that publishes is a human clicking Approve on the preview card. There is no model-callable commit/write tool.",
       inputSchema: directCommandInputSchema,
       execute: async ({ commandId, input, inputJson }) => {
         const { catalog, runtimeAdapters, executionContext } = createBundle();
         const command = catalog.commands.find((entry) => entry.id === commandId);
         const contextCommandIds = createContextCommandIds();
         assertToolFamilyEnabled(command, context.toolPermissionModes);
+        // Draft-only invariant (Slice A, 2026-07-08): executeCommand is the only
+        // surviving command-catalog tool, and it must stay read-only regardless of
+        // host approvedCommandIds. commitCommand was removed from this tool set
+        // entirely so a write can never be model-triggered; this is the residual
+        // guard in case a write-effect command is ever requested through the one
+        // remaining tool. See docs/plans/experience-seams-resolution-plan-2026-07-08.md Slice A.
+        if (command && command.effect !== "read") {
+          await writeAgentTelemetry({
+            source: "server",
+            event: "tool.commit.unavailable_draft_only",
+            ok: false,
+            toolCallId: commandId,
+            ...summarizeCommandTelemetry(command, contextCommandIds),
+          });
+          return {
+            kind: "command-commit-refusal" as const,
+            ok: false as const,
+            error: "draft_only_invariant" as const,
+            commandId,
+            guidance: "This agent can only prepare drafts and previews. Publishing a write requires a human to click Approve on the preview card; there is no model-callable commit tool for this command.",
+          };
+        }
         const commandInput = coerceDirectCommandInput(input, inputJson);
         const repairedInput = repairCommandInputFromPageContext(command, commandInput, context.pageContext);
         const receipt = await executeHostCatalogCommand({
@@ -107,10 +129,10 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
             action: "execute",
             source: "agent-ui",
             sessionId: executionContext.sessionId ?? context.sessionId,
-            // Approval resolves from the host-signed approvedCommandIds grant
-            // (same trust source as commitCommand) — never model-provided.
-            // Without this, "ask" mode dead-ends read commands: execute needs
-            // approval, but read-only commands are forbidden from commit.
+            // Approval resolves from the host-signed approvedCommandIds grant —
+            // never model-provided. Without this, "ask" mode dead-ends read
+            // commands: execute needs approval, but read-only commands are
+            // forbidden from commit.
             approved: context.approvedCommandIds?.includes(commandId) === true,
             toolPolicy: { familyModes: context.toolPermissionModes },
           },
@@ -118,47 +140,6 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
         await writeAgentTelemetry({
           source: "server",
           event: "tool.executeCommand",
-          ok: receipt.ok,
-          toolCallId: commandId,
-          mode: receipt.policy.decision,
-          policyReasons: receipt.policy.reasons,
-          runtimeProvider: receipt.trace.provider,
-          hostSessionSource: executionContext.hostSessionSource,
-          ...summarizeCommandTelemetry(command, contextCommandIds),
-        });
-        return { kind: "command-receipt" as const, receipt };
-      },
-    }),
-    commitCommand: tool({
-      description:
-        "Request commit of an approval-gated command from the Sonik command catalog. Approval is resolved from trusted host/session state, not model-provided booleans. Only trusted host/runtime-mounted mutations can commit; generated discovery records remain metadata-only unless this runtime adapter mounted the command.",
-      inputSchema: directCommandInputSchema.extend({
-        commandId: z.string().describe("Command id to commit."),
-      }),
-      execute: async ({ commandId, input, inputJson }) => {
-        const { catalog, runtimeAdapters, executionContext } = createBundle();
-        const command = catalog.commands.find((entry) => entry.id === commandId);
-        const contextCommandIds = createContextCommandIds();
-        assertToolFamilyEnabled(command, context.toolPermissionModes);
-        const commandInput = coerceDirectCommandInput(input, inputJson);
-        const repairedInput = repairCommandInputFromPageContext(command, commandInput, context.pageContext);
-        const receipt = await executeHostCatalogCommand({
-          catalog,
-          commandId,
-          commandInput: repairedInput,
-          runtimeAdapters,
-          execution: {
-            ...executionContext,
-            action: "commit",
-            source: "agent-ui",
-            sessionId: executionContext.sessionId ?? context.sessionId,
-            approved: context.approvedCommandIds?.includes(commandId) === true,
-            toolPolicy: { familyModes: context.toolPermissionModes },
-          },
-        });
-        await writeAgentTelemetry({
-          source: "server",
-          event: "tool.commitCommand",
           ok: receipt.ok,
           toolCallId: commandId,
           mode: receipt.policy.decision,

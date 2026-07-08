@@ -1,12 +1,45 @@
 import assert from "node:assert/strict";
+import { executeHostCatalogCommand } from "../../packages/platform-adapters/src/index.ts";
 import {
   GENERATED_BOOKING_AVAILABILITY_COMMAND_ID,
   GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
   GENERATED_BOOKING_GET_HOLD_COMMAND_ID,
   GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID,
   GENERATED_BOOKING_RUNTIME_PROVIDER,
+  createStandaloneHostCommandRuntimeBundle,
 } from "../../apps/standalone-sveltekit/src/lib/server/host-command-runtime.ts";
 import { createCommandCatalogTools } from "../../apps/standalone-sveltekit/src/lib/tools/command-catalog.ts";
+
+// Draft-only invariant (Slice A, 2026-07-08): commitCommand is no longer a
+// model-callable tool -- createCommandCatalogTools never mounts it. The
+// write-execution engine underneath it (policy evaluation + the trusted
+// runtime fetch) is unchanged and still needs coverage, so it is exercised
+// directly here, exactly as the removed tool used to call it, instead of
+// through a mounted tool.
+async function runTrustedCommit(bundleInput, commandId, commandInput) {
+  const { catalog, runtimeAdapters, executionContext } = createStandaloneHostCommandRuntimeBundle({
+    sessionId: bundleInput.sessionId,
+    pageContext: bundleInput.pageContext,
+    hostSession: bundleInput.hostSession,
+    bookingServiceBaseUrl: bundleInput.bookingServiceBaseUrl,
+    bookingRuntimeAuth: bundleInput.bookingRuntimeAuth,
+    fetcher: bundleInput.bookingRuntimeFetcher,
+  });
+  const receipt = await executeHostCatalogCommand({
+    catalog,
+    commandId,
+    commandInput,
+    runtimeAdapters,
+    execution: {
+      ...executionContext,
+      action: "commit",
+      source: "agent-ui",
+      sessionId: executionContext.sessionId ?? bundleInput.sessionId,
+      approved: (bundleInput.approvedCommandIds ?? []).includes(commandId),
+    },
+  });
+  return { receipt };
+}
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "user_demo_command_tool";
@@ -102,12 +135,18 @@ assert.equal(learnedCreate.examples.length > 0, true, "agent-facing learnCommand
 assert.equal(learnedCreate.inputConvention.includes("directly"), true, "agent-facing learnCommand returns input-shape guidance");
 assert.equal(learnedCreate.forbiddenFields.includes("organizationId"), true, "agent-facing learnCommand teaches host-derived org scope");
 
+// Draft-only invariant: executeCommand is the only surviving command-catalog
+// tool, and it refuses write-effect commands outright (before ever reaching
+// the runtime) instead of returning a policy-denied receipt.
+assert.equal(tools.commitCommand, undefined, "createCommandCatalogTools must never mount a commit tool");
 const deniedExecuteMutation = await tools.executeCommand.execute({
   commandId: GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
   input: { contextId: CONTEXT_ID, window: { startsAt: "2026-07-01T18:00:00.000Z", endsAt: "2026-07-01T18:30:00.000Z" }, resourceUnitId: RESOURCE_UNIT_ID },
 });
-assert.equal(deniedExecuteMutation.receipt.ok, false, "agent-facing executeCommand cannot run mutation commands");
-assert.equal(deniedExecuteMutation.receipt.policy.reasons.includes("runtime_not_mounted_for_execute"), true);
+assert.equal(deniedExecuteMutation.ok, false, "agent-facing executeCommand cannot run mutation commands");
+assert.equal(deniedExecuteMutation.kind, "command-commit-refusal");
+assert.equal(deniedExecuteMutation.error, "draft_only_invariant");
+assert.equal(deniedExecuteMutation.commandId, GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID);
 assert.equal(calls.length, 0, "denied executeCommand mutation does not call booking runtime");
 
 const emptyAvailability = await tools.executeCommand.execute({
@@ -164,34 +203,38 @@ assert.equal(availability.receipt.ok, true, "agent-facing executeCommand can rea
 assert.equal(availability.receipt.trace.provider, GENERATED_BOOKING_RUNTIME_PROVIDER);
 assert.equal(calls.at(-1).method, "GET");
 
-const create = await tools.commitCommand.execute({
-  commandId: GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
-  input: {
-    contextId: CONTEXT_ID,
-    userId: USER_ID,
-    window: { startsAt: "2026-07-01T18:00:00.000Z", endsAt: "2026-07-01T18:30:00.000Z" },
-    partySize: 2,
-    source: "admin",
-    clientRequestId: "agent-ui-v02-demo-hold-command-tool-001",
-    resourceUnitId: RESOURCE_UNIT_ID,
-    metadata: { purpose: "agent-facing-command-tool-test", apiToken: TOKEN },
-  },
-});
-assert.equal(create.receipt.ok, true, "agent-facing commitCommand can create an approved hold through the trusted runtime");
+const trustedCommitBundleInput = {
+  sessionId: SESSION_ID,
+  hostSession,
+  pageContext,
+  approvedCommandIds: [GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID, GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID],
+  bookingServiceBaseUrl: "https://booking.example.test",
+  bookingRuntimeAuth: { mode: "bearer", token: TOKEN, source: "test" },
+  bookingRuntimeFetcher: fetcher,
+};
 
-const failedRuntimeCreate = await tools.commitCommand.execute({
-  commandId: GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
-  inputJson: JSON.stringify({
-    contextId: CONTEXT_ID,
-    userId: USER_ID,
-    window: { startsAt: "2026-07-01T18:00:00.000Z", endsAt: "2026-07-01T18:30:00.000Z" },
-    partySize: 2,
-    source: "admin",
-    clientRequestId: "force-runtime-500",
-    resourceUnitId: RESOURCE_UNIT_ID,
-  }),
+const create = await runTrustedCommit(trustedCommitBundleInput, GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID, {
+  contextId: CONTEXT_ID,
+  userId: USER_ID,
+  window: { startsAt: "2026-07-01T18:00:00.000Z", endsAt: "2026-07-01T18:30:00.000Z" },
+  partySize: 2,
+  source: "admin",
+  clientRequestId: "agent-ui-v02-demo-hold-command-tool-001",
+  resourceUnitId: RESOURCE_UNIT_ID,
+  metadata: { purpose: "agent-facing-command-tool-test", apiToken: TOKEN },
 });
-assert.equal(failedRuntimeCreate.receipt.ok, false, "commitCommand reports runtime HTTP failures as failed receipts");
+assert.equal(create.receipt.ok, true, "the trusted commit engine can create an approved hold through the trusted runtime");
+
+const failedRuntimeCreate = await runTrustedCommit(trustedCommitBundleInput, GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID, {
+  contextId: CONTEXT_ID,
+  userId: USER_ID,
+  window: { startsAt: "2026-07-01T18:00:00.000Z", endsAt: "2026-07-01T18:30:00.000Z" },
+  partySize: 2,
+  source: "admin",
+  clientRequestId: "force-runtime-500",
+  resourceUnitId: RESOURCE_UNIT_ID,
+});
+assert.equal(failedRuntimeCreate.receipt.ok, false, "the trusted commit engine reports runtime HTTP failures as failed receipts");
 assert.equal(failedRuntimeCreate.receipt.summary.ok, false, "failed runtime summary preserves HTTP ok=false");
 assert.equal(failedRuntimeCreate.receipt.errors[0].code, "HOST_RUNTIME_RESPONSE_NOT_OK", "failed runtime receipt has an explicit runtime-response error code");
 
@@ -199,23 +242,23 @@ assert.equal(create.receipt.summary.receipt.confirmation.id, HOLD_ID);
 assert.equal(create.receipt.summary.receipt.confirmation.status, "active");
 assert.equal(JSON.stringify(create).includes(TOKEN), false, "agent-facing command receipt redacts booking runtime secrets");
 const createCall = calls.find((call) => call.method === "POST" && call.url.endsWith("/api/v1/booking/holds"));
-assert.ok(createCall, "commitCommand calls POST /holds");
+assert.ok(createCall, "the trusted commit engine calls POST /holds");
 assert.equal(createCall.headers.authorization, `Bearer ${TOKEN}`);
 assert.equal(createCall.headers["x-sonik-agent-org-id"], ORG_ID);
 assert.equal(createCall.headers["x-sonik-agent-session-id"], SESSION_ID);
 assert.equal(createCall.headers["x-sonik-agent-principal-id"], USER_ID);
-assert.equal(createCall.body.userId, USER_ID, "commitCommand binds create hold userId to the trusted host principal");
+assert.equal(createCall.body.userId, USER_ID, "the trusted commit engine binds create hold userId to the trusted host principal");
 assert.equal(createCall.body.metadata.apiToken, "[redacted]", "secret-like metadata is redacted before outbound booking API call");
 
 const getHold = await tools.executeCommand.execute({ commandId: GENERATED_BOOKING_GET_HOLD_COMMAND_ID, input: { holdId: HOLD_ID } });
 assert.equal(getHold.receipt.ok, true, "agent-facing executeCommand can confirm created hold");
 assert.equal(getHold.receipt.summary.body.id, HOLD_ID);
 
-const release = await tools.commitCommand.execute({ commandId: GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID, input: { holdId: HOLD_ID, reason: "agent-ui-demo-cleanup" } });
-assert.equal(release.receipt.ok, true, "agent-facing commitCommand can release the approved hold");
+const release = await runTrustedCommit(trustedCommitBundleInput, GENERATED_BOOKING_RELEASE_HOLD_COMMAND_ID, { holdId: HOLD_ID, reason: "agent-ui-demo-cleanup" });
+assert.equal(release.receipt.ok, true, "the trusted commit engine can release the approved hold");
 assert.equal(release.receipt.summary.receipt.confirmation.status, "released");
 const releaseCall = calls.find((call) => call.method === "POST" && call.url.endsWith(`/api/v1/booking/holds/${HOLD_ID}/release`));
-assert.ok(releaseCall, "commitCommand calls POST /holds/{holdId}/release");
+assert.ok(releaseCall, "the trusted commit engine calls POST /holds/{holdId}/release");
 
 const unapprovedTools = createCommandCatalogTools({
   sessionId: SESSION_ID,
@@ -226,14 +269,16 @@ const unapprovedTools = createCommandCatalogTools({
   bookingRuntimeAuth: { mode: "bearer", token: TOKEN, source: "test" },
   bookingRuntimeFetcher: fetcher,
 });
+assert.equal(unapprovedTools.commitCommand, undefined, "createCommandCatalogTools must never mount a commit tool, approved or not");
 const beforeUnapproved = calls.length;
-const unapprovedCreate = await unapprovedTools.commitCommand.execute({
-  commandId: GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
-  input: { contextId: CONTEXT_ID, window: { startsAt: "2026-07-01T18:00:00.000Z", endsAt: "2026-07-01T18:30:00.000Z" }, resourceUnitId: RESOURCE_UNIT_ID },
-});
-assert.equal(unapprovedCreate.receipt.ok, false, "commitCommand denies unapproved writes even with trusted runtime credentials");
+const unapprovedCreate = await runTrustedCommit(
+  { ...trustedCommitBundleInput, hostSession: { ...hostSession, metadata: { approvedCommandIds: [] } }, approvedCommandIds: [] },
+  GENERATED_BOOKING_CREATE_HOLD_COMMAND_ID,
+  { contextId: CONTEXT_ID, window: { startsAt: "2026-07-01T18:00:00.000Z", endsAt: "2026-07-01T18:30:00.000Z" }, resourceUnitId: RESOURCE_UNIT_ID },
+);
+assert.equal(unapprovedCreate.receipt.ok, false, "the trusted commit engine denies unapproved writes even with trusted runtime credentials");
 assert.equal(unapprovedCreate.receipt.policy.decision, "needs_approval");
-assert.equal(calls.length, beforeUnapproved, "unapproved commitCommand does not call booking runtime");
+assert.equal(calls.length, beforeUnapproved, "unapproved commit does not call booking runtime");
 
 console.log(JSON.stringify({
   ok: true,

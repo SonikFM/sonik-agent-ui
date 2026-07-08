@@ -35,9 +35,10 @@ import {
   createBookingRuntimeAuthContextFromEnv,
   createBookingRuntimeAuthContextFromTrustedHostHeader,
   hasBookingRuntimeCredential,
+  createAgentHostSessionEnvelope,
+  approvedCommandIdsFromHostSession,
 } from "$lib/server/host-command-runtime";
-import { AGENT_UI_HOST_CONTEXT_HEADER, resolveTrustedHostSessionSnapshot } from "$lib/server/workspace-services";
-import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
+import { AGENT_UI_HOST_CONTEXT_HEADER } from "$lib/server/workspace-services";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import {
   couldStartWorkspaceSessionTitleMarker,
@@ -59,7 +60,6 @@ import type { RequestHandler } from "./$types";
 
 const PAGE_CONTEXT_FIELD_MAX_CHARS = 160;
 const PAGE_CONTEXT_LIST_MAX_ITEMS = 8;
-const APPROVED_COMMAND_IDS_MAX_ITEMS = 128;
 const AGENT_SKILL_IDS_MAX_ITEMS = 8;
 const AGENT_SKILL_ID_MAX_CHARS = 160;
 const AGENT_UI_RUN_ID_HEADER = "x-sonik-agent-ui-run-id";
@@ -87,34 +87,6 @@ function createServiceBindingFetcher(binding: unknown): typeof fetch | undefined
   if (typeof candidate.fetch !== "function") return undefined;
   const bindingFetch = candidate.fetch.bind(candidate);
   return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => bindingFetch(input, init)) as typeof fetch;
-}
-
-function createAgentHostSessionEnvelope(event: RequestEvent): HostSessionEnvelope | null {
-  const snapshot = resolveTrustedHostSessionSnapshot(event);
-  if (!snapshot.authenticated || !snapshot.organizationId) return null;
-  return {
-    source: "amplify-embedded",
-    sessionId: snapshot.sessionId ?? null,
-    userId: snapshot.userId ?? null,
-    principalId: snapshot.principalId ?? snapshot.userId ?? null,
-    organizationId: snapshot.organizationId,
-    authenticated: true,
-    scopes: snapshot.scopes ?? [],
-    expiresAt: snapshot.expiresAt ?? null,
-    metadata: snapshot.metadata,
-  };
-}
-
-function approvedCommandIdsFromHostSession(hostSession: HostSessionEnvelope | null): string[] {
-  const value = hostSession?.metadata?.approvedCommandIds;
-  if (!Array.isArray(value)) return [];
-  return [
-    ...new Set(
-      value
-        .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-        .map((entry) => entry.trim()),
-    ),
-  ].slice(0, APPROVED_COMMAND_IDS_MAX_ITEMS);
 }
 
 function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: WorkspaceDocumentRecord | null } = {}): AgentPageContext | undefined {

@@ -215,7 +215,7 @@ const catalog = createSkillCatalog("sonik-agent-ui-runtime", [
       successEvidence: [...BOOKING_CONTEXT_CREATE_RECIPE.successEvidence],
       execution: "trusted_command",
       approval: "host_required",
-      telemetryEvents: ["tool.readActiveArtifactState", "tool.previewActiveIntakeCommand", "tool.commitActiveIntakeCommand"],
+      telemetryEvents: ["tool.readActiveArtifactState", "tool.previewActiveIntakeCommand", "commit.human_approved"],
     },
   },
   {
@@ -325,7 +325,7 @@ function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
     lines.push([
       "Question-answer turns arrive as a fenced ```sonik_question_answer JSON block (version sonik-agent-ui.question-answer-turn.v1, entryFrom=question_answer).",
       "Treat it as user input only: read submission.questionId, answer.value/writesTo, artifact.id/version; then ask the next highest-impact missing question for this artifact.",
-      "Do not execute commands or treat the answer as approval. After user approval, switch to booking.context.create for readActiveArtifactState/previewActiveIntakeCommand/commitActiveIntakeCommand.",
+      "Do not execute commands or treat the answer as approval. After approval, use booking.context.create (readActiveArtifactState/previewActiveIntakeCommand) — no commit tool; Approve click publishes it.",
     ].join(" "));
   }
   if (skill.forbiddenUnlessExplicit.length > 0) {

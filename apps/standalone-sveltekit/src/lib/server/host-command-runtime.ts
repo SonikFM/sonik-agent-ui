@@ -1,6 +1,7 @@
 import bookingCommandArtifacts from "./generated/sonik-booking-command-artifacts.generated.json" with { type: "json" };
 import bookingRuntimeBindings from "./generated/sonik-booking-runtime-bindings.generated.json" with { type: "json" };
 import { writeAgentTelemetry } from "./agent-telemetry.ts";
+import { resolveTrustedHostSessionSnapshot, type WorkspaceRuntimeRequest } from "./workspace-services.ts";
 import {
   createCommandIndexContext,
   createAnonymousHostSessionEnvelope,
@@ -774,6 +775,41 @@ export function hasBookingRuntimeCredential(authContext: BookingRuntimeAuthConte
   if (mode === "signed-host-context") return Boolean(safeSignedEnvelopeHeaderValue(authContext.signedHostContextHeader));
   if (mode !== "bearer" && mode !== "service-token") return false;
   return Boolean(safeSecretHeaderValue(authContext.token));
+}
+
+const APPROVED_COMMAND_IDS_MAX_ITEMS = 128;
+
+// Shared trust-boundary resolution: both /api/generate (model turns) and the
+// deterministic draft-only commit endpoints (human-clicked publish, no model
+// turn) must resolve the exact same signed host session and approved-command
+// grant, or the "ask" vs "allow" distinction and the commit gate could drift
+// between the two call sites.
+export function createAgentHostSessionEnvelope(event: WorkspaceRuntimeRequest | null | undefined): HostSessionEnvelope | null {
+  const snapshot = resolveTrustedHostSessionSnapshot(event ?? undefined);
+  if (!snapshot.authenticated || !snapshot.organizationId) return null;
+  return {
+    source: "amplify-embedded",
+    sessionId: snapshot.sessionId ?? null,
+    userId: snapshot.userId ?? null,
+    principalId: snapshot.principalId ?? snapshot.userId ?? null,
+    organizationId: snapshot.organizationId,
+    authenticated: true,
+    scopes: snapshot.scopes ?? [],
+    expiresAt: snapshot.expiresAt ?? null,
+    metadata: snapshot.metadata,
+  };
+}
+
+export function approvedCommandIdsFromHostSession(hostSession: HostSessionEnvelope | null): string[] {
+  const value = hostSession?.metadata?.approvedCommandIds;
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        .map((entry) => entry.trim()),
+    ),
+  ].slice(0, APPROVED_COMMAND_IDS_MAX_ITEMS);
 }
 
 function resolveBookingRuntimeAuthContext(input: BookingRuntimeAuthContext | null | undefined): BookingRuntimeAuthContext {
