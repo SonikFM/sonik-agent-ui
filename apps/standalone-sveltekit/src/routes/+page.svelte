@@ -2074,11 +2074,9 @@
       logSessionTelemetry("session.bootstrap.superseded", { sessionId: activeSessionId, reason });
       return;
     }
-    if (isEmbeddedHostContextExpected()) {
-      logSessionTelemetry("session.bootstrap.embedded_fresh_session", { reason, mode: "embedded_new_chat" });
-      await createSession({ force: true });
-      return;
-    }
+    // Embedded no longer forces a fresh session per mount — reopening the
+    // widget resumed nothing, so every open/close lost the user's chat.
+    // Embedded and standalone both resume the most recent session.
     const firstSession = sessions[0];
     if (firstSession) {
       await switchSession(firstSession.id, { force: true });
@@ -3425,6 +3423,9 @@
   {#snippet chat()}
     <AgentConversation
       title="Sonik Chat"
+      sessionOptions={isEmbeddedHostContextExpected() ? sessions.map((session) => ({ id: session.id, title: session.name })) : undefined}
+      {activeSessionId}
+      onSessionSwitch={(sessionId) => void switchSession(sessionId)}
       messages={conversation.messages as AgentChatMessage[]}
       status={conversation.status}
       error={conversation.error}
