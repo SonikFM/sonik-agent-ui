@@ -1,8 +1,13 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { getWeather } from "./tools/weather";
-import { getGitHubRepo, getGitHubPullRequests } from "./tools/github";
-import { getCryptoPrice, getCryptoPriceHistory } from "./tools/crypto";
-import { getHackerNewsTop } from "./tools/hackernews";
+// Demo starter tools from the upstream svelte-chat harness (github/crypto/HN)
+// are unmounted for the booking surface: with them mounted, "what can you do"
+// answers led with Bitcoin charts and HN stories instead of booking (pressure
+// test F3, 2026-07-08). Weather stays as a harmless utility. Re-enable by
+// uncommenting the imports and mounts.
+// import { getGitHubRepo, getGitHubPullRequests } from "./tools/github";
+// import { getCryptoPrice, getCryptoPriceHistory } from "./tools/crypto";
+// import { getHackerNewsTop } from "./tools/hackernews";
 import { webSearch } from "./tools/search";
 import { createJsonArtifact } from "./tools/artifact";
 import { createBookingIntakeArtifactTool, createSubmitIntakeAnswerTool } from "./tools/intake-artifact";
@@ -113,11 +118,11 @@ export function createAgent(context: AgentRuntimeContext = {}) {
     instructions: createAgentInstructions(context),
     tools: {
       getWeather,
-      getGitHubRepo,
-      getGitHubPullRequests,
-      getCryptoPrice,
-      getCryptoPriceHistory,
-      getHackerNewsTop,
+      // getGitHubRepo,
+      // getGitHubPullRequests,
+      // getCryptoPrice,
+      // getCryptoPriceHistory,
+      // getHackerNewsTop,
       webSearch,
       ...(bookingContextIntakeActive
         ? { createBookingIntakeArtifact: createBookingIntakeArtifactTool({ pageContext: context.pageContext }), submitIntakeAnswer: createSubmitIntakeAnswerTool({ pageContext: context.pageContext, persistence: context.persistence }) }
