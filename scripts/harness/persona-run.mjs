@@ -285,6 +285,154 @@ async function cmdBatch(args) {
   console.log(JSON.stringify({ ok: true, datasetPath, count: jobs.length, results }, null, 2));
 }
 
+const ARTIFACT_CREATE_TOOL_PATTERN = /^create(Json|BookingIntake|Document)Artifact$/;
+
+/**
+ * `smoke`: a single self-contained "Haiku user tests the chat" run against the
+ * deployed agent-ui. One conversation, deterministic stop conditions, and a
+ * one-line verdict that exits non-zero on anything but preview_ready — so it
+ * can be a CI/demo gate, not just a data collector. The judge is NOT a model:
+ * the terminal state is a pure function of the rendered artifact
+ * (resolveWorkflowPhase / extractQuestions via currentSnapshot), so this tests
+ * whether the WORKFLOW advances, not how the model scores itself.
+ *
+ * Two inline guards (the parts a naive `while (phase != preview_ready)` loop
+ * gets wrong against the real chat):
+ *   - stalled: an assistant turn produced no text, no tool call, and no spec
+ *     change (the observed finishReason:"other" empty-turn failure) — the loop
+ *     must not hang on it.
+ *   - not_advancing: once a QuestionCard intake is open, forward progress must
+ *     continue — flagged if the turn recreates an artifact instead of patching
+ *     it (Bug #1: create*Artifact called again rather than submitIntakeAnswer),
+ *     or if the open-question set fails to shrink across 2 consecutive answer
+ *     turns.
+ *
+ * Persona-turn source: the gateway Haiku driver by default (needs
+ * AI_GATEWAY_API_KEY); or `--script "msg1||msg2||..."` for a keyless,
+ * deterministic run (pre-scripted natural-language answers, one per turn).
+ */
+async function cmdSmoke(args) {
+  const persona = getPersona(args.persona ?? "restaurant-gm-terse");
+  const maxTurns = Number(args["max-turns"] ?? 8);
+  const runId = args["run-id"] ?? `smoke-${persona.id}-${Date.now()}`;
+
+  const scripted = typeof args.script === "string" ? args.script.split("||").map((s) => s.trim()).filter(Boolean) : null;
+  const useGateway = !scripted;
+  if (useGateway && !hasGatewayCredentials()) {
+    console.error("smoke needs a persona-turn source: set AI_GATEWAY_API_KEY for the Haiku driver, or pass --script \"msg1||msg2||...\" for a keyless deterministic run.");
+    process.exitCode = 1;
+    return;
+  }
+  const apiKey = process.env.AI_GATEWAY_API_KEY;
+
+  const { baseUrl, envelope } = await resolveClient();
+  const responses = [];
+  const client = new EndpointClient({ baseUrl, headers: deployedHeaders(envelope), onResponse: (entry) => responses.push(entry) });
+  const session = await client.createSession({ name: `Smoke: ${persona.name} (${runId})` });
+  const state = await createRunState({ repoRoot, runId, persona, path: "smoke", baseUrl, sessionId: session.id, bookingOrganizationId: envelope.organizationId });
+
+  let verdict = "max_turns";
+  let verdictReason = `Reached max turns (${maxTurns}) without preview_ready.`;
+  let intakeEstablished = false;
+  let prevOpenCount = null;
+  let noShrinkStreak = 0;
+  const progression = [];
+
+  for (let turnIndex = 0; turnIndex < maxTurns; turnIndex += 1) {
+    const preSnapshot = currentSnapshot(state);
+    if (preSnapshot.phase === "preview_ready") {
+      verdict = "preview_ready";
+      verdictReason = "Workflow already at preview_ready before this turn.";
+      break;
+    }
+
+    let personaText;
+    if (scripted) {
+      if (turnIndex >= scripted.length) {
+        verdictReason = `Ran out of scripted answers after ${turnIndex} turns without reaching preview_ready.`;
+        break;
+      }
+      personaText = scripted[turnIndex];
+    } else {
+      personaText = await generatePersonaTurn({ persona, transcript: state.turns, openQuestions: preSnapshot.openQuestions, isOpeningTurn: turnIndex === 0, apiKey });
+    }
+
+    const { reduced, snapshot } = await runOneTurn({ state, client, personaText });
+    const openIds = snapshot.openQuestions.map((question) => question.id).sort();
+    const createdThisTurn = (reduced.toolCalls ?? []).filter((call) => ARTIFACT_CREATE_TOOL_PATTERN.test(call.toolName ?? ""));
+    const submitIntakeAnswerCalled = (reduced.toolCalls ?? []).some((call) => call.toolName === "submitIntakeAnswer");
+    progression.push({
+      turnIndex,
+      personaText,
+      phase: snapshot.phase,
+      artifactId: state.artifactId,
+      openQuestionCount: openIds.length,
+      submitIntakeAnswerCalled,
+      recreatedArtifact: intakeEstablished && createdThisTurn.length > 0,
+      toolNames: (reduced.toolCalls ?? []).map((call) => call.toolName),
+    });
+
+    // GUARD 1 — stalled.
+    const emptyTurn = !(reduced.text ?? "").trim() && (reduced.toolCalls?.length ?? 0) === 0 && (reduced.specPatches?.length ?? 0) === 0;
+    if (emptyTurn) {
+      verdict = "stalled";
+      verdictReason = `Turn ${turnIndex} produced no text, no tool call, and no spec change (finishReason=${reduced.finishReason ?? "unknown"}).`;
+      break;
+    }
+
+    if (snapshot.phase === "preview_ready") {
+      verdict = "preview_ready";
+      verdictReason = `Conversational answering advanced the intake to preview_ready in ${turnIndex + 1} turn(s)${submitIntakeAnswerCalled ? " (submitIntakeAnswer was called)" : ""}.`;
+      break;
+    }
+
+    // GUARD 2 — not_advancing (only meaningful once a QuestionCard intake is open).
+    if (intakeEstablished) {
+      if (createdThisTurn.length > 0) {
+        verdict = "not_advancing";
+        verdictReason = `Intake already open, but turn ${turnIndex} recreated an artifact (${createdThisTurn.map((call) => call.toolName).join(", ")}) instead of patching via submitIntakeAnswer.`;
+        break;
+      }
+      if (prevOpenCount !== null && openIds.length >= prevOpenCount) noShrinkStreak += 1;
+      else noShrinkStreak = 0;
+      if (noShrinkStreak >= 2) {
+        verdict = "not_advancing";
+        verdictReason = `Open-question count did not shrink across 2 consecutive answer turns (stuck at ${openIds.length}).`;
+        break;
+      }
+    }
+
+    if (snapshot.questionSource === "QuestionCard") intakeEstablished = true;
+    prevOpenCount = openIds.length;
+  }
+
+  state.responses.push(...responses);
+  state.outcome = verdict;
+  state.outcomeNotes = verdictReason;
+  state.finishedAt = new Date().toISOString();
+  await saveRunState(repoRoot, state);
+
+  const passed = verdict === "preview_ready";
+  console.log(
+    JSON.stringify(
+      {
+        verdict,
+        verdictReason,
+        runId,
+        persona: persona.id,
+        sessionId: session.id,
+        artifactId: state.artifactId,
+        assistantTurns: state.turns.filter((turn) => turn.role === "assistant").length,
+        progression,
+      },
+      null,
+      2,
+    ),
+  );
+  console.log(`\nVERDICT: ${verdict}${passed ? "" : "  (non-preview — exit 1)"}`);
+  process.exitCode = passed ? 0 : 1;
+}
+
 function printHelp() {
   console.log(`node scripts/harness/persona-run.mjs <command> [options]
 
@@ -294,7 +442,13 @@ Commands:
   turn --run-id <id> --message "..."
   status --run-id <id>
   finalize --run-id <id> --outcome <status> [--notes "..."] [--dataset <path>] [--pipe-b-batch-id <id>]
+  smoke --persona <id> [--max-turns 8] [--script "msg1||msg2||..."]   (Haiku-in-the-loop gate; needs AI_GATEWAY_API_KEY unless --script)
   batch --count <n> --concurrency <n> [--max-turns <n>] [--dataset <path>]   (Path B, requires AI_GATEWAY_API_KEY)
+
+The smoke verdict is one of: preview_ready (workflow works, exit 0) |
+not_advancing (workflow broke — recreated artifact / questions not shrinking) |
+stalled (model produced an empty turn) | max_turns. Exit is non-zero on
+anything but preview_ready.
 
 Known persona ids: ${listPersonaIds().join(", ")}
 `);
@@ -306,7 +460,7 @@ async function main() {
     printHelp();
     return;
   }
-  const commands = { login: cmdLogin, start: cmdStart, turn: cmdTurn, status: cmdStatus, finalize: cmdFinalize, batch: cmdBatch };
+  const commands = { login: cmdLogin, start: cmdStart, turn: cmdTurn, status: cmdStatus, finalize: cmdFinalize, smoke: cmdSmoke, batch: cmdBatch };
   const handler = commands[args.command];
   if (!handler) {
     printHelp();
