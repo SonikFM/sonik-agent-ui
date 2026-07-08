@@ -5,6 +5,7 @@ import { logArtifactTelemetry, summarizeSpec } from "../artifacts/artifact-telem
 import { normalizeJsonArtifactSpec } from "../artifacts/json-artifact-spec";
 import { explorerCatalog } from "../render/catalog";
 import { getJsonArtifactToolDescription, JSON_ARTIFACT_ALLOWED_COMPONENTS } from "../artifacts/artifact-generation-guidance";
+import { repairSpec } from "../../../../../packages/json-ui-runtime/src/spec-repair.ts";
 
 const catalogComponentNames = JSON_ARTIFACT_ALLOWED_COMPONENTS;
 type CatalogComponentDefinition = {
@@ -127,7 +128,24 @@ export const createJsonArtifact = tool({
   }),
   execute: async ({ title, spec }) => {
     const parsedSpec = parseStringifiedSpecForExecution(spec);
-    const strictSpec = specSchema.safeParse(parsedSpec);
+    // Tool `execute` only runs once the AI SDK has resolved the full tool
+    // input (never on a still-streaming `input-streaming` part), so the spec
+    // here is always complete: it is always safe to attempt the terminal
+    // (lossy-if-needed) repair pass before rejecting.
+    const repairAttempt = repairSpec(parsedSpec, { streamComplete: true });
+    if (repairAttempt?.repaired) {
+      logArtifactTelemetry({
+        source: "server",
+        event: "artifact.spec.autofix_applied",
+        title,
+        lossy: repairAttempt.lossy,
+        fixCount: repairAttempt.fixDetails.length,
+        reason: repairAttempt.fixDetails.map((fix) => fix.message).join("; "),
+        ok: true,
+      });
+    }
+    const candidateSpec = repairAttempt ? repairAttempt.spec : parsedSpec;
+    const strictSpec = specSchema.safeParse(candidateSpec);
     if (!strictSpec.success) {
       const message = strictSpec.error.issues.map((issue) => `${issue.path.join(".") || "spec"}: ${issue.message}`).join("; ") || "invalid_spec";
       logArtifactTelemetry({
