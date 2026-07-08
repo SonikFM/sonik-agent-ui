@@ -7,7 +7,9 @@ import {
   createRuntimeSkillIndexSummary,
   getRuntimeSkillCatalog,
   learnRuntimeSkill,
+  listRuntimeSkillPromptDefaults,
   RUNTIME_SKILL_FAMILIES,
+  RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS,
   searchRuntimeSkillCatalog,
 } from "../../apps/standalone-sveltekit/src/lib/server/skill-registry.ts";
 import { createSkillCatalogTools } from "../../apps/standalone-sveltekit/src/lib/tools/skill-catalog.ts";
@@ -401,3 +403,14 @@ const businessNameQuestion = deterministicQuestions.find((element) => element.pr
 assert.ok(businessNameQuestion, "deterministic intake should include a first-class venue/context name question");
 assert.equal(businessNameQuestion.props.writesTo, "/manifest/business/name", "context names should have a deterministic manifest path for command previews");
 assert.equal(explorerCatalog.validate(deterministicIntakeArtifact.spec).success, true, "booking intake tool output should pass catalog validation");
+
+// Every registered skill's default prompt body must fit under the per-skill
+// truncation cap untruncated. A skill that silently overflows loses its tail
+// content (workflow steps, forbidden commands, etc.) with no signal -- fail
+// loudly here instead so growth in a skill's rules/steps is caught in CI.
+for (const skill of listRuntimeSkillPromptDefaults()) {
+  assert.ok(
+    skill.defaultBody.length <= RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS,
+    `skill ${skill.id} default prompt body is ${skill.defaultBody.length} chars, exceeding the ${RUNTIME_SKILL_PROMPT_MAX_BODY_CHARS}-char truncation cap`,
+  );
+}

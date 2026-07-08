@@ -109,6 +109,25 @@ async function runOneTurn({ state, client, personaText }) {
   const reduced = await client.generateTurn({ messages, sessionId: state.sessionId, pageContext: generatePageContext });
   const elapsedMs = Date.now() - startedAt;
   recordAssistantTurn(state, { reduced, messageId: reduced.messageId });
+  // Mirror the widget's persistJsonRenderArtifactSnapshot: tool-part artifact
+  // ids (json-render-tool:...) are client-side synthetics — the server only
+  // knows an artifact once POST /api/artifact persists it. Without this,
+  // submitIntakeAnswer failed artifact_not_found on every harness turn.
+  const latestSpec = state.specHistory.at(-1)?.spec;
+  if (latestSpec?.root && state.artifactId && !state.persistedArtifactId) {
+    const persistedId = `persona-artifact-${state.runId}`;
+    await client.upsertArtifact({
+      id: persistedId,
+      session_id: state.sessionId,
+      kind: "json-render",
+      title: `Persona intake (${state.runId})`,
+      content: latestSpec,
+      source: "agent",
+      summary: "Persona harness persisted artifact",
+    });
+    state.persistedArtifactId = persistedId;
+    state.artifactId = persistedId;
+  }
   const telemetryResult = await client.postTelemetry({
     event: "persona-harness.turn",
     source: "client",
