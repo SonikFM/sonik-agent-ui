@@ -37,6 +37,8 @@
 | K3 | Terse "make me a reservation" no longer thrashes, but may explore before acting | Zero tool failures; the agent discovers + learns booking commands | Acceptable; give it one concrete detail to anchor |
 | K4 | Model dated "tomorrow" as a wrong year in one test | Watch for date grounding; correct it in chat if seen | Confirm any date it proposes before approving |
 | K5 | Host-app chrome (left nav, page layout) is outside agent-ui | Note but don't debug in this plan | — |
+| K6 | The Documents editor is the vendored **Odysseus** editor (AGPL-3.0); some of its own copy is live — `Document saved`, `Copied to clipboard`, `Exported as HTML/DOCX`, `Restored to v{n}`, placeholders `Find...` / `Document content...` | Known; foreign copy not yet replaced with Sonik text. AGPL resolution deferred to pre-release (rewrite + scan). | Don't dwell on the Documents editor chrome in a client demo |
+| K7 | The Documents panel's import control (`#doc-import-btn`) opens the full Odysseus **Library modal** (Chats/Documents/Research/Archive) with foreign copy | Reachable in one click; slated for removal (Dan: no useful Library usage) | **Do not click the Documents import/library control during a client demo** |
 
 ---
 
