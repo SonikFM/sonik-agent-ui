@@ -81,6 +81,20 @@ export function recordAssistantTurn(state, { reduced, messageId }) {
     state.questionsSeen[question.id] = { ...question, firstSeenTurn: state.turnIndex, answerGiven: null, answeredTurn: null };
   }
 
+  // A successful submitIntakeAnswer receipt is the server confirming the answer
+  // was persisted — mark the question answered so open-question accounting
+  // reflects conversational answers, not just QuestionCard click flows.
+  for (const call of reduced.toolCalls ?? []) {
+    if (call.toolName !== "submitIntakeAnswer" || call.output?.ok !== true) continue;
+    const questionId = call.input?.questionId;
+    if (!questionId) continue;
+    const seen = state.questionsSeen[questionId];
+    if (seen && seen.answerGiven == null) {
+      seen.answerGiven = call.input?.skipped === true ? "skipped" : String(call.input?.value ?? "answered");
+      seen.answeredTurn = state.turnIndex;
+    }
+  }
+
   if (!state.artifactId) {
     const artifactToolCall = (reduced.toolCalls ?? []).find((call) => ARTIFACT_CREATE_TOOL_NAME_PATTERN.test(call.toolName ?? ""));
     if (artifactToolCall) {
