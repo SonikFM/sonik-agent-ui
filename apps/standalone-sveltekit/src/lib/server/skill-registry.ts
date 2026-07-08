@@ -294,7 +294,11 @@ function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
   if (commandPath) lines.push(`Command path: ${commandPath}`);
   const metadata = isRecord(skill.metadata) ? skill.metadata : {};
   if (metadata.execution === "none") {
-    lines.push("Execution mode: intake/preview only; the first action must be the registered intake tool (for booking.context.intake, call createBookingIntakeArtifact exactly once). Do not improvise createJsonArtifact here. If the user answers in chat instead of clicking a QuestionCard, call submitIntakeAnswer(questionId, value) on the existing artifact -- never call createBookingIntakeArtifact again to record an answer.");
+    // The chat-answer / never-recreate steering is now structural: the runtime-skill-intent
+    // guard keeps this skill active while an artifact is active, and the patch-first
+    // refinement contract (agent-prompt.ts) tells the model the artifact exists and how to
+    // patch it whenever one is loaded, reclaiming the truncation budget here.
+    lines.push("Execution mode: intake/preview only; the first action must be the registered intake tool (for booking.context.intake, call createBookingIntakeArtifact exactly once). Do not improvise createJsonArtifact here.");
   }
   if (Array.isArray(metadata.workflowSteps) && metadata.workflowSteps.length > 0) {
     lines.push("Workflow steps:");

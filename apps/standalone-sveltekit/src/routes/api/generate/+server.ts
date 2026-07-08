@@ -1,5 +1,5 @@
 import { env } from "$env/dynamic/private";
-import { createAgent, resolveAgentPromptComposition } from "$lib/agent";
+import { createAgent, hasBookingContextIntakeSkill, resolveAgentPromptComposition } from "$lib/agent";
 import { minuteRateLimit, dailyRateLimit } from "$lib/rate-limit";
 import {
   convertToModelMessages,
@@ -8,7 +8,7 @@ import {
   type UIMessage,
   type UIMessageChunk,
 } from "ai";
-import { pipeJsonRender, pipeUiMessageStreamSafety } from "@json-render/core";
+import { pipeJsonRender, pipeUiMessageStreamSafety, type Spec } from "@json-render/core";
 import { pipeArtifactToolOutputsToSpecParts } from "$lib/artifacts/artifact-stream";
 import { logArtifactTelemetry } from "$lib/artifacts/artifact-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
@@ -464,7 +464,16 @@ export const POST: RequestHandler = async (event) => {
     selectedSkillFamilies: selectionResolution.skillFamilies,
     implicitSkillIds,
   });
-  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings });
+  // Patch-first refinement contract (Phase 2.1): when the intake skill is active over an
+  // already-active artifact, load its current spec so the composed prompt can tell the model
+  // to refine it via submitIntakeAnswer instead of regenerating it via createBookingIntakeArtifact.
+  const activeIntakeArtifactId = pageContext?.activeArtifactId?.trim();
+  const currentIntakeArtifactSpec = activeIntakeArtifactId && hasBookingContextIntakeSkill(skillIds)
+    ? await requestPersistence.getArtifact<Spec>(activeIntakeArtifactId)
+        .then((artifact) => (artifact?.kind === "json-render" ? artifact.content ?? null : null))
+        .catch(() => null)
+    : null;
+  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec });
   const fallbackConversationTitle = firstUserMessage ? deriveWorkspaceSessionTitle(firstUserMessage) : "";
   const titleSession = workspaceSessionId ? await requestPersistence.getSession(workspaceSessionId).catch(() => null) : null;
   const titleGenerationEnabled = Boolean(
@@ -615,7 +624,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

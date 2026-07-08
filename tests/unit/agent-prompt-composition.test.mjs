@@ -147,6 +147,27 @@ const composedForReservation = composeAgentSystemPrompt({
 assert.ok(composedForReservation.moduleIds.includes("booking-commands"), "reservation execution turns must keep booking command module");
 assert.ok(composedForReservation.prompt.includes("booking.get.availability -> booking.create.guest -> booking.create.booking"), "reservation prompt must retain command workflow guidance");
 
+// (d) Patch-first refinement contract (Phase 2.1): a currentIntakeArtifactSpec composes a
+// REFINEMENT CONTRACT section telling the model the artifact already exists and to patch it
+// via submitIntakeAnswer -- never regenerate it via createBookingIntakeArtifact. Absent, no
+// such section is composed (today's behavior is reproduced exactly).
+const activeIntakeSpec = {
+  root: "main",
+  elements: { main: { type: "Card", props: { title: "Venue setup" }, children: [] } },
+  state: { answers: { hours: "Tuesday to Sunday" } },
+};
+const composedWithRefinement = composeAgentSystemPrompt({ currentIntakeArtifactSpec: activeIntakeSpec });
+assert.ok(composedWithRefinement.prompt.includes("REFINEMENT CONTRACT (active intake artifact):"), "an active intake spec must compose the refinement contract section");
+assert.ok(composedWithRefinement.prompt.includes("submitIntakeAnswer(questionId, value)"), "refinement contract must direct the model to patch via submitIntakeAnswer");
+assert.ok(composedWithRefinement.prompt.includes("never call createBookingIntakeArtifact again"), "refinement contract must forbid recreating the artifact");
+assert.ok(composedWithRefinement.prompt.includes(JSON.stringify(activeIntakeSpec.state.answers.hours)) || composedWithRefinement.prompt.includes("Tuesday to Sunday"), "refinement contract must embed the current spec content");
+
+const composedWithoutRefinement = composeAgentSystemPrompt();
+assert.ok(!composedWithoutRefinement.prompt.includes("REFINEMENT CONTRACT"), "no active intake spec must omit the refinement contract section");
+
+const composedWithEmptySpec = composeAgentSystemPrompt({ currentIntakeArtifactSpec: { root: "main", elements: {} } });
+assert.ok(!composedWithEmptySpec.prompt.includes("REFINEMENT CONTRACT"), "an empty spec (no elements) must not compose the refinement contract section");
+
 console.log(JSON.stringify({
   ok: true,
   checked: "agent-prompt-composition",
