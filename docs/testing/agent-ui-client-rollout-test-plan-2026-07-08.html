@@ -193,6 +193,8 @@ const KNOWN = [
   ["K3","Terse \"make me a reservation\" no longer thrashes, but may explore before acting","Zero tool failures; the agent discovers + learns booking commands","Acceptable; give it one concrete detail to anchor"],
   ["K4","Model dated \"tomorrow\" as a wrong year in one test","Watch for date grounding; correct it in chat if seen","Confirm any date it proposes before approving"],
   ["K5","Host-app chrome (left nav, page layout) is outside agent-ui","Note but don't debug in this plan","—"],
+  ["K6","The Documents editor is the vendored <b>Odysseus</b> editor (AGPL-3.0); some of its own copy is live — <code>Document saved</code>, <code>Copied to clipboard</code>, <code>Exported as HTML/DOCX</code>, placeholders <code>Find...</code> / <code>Document content...</code>","Foreign copy not yet replaced with Sonik text; AGPL resolution deferred to pre-release (rewrite + scan)","Don't dwell on the Documents editor chrome in a client demo"],
+  ["K7","The Documents import control (<code>#doc-import-btn</code>) opens the full Odysseus <b>Library modal</b> (Chats/Documents/Research/Archive) with foreign copy","Reachable in one click; slated for removal (no useful Library usage)","<b>Do not click the Documents import/library control during a client demo</b>"],
 ];
 
 // Each suite: [num, title, surface, intro, [ [id, step, expected, sev], ... ] ]
