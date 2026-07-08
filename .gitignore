@@ -23,6 +23,8 @@ build/
 # Local runtime/test artifacts
 .omx/
 .playwright-mcp/
+test-results/
+playwright-report/
 config.bat
 .claude/settings.local.json
 .codex/
