@@ -13,6 +13,9 @@ artifact.** The only path that patches artifact state (`updateIntakeArtifactStat
 `apps/standalone-sveltekit/src/lib/server/intake-artifacts.ts:145`) is wired exclusively to
 the QuestionCard's UI `submit`/`skip` actions in
 `apps/standalone-sveltekit/src/routes/+page.svelte` — it is never exposed as an AI SDK tool.
+*(Pre-fix history: accurate for the 2026-07-07 dataset this triage analyzed. The fix landed the
+same night as `createSubmitIntakeAnswerTool` in
+`apps/standalone-sveltekit/src/lib/tools/intake-artifact.ts`.)*
 The model-callable tool set for an active `booking.context.intake` skill is:
 
 - `createBookingIntakeArtifact` (`apps/standalone-sveltekit/src/lib/tools/intake-artifact.ts:39`)
@@ -122,7 +125,7 @@ telemetry (10 of 12 persona runs) settle the classification without needing a fr
 
 **Mechanism A — command tools are unconditionally removed when a preview-only/context-create
 skill is active.** `apps/standalone-sveltekit/src/lib/agent.ts:103-104`:
-```
+```ts
 const commandCatalogTools = previewOnlyRuntimeActive || bookingContextCreateActive
   ? {}
   : createCommandCatalogTools({ ... });
@@ -173,7 +176,7 @@ auth as the cause). Correlating opener phrasing against outcome:
 | 10 | restaurant-gm-terse | **"Set up a venue** for dinner reservations..." | No — routed to intake skill (bug #1 instead) |
 | 11 | spa-wellness-manager | **"I want to set up a venue** for spa treatment bookings..." | No — routed to intake skill |
 
-10 of 12 organic phrasings hit `RUNTIME_UNAVAILABLE` or an equivalent unmounted-runtime
+9 of 12 organic phrasings hit `RUNTIME_UNAVAILABLE` or an equivalent unmounted-runtime
 message; only the three records whose opener contains the literal "set up a venue" /
 booking-context intent-alias phrase avoid it, by skipping the command runtime entirely. This
 is exactly what Mechanisms A+B predict, and it means the booking command runtime (real reads,
