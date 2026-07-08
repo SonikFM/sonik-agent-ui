@@ -57,13 +57,38 @@ function validatedBookingIntakeSpec(title?: string | null): Spec {
  * not rely on the model to synthesize every QuestionCard prop correctly before
  * the first user question can render.
  */
-export const createBookingIntakeArtifact = tool({
+export type CreateBookingIntakeArtifactToolContext = {
+  pageContext?: AgentPageContext;
+};
+
+export function createBookingIntakeArtifactTool(context: CreateBookingIntakeArtifactToolContext = {}) {
+  return tool({
   description:
-    "Create the registered booking-context intake QuestionCard canvas from the Sonik runtime skill registry. Use this as the first and only artifact tool for venue setup, bookable inventory setup, restaurant/table schedule setup, tee-sheet setup, or booking context intake. It is preview-only: it does not execute booking commands or create bookings.",
+    "Create the registered booking-context intake QuestionCard canvas from the Sonik runtime skill registry. Use this as the first and only artifact tool for venue setup, bookable inventory setup, restaurant/table schedule setup, tee-sheet setup, or booking context intake. It is preview-only: it does not execute booking commands or create bookings. Refuses while an intake canvas is already active — patch that one via submitIntakeAnswer instead; pass replaceActive only when the user explicitly asks to start over.",
   inputSchema: z.object({
     title: z.string().optional().describe("Optional title override for the intake canvas. Defaults to the registered booking intake title."),
+    replaceActive: z.boolean().optional().describe("Set true ONLY when the user explicitly asked to discard the current intake and start over."),
   }),
-  execute: async ({ title }) => {
+  execute: async ({ title, replaceActive }) => {
+    // Structural recreation guard: prompt steering alone did not stop models
+    // from re-creating the canvas on answer turns (2026-07-08 smoke evidence).
+    const activeArtifactId = context.pageContext?.activeArtifactId?.trim();
+    if (activeArtifactId && replaceActive !== true) {
+      logArtifactTelemetry({
+        source: "server",
+        event: "tool.createBookingIntakeArtifact",
+        ok: false,
+        reason: "active_intake_artifact_exists",
+        artifactId: activeArtifactId,
+      });
+      return {
+        kind: "intake-artifact-refusal" as const,
+        ok: false as const,
+        error: "active_intake_artifact_exists" as const,
+        activeArtifactId,
+        guidance: "An intake canvas is already active. Submit the user's answer with submitIntakeAnswer(questionId, value) against it. Only call createBookingIntakeArtifact with replaceActive:true if the user explicitly asked to start over.",
+      };
+    }
     const spec = validatedBookingIntakeSpec(title);
     const artifactTitle = title?.trim() || BOOKING_CONTEXT_INTAKE_SURFACE_TEMPLATE.title;
     logArtifactTelemetry({
@@ -80,7 +105,12 @@ export const createBookingIntakeArtifact = tool({
       createdAt: new Date().toISOString(),
     };
   },
-});
+  });
+}
+
+// Bare unguarded export kept for existing imports/tests; the agent runtime
+// mounts the guarded factory with the request's pageContext.
+export const createBookingIntakeArtifact = createBookingIntakeArtifactTool();
 
 export type SubmitIntakeAnswerToolContext = {
   pageContext?: AgentPageContext;

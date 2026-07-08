@@ -5,7 +5,7 @@ import { getCryptoPrice, getCryptoPriceHistory } from "./tools/crypto";
 import { getHackerNewsTop } from "./tools/hackernews";
 import { webSearch } from "./tools/search";
 import { createJsonArtifact } from "./tools/artifact";
-import { createBookingIntakeArtifact, createSubmitIntakeAnswerTool } from "./tools/intake-artifact";
+import { createBookingIntakeArtifactTool, createSubmitIntakeAnswerTool } from "./tools/intake-artifact";
 import { composeAgentSystemPrompt, type ComposedAgentPrompt } from "./agent-prompt";
 import { resolveRuntimeSkillPromptModules } from "./server/skill-registry";
 import { createDocumentTools, type DocumentToolContext } from "./tools/document";
@@ -120,7 +120,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
       getHackerNewsTop,
       webSearch,
       ...(bookingContextIntakeActive
-        ? { createBookingIntakeArtifact, submitIntakeAnswer: createSubmitIntakeAnswerTool({ pageContext: context.pageContext, persistence: context.persistence }) }
+        ? { createBookingIntakeArtifact: createBookingIntakeArtifactTool({ pageContext: context.pageContext }), submitIntakeAnswer: createSubmitIntakeAnswerTool({ pageContext: context.pageContext, persistence: context.persistence }) }
         : { createJsonArtifact }),
       ...documentTools,
       ...artifactStateTools,
