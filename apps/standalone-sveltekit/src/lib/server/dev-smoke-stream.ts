@@ -14,6 +14,11 @@ export const DEV_SMOKE_SCENARIO_HEADER = "x-sonik-agent-ui-smoke-scenario";
  *  the canvas can be observed mounting the spec progressively. */
 export const DEV_SMOKE_ARTIFACT_INPUT_SCENARIO = "artifact-input-stream";
 
+/** Dev-only: stream a createJsonArtifact call that resolves as tool-output-error,
+ *  so the E2E lane can drive today's "recoverable tool failure renders as a scary
+ *  red block" presentation (R2 / Slice C target). */
+export const DEV_SMOKE_TOOL_FAILURE_SCENARIO = "tool-failure-stream";
+
 export interface DevSmokeStreamInput {
   requestId: string;
   traceId: string;
@@ -78,6 +83,8 @@ export function createDevSmokeStream(input: DevSmokeStreamInput): ReadableStream
   if (input.failMode) return createDevSmokeFailStream(input);
   const stream = input.scenario === DEV_SMOKE_ARTIFACT_INPUT_SCENARIO
     ? createDevSmokeArtifactInputStream()
+    : input.scenario === DEV_SMOKE_TOOL_FAILURE_SCENARIO
+    ? createDevSmokeToolFailureStream()
     : createUIMessageStream({
         execute: async ({ writer }) => {
           const id = "smoke-text";
@@ -175,6 +182,27 @@ function createDevSmokeArtifactInputStream(): ReadableStream<UIMessageChunk> {
       }
       writer.write({ type: "tool-input-available", toolCallId, toolName: "createJsonArtifact", input: DEV_SMOKE_ARTIFACT_INPUT });
       writer.write({ type: "tool-output-available", toolCallId, output: { kind: "json-render-artifact", title: DEV_SMOKE_ARTIFACT_INPUT.title, spec: DEV_SMOKE_ARTIFACT_INPUT.spec } });
+    },
+    onError: (error) => error instanceof Error ? error.message : String(error),
+  });
+}
+
+// Dev-only: stream a createJsonArtifact call that resolves as tool-output-error
+// (recoverable-looking failure), so the client renders today's immediate
+// error presentation for a mid-turn tool failure. Mirrors the real
+// "Canvas creation failed" case from the 2026-07-08 transcript.
+function createDevSmokeToolFailureStream(): ReadableStream<UIMessageChunk> {
+  const toolCallId = "smoke-tool-failure-1";
+  return createUIMessageStream({
+    execute: async ({ writer }) => {
+      const textId = "smoke-tool-failure-preamble";
+      writer.write({ type: "text-start", id: textId });
+      writer.write({ type: "text-delta", id: textId, delta: "Building your dashboard…" });
+      writer.write({ type: "text-end", id: textId });
+      writer.write({ type: "tool-input-start", toolCallId, toolName: "createJsonArtifact" });
+      writer.write({ type: "tool-input-available", toolCallId, toolName: "createJsonArtifact", input: DEV_SMOKE_ARTIFACT_INPUT });
+      await sleep(50);
+      writer.write({ type: "tool-output-error", toolCallId, errorText: "dev smoke injected tool failure" });
     },
     onError: (error) => error instanceof Error ? error.message : String(error),
   });
