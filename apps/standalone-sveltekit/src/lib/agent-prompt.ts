@@ -203,7 +203,7 @@ export const AGENT_PROMPT_MODULES: readonly AgentPromptModule[] = [
 export function buildIntakeRefinementContractSection(currentSpec: Spec | null | undefined): string | null {
   if (!isNonEmptySpec(currentSpec)) return null;
   const editContext = buildUserPrompt({ prompt: "", currentSpec, editModes: ["patch"] });
-  return `REFINEMENT CONTRACT (active intake artifact):\n${editContext}\n\nFor this booking-context intake artifact, apply the patch above by calling submitIntakeAnswer(questionId, value) against the existing artifact. Never emit raw JSON Patch lines in chat text, and never call createBookingIntakeArtifact again while this artifact is active.`;
+  return `REFINEMENT CONTRACT (active intake artifact):\n${editContext}\n\nFor this booking-context intake artifact, apply the patch above by calling submitIntakeAnswer(questionId, value) against the existing artifact. Never emit raw JSON Patch lines in chat text, and never call createBookingIntakeArtifact again while this artifact is active. An answer counts as recorded ONLY when a submitIntakeAnswer receipt for it appears in this turn — never write "recorded", "saved", or a progress checklist for an answer you did not submit via the tool this turn, even if earlier turns in this conversation did so.`;
 }
 
 export interface ComposedAgentPrompt {
