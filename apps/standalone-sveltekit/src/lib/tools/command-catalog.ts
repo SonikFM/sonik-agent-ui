@@ -107,6 +107,11 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
             action: "execute",
             source: "agent-ui",
             sessionId: executionContext.sessionId ?? context.sessionId,
+            // Approval resolves from the host-signed approvedCommandIds grant
+            // (same trust source as commitCommand) — never model-provided.
+            // Without this, "ask" mode dead-ends read commands: execute needs
+            // approval, but read-only commands are forbidden from commit.
+            approved: context.approvedCommandIds?.includes(commandId) === true,
             toolPolicy: { familyModes: context.toolPermissionModes },
           },
         });

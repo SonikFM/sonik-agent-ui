@@ -91,23 +91,23 @@ hostUiTargetRegistry: {
   surface: 'booking-context',
   targets: [
     {
-      targetId: 'booking.context.header',
+      targetId: 'booking.ui.contextHeader',
       label: 'Booking context header',
       description: 'Header for the active booking context.',
       surface: 'booking-context',
       entityRef: { kind: 'booking_context', id: contextId, label: contextName },
       capabilities: ['highlight', 'scroll', 'describe', 'open'],
-      locator: { kind: 'data-sonik-target', value: 'booking.context.header' },
+      locator: { kind: 'data-sonik-target', value: 'booking.ui.contextHeader' },
       policy: { actionMode: 'allow' },
     },
     {
-      targetId: 'booking.command.approval-preview',
+      targetId: 'booking.ui.commandApprovalPanel',
       label: 'Booking command approval preview',
       description: 'Trusted preview/approval region for booking mutations.',
       surface: 'booking-context',
       entityRef: { kind: 'booking_context', id: contextId, label: contextName },
       capabilities: ['highlight', 'scroll', 'approve', 'describe'],
-      locator: { kind: 'data-sonik-target', value: 'booking.command.approval-preview' },
+      locator: { kind: 'data-sonik-target', value: 'booking.ui.commandApprovalPanel' },
       policy: { actionMode: 'ask', reason: 'Booking mutations require trusted host approval.' },
     },
   ],
@@ -117,7 +117,7 @@ hostUiTargetRegistry: {
 DOM hooks should use semantic target attributes, not raw selectors in agent prompts:
 
 ```svelte
-<section data-sonik-target="booking.context.schedule" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
+<section data-sonik-target="booking.ui.schedulePanel" data-sonik-entity-kind="booking_context" data-sonik-entity-id={contextId}>
   ...
 </section>
 ```
@@ -156,7 +156,7 @@ Do not expose `approval.confirmTrustedAction` until Amplify has a server-generat
 In embedded booking:
 
 1. `Open the canvas and highlight the schedule section for this booking context.`
-   - Expected: host action `canvas.open` executes; then `tour.highlight` returns executed receipt for `booking.context.schedule`.
+   - Expected: host action `canvas.open` executes; then `tour.highlight` returns executed receipt for `booking.ui.schedulePanel`.
 2. `Show me the approval preview area before creating this booking context.`
    - Expected: `approval.requestPreview` returns `approval_required`, not executed, and visibly focuses the approval preview region.
 3. `What host UI targets can you act on right now?`
