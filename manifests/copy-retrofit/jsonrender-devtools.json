@@ -1,0 +1,173 @@
+{
+	"name": "jsonrender-devtools",
+	"upstream": {
+		"repoPath": "${JSONRENDER_REPO_PATH:-/Users/danielletterio/Documents/GitHub/json-render}",
+		"gitRemote": "https://github.com/vercel-labs/json-render.git",
+		"revision": "e2d00faeaabe2871ca18a4594a9ec39a245f9b6c",
+		"license": "Apache-2.0"
+	},
+	"entries": [
+		{
+			"source": "packages/devtools",
+			"destination": "packages/devtools",
+			"ignore": [
+				"dist",
+				"node_modules",
+				".svelte-kit"
+			],
+			"integrity": {
+				"files": [
+					{
+						"path": "README.md",
+						"sha256": "bc7378b8e3c8086535912effe0fb5ce6e65aef4af8e510de99fb0577919b7d1c"
+					},
+					{
+						"path": "package.json",
+						"sha256": "f0858d1d374a52c06cac7802df60d0829e0d06ab34638d570a5d459fad53d519"
+					},
+					{
+						"path": "src/env.d.ts",
+						"sha256": "bee4a29692c17e8ed664e94fb58a356a21f3a1ada964d4e72e6160a78ff67d2c"
+					},
+					{
+						"path": "src/event-store.test.ts",
+						"sha256": "7345ba4b4ca75ab9d10c039d5ef0c224c36d8f998b72e1f8feb3777b798ec084"
+					},
+					{
+						"path": "src/event-store.ts",
+						"sha256": "62ce92a072f40abfe19fe211418df2171ad89cb37314e6cf54f16569547d35ca"
+					},
+					{
+						"path": "src/index.ts",
+						"sha256": "5e6ce2e16e05d86858d4ea682d06e1af05c8167421e96a0ec01020eab657053d"
+					},
+					{
+						"path": "src/panel/dom.ts",
+						"sha256": "0ef967e047e6bbb905913373f648e32a0b924d780a8f629bde977457b133d4e9"
+					},
+					{
+						"path": "src/panel/index.ts",
+						"sha256": "ac666257482e909adbef5b2924bd18f41592c4bb07be19b2585df82d94475127"
+					},
+					{
+						"path": "src/panel/shell.ts",
+						"sha256": "2c7ef01c333860367529e070bf9f3242201829e0221c61df48a789835de857ad"
+					},
+					{
+						"path": "src/panel/styles.ts",
+						"sha256": "657b6d77c4bd5df37535918229da5ea58b1e40695504f48377afbba333f86420"
+					},
+					{
+						"path": "src/panel/tabs/actions.ts",
+						"sha256": "fc87e43e94296d3e9effa14f7f4c467b804d628c2183185cf31c022a94475a2b"
+					},
+					{
+						"path": "src/panel/tabs/catalog.ts",
+						"sha256": "0ccef757561aeacee1f69629585d34bb87fa1ee839787cb78fe1efe82a19fdd3"
+					},
+					{
+						"path": "src/panel/tabs/index.ts",
+						"sha256": "359424b08da0704d298a87846eb2d12856b0a82b5088a1c8b68544e4b4173149"
+					},
+					{
+						"path": "src/panel/tabs/picker.ts",
+						"sha256": "e5f0efc90ddb6b39923d6a954dd619f5f2a21a58380462c32ee334f7e2e82371"
+					},
+					{
+						"path": "src/panel/tabs/spec.ts",
+						"sha256": "d99b30b0e6570ca7cc02794e3ee5b169e897ecdd57f60f55dd89264fc995208b"
+					},
+					{
+						"path": "src/panel/tabs/state.ts",
+						"sha256": "0149cce8bbc63b15a4c9587f00cf986d48e01a282cd590d8f66553b032227c1e"
+					},
+					{
+						"path": "src/panel/tabs/stream.ts",
+						"sha256": "cb2af967881c48fce51da5206eacae2914f850d04384f386294c0bc43ac4491b"
+					},
+					{
+						"path": "src/panel/types.ts",
+						"sha256": "720718cbff12737bdb592342700eb41685088471e1d27872bf727a8a657b5e0e"
+					},
+					{
+						"path": "src/picker.ts",
+						"sha256": "d7936df2c174f86d19ae1c105ec91a8fe39bebc8e1e62407a14abc780335de14"
+					},
+					{
+						"path": "src/prod-guard.test.ts",
+						"sha256": "397c2b2494e57063cacfd132a05cb7042b4b813bba29c3154ce58ee41f6483c7"
+					},
+					{
+						"path": "src/prod-guard.ts",
+						"sha256": "6010eb486291cb8f26ad3c73feff3ff74add02462d38e208e6dee03b402bd119"
+					},
+					{
+						"path": "src/stream-tap.test.ts",
+						"sha256": "950ddb0911ab0f0c349f1e7f7fc872a056bfeed46dd54dfa0b794558a87ac26e"
+					},
+					{
+						"path": "src/stream-tap.ts",
+						"sha256": "44726e7d784581df3c4140993a82c1528b8b158163deb14be943e5786ab2a5ef"
+					},
+					{
+						"path": "src/types.ts",
+						"sha256": "f2714300faec8d20b9833afda597ebfeaa2d2131c18dcaa16cbb0f562a482f85"
+					},
+					{
+						"path": "tsconfig.json",
+						"sha256": "2eed5bbfb95d5e88c7506ed4bb08b482380f4790ad7f178a335ed5885fabc57c"
+					},
+					{
+						"path": "tsup.config.ts",
+						"sha256": "b8266692adf24ac62d5f5fdb00aeb23552d616a72a6edda2e49ae89cc6517c2b"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/devtools-svelte",
+			"destination": "packages/devtools-svelte",
+			"ignore": [
+				"dist",
+				"node_modules",
+				".svelte-kit"
+			],
+			"integrity": {
+				"files": [
+					{
+						"path": "README.md",
+						"sha256": "dfde1f745136ba068989225b7ecba281f7a8bb23a8b41b288e1d06940860b6b7"
+					},
+					{
+						"path": "package.json",
+						"sha256": "f9d435a809049e9c55aa8ad9eb323cdfdf09a4fb3796ec37e3bd92cf6c727660"
+					},
+					{
+						"path": "src/JsonRenderDevtools.svelte",
+						"sha256": "761f9041d4e238fb389eca5373fd63d3898d83b541789f1c857aaa661a9129e2"
+					},
+					{
+						"path": "src/index.ts",
+						"sha256": "47f732a532aff5fe8b803e47befada13017cb1d2e636d5436feacaf7d980ad23"
+					},
+					{
+						"path": "tsconfig.json",
+						"sha256": "b67f88344ff6e0c91e7ac216abc900bf106d6754cecb9beae4f33c3c77bb1753"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": [
+		{
+			"path": "packages/devtools-svelte/package.json",
+			"reason": "devDependencies.svelte pinned to ^5.0.0 upstream; bumped to ^5.56.3 to match the svelte devDependency version already used by packages/svelte in this repo (peerDependencies.svelte stays ^5.0.0, matching packages/svelte's peerDependencies convention). No source edits.",
+			"test": "pnpm --filter @json-render/devtools-svelte build"
+		},
+		{
+			"path": "packages/devtools/tsconfig.json",
+			"reason": "Added \"./**/*.test.ts\" to exclude, matching the same exclusion already present in packages/core/tsconfig.json and packages/svelte/tsconfig.json in this repo. Upstream *.test.ts files import from vitest, which is not a devDependency in this repo (tests run via node --experimental-strip-types instead); without the exclude, `tsc --noEmit` fails on the copied test files even though production source typechecks cleanly.",
+			"test": "pnpm --filter @json-render/devtools typecheck"
+		}
+	]
+}
