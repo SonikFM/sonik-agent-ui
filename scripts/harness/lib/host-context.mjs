@@ -27,8 +27,7 @@ const LOCAL_FIXTURE_USER_ID = "harness-local-user-0001";
 
 export function encodeTrustedHostContextHeader(context) {
   const json = JSON.stringify(context);
-  const base64 = Buffer.from(json, "utf8").toString("base64");
-  return base64.replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return Buffer.from(json, "utf8").toString("base64url");
 }
 
 /**
