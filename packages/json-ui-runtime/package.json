@@ -23,6 +23,7 @@
     "typecheck": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
+    "@json-render/core": "workspace:*",
     "@json-render/svelte": "workspace:*",
     "@sonik-agent-ui/tool-contracts": "workspace:*"
   },
