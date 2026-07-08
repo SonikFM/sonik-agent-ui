@@ -34,8 +34,17 @@ assert.match(
 );
 assert.match(
   pageSvelte,
-  /\{#if dev\}\s*\n\s*<JsonRenderDevtools[^>]*\/>\s*\n\s*\{\/if\}/,
+  /\{#if dev(?:\s*&&[^}]*)?\}[\s\S]*?<JsonRenderDevtools[^>]*\/>[\s\S]*?\{\/if\}/,
   "+page.svelte must mount <JsonRenderDevtools /> gated behind the dev flag from $app/environment",
+);
+// The panel calls getStateContext() unconditionally outside production, so it must be
+// nested inside a StateProvider rather than mounted as a bare sibling of
+// JsonArtifactRenderer's own provider (that crashed the instant an artifact first
+// appeared -- see streaming-artifact tests / 2026-07-08 progressive-streaming fix).
+assert.match(
+  pageSvelte,
+  /<JsonUIProvider[^>]*>\s*\n\s*<JsonRenderDevtools/,
+  "+page.svelte must mount <JsonRenderDevtools /> inside a JsonUIProvider so getStateContext() does not throw",
 );
 assert.match(pageSvelte, /import\s*\{\s*browser,\s*dev\s*\}\s*from\s*"\$app\/environment"/, "+page.svelte must import dev from $app/environment for the devtools gate");
 

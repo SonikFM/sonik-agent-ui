@@ -71,31 +71,37 @@ export function findStreamingJsonArtifactSpecCandidate(
 /**
  * Guards a partial `spec` down to the minimum the core Renderer needs: a root
  * key, an elements map, and a root element with a type and props. The Renderer
- * only mounts `spec.elements[spec.root]` and skips children whose ids are not
- * present yet, so this is exactly the threshold at which progressive mounting is
- * safe. Incomplete deltas below this threshold return null (keep last good).
+ * mounts `spec.elements[spec.root]` and skips children whose ids are not present
+ * yet in `elements`, but a child id CAN be present with its `props` key not yet
+ * streamed in (the SDK's partial-json parser emits `{ type: "Text" }` before
+ * `props` appears) -- that child is not "absent", so the Renderer's existence
+ * guard does not skip it, and resolving `undefined` props throws. So this checks
+ * every element currently in `elements`, not just root, before this is safe.
  */
 export function extractRenderablePartialSpec(input: Record<string, unknown> | null): Spec | null {
   if (!input) return null;
   const spec = input.spec;
   if (!isMinimallyRenderableSpec(spec)) return null;
-  // Structural validity is not enough: a partially-streamed directive-shaped root
-  // prop (e.g. a `$cond` whose condition has not finished streaming into an object)
+  // Structural validity is not enough: a partially-streamed directive-shaped prop
+  // (e.g. a `$cond` whose condition has not finished streaming into an object)
   // passes the structural guard but throws when the canvas resolves it inside a
-  // $derived. Dry-run the root element's prop resolution here so a throwing partial
-  // yields null (keep last good) rather than propagating into the render tree.
-  return rootPropsResolveCleanly(spec) ? spec : null;
+  // $derived. Dry-run every element's prop resolution here so a throwing or
+  // not-yet-ready partial yields null (keep last good) rather than propagating
+  // into the render tree.
+  return allElementPropsResolveCleanly(spec) ? spec : null;
 }
 
-function rootPropsResolveCleanly(spec: Spec): boolean {
-  const rootElement = spec.elements[spec.root] as { props?: unknown } | undefined;
-  if (!isRecord(rootElement?.props)) return true;
-  try {
-    resolveElementProps(rootElement.props, { stateModel: isRecord(spec.state) ? spec.state : {} });
-    return true;
-  } catch {
-    return false;
+function allElementPropsResolveCleanly(spec: Spec): boolean {
+  const stateModel = isRecord(spec.state) ? spec.state : {};
+  for (const element of Object.values(spec.elements) as Array<{ props?: unknown } | undefined>) {
+    if (!isRecord(element?.props)) return false;
+    try {
+      resolveElementProps(element.props, { stateModel });
+    } catch {
+      return false;
+    }
   }
+  return true;
 }
 
 export function isMinimallyRenderableSpec(value: unknown): value is Spec {

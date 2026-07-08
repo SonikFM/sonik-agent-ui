@@ -128,4 +128,33 @@ const renderableSpec = {
   );
 }
 
+// --- a child element id can be present in `elements` before its `props` key
+//     has streamed in (the SDK's partial-json parser emits `{ type: "Text" }`
+//     before `props` appears). The Renderer's existence guard does not skip a
+//     present-but-propless child, so resolving it throws unless the streaming
+//     guard also validates non-root elements, not just root. ---
+{
+  const childMissingPropsSpec = {
+    root: "main",
+    elements: {
+      main: { type: "Card", props: { title: "Sales" }, children: ["body"] },
+      body: { type: "Text" }, // props key not yet streamed in
+    },
+  };
+  assert.equal(isMinimallyRenderableSpec(childMissingPropsSpec), true, "root alone is structurally renderable");
+  assert.equal(
+    extractRenderablePartialSpec({ spec: childMissingPropsSpec }),
+    null,
+    "a present child with no props yet yields null (keep last good), not a throw in the Renderer",
+  );
+  const parts = [
+    { type: "tool-createJsonArtifact", toolCallId: "call-child-props", state: "input-streaming", input: { title: "Dash", spec: childMissingPropsSpec } },
+  ];
+  assert.equal(
+    findStreamingJsonArtifactSpecCandidate("msg-child-props", parts),
+    null,
+    "the streaming candidate boundary withholds the mount until every present element has props",
+  );
+}
+
 console.log("streaming-artifact tests passed");

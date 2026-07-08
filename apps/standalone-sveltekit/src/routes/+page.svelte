@@ -6,7 +6,7 @@
   import { SvelteSet, SvelteMap } from "svelte/reactivity";
   import { Chat } from "@ai-sdk/svelte";
   import { DefaultChatTransport } from "ai";
-  import type { DataPart, Spec } from "@json-render/svelte";
+  import { JsonUIProvider, type DataPart, type Spec } from "@json-render/svelte";
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
   import { JsonRenderDevtools } from "@json-render/devtools-svelte";
@@ -3557,8 +3557,15 @@
           onAction={handleJsonRenderAction}
         />
       {/if}
-      {#if dev}
-        <JsonRenderDevtools spec={activeArtifact?.content ?? null} catalog={null} position="right" />
+      {#if dev && activeArtifact}
+        <!-- JsonRenderDevtools calls getStateContext() unconditionally (non-prod), so it
+             must be nested inside a StateProvider -- it previously mounted as a bare
+             sibling of JsonArtifactRenderer's own provider and crashed the instant an
+             artifact (streamed or complete) first appeared. Share the same state store
+             so the devtools state tab reflects the live artifact, not a shadow copy. -->
+        <JsonUIProvider initialState={activeArtifact.content.state} store={activeArtifactStateStore}>
+          <JsonRenderDevtools spec={activeArtifact.content} catalog={null} position="right" />
+        </JsonUIProvider>
       {/if}
     </CanvasViewport>
   {/snippet}
