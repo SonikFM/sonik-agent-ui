@@ -32,7 +32,6 @@ const MONOLITH_RULE_FRAGMENTS = [
   // interactivity + actions + inputs (core)
   "You can use visible, repeat, on.press, and $cond/$then/$else freely.",
   "pushState: Append to an array. params: { statePath: \"/items\", value: { ... } }",
-  "RadioGroup: Renders radio buttons. Writes selected value to statePath automatically.",
   // catalog custom rule (core, from explorerCatalog.prompt)
   "NEVER use viewport height classes (min-h-screen, h-screen)",
   // json-artifact-authoring module
@@ -67,6 +66,21 @@ for (const fragment of MONOLITH_RULE_FRAGMENTS) {
 // The artifact tool object guidance (interpolated verbatim in the old monolith)
 // must still be present under default seeding.
 assert.ok(defaultComposed.prompt.includes("ARTIFACT TOOL OBJECT EXAMPLES"), "artifact tool object examples header missing");
+
+// Component/prop documentation is generated from the render catalog
+// (explorerCatalog.prompt()), not hand-written in AGENT_PROMPT_CORE. Pin the
+// generated "AVAILABLE COMPONENTS" section and a marker component's
+// catalog-derived description so drift between the catalog and hand-written
+// prose can't silently reappear.
+assert.ok(defaultComposed.prompt.includes("AVAILABLE COMPONENTS"), "generated component catalog section missing from default prompt");
+assert.ok(
+  defaultComposed.prompt.includes("QuestionCard") && defaultComposed.prompt.includes("Trusted ask-user-question renderer"),
+  "generated catalog must document QuestionCard from its catalog description, not a hand-written substitute",
+);
+assert.ok(
+  !defaultComposed.prompt.includes("RadioGroup: Renders radio buttons. Writes selected value to statePath automatically."),
+  "hand-written INPUT COMPONENTS doc must not duplicate the generated catalog section",
+);
 
 // Default seeding records the always-on core plus every module and no skills.
 assert.deepEqual(
