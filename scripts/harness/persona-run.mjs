@@ -100,7 +100,13 @@ async function runOneTurn({ state, client, personaText }) {
   recordUserTurn(state, personaText);
   const messages = messagesFromState(state);
   const startedAt = Date.now();
-  const reduced = await client.generateTurn({ messages, sessionId: state.sessionId, pageContext: {} });
+  // Mirror the real widget: generate requests carry the active artifact so the
+  // server's skill-intent guard and submitIntakeAnswer can see it. Sending {}
+  // here made every answer turn look artifact-less (2026-07-08 false negative).
+  const generatePageContext = state.artifactId
+    ? { activeSessionId: state.sessionId, activeArtifactId: state.artifactId, workflowPhase: state.specHistory.at(-1)?.phase ?? "idle" }
+    : {};
+  const reduced = await client.generateTurn({ messages, sessionId: state.sessionId, pageContext: generatePageContext });
   const elapsedMs = Date.now() - startedAt;
   recordAssistantTurn(state, { reduced, messageId: reduced.messageId });
   const telemetryResult = await client.postTelemetry({
@@ -359,7 +365,7 @@ async function cmdSmoke(args) {
 
     const { reduced, snapshot } = await runOneTurn({ state, client, personaText });
     const openIds = snapshot.openQuestions.map((question) => question.id).sort();
-    const createdThisTurn = (reduced.toolCalls ?? []).filter((call) => ARTIFACT_CREATE_TOOL_PATTERN.test(call.toolName ?? ""));
+    const createdThisTurn = (reduced.toolCalls ?? []).filter((call) => ARTIFACT_CREATE_TOOL_PATTERN.test(call.toolName ?? "") && call.output?.ok !== false);
     const submitIntakeAnswerCalled = (reduced.toolCalls ?? []).some((call) => call.toolName === "submitIntakeAnswer");
     progression.push({
       turnIndex,
