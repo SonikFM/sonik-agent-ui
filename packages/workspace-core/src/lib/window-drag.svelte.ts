@@ -197,6 +197,11 @@ export function createCanvasWindowController(options: CanvasWindowControllerOpti
     }
   }
 
+  /** Return to docked (in-grid) layout without clearing the persisted floating rect -- unlike reset(), the next undock (drag/resize) resumes from where the window was left. Used for keyboard "Escape to dock". */
+  function dock(): void {
+    docked = true;
+  }
+
   const style = $derived(
     `left: ${rect.xPct}%; top: ${rect.yPct}%; width: ${clamp(rect.width, MIN_WINDOW_WIDTH, Number.MAX_SAFE_INTEGER)}px; height: ${clamp(rect.height, MIN_WINDOW_HEIGHT, Number.MAX_SAFE_INTEGER)}px;`,
   );
@@ -219,6 +224,7 @@ export function createCanvasWindowController(options: CanvasWindowControllerOpti
     onResizePointerMove,
     onResizePointerUp,
     reset,
+    dock,
   };
 }
 

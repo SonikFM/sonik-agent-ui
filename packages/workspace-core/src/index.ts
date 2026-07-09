@@ -23,10 +23,12 @@ export { createWorkspaceRuntimeSnapshot, withActiveArtifact } from "./state/work
 
 export { default as CanvasToolbar } from "./components/CanvasToolbar.svelte";
 export { default as CanvasViewport } from "./components/CanvasViewport.svelte";
+export { default as ChatWindow } from "./components/ChatWindow.svelte";
 export { default as WorkspaceRoot } from "./components/WorkspaceRoot.svelte";
 export type { WorkspaceLayoutMode, WorkspaceRailMode } from "./components/WorkspaceRoot.svelte";
 export type { CanvasPanel, CanvasToolbarProps } from "./components/CanvasToolbar.svelte";
 export type { CanvasViewportProps } from "./components/CanvasViewport.svelte";
+export type { ChatWindowProps } from "./components/ChatWindow.svelte";
 
 
 export { default as WorkspaceDocumentFrame } from "./components/WorkspaceDocumentFrame.svelte";
