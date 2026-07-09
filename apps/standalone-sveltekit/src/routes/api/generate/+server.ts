@@ -1,5 +1,5 @@
 import { env } from "$env/dynamic/private";
-import { createAgent, hasBookingContextIntakeSkill, resolveAgentPromptComposition } from "$lib/agent";
+import { createAgent, hasBookingContextIntakeSkill, resolveAgentPromptComposition, resolveCommandFamilyMountDecision } from "$lib/agent";
 import { minuteRateLimit, dailyRateLimit } from "$lib/rate-limit";
 import {
   convertToModelMessages,
@@ -29,7 +29,7 @@ import { resolveEffectiveContextDocument } from "$lib/server/run-context-documen
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
-import { resolveImplicitWorkflowSkillIds } from "$lib/runtime-skill-intent";
+import { resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
 import { listPersistedQuestionIds } from "$lib/server/intake-artifacts";
 import {
   createBookingRuntimeAuthContextFromEnv,
@@ -452,13 +452,17 @@ export const POST: RequestHandler = async (event) => {
       activeArtifactIsRegisteredIntake = undefined;
     }
   }
-  const implicitSkillIds = resolveImplicitWorkflowSkillIds({ userMessage: latestUserMessage, pageContext, activeArtifactIsRegisteredIntake });
+  const implicitSkillSelection = resolveImplicitWorkflowSkillSelection({ userMessage: latestUserMessage, pageContext, activeArtifactIsRegisteredIntake });
+  const implicitSkillIds = implicitSkillSelection.skillIds;
   const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
   const skillIds = resolveRequestSkillIds({
     requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
     selectedSkillFamilies: selectionResolution.skillFamilies,
     implicitSkillIds,
   });
+  // Slice E toolset stability (2026-07-08): decide + telemetry the booking command-family mount
+  // once here so createAgent (below) and this turn's churn telemetry agree on the same decision.
+  const commandFamilyDecision = resolveCommandFamilyMountDecision({ skillIds, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds });
   // Patch-first refinement contract (Phase 2.1): when the intake skill is active over an
   // already-active artifact, expose its current spec so the composed prompt can tell the model
   // to refine it via submitIntakeAnswer instead of regenerating it via createBookingIntakeArtifact.
