@@ -42,7 +42,7 @@
     type ArtifactObservationEvent,
     type ArtifactStatus,
   } from "$lib/artifacts/artifact-observability";
-  import { CanvasViewport, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
+  import { CanvasViewport, ChatWindow, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
   import type { AgentUiActionDescriptor, AgentUiActionRegistrySnapshot, AgentUiApprovalStateSnapshot, AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult, AgentUiTargetRegistrySnapshot, AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
   import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
@@ -3547,6 +3547,7 @@
   {/snippet}
 
   {#snippet chat()}
+    <ChatWindow title="Sonik Chat" windowControlsEnabled={!isEmbeddedHostContextExpected()}>
     <AgentConversation
       title="Sonik Chat"
       sessionOptions={isEmbeddedHostContextExpected() ? sessions.map((session) => ({ id: session.id, title: session.name })) : undefined}
@@ -3630,6 +3631,7 @@
         <JsonArtifactRenderer {spec} {registry} {loading} onAction={handleJsonRenderAction} />
       {/snippet}
     </AgentConversation>
+    </ChatWindow>
   {/snippet}
 
   {#snippet artifact()}
