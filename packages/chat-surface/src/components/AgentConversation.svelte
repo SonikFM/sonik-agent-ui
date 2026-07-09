@@ -37,6 +37,9 @@
     status?: "draft" | "preview" | "approval_required" | "blocked";
     disabled?: boolean;
     disabledReason?: string | null;
+    previewLabel?: string;
+    approveLabel?: string;
+    cancelLabel?: string;
     onRequestPreview: () => void;
     onApprove: () => void;
     onCancel: () => void;
@@ -291,7 +294,7 @@
                   disabled={isStreaming || approvalAffordance.disabled}
                   data-approval-action="preview"
                 >
-                  Preview setup
+                  {approvalAffordance.previewLabel ?? "Preview setup"}
                 </button>
                 <button
                   type="button"
@@ -300,7 +303,7 @@
                   disabled={isStreaming || approvalAffordance.disabled}
                   data-approval-action="approve"
                 >
-                  Approve and create
+                  {approvalAffordance.approveLabel ?? "Approve and create"}
                 </button>
                 <button
                   type="button"
@@ -309,7 +312,7 @@
                   disabled={isStreaming || approvalAffordance.disabled}
                   data-approval-action="cancel"
                 >
-                  Cancel
+                  {approvalAffordance.cancelLabel ?? "Cancel"}
                 </button>
               </div>
             </div>

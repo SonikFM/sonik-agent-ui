@@ -20,6 +20,38 @@ const directCommandInputSchema = z.object({
   inputJson: z.string().optional().describe("Optional JSON string for direct command input. Use this for generated OpenAPI/ORPC commands with arbitrary path/query/body fields, e.g. {\"contextId\":\"...\"}. Parsed and schema-preflighted before runtime execution."),
 });
 
+const reservationPreviewInputSchema = z.object({
+  guest: z.record(z.string(), z.unknown()).describe("Guest/customer fields for booking.create.guest. Must include a name and at least one contact channel."),
+  booking: z.record(z.string(), z.unknown()).describe("booking.create.booking input without userId. Must include contextId, startsAt, endsAt, partySize, source, and clientRequestId."),
+});
+
+const RESERVATION_REQUIRED_BOOKING_FIELDS = ["contextId", "startsAt", "endsAt", "partySize", "source", "clientRequestId"] as const;
+
+function missingReservationPreviewFields(guest: Record<string, unknown>, booking: Record<string, unknown>): string[] {
+  const missing: string[] = [];
+  const guestName = typeof guest.name === "string" ? guest.name.trim() : "";
+  const guestEmail = typeof guest.email === "string" ? guest.email.trim() : "";
+  const guestPhone = typeof guest.phone === "string" ? guest.phone.trim() : "";
+  if (!guestName) missing.push("guest.name");
+  if (!guestEmail && !guestPhone) missing.push("guest.email or guest.phone");
+  for (const field of RESERVATION_REQUIRED_BOOKING_FIELDS) {
+    if (!hasUsableToolInput(booking[field])) missing.push(`booking.${field}`);
+  }
+  return missing;
+}
+
+function createBookingReservationPreview(guest: Record<string, unknown>, booking: Record<string, unknown>) {
+  const { userId: _discardedUserId, ...bookingInput } = booking;
+  return {
+    commandId: "booking.create.booking" as const,
+    endpoint: "/api/reservation/commit" as const,
+    input: {
+      guest,
+      booking: bookingInput,
+    },
+  };
+}
+
 export function createCommandCatalogTools(context: { sessionId?: string | null; approvedCommandIds?: string[]; hostSession?: HostSessionEnvelope | null; pageContext?: AgentPageContext; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; toolPermissionModes?: Record<string, AgentToolPermissionMode> } = {}) {
   const hostSessionInput = () => context.hostSession ? { hostSession: context.hostSession } : { hostSessionMode: "standalone-demo" as const };
   const createBundle = () => createStandaloneHostCommandRuntimeBundle({ sessionId: context.sessionId, pageContext: context.pageContext, ...hostSessionInput(), bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, fetcher: context.bookingRuntimeFetcher });
@@ -84,6 +116,35 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
           ...summarizeCommandTelemetry(command, contextCommandIds),
         });
         return { kind: "command-learn" as const, contextLoaded: contextCommandIds.has(commandId), ...learned };
+      },
+    }),
+    previewBookingReservationCommand: tool({
+      description:
+        "Prepare the human approval preview for a booking reservation after booking.get.availability succeeds. This does not create the guest or booking. The user must click Approve, which POSTs to /api/reservation/commit outside the model turn.",
+      inputSchema: reservationPreviewInputSchema,
+      execute: async ({ guest, booking }) => {
+        const command = createBookingReservationPreview(guest, booking);
+        const missingFields = missingReservationPreviewFields(guest, command.input.booking);
+        const ok = missingFields.length === 0;
+        await writeAgentTelemetry({
+          source: "server",
+          event: "tool.previewBookingReservationCommand",
+          ok,
+          sessionId: context.sessionId ?? undefined,
+          toolCallId: command.commandId,
+          commandFamily: "booking-reservations",
+          commandEffect: "write",
+          payload: { missingFields, command },
+        }).catch(() => undefined);
+        return {
+          ok,
+          kind: "reservation-command-preview" as const,
+          command,
+          missingFields,
+          nextAction: ok
+            ? "Show this reservation to the user as the approval preview and stop. Do not call booking.create.guest or booking.create.booking. Publishing is a human Approve click that runs /api/reservation/commit outside this conversation."
+            : "Ask the user for the missing reservation fields before requesting approval. Do not attempt booking writes.",
+        };
       },
     }),
     executeCommand: tool({

@@ -113,8 +113,8 @@ const bookingEventPrompt = [
 
 const bookingReservationPrompt = [
   "Use searchSkillCatalog to find booking.reservation.create, then learnSkill before using commands.",
-  "Use the canonical reservation path: learnCommand booking.get.availability, booking.create.guest, and booking.create.booking.",
-  "Use current page context for contextId/resource details when available, and ask for missing guest, party size, date, or time details before committing.",
+  "Use the canonical reservation path: learnCommand booking.get.availability, run booking.get.availability, then call previewBookingReservationCommand and stop for human approval.",
+  "Use current page context for contextId/resource details when available, and ask for missing guest, party size, date, or time details before previewing.",
   "Do not use booking.create.hold unless I explicitly ask for a temporary hold.",
 ].join(" ");
 
@@ -237,14 +237,14 @@ export const WORKFLOW_TEMPLATE_DEFINITIONS: Record<WorkflowTemplateDefinition["i
     marketplaceItemId: "marketplace.workflow.booking-reservation-create",
     label: "Create reservation",
     title: "Booking Reservation Create",
-    summary: "Run the canonical availability → guest → booking reservation path with page context and trusted host approval.",
-    description: "Run the canonical availability → guest → booking path with host approval.",
+    summary: "Check availability, prepare a reservation preview, then let a human approve the booking.",
+    description: "Run availability, prepare the guest/booking payload, and stop for host-approved booking.",
     familyId: "booking-reservation",
     kind: "command_workflow",
     version: "0.1.0",
     triggerPhrases: ["create reservation", "book a guest", "make a booking", "reserve a table", "book a tee time"],
     requiredSkills: ["booking.reservation.create"],
-    requiredCommands: ["booking.get.availability", "booking.create.guest", "booking.create.booking"],
+    requiredCommands: ["booking.get.availability", "previewBookingReservationCommand", "booking.create.guest", "booking.create.booking"],
     requiredCapabilities: ["booking.availability.read", "booking.guest.write", "booking.reservation.write", "trusted-host.approval"],
     requiredHostContext: ["authenticated", "organizationId", "page.activeEntity", "booking:write"],
     permissionDefaults: { "booking.get.availability": "allow", "booking.create.guest": "ask", "booking.create.booking": "ask" },
@@ -255,13 +255,13 @@ export const WORKFLOW_TEMPLATE_DEFINITIONS: Record<WorkflowTemplateDefinition["i
     nodes: [
       { id: "learn", type: "skill", title: "Learn reservation workflow", requiredSkillId: "booking.reservation.create", readiness: "EXISTS" },
       { id: "availability", type: "tool_preview", title: "Check availability", commandId: "booking.get.availability", effect: "read", approval: "none", readiness: "EXISTS" },
-      { id: "guest", type: "tool_commit", title: "Create guest", commandId: "booking.create.guest", effect: "write", approval: "preview_then_trusted_approval", readiness: "EXISTS" },
-      { id: "booking", type: "tool_commit", title: "Create booking", commandId: "booking.create.booking", effect: "write", approval: "preview_then_trusted_approval", readiness: "EXISTS" },
+      { id: "preview", type: "tool_preview", title: "Preview reservation", commandId: "previewBookingReservationCommand", effect: "write", approval: "preview", readiness: "EXISTS" },
+      { id: "approval", type: "tool_commit", title: "Approve booking", commandId: "booking.create.booking", effect: "write", approval: "preview_then_trusted_approval", readiness: "EXISTS" },
     ],
     edges: [
       { id: "e1", source: "learn", target: "availability" },
-      { id: "e2", source: "availability", target: "guest" },
-      { id: "e3", source: "guest", target: "booking" },
+      { id: "e2", source: "availability", target: "preview" },
+      { id: "e3", source: "preview", target: "approval" },
     ],
     contextMatchers: ["booking-detail", "event-booking-detail", "booking-reservation", "booking-reservations", "booking-admin", "booking-console"],
     objectFamily: "workflow_template",

@@ -7,7 +7,7 @@ import {
   type BookingRuntimeAuthContext,
 } from "../host-command-runtime.ts";
 import { writeAgentTelemetry } from "../agent-telemetry.ts";
-import type { AgentToolPermissionMode } from "../agent-settings.ts";
+import type { AgentToolPermissionMode } from "../../agent-settings.ts";
 
 // A2 reservation-commit (2026-07-08): the human-only publish path for reservations.
 //

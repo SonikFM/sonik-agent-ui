@@ -92,6 +92,7 @@ assert.equal(correlated.some((line) => line.includes('other-run')), false, 'corr
 assert.equal(hasTelemetryEvent(correlated, 'booking.reservation.create', 'tool.searchSkillCatalog', true), true, 'matching run skill search is detected');
 assert.equal(hasTelemetryEvent(correlated, 'booking.create.booking', 'booking.runtime.fetch.end', true), true, 'matching run booking runtime receipt is detected');
 assert.equal(hasTelemetryEvent(correlated, 'booking.create.booking', 'tool.commitCommand', true), true, 'matching run booking commit receipt is detected');
+assert.equal(hasTelemetryEvent(correlated, 'booking.create.booking', 'commit.human_approved', true), false, 'legacy fixture does not claim human-approved commit telemetry');
 assert.equal(hasEventName(correlated, 'tool.searchSkillCatalog', true), true, 'event-name helper still works on correlated records');
 
 const unrelatedOnly = extractPipeBToolEvents(unrelatedRecord, { markers: ['run-123'] });
@@ -123,3 +124,15 @@ assert.equal(countRelevantPipeBLines(`${unrelatedRecord}\n${matchingRecord}`, ['
 assert.equal(countRelevantPipeBLines(unrelatedRecord, ['run-123']), 0, 'correlated line count ignores unrelated runs');
 
 console.log('booking-pipeb-evidence tests passed');
+
+
+const humanApprovedRecord = JSON.stringify({
+  objectKey: 'workers/sonik-agent-ui/current-run-human-approved.json',
+  request: { url: '/api/generate?smokeRunId=run-123' },
+  logs: [
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'api.generate.start', ok: true, sessionId: 'workspace-session-current' } }] },
+    { message: ['sonik_agent_ui_telemetry', { payload: { event: 'commit.human_approved', ok: true, toolCallId: 'booking.create.booking', sessionId: 'workspace-session-current' } }] },
+  ],
+});
+const humanApproved = extractPipeBToolEvents(humanApprovedRecord, { markers: ['run-123', 'workspace-session-current'] });
+assert.equal(hasTelemetryEvent(humanApproved, 'booking.create.booking', 'commit.human_approved', true), true, 'human-approved reservation endpoint commit telemetry is detected');

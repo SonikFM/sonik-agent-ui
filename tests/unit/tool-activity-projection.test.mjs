@@ -13,7 +13,9 @@ const leakedRawToolNames = [
   "executeCommand",
   "commitCommand",
   "previewActiveIntakeCommand",
+  "previewBookingReservationCommand",
   "commitActiveIntakeCommand",
+  "commitBookingReservationCommand",
   "createBookingIntakeArtifact",
 ];
 

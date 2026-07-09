@@ -7,7 +7,7 @@ export const BOOKING_RESERVATION_CREATE_RECIPE = commandWorkflowRecipeSchema.par
   familyId: "booking",
   intentAliases: ["create reservation", "make booking", "book tee time", "create booking", "reserve a slot"],
   canonicalRegressionPrompt: "Create a reservation for Dan at 1pm July 1 for 3.",
-  commandSequence: ["booking.get.availability", "booking.create.guest", "booking.create.booking"],
+  commandSequence: ["booking.get.availability", "previewBookingReservationCommand"],
   steps: [
     {
       commandId: "booking.get.availability",
@@ -16,16 +16,10 @@ export const BOOKING_RESERVATION_CREATE_RECIPE = commandWorkflowRecipeSchema.par
       requiredBefore: [],
     },
     {
-      commandId: "booking.create.guest",
-      action: "commit",
-      why: "Create or resolve the human guest/customer identity named by the user.",
+      commandId: "previewBookingReservationCommand",
+      action: "execute",
+      why: "Prepare the guest and booking payload as a human approval preview. The user clicks Approve to run /api/reservation/commit; the model never calls booking.create.guest or booking.create.booking.",
       requiredBefore: ["booking.get.availability"],
-    },
-    {
-      commandId: "booking.create.booking",
-      action: "commit",
-      why: "Create the durable reservation using the current booking context, selected slot, party size, and resolved guest/customer id.",
-      requiredBefore: ["booking.get.availability", "booking.create.guest"],
     },
   ],
   forbiddenUnlessExplicit: ["booking.create.hold"],
@@ -45,9 +39,9 @@ export const BOOKING_RESERVATION_CREATE_RECIPE = commandWorkflowRecipeSchema.par
   ],
   successEvidence: [
     "booking.get.availability receipt ok=true for the requested slot",
-    "booking.create.guest receipt ok=true with guest/customer id",
-    "booking.create.booking receipt ok=true with booking/reservation id",
-    "Pipe B telemetry contains all three command ids in order for the same session/request chain",
+    "previewBookingReservationCommand receipt ok=true with guest and booking payload",
+    "commit.human_approved telemetry contains booking.create.guest and booking.create.booking after user approval",
+    "Pipe B telemetry contains availability, preview, and human-approved commit events for the same session/request chain",
   ],
   negativeTranscriptRegression: {
     prompt: "Create a reservation for Dan at 1pm July 1 for 3.",
@@ -60,7 +54,7 @@ export const BOOKING_RESERVATION_CREATE_RECIPE = commandWorkflowRecipeSchema.par
       "create a guest for it",
       "use that principal as a guest",
     ],
-    expectedCommandPath: ["booking.get.availability", "booking.create.guest", "booking.create.booking"],
+    expectedCommandPath: ["booking.get.availability", "previewBookingReservationCommand"],
   },
 } satisfies CommandWorkflowRecipe);
 

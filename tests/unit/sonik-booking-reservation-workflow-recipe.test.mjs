@@ -7,7 +7,7 @@ const globalRegistry = JSON.parse(await readFile("tests/fixtures/generated/sonik
 const regression = JSON.parse(await readFile("tests/fixtures/sonik-booking/reservation-workflow-regression.json", "utf8"));
 
 const recipe = BOOKING_RESERVATION_CREATE_RECIPE;
-const expectedPath = ["booking.get.availability", "booking.create.guest", "booking.create.booking"];
+const expectedPath = ["booking.get.availability", "previewBookingReservationCommand"];
 const bookingCommands = new Map(bookingArtifacts.catalog.commands.map((command) => [command.id, command]));
 const globalCommands = new Map(globalRegistry.catalog.commands.map((command) => [command.id, command]));
 
@@ -15,7 +15,7 @@ assert.equal(recipe.id, "booking.reservation.create");
 assert.equal(recipe.canonicalRegressionPrompt, "Create a reservation for Dan at 1pm July 1 for 3.");
 assert.deepEqual(recipe.commandSequence, expectedPath, "reservation recipe encodes the durable booking command path");
 assert.deepEqual(recipe.steps.map((step) => step.commandId), expectedPath, "steps mirror the canonical command path");
-assert.deepEqual(recipe.steps.map((step) => step.action), ["execute", "commit", "commit"], "reservation flow reads first, then writes with approval");
+assert.deepEqual(recipe.steps.map((step) => step.action), ["execute", "execute"], "reservation flow reads first, then prepares a human approval preview");
 assert.ok(recipe.forbiddenUnlessExplicit.includes("booking.create.hold"), "hold creation is forbidden for reservation intent unless explicit");
 assert.ok(recipe.actorFields.includes("userId"), "recipe marks actor/principal fields as identity-sensitive");
 assert.ok(recipe.guestFields.includes("guestId"), "recipe keeps guest/customer identity separate from host actor identity");
@@ -25,17 +25,19 @@ assert.equal(recipe.negativeTranscriptRegression.prompt, recipe.canonicalRegress
 assert.deepEqual(recipe.negativeTranscriptRegression.expectedCommandPath, expectedPath);
 assert.ok(recipe.negativeTranscriptRegression.failIfCommandIds.includes("booking.create.hold"));
 
-for (const commandId of [...expectedPath, ...recipe.forbiddenUnlessExplicit]) {
+for (const commandId of ["booking.get.availability", ...recipe.forbiddenUnlessExplicit]) {
   const bookingCommand = bookingCommands.get(commandId);
   const globalCommand = globalCommands.get(commandId);
   assert.ok(bookingCommand, `booking artifact contains ${commandId}`);
   assert.ok(globalCommand, `global registry contains ${commandId}`);
   assert.equal(bookingCommand.id, globalCommand.id, `${commandId} id matches across registries`);
 }
+assert.ok(recipe.commandSequence.includes("previewBookingReservationCommand"), "reservation recipe includes the local approval-preview tool");
 
 const availability = bookingCommands.get("booking.get.availability");
 const guestCreate = bookingCommands.get("booking.create.guest");
 const bookingCreate = bookingCommands.get("booking.create.booking");
+assert.ok(recipe.successEvidence.some((entry) => /commit\.human_approved/.test(entry)), "success evidence must point to the human-approved endpoint writes");
 const holdCreate = bookingCommands.get("booking.create.hold");
 assert.equal(availability.effect, "read");
 assert.equal(availability.approval, "none");
@@ -95,7 +97,7 @@ assert.ok(badResult.reasons.includes("guest_creation_mutates_actor_fields"), "re
 assert.ok(badResult.reasons.includes("trusted_actor_user_id_leaked_into_booking_identity"), "regression catches trusted host principal leakage");
 
 const goodResult = classifyReservationTranscript(regression.goodTranscript, recipe);
-assert.equal(goodResult.ok, true, `canonical availability -> guest -> booking transcript passes: ${goodResult.reasons.join(",")}`);
+assert.equal(goodResult.ok, true, `canonical availability -> preview transcript passes: ${goodResult.reasons.join(",")}`);
 assert.deepEqual(goodResult.commandIds, expectedPath);
 
 console.log(JSON.stringify({

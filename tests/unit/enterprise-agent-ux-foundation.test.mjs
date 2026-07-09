@@ -54,6 +54,6 @@ assert.match(appPage, /import \{ browser, dev \} from "\$app\/environment"/);
 assert.match(appPage, /let embeddedHostContextExpected = \$state\(browser && new URLSearchParams\(window\.location\.search\)\.has\("agentUiHostOrigin"\)\)/);
 assert.match(appPage, /const showCanvasDeveloperPanels = \$derived\(dev \|\| !isEmbeddedHostContextExpected\(\)\)/);
 assert.match(appPage, /showDeveloperPanels=\{showCanvasDeveloperPanels\}/);
-assert.match(appPage, /approvalAffordance=\{createActiveIntakeApprovalAffordance\(\)\}/);
+assert.match(appPage, /approvalAffordance=\{createReservationApprovalAffordance\(\) \?\? createActiveIntakeApprovalAffordance\(\)\}/);
 
 console.log("enterprise-agent-ux-foundation tests passed");
