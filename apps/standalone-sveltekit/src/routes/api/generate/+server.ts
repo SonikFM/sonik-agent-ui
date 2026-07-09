@@ -534,6 +534,12 @@ export const POST: RequestHandler = async (event) => {
       hostContextHeaderRejected,
       hostSessionSource: hostSession?.source ?? null,
       approvedCommandCount: approvedCommandIds.length,
+      // Slice E toolset stability (2026-07-08): whether the booking command family was mounted
+      // this turn, and whether the continuity rule averted a churn (it would have been dropped
+      // without the rule). commandFamilyChurnAverted true == a "commands gone -> back" flicker
+      // the user did NOT see because a preview-only skill was carried over by continuity only.
+      commandFamilyMounted: commandFamilyDecision.mounted,
+      commandFamilyChurnAverted: commandFamilyDecision.mounted && !commandFamilyDecision.wouldMountWithoutStability,
       // Analytics-only run hints, stamped onto the run telemetry / Pipe-B so a
       // session's run sequence is queryable. Never influences behavior.
       analyticsHints: analyticsHints ?? null,
@@ -618,7 +624,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });
