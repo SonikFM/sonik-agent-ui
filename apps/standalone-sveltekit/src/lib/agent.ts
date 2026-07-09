@@ -26,43 +26,19 @@ import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
 import type { Spec } from "@json-render/core";
+import {
+  hasBookingContextCreateSkill,
+  hasBookingContextIntakeSkill,
+  hasPreviewOnlyRuntimeSkill,
+  resolveCommandFamilyMountDecision,
+} from "./command-family-mount";
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null };
+// Re-exported for existing `$lib/agent` importers; the logic lives in the dependency-free
+// leaf module so it stays unit-testable (agent.ts itself can only be type-imported in plain node).
+export { hasBookingContextIntakeSkill, resolveCommandFamilyMountDecision } from "./command-family-mount";
+export type { CommandFamilyMountDecision } from "./command-family-mount";
 
-const PREVIEW_ONLY_RUNTIME_SKILL_IDS = new Set([
-  "booking.context.intake",
-  "booking-context-intake",
-  "booking.event.create",
-  "booking-event",
-  "amplify.campaign.template.create",
-  "amplify-campaign-template",
-]);
-const EXECUTION_RUNTIME_SKILL_IDS = new Set([
-  "booking.reservation.create",
-  "booking-reservation",
-  "booking.context.create",
-  "booking-context-create",
-]);
-
-function normalizedSkillIds(skillIds: string[] | undefined): string[] {
-  return (skillIds ?? []).map((id) => String(id).trim()).filter(Boolean);
-}
-
-function hasPreviewOnlyRuntimeSkill(skillIds: string[] | undefined): boolean {
-  const ids = normalizedSkillIds(skillIds);
-  if (ids.some((id) => EXECUTION_RUNTIME_SKILL_IDS.has(id))) return false;
-  return ids.some((id) => PREVIEW_ONLY_RUNTIME_SKILL_IDS.has(id));
-}
-
-export function hasBookingContextIntakeSkill(skillIds: string[] | undefined): boolean {
-  const ids = normalizedSkillIds(skillIds);
-  if (ids.some((id) => EXECUTION_RUNTIME_SKILL_IDS.has(id))) return false;
-  return ids.some((id) => id === "booking.context.intake" || id === "booking-context-intake");
-}
-
-function hasBookingContextCreateSkill(skillIds: string[] | undefined): boolean {
-  return normalizedSkillIds(skillIds).some((id) => id === "booking.context.create" || id === "booking-context-create");
-}
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[] };
 
 /**
  * Composes the per-turn system prompt for a run: the always-on core plus the
@@ -106,10 +82,10 @@ export function createAgent(context: AgentRuntimeContext = {}) {
   const toolManifestTools = createToolManifestTools();
   const bookingContextIntakeActive = hasBookingContextIntakeSkill(context.skillIds);
   const bookingContextCreateActive = hasBookingContextCreateSkill(context.skillIds);
-  const previewOnlyRuntimeActive = hasPreviewOnlyRuntimeSkill(context.skillIds);
-  const commandCatalogTools = previewOnlyRuntimeActive || bookingContextCreateActive
-    ? {}
-    : createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, toolPermissionModes: context.agentSettings?.toolPermissionModes });
+  const commandFamilyDecision = resolveCommandFamilyMountDecision(context);
+  const commandCatalogTools = commandFamilyDecision.mounted
+    ? createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, toolPermissionModes: context.agentSettings?.toolPermissionModes })
+    : {};
   const artifactStateTools = createArtifactStateTools({ sessionId: context.sessionId, pageContext: context.pageContext, persistence: context.persistence, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher });
   const skillCatalogTools = createSkillCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   const marketplaceWorkflowTools = createMarketplaceWorkflowTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });

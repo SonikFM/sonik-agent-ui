@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-const [fsModule, intakeModule, contextIntakeModule, artifactStateModule, intakeToolModule, skillIntentModule, skillRegistryModule, workspaceStoreModule] = await Promise.all([
+const [fsModule, intakeModule, contextIntakeModule, artifactStateModule, intakeToolModule, skillIntentModule, skillRegistryModule, workspaceStoreModule, commandFamilyModule] = await Promise.all([
   import("node:fs"),
   import("../../apps/standalone-sveltekit/src/lib/server/intake-artifacts.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/booking-workflows/context-intake.ts"),
@@ -9,6 +9,7 @@ const [fsModule, intakeModule, contextIntakeModule, artifactStateModule, intakeT
   import("../../apps/standalone-sveltekit/src/lib/runtime-skill-intent.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/skill-registry.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/workspace-store.ts"),
+  import("../../apps/standalone-sveltekit/src/lib/command-family-mount.ts"),
 ]);
 
 const { readFileSync } = fsModule;
@@ -18,6 +19,7 @@ const { createArtifactStateTools, commitBookingContextIntakeCommand } = artifact
 const { createSubmitIntakeAnswerTool } = intakeToolModule;
 const { resolveImplicitWorkflowSkillIds } = skillIntentModule;
 const { learnRuntimeSkill } = skillRegistryModule;
+const { resolveCommandFamilyMountDecision } = commandFamilyModule;
 const { getWorkspaceArtifact, updateWorkspaceArtifact } = workspaceStoreModule;
 
 const sessionId = `session-intake-command-${Date.now()}`;
@@ -80,7 +82,11 @@ assert.ok(JSON.stringify(learnedCreate).includes("Resource/table = inventory ins
 // never by the agent's tool set. See command-catalog-tools-booking-runtime.test.mjs
 // for the structural invariant closure across every skill combination.
 const agentSource = readFileSync(new URL("../../apps/standalone-sveltekit/src/lib/agent.ts", import.meta.url), "utf8");
-assert.ok(agentSource.includes("previewOnlyRuntimeActive || bookingContextCreateActive"), "booking.context.create turns must not mount the generic executeCommand catalog tools");
+// booking.context.create turns must not mount the generic executeCommand catalog tools.
+// The suppression logic lives in the dependency-free command-family-mount leaf (Slice E) so it
+// can be asserted behaviorally instead of by brittle source grep; agent.ts must still WIRE it.
+assert.equal(resolveCommandFamilyMountDecision({ skillIds: ["booking.context.create"] }).mounted, false, "booking.context.create turns must not mount the generic executeCommand catalog tools");
+assert.ok(agentSource.includes("resolveCommandFamilyMountDecision"), "agent.ts must gate command-catalog tool mounting through the command-family mount decision");
 assert.equal(agentSource.includes("allowIntakeCommandCommit"), false, "agent.ts must not thread an intake-commit-tool gate; the model never holds a commit tool");
 
 const previewOnlyTools = createArtifactStateTools({ sessionId, pageContext });

@@ -25,7 +25,19 @@ function contextText(pageContext?: AgentPageContext): string {
   ].map(normalize).filter(Boolean).join(" ");
 }
 
-export function resolveImplicitWorkflowSkillIds(input: {
+export interface ImplicitWorkflowSkillSelection {
+  skillIds: string[];
+  /**
+   * The subset of skillIds that were selected ONLY because of a structural continuity guard
+   * (e.g. activeArtifactKeepsIntake below) rather than fresh explicit keyword intent this turn.
+   * Command-family mounting (agent.ts's resolveCommandFamilyMountDecision) uses this so an
+   * incidental keyword miss mid-workflow doesn't drop tools the user was already using -- the
+   * transcript's "booking commands are gone -> check again -> back" churn (Slice E, 2026-07-08).
+   */
+  continuitySkillIds: string[];
+}
+
+export function resolveImplicitWorkflowSkillSelection(input: {
   userMessage?: string | null;
   firstUserMessage?: string | null;
   pageContext?: AgentPageContext;
@@ -37,11 +49,12 @@ export function resolveImplicitWorkflowSkillIds(input: {
    * (e.g. load failure) and preserves prior any-active-artifact behavior.
    */
   activeArtifactIsRegisteredIntake?: boolean;
-}): string[] {
+}): ImplicitWorkflowSkillSelection {
   const message = normalize(input.userMessage ?? input.firstUserMessage);
-  if (!message) return [];
+  if (!message) return { skillIds: [], continuitySkillIds: [] };
   const context = contextText(input.pageContext);
   const skills: string[] = [];
+  const continuitySkills: string[] = [];
 
   const setupIntent = includesAny(message, [
     "set up",
@@ -109,8 +122,13 @@ export function resolveImplicitWorkflowSkillIds(input: {
   }
 
   // structural guard specified by Dan (2026-07-08): keep intake skill active while an active intake artifact exists
-  if (((setupIntent && venueIntakeObject) || activeArtifactKeepsIntake) && !reservationExecutionIntent && !canCommitActiveBookingArtifact) {
+  const explicitIntakeIntent = setupIntent && venueIntakeObject;
+  if ((explicitIntakeIntent || activeArtifactKeepsIntake) && !reservationExecutionIntent && !canCommitActiveBookingArtifact) {
     skills.push("booking.context.intake");
+    // Selected only via the continuity guard (no fresh explicit intent this turn) -- record it
+    // so command-family mounting can tell "carried over on a keyword miss" apart from "the user
+    // just explicitly started intake" (Slice E stability rule).
+    if (!explicitIntakeIntent) continuitySkills.push("booking.context.intake");
   }
 
   if (includesAny(message, ["create an event", "set up an event", "event intake", "event setup"])) {
@@ -125,5 +143,18 @@ export function resolveImplicitWorkflowSkillIds(input: {
     skills.push("booking.reservation.create");
   }
 
-  return [...new Set(skills)].slice(0, MAX_IMPLICIT_SKILLS);
+  const skillIds = [...new Set(skills)].slice(0, MAX_IMPLICIT_SKILLS);
+  return {
+    skillIds,
+    continuitySkillIds: continuitySkills.filter((id) => skillIds.includes(id)),
+  };
+}
+
+/**
+ * Backward-compatible accessor: most callers only need the resolved skill ids, not the
+ * continuity metadata (used by agent.ts's command-family stability rule). Kept as a thin
+ * wrapper so existing call sites and tests are unaffected.
+ */
+export function resolveImplicitWorkflowSkillIds(input: Parameters<typeof resolveImplicitWorkflowSkillSelection>[0]): string[] {
+  return resolveImplicitWorkflowSkillSelection(input).skillIds;
 }
