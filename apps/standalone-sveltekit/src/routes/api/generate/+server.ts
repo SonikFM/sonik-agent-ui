@@ -31,6 +31,7 @@ import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
 import { resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
+import { resolveWorkspaceDocumentIntent } from "$lib/document-intent";
 import { listPersistedQuestionIds } from "$lib/server/intake-artifacts";
 import {
   createBookingRuntimeAuthContextFromEnv,
@@ -446,6 +447,7 @@ export const POST: RequestHandler = async (event) => {
       activeArtifactIsRegisteredIntake = undefined;
     }
   }
+  const workspaceDocumentIntent = resolveWorkspaceDocumentIntent(latestUserMessage);
   const implicitSkillSelection = resolveImplicitWorkflowSkillSelection({ userMessage: latestUserMessage, pageContext, activeArtifactIsRegisteredIntake });
   const implicitSkillIds = implicitSkillSelection.skillIds;
   const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
@@ -538,6 +540,7 @@ export const POST: RequestHandler = async (event) => {
       // session's run sequence is queryable. Never influences behavior.
       analyticsHints: analyticsHints ?? null,
       agentSettings: agentRuntimeSettings,
+      workspaceDocumentIntent,
     },
     ok: true,
   }).catch(() => undefined);
@@ -618,7 +621,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

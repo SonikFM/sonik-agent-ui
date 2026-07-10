@@ -12,7 +12,7 @@ const bookingCommands = new Map(bookingArtifacts.catalog.commands.map((command) 
 const globalCommands = new Map(globalRegistry.catalog.commands.map((command) => [command.id, command]));
 
 assert.equal(recipe.id, "booking.reservation.create");
-assert.equal(recipe.canonicalRegressionPrompt, "Create a reservation for Dan at 1pm July 1 for 3.");
+assert.equal(recipe.canonicalRegressionPrompt, "Create a reservation for Dan at 1pm July 1 for 3; ask for a user-confirmed email or phone before previewing.");
 assert.deepEqual(recipe.commandSequence, expectedPath, "reservation recipe encodes the durable booking command path");
 assert.deepEqual(recipe.steps.map((step) => step.commandId), expectedPath, "steps mirror the canonical command path");
 assert.deepEqual(recipe.steps.map((step) => step.action), ["execute", "execute"], "reservation flow reads first, then prepares a human approval preview");

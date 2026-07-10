@@ -28,6 +28,7 @@
   import { findDocumentArtifactToolCandidate, findJsonArtifactToolCandidate, type PreferredDocumentView } from "$lib/artifacts/tool-artifact-extraction";
   import { findStreamingJsonArtifactSpecCandidate } from "$lib/artifacts/streaming-artifact";
   import { hasActiveArtifactUpdateIntent, hasExplicitArtifactIntent } from "$lib/artifacts/artifact-promotion";
+  import { hasExplicitWorkspaceDocumentIntent } from "$lib/document-intent";
   import { logArtifactTelemetry, summarizeSpec } from "$lib/artifacts/artifact-telemetry";
   import { createInMemoryArtifactWarehouse, type ArtifactWarehouseSnapshot, type ArtifactWarehouseVersion } from "$lib/artifacts/artifact-warehouse";
   import ArtifactInspector from "$lib/artifacts/ArtifactInspector.svelte";
@@ -439,6 +440,7 @@
 
     return null;
   });
+
 
   $effect(() => {
     if (!latestDocumentArtifact) return;
@@ -2981,7 +2983,7 @@
     const trimmed = message.trim();
     if (getSubmitDisabledReason(trimmed)) return;
 
-    if (hasExplicitArtifactIntent(trimmed) || (activeArtifact && hasActiveArtifactUpdateIntent(trimmed))) {
+    if (!hasExplicitWorkspaceDocumentIntent(trimmed) && (hasExplicitArtifactIntent(trimmed) || (activeArtifact && hasActiveArtifactUpdateIntent(trimmed)))) {
       pendingArtifactIntent = trimmed;
     }
 
@@ -3742,9 +3744,9 @@
           type="button"
           onclick={openDocumentEditor}
           class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          aria-label="Open workspace documents"
+          aria-label="Open or create a workspace document"
         >
-          Documents
+          Workspace document
         </button>
         {#if embedMode === "chat" && hostCanvasOpenDeclined && (activeArtifact || documentEditorOpen)}
           <button
