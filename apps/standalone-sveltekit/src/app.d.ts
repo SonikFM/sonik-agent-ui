@@ -3,7 +3,13 @@
 declare global {
   namespace App {
     interface Platform {
-      env?: Record<string, unknown>;
+      env?: Record<string, unknown> & {
+        CF_VERSION_METADATA?: {
+          id?: string;
+          tag?: string;
+          timestamp?: string;
+        };
+      };
       context?: unknown;
       caches?: CacheStorage;
     }

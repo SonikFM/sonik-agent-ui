@@ -59,6 +59,36 @@ assert.equal(merged.activeEntity?.id, "booking_123", "merged context should incl
 assert.equal(merged.organizationId, "org-trusted", "trusted context should be appended explicitly");
 assert.deepEqual(merged.scopes, ["booking:read"], "trusted scopes should come from trusted context only");
 
+const spoofedSupportDiagnostics = {
+  route: "/hostile",
+  correlation: {
+    sessionId: "session-support",
+    messageId: "message-support",
+    requestId: "request-hostile",
+    traceId: "0123456789abcdef0123456789abcdef",
+    traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+    agentUiRunId: "run-hostile",
+    status: "success",
+    capturedAt: "2026-07-10T12:00:00.000Z",
+    rawHeaders: { cookie: "should-not-survive" },
+  },
+  deployment: {
+    id: "deployment-hostile",
+    tag: "release-hostile",
+    timestamp: "2026-07-10T11:59:00.000Z",
+    rawHeaders: { authorization: "Bearer should-not-survive" },
+  },
+};
+const sanitizedSpoofedSupportDiagnostics = sanitizeAgentHostPageContext(spoofedSupportDiagnostics);
+assert.equal(sanitizedSpoofedSupportDiagnostics?.correlation, undefined, "host-supplied correlation must be dropped");
+assert.equal(sanitizedSpoofedSupportDiagnostics?.deployment, undefined, "host-supplied deployment must be dropped");
+const mergedWithSpoofedSupportDiagnostics = mergeAgentHostPageContext(
+  { activeSessionId: "session-support" },
+  spoofedSupportDiagnostics,
+);
+assert.equal(mergedWithSpoofedSupportDiagnostics.correlation, undefined, "host merge must not accept spoofed correlation");
+assert.equal(mergedWithSpoofedSupportDiagnostics.deployment, undefined, "host merge must not accept spoofed deployment");
+
 // Regression: window.__sonikAgentUI.getPageContext() (the standalone route's createPageContextSnapshot)
 // always routes the local snapshot through mergeAgentHostPageContext/sanitizeAgentHostPageContext before
 // returning it, even with no embedding host present. The sanitizer's key allowlist previously omitted

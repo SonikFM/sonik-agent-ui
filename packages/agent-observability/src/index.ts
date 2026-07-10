@@ -42,6 +42,24 @@ export interface AgentUiWorkflowSnapshot {
   commandPreview?: AgentUiWorkflowCommandPreviewSnapshot | null;
 }
 
+export interface AgentUiDeploymentSnapshot {
+  id?: string;
+  tag?: string;
+  timestamp?: string;
+}
+
+export interface AgentUiTurnCorrelationSnapshot {
+  sessionId: string;
+  messageId?: string;
+  requestId: string;
+  traceId?: string;
+  traceparent?: string;
+  agentUiRunId?: string;
+  status: "success" | "error";
+  capturedAt: string;
+  deployment?: AgentUiDeploymentSnapshot;
+}
+
 export interface AgentUiPageContextSnapshot {
   route?: string;
   surface?: string;
@@ -66,6 +84,10 @@ export interface AgentUiPageContextSnapshot {
   hostUiTargetRegistry?: AgentUiTargetRegistrySnapshot;
   commandFamilies?: string[];
   skillFamilies?: string[];
+  /** Privacy-safe deployment/build identifiers explicitly allowlisted for support diagnostics. */
+  deployment?: AgentUiDeploymentSnapshot;
+  /** Privacy-safe per-turn correlation identifiers explicitly allowlisted for support diagnostics. */
+  correlation?: AgentUiTurnCorrelationSnapshot;
   at?: string;
 }
 
@@ -169,6 +191,8 @@ export interface AgentUiPageControl {
     requestApproval: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     approveAndRun: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     cancelApproval: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    exportChat?: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    exportDiagnostics?: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     requestHostAction?: (input: {
       actionKey?: string;
       targetId?: string;
@@ -371,12 +395,48 @@ export function sanitizePageContext(value: unknown): AgentUiPageContextSnapshot 
     // target-registry sanitizer before anything target-like reaches the agent.
     commandFamilies: sanitizeTelemetryStringList(record.commandFamilies),
     skillFamilies: sanitizeTelemetryStringList(record.skillFamilies),
+    deployment: sanitizeDeploymentSnapshot(record.deployment),
+    correlation: sanitizeTurnCorrelationSnapshot(record.correlation),
     at: cleanOptionalString(record.at),
   };
   const clean = Object.fromEntries(Object.entries(context).filter(([, entry]) => entry !== undefined && entry !== "")) as AgentUiPageContextSnapshot;
   return Object.keys(clean).length > 0 ? clean : undefined;
 }
 
+export function sanitizeDeploymentSnapshot(value: unknown): AgentUiDeploymentSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const deployment: AgentUiDeploymentSnapshot = {
+    id: cleanOptionalString(record.id),
+    tag: cleanOptionalString(record.tag),
+    timestamp: cleanOptionalString(record.timestamp),
+  };
+  const clean = Object.fromEntries(Object.entries(deployment).filter(([, entry]) => entry !== undefined && entry !== "")) as AgentUiDeploymentSnapshot;
+  return Object.keys(clean).length > 0 ? clean : undefined;
+}
+
+export function sanitizeTurnCorrelationSnapshot(value: unknown): AgentUiTurnCorrelationSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const sessionId = cleanOptionalString(record.sessionId);
+  const requestId = cleanOptionalString(record.requestId);
+  const status = record.status === "success" || record.status === "error" ? record.status : undefined;
+  const capturedAt = cleanOptionalString(record.capturedAt);
+  if (!sessionId || !requestId || !status || !capturedAt) return undefined;
+  const traceparent = trustedTraceparent(record.traceparent) ?? cleanOptionalString(record.traceparent);
+  const traceId = trustedTraceId(record.traceId) ?? traceIdFromTraceparent(traceparent) ?? cleanOptionalString(record.traceId);
+  return {
+    sessionId,
+    messageId: cleanOptionalString(record.messageId),
+    requestId,
+    traceId,
+    traceparent,
+    agentUiRunId: cleanOptionalString(record.agentUiRunId),
+    status,
+    capturedAt,
+    deployment: sanitizeDeploymentSnapshot(record.deployment),
+  };
+}
 
 function sanitizeWorkflowSnapshot(value: unknown): AgentUiWorkflowSnapshot | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;

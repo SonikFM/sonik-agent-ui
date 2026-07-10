@@ -12,6 +12,7 @@ import { pipeJsonRender, pipeUiMessageStreamSafety, type Spec } from "@json-rend
 import { pipeArtifactToolOutputsToSpecParts } from "$lib/artifacts/artifact-stream";
 import { logArtifactTelemetry } from "$lib/artifacts/artifact-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
+import { createDeploymentMetadataHeaders, resolveDeploymentMetadata } from "$lib/server/deployment-metadata";
 import { createTelemetryCorrelation, sanitizePageContext } from "@sonik-agent-ui/agent-observability";
 import { classifyRunErrorCode, sanitizeAgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
 import {
@@ -327,6 +328,42 @@ function createCorrelationHeaders(input: { requestId: string; traceId: string; t
   };
 }
 
+class MalformedJsonRequestError extends Error {
+  constructor(cause: unknown) {
+    super("Malformed JSON request");
+    this.name = "MalformedJsonRequestError";
+    this.cause = cause;
+  }
+}
+
+function resolveGenerateFailureStatus(error: unknown): number {
+  if (error instanceof MalformedJsonRequestError) return 400;
+  if ((typeof error === "object" || typeof error === "function") && error !== null && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    if (status === 400 || status === 413) return status;
+  }
+  return 500;
+}
+
+function createGenerateFailureResponse(input: {
+  error: unknown;
+  responseHeaders: Record<string, string>;
+  runRecorder?: RunRecorder | null;
+}): Response {
+  const status = resolveGenerateFailureStatus(input.error);
+  return new Response(
+    JSON.stringify({ error: status === 500 ? "Generation failed" : "Invalid request" }),
+    {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        ...input.responseHeaders,
+        ...(input.runRecorder ? { [AGENT_UI_RUN_ID_HEADER]: input.runRecorder.runId } : {}),
+      },
+    },
+  );
+}
+
 export const POST: RequestHandler = async (event) => {
   const { request } = event;
   const correlation = createTelemetryCorrelation({
@@ -335,6 +372,14 @@ export const POST: RequestHandler = async (event) => {
     traceparent: request.headers.get("traceparent"),
   });
   const correlationHeaders = createCorrelationHeaders(correlation);
+  const responseHeaders = {
+    ...correlationHeaders,
+    ...createDeploymentMetadataHeaders(resolveDeploymentMetadata(event.platform)),
+  };
+  const requestId = correlation.requestId;
+  const traceId = correlation.traceId;
+  const traceparent = correlation.traceparent;
+  const startedAt = Date.now();
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0] ?? "anonymous";
 
@@ -354,19 +399,19 @@ export const POST: RequestHandler = async (event) => {
       }),
       {
         status: 429,
-        headers: { "Content-Type": "application/json", ...correlationHeaders },
+        headers: { "Content-Type": "application/json", ...responseHeaders },
       },
     );
   }
 
-  const body = await request.json();
+  try {
+  const body = await request.json().catch((error) => {
+    throw new MalformedJsonRequestError(error);
+  });
   const uiMessages: UIMessage[] = body.messages;
+  const workspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
   const requestPersistence = getRequestWorkspacePersistence(event);
   const activeDocument = await resolveActiveDocumentForRequest(event, body?.workspace?.activeDocument);
-  const requestId = correlation.requestId;
-  const traceId = correlation.traceId;
-  const traceparent = correlation.traceparent;
-  const workspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
   const telemetrySessionId = activeDocument?.session_id ?? workspaceSessionId;
   const smokeRunId = readDevSmokeRunId(request);
   // Explicit composer context selection wins over implicit host/page context.
@@ -410,14 +455,13 @@ export const POST: RequestHandler = async (event) => {
   // telemetry analytics — never passed to createAgent, prompt composition, or
   // tool inputs. Absent/dropped hints reproduce today's behavior.
   const analyticsHints = sanitizeAgentAnalyticsHints(body?.analyticsHints ?? body?.workspace?.analyticsHints);
-  const startedAt = Date.now();
 
   if (!uiMessages || !Array.isArray(uiMessages) || uiMessages.length === 0) {
     return new Response(
       JSON.stringify({ error: "messages array is required" }),
       {
         status: 400,
-        headers: { "Content-Type": "application/json", ...correlationHeaders },
+        headers: { "Content-Type": "application/json", ...responseHeaders },
       },
     );
   }
@@ -627,7 +671,7 @@ export const POST: RequestHandler = async (event) => {
     const response = createUIMessageStreamResponse({
       stream: runRecorder ? teeRunEvents(titledSmokeStream, runRecorder) : titledSmokeStream,
     });
-    for (const [key, value] of Object.entries(correlationHeaders)) response.headers.set(key, value);
+    for (const [key, value] of Object.entries(responseHeaders)) response.headers.set(key, value);
     if (runRecorder) response.headers.set(AGENT_UI_RUN_ID_HEADER, runRecorder.runId);
     return response;
   }
@@ -733,12 +777,12 @@ export const POST: RequestHandler = async (event) => {
           ok: false,
           error: message,
         }).catch(() => undefined);
-        return message;
+        return "Generation failed";
       },
     });
 
     const response = createUIMessageStreamResponse({ stream });
-    for (const [key, value] of Object.entries(correlationHeaders)) response.headers.set(key, value);
+    for (const [key, value] of Object.entries(responseHeaders)) response.headers.set(key, value);
     if (runRecorder) response.headers.set(AGENT_UI_RUN_ID_HEADER, runRecorder.runId);
     return response;
   } catch (error) {
@@ -757,7 +801,21 @@ export const POST: RequestHandler = async (event) => {
       ok: false,
       error: message,
     }).catch(() => undefined);
-    throw error;
+    return createGenerateFailureResponse({ error, responseHeaders, runRecorder });
+  }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    void writeAgentTelemetry({
+      source: "server",
+      event: "api.generate.error",
+      requestId,
+      traceId,
+      traceparent,
+      durationMs: Date.now() - startedAt,
+      ok: false,
+      error: message,
+    }).catch(() => undefined);
+    return createGenerateFailureResponse({ error, responseHeaders });
   }
 };
 
