@@ -50,11 +50,11 @@ jobs:
       - name: Production build
         run: pnpm build
 
-      - name: Run persistence and reattach smoke
-        run: pnpm smoke:agent-ui:run-reattach
-
       - name: Embedded Agent UI smoke
         run: pnpm smoke:agent-ui:embed
+
+      - name: Run persistence and reattach smoke
+        run: pnpm smoke:agent-ui:run-reattach
 
       - name: Upload smoke evidence on failure
         if: failure()
