@@ -58,6 +58,10 @@ assert.equal(rootSource.includes('data-has-rail={railVisible}'), true, "Workspac
 assert.equal(rootSource.includes("layoutMode?: WorkspaceLayoutMode"), true, "WorkspaceRoot should expose an embeddable layout mode seam");
 assert.equal(rootSource.includes("railMode?: WorkspaceRailMode"), true, "WorkspaceRoot should expose an embeddable rail mode seam");
 assert.equal(rootSource.includes("--workspace-pane-split"), true, "WorkspaceRoot should expose a CSS-variable seam for future pane resizing");
+assert.equal(rootSource.includes('grid-template-areas: "artifact" "chat"'), true, "canvas artifact-open layout should place the artifact above compact chat");
+assert.equal(rootSource.includes('grid-template-rows: minmax(0, 1fr) minmax(7rem, 12rem)'), true, "canvas artifact-open layout should reserve only a compact row for chat");
+assert.equal(rootSource.includes('.workspace-pane--chat\n    :global([role="log"] > header)'), true, "embedded hidden-rail canvas should narrowly hide the conversation header");
+assert.equal(rootSource.includes('.workspace-root[data-layout-mode="canvas"] .workspace-grid--artifact-open {\n      grid-template-columns: minmax(0, 1fr);\n    }'), true, "desktop canvas should remain a single-column layout");
 assert.equal(agentObservabilitySource.includes("createSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the fresh-session semantic action");
 assert.equal(agentObservabilitySource.includes("sessionId?: string | null"), true, "agent page-control submit type should accept an expected session id");
 assert.equal(agentObservabilitySource.includes("expectedSessionId?: string | null"), true, "semantic action results should report the expected session id selected by createSession");
@@ -358,8 +362,12 @@ assert.equal(pageSource.includes("getInitialEmbedIntent().mode"), true, "standal
 assert.equal(pageSource.includes("normalizeAgentEmbedIntent"), true, "standalone app should reuse shared embed-intent normalization for client-side URL synchronization");
 assert.equal(pageSource.includes('embedMode === "chat"'), true, "chat embed mode should be able to suppress the artifact pane");
 assert.equal(pageSource.includes('embedMode === "canvas"'), true, "canvas embed mode should force the workspace canvas open");
+assert.equal(pageSource.includes('isEmbeddedHostContextExpected() && (nextContext.mode === "chat" || nextContext.mode === "canvas" || nextContext.mode === "workspace")'), true, "embedded host page-context updates should reactively synchronize the active embed mode");
+assert.equal(pageSource.includes('isEmbeddedHostContextExpected() && embedMode === "chat"\n      ? false'), true, "embedded host chat mode should suppress the local artifact pane because the host owns canvas opening");
+assert.equal(pageSource.includes('isEmbeddedHostContextExpected() && embedMode === "canvas" ? "hidden" : embedRailMode'), true, "only embedded host canvas mode should force the workspace rail hidden");
 assert.equal(pageSource.includes('railMode={workspaceRailMode}'), true, "standalone app should pass rail mode through to WorkspaceRoot");
 assert.equal(pageSource.includes("collapsed={workspaceRailMode === \"collapsed\"}"), true, "standalone app should pass collapsed rail mode into SessionRail");
+assert.equal(pageSource.includes('notifyHostCanvasOpen(promotedSnapshot.artifact.id, "A completed artifact was promoted to the canvas.")'), true, "completed promoted JSON artifacts should ask the host to open canvas using the promoted artifact id");
 assert.equal(generateRoute.includes("activeEntity.label"), true, "generate route should parse and bound active entity display labels");
 assert.equal(observabilityPackageSource.includes("activeEntity?: { type: string; id: string; label?: string }"), true, "observability page context should preserve active entity display labels");
 assert.equal(fakeBookingHostSource.includes("fake booking host") || fakeBookingHostSource.includes("Fake Booking Host"), true, "static fake host should document its booking host purpose");
@@ -392,7 +400,7 @@ assert.equal(agentEmbedSource.includes("onRequestPageContext"), true, "host embe
 assert.equal(fakeBookingHostSource.includes("launcher: \"#agent-fab-main\""), true, "static fake host should expose the visible FAB launcher through the SDK element map");
 assert.equal(fakeBookingHostSource.includes("openChat: \"#open-chat\""), true, "static fake host should expose a compact chat launcher through the SDK element map");
 assert.equal(fakeBookingHostSource.includes("openCanvas: \"#open-canvas\""), true, "static fake host should expose a canvas workspace launcher through the SDK element map");
-assert.equal(fakeBookingHostSource.includes("agentUrl: \"/\""), true, "static fake host should pass the agent URL through the SDK mount helper");
+assert.equal(fakeBookingHostSource.includes("agentUrl: smokeScenario ?"), true, "static fake host should preserve smoke scenario query params while passing the agent URL through the SDK mount helper");
 assert.equal(packageSource.includes("@sonik-agent-ui/agent-embed build"), true, "root build/test scripts should build the agent embed package before the app");
 assert.equal(agentEmbedDocsSource.includes("Native Svelte API sketch"), true, "embedding docs should include a native Svelte API sketch using the same semantics");
 assert.equal(agentEmbedDocsSource.includes("Booking context adapter example"), true, "embedding docs should include a booking context adapter example");

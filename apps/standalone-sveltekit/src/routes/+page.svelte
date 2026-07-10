@@ -347,15 +347,16 @@
   const documentFramePreferredView = $derived(documentPreferredView);
   const documentFrameSubtitle = $derived(`${documentFrameLanguage} · v${documentSeed?.version_count ?? 1}`);
   const workspaceLayoutMode = $derived<WorkspaceLayoutMode>(embedMode);
-  const workspaceRailMode = $derived<WorkspaceRailMode>(embedRailMode);
-  // Slice B (R1): embedded chat mode used to force this false unconditionally,
-  // which left a created artifact invisible until the host separately called
-  // canvas.open. It now follows the same "an artifact/document now exists"
-  // rule as workspace mode -- the surface never renders nothing for a real
-  // artifact. `notifyHostCanvasOpen` (below) separately best-effort-asks the
-  // embedding host to make room around this iframe.
+  const workspaceRailMode = $derived<WorkspaceRailMode>(
+    isEmbeddedHostContextExpected() && embedMode === "canvas" ? "hidden" : embedRailMode,
+  );
+  // Embedded chat suppresses the local artifact pane because the embedding
+  // host owns canvas opening. Standalone/workspace still follows local
+  // artifact state, while embedded canvas remains explicitly open.
   const artifactOpen = $derived(
-    embedMode === "canvas"
+    isEmbeddedHostContextExpected() && embedMode === "chat"
+      ? false
+      : embedMode === "canvas"
       ? true
       : Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen),
   );
@@ -628,6 +629,7 @@
       persistJsonRenderArtifactSnapshot(promotedSnapshot, "agent");
       activeArtifactStatus = createArtifactStatus(promotedSnapshot.artifact, event);
       pendingArtifactIntent = null;
+      notifyHostCanvasOpen(promotedSnapshot.artifact.id, "A completed artifact was promoted to the canvas.");
     }
   });
 
@@ -1444,6 +1446,9 @@
       logArtifactTelemetry({ source: "client", event: "host.page_context.message_ignored", reason: "empty_context", ok: false });
       return;
     }
+    if (isEmbeddedHostContextExpected() && (nextContext.mode === "chat" || nextContext.mode === "canvas" || nextContext.mode === "workspace")) {
+      embedMode = nextContext.mode;
+    }
     hostPageContext = nextContext;
     lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext });
     applyEmbeddedThemeFromHost(nextContext.theme ?? embeddedUrlTheme);
@@ -1817,13 +1822,10 @@
     return semanticHostActionResult(result, result.ok, result.message ?? hostActionStatusMessage(result), result.disabledReason);
   }
 
-  // Slice B (R1): best-effort request that the embedding host make room for
-  // the canvas (agent-embed's `canvas.open` host action) whenever a renderable
-  // artifact/document mounts in embedded chat mode. Fire-and-forget -- our own
-  // canvas pane already opens locally via `artifactOpen` regardless, so this
-  // never blocks or gates local rendering. If the host declines, doesn't
-  // respond, or there is no real embedding host, `hostCanvasOpenDeclined`
-  // flips true so the inline "Open canvas" fallback pill shows in chat.
+  // Best-effort request that the embedding host open its canvas whenever a
+  // renderable artifact/document mounts in embedded chat mode. Embedded chat
+  // suppresses the local artifact pane, so the host owns canvas opening. If it
+  // declines or does not answer, expose the inline fallback action in chat.
   function notifyHostCanvasOpen(id: string, intentLabel: string): void {
     if (!browser || embedMode !== "chat") return;
     if (window.parent === window) return;

@@ -3,6 +3,7 @@ import {
   mountSonikAgentUI,
   requestAgentHostAction,
   sanitizeAgentHostPageContext,
+  SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
 } from "../../packages/agent-embed/src/index.ts";
 import {
   createDefaultHostUiTargetRegistry,
@@ -202,7 +203,15 @@ mountedDefault.window.dispatchMessage({
 });
 await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 assert.equal(mountedDefault.controller.getMode(), "canvas", "default host SDK action handler should execute safe canvas.open requests");
-assert.equal(mountedDefault.iframe.contentWindow.messages.at(-1).message.ok, true, "default host SDK handler should return a typed executed receipt for canvas.open");
+const canvasResultMessageIndex = mountedDefault.iframe.contentWindow.messages.findIndex(
+  ({ message }) => message?.requestId === "req-host-canvas",
+);
+assert.notEqual(canvasResultMessageIndex, -1, "default host SDK handler should return a typed executed receipt for canvas.open");
+assert.equal(mountedDefault.iframe.contentWindow.messages[canvasResultMessageIndex].message.ok, true, "default host SDK handler should return a typed executed receipt for canvas.open");
+const canvasContextMessage = mountedDefault.iframe.contentWindow.messages
+  .slice(canvasResultMessageIndex + 1)
+  .find(({ message }) => message?.type === SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE);
+assert.equal(canvasContextMessage?.message.payload.mode, "canvas", "default host SDK handler should donate canvas mode in page context after canvas.open executes");
 
 mountedDefault.window.dispatchMessage({
   origin: "https://agent.sonik.local",

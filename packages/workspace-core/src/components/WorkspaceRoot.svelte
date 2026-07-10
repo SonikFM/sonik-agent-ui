@@ -90,10 +90,15 @@
   .workspace-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "chat";
     gap: 0.5rem;
     height: 100%;
     min-height: 0;
     padding: 0.5rem;
+  }
+
+  .workspace-grid--artifact-open {
+    grid-template-areas: "chat" "artifact";
   }
 
   .workspace-pane {
@@ -104,11 +109,24 @@
   }
 
   .workspace-pane--chat {
+    grid-area: chat;
     border-radius: 0.75rem;
   }
 
   .workspace-pane--artifact {
+    grid-area: artifact;
     border-radius: 0.75rem;
+  }
+
+  .workspace-root[data-layout-mode="canvas"] .workspace-grid--artifact-open {
+    grid-template-areas: "artifact" "chat";
+    grid-template-rows: minmax(0, 1fr) minmax(7rem, 12rem);
+  }
+
+  .workspace-root[data-layout-mode="canvas"][data-rail-mode="hidden"]
+    .workspace-pane--chat
+    :global([role="log"] > header) {
+    display: none;
   }
 
   @media (max-width: 820px) {
@@ -126,6 +144,7 @@
 
   @media (min-width: 1024px) {
     .workspace-grid--artifact-open {
+      grid-template-areas: "chat artifact";
       grid-template-columns: var(
         --workspace-pane-split,
         minmax(360px, 0.92fr) minmax(420px, 1.08fr)
@@ -133,10 +152,7 @@
     }
 
     .workspace-root[data-layout-mode="canvas"] .workspace-grid--artifact-open {
-      grid-template-columns: var(
-        --workspace-pane-split,
-        minmax(320px, 0.52fr) minmax(520px, 1.48fr)
-      );
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>
