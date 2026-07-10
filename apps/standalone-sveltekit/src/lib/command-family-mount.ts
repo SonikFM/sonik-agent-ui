@@ -63,7 +63,10 @@ export interface CommandFamilyMountDecision {
  * explicit booking.context.create (approve/commit) turn, or the workflow/artifact clearing (which
  * naturally drops the preview-only skill from skillIds entirely).
  */
-export function resolveCommandFamilyMountDecision(context: { skillIds?: string[]; toolsetContinuitySkillIds?: string[] }): CommandFamilyMountDecision {
+export function resolveCommandFamilyMountDecision(context: { skillIds?: string[]; toolsetContinuitySkillIds?: string[]; suppressCommandCatalog?: boolean }): CommandFamilyMountDecision {
+  if (context.suppressCommandCatalog) {
+    return { mounted: false, wouldMountWithoutStability: false };
+  }
   const previewOnlyRuntimeActive = hasPreviewOnlyRuntimeSkill(context.skillIds);
   const bookingContextCreateActive = hasBookingContextCreateSkill(context.skillIds);
   const previewSuppressesCommands = previewOnlyRuntimeActive || bookingContextCreateActive;

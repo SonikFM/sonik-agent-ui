@@ -164,6 +164,18 @@ const composedForReservation = composeAgentSystemPrompt({
 assert.ok(composedForReservation.moduleIds.includes("booking-commands"), "reservation execution turns must keep booking command module");
 assert.ok(composedForReservation.prompt.includes("booking.get.availability -> previewBookingReservationCommand"), "reservation prompt must retain command workflow guidance");
 
+const composedWithoutBookingRuntime = composeAgentSystemPrompt({
+  context: { hasBookingRuntime: false },
+});
+assert.ok(
+  !composedWithoutBookingRuntime.moduleIds.includes("booking-commands"),
+  "turns with hasBookingRuntime:false must not seed booking command module",
+);
+assert.ok(
+  !composedWithoutBookingRuntime.prompt.includes("booking.get.availability -> previewBookingReservationCommand"),
+  "turns with hasBookingRuntime:false must not include reservation command workflow guidance",
+);
+
 // (d) Patch-first refinement contract (Phase 2.1): a currentIntakeArtifactSpec composes a
 // REFINEMENT CONTRACT section telling the model the artifact already exists and to patch it
 // via submitIntakeAnswer -- never regenerate it via createBookingIntakeArtifact. Absent, no

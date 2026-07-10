@@ -6,10 +6,10 @@
 // record which modules reached the model. Per-turn skill bodies (resolved from
 // the runtime skill registry) append after the core for that run only.
 //
-// Every module seeds unconditionally by default (`seedWhen` returns true) so the
-// monolith's current unconditional behavior is preserved; narrowing a module's
-// seeding condition (e.g. only seed booking conventions when booking runtime is
-// available) is a deliberate one-line follow-up. See the per-module notes below.
+// Most modules seed unconditionally by default (`seedWhen` returns true) so the
+// monolith's current unconditional behavior is preserved. The booking commands
+// module intentionally remains default-on and seeds unless the host explicitly
+// reports that no booking runtime is available. See the per-module notes below.
 //
 // This file imports only the render catalog and the artifact tool guidance
 // (both pure), never the AI SDK or the tool graph, so the prompt-assembly test
@@ -24,7 +24,8 @@ import { buildUserPrompt, isNonEmptySpec, type Spec } from "@json-render/core";
  *  because all default `seedWhen` predicates return true. */
 export interface AgentPromptSeedContext {
   /** True when a booking runtime/command surface is available for this turn.
-   *  Reserved for a future narrowing of the booking module; unused today. */
+   *  When explicitly false, booking command conventions are not seeded; omitted
+   *  preserves the historical default-on prompt behavior. */
   hasBookingRuntime?: boolean;
   /** True when the document tools are mounted. Reserved; unused today. */
   hasDocumentTools?: boolean;
@@ -145,12 +146,10 @@ const PAGE_CONTEXT_MODULE: AgentPromptModule = {
 const BOOKING_COMMANDS_MODULE: AgentPromptModule = {
   id: "booking-commands",
   title: "BOOKING COMMAND CONVENTIONS",
-  // Today: unconditional. In the current monolith these booking/command-catalog
-  // conventions reach the model on every turn regardless of whether booking
-  // runtime is available, so seeding stays unconditional to preserve exact
-  // behavior. Narrowing to "seed when booking runtime/commands are available"
-  // is a deliberate follow-up (a behavior change, out of this phase's scope).
-  seedWhen: ALWAYS_ON,
+  // Default-on to preserve the old monolith and empty-context behavior, but do
+  // not seed command execution conventions when the host explicitly reports that
+  // no booking runtime/command surface is available for this turn.
+  seedWhen: (context) => context.hasBookingRuntime !== false,
   body: `- The command catalog is CLI-first and context-efficient: search, learn, then execute. For any booking or ORPC-backed command, call learnCommand before executeCommand unless you already have the exact schema from this same turn. Never call executeCommand with {} unless learnCommand says the command has no required fields.
 - For generated booking/OpenAPI commands, prefer executeCommand with inputJson (a JSON string of the direct command input) instead of a loose input object. This avoids record-schema stripping and keeps the schema-aware preflight validator authoritative.
 - If executeCommand returns policy.reasons including command_input_preflight_failed, missing_required_fields, unsupported_input_fields, or summary.kind == "command_input_preflight_failed", do not repeat the same bad call. Immediately call learnCommand for that command, copy the requiredFields/exampleInput shape, remove unsupported fields, and retry once with corrected direct command input via inputJson.

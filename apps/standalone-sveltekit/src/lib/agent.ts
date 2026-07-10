@@ -39,7 +39,7 @@ import {
 export { hasBookingContextIntakeSkill, resolveCommandFamilyMountDecision } from "./command-family-mount";
 export type { CommandFamilyMountDecision } from "./command-family-mount";
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent };
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean };
 
 /**
  * Composes the per-turn system prompt for a run: the always-on core plus the
@@ -52,7 +52,7 @@ export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPag
 export function resolveAgentPromptComposition(context: AgentRuntimeContext = {}): ComposedAgentPrompt {
   return composeAgentSystemPrompt({
     context: {
-      hasBookingRuntime: Boolean(context.bookingRuntimeAuth || context.bookingServiceBaseUrl),
+      hasBookingRuntime: !context.productTourIntent && Boolean(context.bookingRuntimeAuth || context.bookingServiceBaseUrl),
       hasDocumentTools: true,
       hasPageContext: Boolean(context.pageContext),
       previewOnlySkillActive: hasPreviewOnlyRuntimeSkill(context.skillIds),
@@ -83,7 +83,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
   const toolManifestTools = createToolManifestTools();
   const bookingContextIntakeActive = hasBookingContextIntakeSkill(context.skillIds);
   const bookingContextCreateActive = hasBookingContextCreateSkill(context.skillIds);
-  const commandFamilyDecision = resolveCommandFamilyMountDecision(context);
+  const commandFamilyDecision = resolveCommandFamilyMountDecision({ ...context, suppressCommandCatalog: context.productTourIntent });
   const mountJsonArtifactTool = shouldMountJsonArtifactTool(context.workspaceDocumentIntent ?? "none");
   const commandCatalogTools = commandFamilyDecision.mounted
     ? createCommandCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession, approvedCommandIds: context.approvedCommandIds, bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, bookingRuntimeFetcher: context.bookingRuntimeFetcher, toolPermissionModes: context.agentSettings?.toolPermissionModes })
