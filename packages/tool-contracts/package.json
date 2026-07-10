@@ -30,6 +30,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@sonik-agent-ui/agent-observability": "workspace:*",
     "zod": "4.3.6"
   },
   "devDependencies": {

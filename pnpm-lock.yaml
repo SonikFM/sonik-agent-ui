@@ -376,6 +376,9 @@ importers:
 
   packages/tool-contracts:
     dependencies:
+      '@sonik-agent-ui/agent-observability':
+        specifier: workspace:*
+        version: link:../agent-observability
       zod:
         specifier: 4.3.6
         version: 4.3.6
