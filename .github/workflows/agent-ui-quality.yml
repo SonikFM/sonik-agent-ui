@@ -59,10 +59,12 @@ jobs:
             id: embed
             script: smoke:agent-ui:embed
             browser: true
+            persistence: auto
           - name: Run persistence and reattach smoke
             id: reattach
             script: smoke:agent-ui:run-reattach
             browser: false
+            persistence: memory
 
     steps:
       - name: Checkout
@@ -89,6 +91,8 @@ jobs:
 
       - name: Run smoke
         run: pnpm ${{ matrix.script }}
+        env:
+          SONIK_AGENT_UI_PERSISTENCE_MODE: ${{ matrix.persistence }}
 
       - name: Upload smoke evidence on failure
         if: failure()
