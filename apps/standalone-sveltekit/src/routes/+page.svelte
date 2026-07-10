@@ -77,6 +77,11 @@
     createQuestionAnswerStateChanges,
   } from "$lib/agent-workflows/page-control-workflow";
   import {
+    createApprovalAffordanceFromWorkflowRun,
+    deriveActiveIntakeWorkflowRunState,
+    deriveReservationWorkflowRunState,
+  } from "$lib/agent-workflows/approval-affordance";
+  import {
     decideTrustedIntakeControllerAction,
     isTrustedIntakeControllerAction,
     type TrustedIntakeControllerAction,
@@ -3834,39 +3839,31 @@
   function createReservationApprovalAffordance(): AgentApprovalAffordance | null {
     const preview = findLatestReservationApprovalPreview();
     if (!preview) return null;
-    return {
+    return createApprovalAffordanceFromWorkflowRun(deriveReservationWorkflowRunState(preview), {
       title: "Book this reservation?",
       description: reservationPreviewSummary(preview),
-      commandId: preview.commandId,
       artifactTitle: null,
-      status: "approval_required",
-      disabled: false,
-      disabledReason: null,
       previewLabel: "Review reservation",
       approveLabel: "Approve and book",
       cancelLabel: "Cancel",
       onRequestPreview: () => logArtifactTelemetry({ source: "client", event: "reservation.approval_preview.viewed", sessionId: activeSessionId ?? undefined, toolCallId: preview.commandId, ok: true }),
       onApprove: () => void runReservationCommitEndpoint(preview),
       onCancel: () => appendReservationCommitReceiptMessage({ ok: false, kind: "reservation-commit", error: "cancelled", message: "Reservation approval was cancelled." }),
-    };
+    });
   }
 
   function createActiveIntakeApprovalAffordance(): AgentApprovalAffordance | null {
     if (!isActiveBookingIntakeArtifact()) return null;
     const readiness = getActiveIntakeApprovalReadiness();
     if (!readiness.visible) return null;
-    return {
+    return createApprovalAffordanceFromWorkflowRun(deriveActiveIntakeWorkflowRunState(readiness), {
       title: "Create this booking setup?",
       description: "Preview the booking setup that will be sent to the trusted host. Chat approval is not enough; the host still gates the write.",
-      commandId: "booking.create.context",
       artifactTitle: activeArtifact?.title ?? null,
-      status: readiness.ready ? "approval_required" : "blocked",
-      disabled: !activeArtifact || !readiness.ready,
-      disabledReason: readiness.reason,
       onRequestPreview: () => void handleTrustedIntakeControllerAction("requestApproval", { source: "chat_approval_card", commandId: "booking.create.context" }),
       onApprove: () => void handleTrustedIntakeControllerAction("approveAndRun", { source: "chat_approval_card", commandId: "booking.create.context" }),
       onCancel: () => void handleTrustedIntakeControllerAction("cancelApproval", { source: "chat_approval_card", commandId: "booking.create.context" }),
-    };
+    });
   }
 </script>
 
