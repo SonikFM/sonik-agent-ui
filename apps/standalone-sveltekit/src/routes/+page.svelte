@@ -10,7 +10,7 @@
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
   import { JsonRenderDevtools } from "@json-render/devtools-svelte";
-  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
+  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentSuggestion, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, createDefaultHostUiTargetRegistry, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
@@ -250,12 +250,9 @@
   // Composer context selection for the next turn (chips + authoritative dismissals).
   let runContextSelection = $state<AgentRunContextSelection>(createEmptyAgentRunContextSelection());
   // Analytics-only run hints, computed client-side at send time. `analyticsTurnIndex`
-  // is 0-based per workspace session (reset on clear/switch); `pendingAnalyticsEntryFrom`
-  // records how the next turn started (default composer; workflow launcher / Continue
-  // override it); `pendingAnalyticsHints` is the object read by the transport for the
-  // in-flight send. Never influences behavior — analytics dimension only.
+  // is 0-based per workspace session (reset on clear/switch); `pendingAnalyticsHints`
+  // is the object read by the transport for the in-flight send.
   let analyticsTurnIndex = 0;
-  let pendingAnalyticsEntryFrom: AgentAnalyticsEntryFrom = "composer";
   let pendingAnalyticsHints: AgentAnalyticsHints | null = null;
   // Per-turn provenance: user message id -> the context items sent with that turn.
   let turnContextByMessageId = new SvelteMap<string, AgentContextItem[]>();
@@ -2500,7 +2497,6 @@
     rehydrateRunContextState(detail);
     // Entering a session restarts its per-session analytics turn sequence.
     analyticsTurnIndex = 0;
-    pendingAnalyticsEntryFrom = "composer";
     pendingAnalyticsHints = null;
     activeDocument = detail.activeDocument;
     documentSeed = detail.activeDocument;
@@ -2979,9 +2975,9 @@
     analyticsTurnIndex = turnIndex + 1;
   }
 
-  function handleSubmit(message: string) {
+  function handleSubmit(message: string): boolean {
     const trimmed = message.trim();
-    if (getSubmitDisabledReason(trimmed)) return;
+    if (getSubmitDisabledReason(trimmed)) return false;
 
     if (!hasExplicitWorkspaceDocumentIntent(trimmed) && (hasExplicitArtifactIntent(trimmed) || (activeArtifact && hasActiveArtifactUpdateIntent(trimmed)))) {
       pendingArtifactIntent = trimmed;
@@ -2990,10 +2986,7 @@
     logSessionTelemetry("chat.submit.start", { sessionId: activeSessionId, reason: `${trimmed.length} chars` });
     // A fresh user turn supersedes any pending run recovery.
     resumableRun = null;
-    // Entry point defaults to composer; a workflow launcher chip sets it just
-    // before this call and we consume + reset it here.
-    stampAnalyticsHints(pendingAnalyticsEntryFrom);
-    pendingAnalyticsEntryFrom = "composer";
+    stampAnalyticsHints("composer");
     maybeNameNewChat(trimmed);
     const turnContext = ($state.snapshot(runContextSelection).items ?? []) as AgentContextItem[];
     conversation.sendMessage({ text: trimmed });
@@ -3003,20 +2996,62 @@
     if (turnContext.length > 0 && sentUserMessage?.role === "user") {
       turnContextByMessageId.set(sentUserMessage.id, turnContext);
     }
+    return true;
   }
 
-  function sendUserTurnWithEntryFrom(message: string, entryFrom: AgentAnalyticsEntryFrom): void {
+
+  function workflowLauncherTelemetryBase(suggestion: AgentSuggestion) {
+    return {
+      toolCallId: "templateId" in suggestion && typeof suggestion.templateId === "string" ? suggestion.templateId : undefined,
+      runtimeStatus: suggestion.familyId,
+      mode: suggestion.readiness,
+      title: "version" in suggestion && typeof suggestion.version === "string" ? suggestion.version : undefined,
+    };
+  }
+
+  function logWorkflowLauncherSuppressed(suggestion: AgentSuggestion, reason: string): void {
+    logArtifactTelemetry({
+      source: "client",
+      event: "workflow_launcher.suppressed",
+      sessionId: activeSessionId ?? undefined,
+      reason,
+      ok: false,
+      ...workflowLauncherTelemetryBase(suggestion),
+    });
+  }
+
+  function handleWorkflowSuggestionSuppressed(suggestion: AgentSuggestion, reason: "duplicate" | "busy"): void {
+    logWorkflowLauncherSuppressed(suggestion, reason);
+  }
+
+  function handleWorkflowSuggestionLaunch(suggestion: AgentSuggestion): boolean {
+    if (isStreaming || getSubmitDisabledReason(suggestion.prompt.trim())) {
+      logWorkflowLauncherSuppressed(suggestion, isStreaming ? "busy" : "blocked");
+      return false;
+    }
+    logArtifactTelemetry({
+      source: "client",
+      event: "workflow_launcher.accepted",
+      sessionId: activeSessionId ?? undefined,
+      reason: "templateId" in suggestion && typeof suggestion.templateId === "string" ? suggestion.templateId : (suggestion.familyId ?? suggestion.label),
+      ok: true,
+      ...workflowLauncherTelemetryBase(suggestion),
+    });
+    return sendUserTurnWithEntryFrom(suggestion.prompt, "workflow_launcher");
+  }
+
+  function sendUserTurnWithEntryFrom(message: string, entryFrom: AgentAnalyticsEntryFrom): boolean {
     const trimmed = message.trim();
-    if (!trimmed || isStreaming || getSubmitDisabledReason(trimmed)) return;
+    if (!trimmed || isStreaming || getSubmitDisabledReason(trimmed)) return false;
     resumableRun = null;
     stampAnalyticsHints(entryFrom);
-    pendingAnalyticsEntryFrom = "composer";
     const turnContext = ($state.snapshot(runContextSelection).items ?? []) as AgentContextItem[];
     conversation.sendMessage({ text: trimmed });
     const sentUserMessage = conversation.messages.at(-1);
     if (turnContext.length > 0 && sentUserMessage?.role === "user") {
       turnContextByMessageId.set(sentUserMessage.id, turnContext);
     }
+    return true;
   }
 
   async function handleJsonRenderAction(actionName: string, params?: Record<string, unknown>): Promise<void> {
@@ -3478,7 +3513,6 @@
     turnContextByMessageId.clear();
     // New conversation → restart the per-session analytics turn sequence.
     analyticsTurnIndex = 0;
-    pendingAnalyticsEntryFrom = "composer";
     pendingAnalyticsHints = null;
     lastPersistStatus = "idle";
     input = "";
@@ -3694,7 +3728,8 @@
       activity={agentActivity}
       bind:input
       onSubmit={handleSubmit}
-      onSelectSuggestion={() => { pendingAnalyticsEntryFrom = "workflow_launcher"; }}
+      onSelectSuggestion={handleWorkflowSuggestionLaunch}
+      onSuppressSuggestion={handleWorkflowSuggestionSuppressed}
       onStop={handleStop}
       onClear={handleClear}
       runRecovery={runRecovery}

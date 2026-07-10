@@ -71,4 +71,12 @@ assert.deepEqual(
   "continuity selection must resolve to a mounted family with churn averted",
 );
 
+
+// Product-tour turns suppress the command catalog before normal skill/stability logic.
+assert.deepEqual(
+  resolveCommandFamilyMountDecision({ skillIds: ["booking.reservation.create"], suppressCommandCatalog: true }),
+  { mounted: false, wouldMountWithoutStability: false },
+  "product tour suppression must keep command catalog unmounted even if executable booking skills are present",
+);
+
 console.log("command-family-mount-stability.test.mjs passed");

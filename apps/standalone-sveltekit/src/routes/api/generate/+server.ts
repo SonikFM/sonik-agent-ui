@@ -30,7 +30,8 @@ import { resolveEffectiveContextDocument } from "$lib/server/run-context-documen
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
-import { resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
+import { isProductTourIntent, resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
+import { createCurrentPageContextSummary } from "$lib/page-context-summary";
 import { resolveWorkspaceDocumentIntent } from "$lib/document-intent";
 import { listPersistedQuestionIds } from "$lib/server/intake-artifacts";
 import {
@@ -40,7 +41,8 @@ import {
   createAgentHostSessionEnvelope,
   approvedCommandIdsFromHostSession,
 } from "$lib/server/host-command-runtime";
-import { AGENT_UI_HOST_CONTEXT_HEADER } from "$lib/server/workspace-services";
+import { AGENT_UI_HOST_CONTEXT_HEADER, resolveSignedTrustedOrganizationDisplayFromRequest } from "$lib/server/workspace-services";
+import { sanitizeAgentHostPageContext } from "@sonik-agent-ui/agent-embed";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import {
   couldStartWorkspaceSessionTitleMarker,
@@ -99,6 +101,7 @@ function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: Wo
     visibleActions: routeStringArray(record.visibleActions, "workspace.pageContext.visibleActions"),
     skillFamilies: routeStringArray(record.skillFamilies, "workspace.pageContext.skillFamilies"),
     commandFamilies: routeStringArray(record.commandFamilies, "workspace.pageContext.commandFamilies"),
+    ...resolveHostUiTargetContext(record),
   };
   if (!pageContext.activeDocumentId && defaults.activeDocument?.id) pageContext.activeDocumentId = defaults.activeDocument.id;
   if (!pageContext.artifactType && defaults.activeDocument?.language) pageContext.artifactType = defaults.activeDocument.language;
@@ -133,6 +136,17 @@ function applyRunContextSelectionToPageContext(
   return hasPageContext(next) ? next : undefined;
 }
 
+function resolveHostUiTargetContext(record: Record<string, unknown>): Pick<AgentPageContext, "hostUiTargets" | "hostUiTargetRegistry"> {
+  const sanitized = sanitizeAgentHostPageContext({
+    hostUiTargets: record.hostUiTargets,
+    hostUiTargetRegistry: record.hostUiTargetRegistry,
+  });
+  return {
+    ...(sanitized?.hostUiTargets ? { hostUiTargets: sanitized.hostUiTargets } : {}),
+    ...(sanitized?.hostUiTargetRegistry ? { hostUiTargetRegistry: sanitized.hostUiTargetRegistry } : {}),
+  };
+}
+
 function resolveActiveEntity(value: unknown): AgentPageContext["activeEntity"] | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -161,25 +175,10 @@ function hasPageContext(context: AgentPageContext): boolean {
     context.artifactType ||
     (context.visibleActions && context.visibleActions.length > 0) ||
     (context.skillFamilies && context.skillFamilies.length > 0) ||
-    (context.commandFamilies && context.commandFamilies.length > 0)
+    (context.commandFamilies && context.commandFamilies.length > 0) ||
+    (context.hostUiTargets && context.hostUiTargets.length > 0) ||
+    (context.hostUiTargetRegistry && context.hostUiTargetRegistry.targets.length > 0)
   );
-}
-
-function createCurrentPageContextSummary(context: AgentPageContext | undefined): string {
-  if (!context) return "";
-  const lines = ["CURRENT HOST/PAGE CONTEXT:"];
-  if (context.title) lines.push(`- title: ${context.title}`);
-  if (context.route) lines.push(`- route: ${context.route}`);
-  if (context.surface) lines.push(`- surface: ${context.surface}`);
-  if (context.pageType) lines.push(`- pageType: ${context.pageType}`);
-  if (context.activeEntity) {
-    lines.push(`- activeEntity: ${context.activeEntity.type} ${context.activeEntity.label ?? context.activeEntity.id} (${context.activeEntity.id})`);
-  }
-  if (context.commandFamilies?.length) lines.push(`- commandFamilies: ${context.commandFamilies.join(", ")}`);
-  if (context.skillFamilies?.length) lines.push(`- skillFamilies: ${context.skillFamilies.join(", ")}`);
-  if (context.visibleActions?.length) lines.push(`- visibleActions: ${context.visibleActions.join(", ")}`);
-  lines.push("If the user asks where they are, what page this is, or what context is attached, answer directly from this block. Do not create an artifact or dashboard unless the user explicitly asks for one.");
-  return lines.join("\n");
 }
 
 function createConversationTitleGenerationPrompt(input: { firstUserMessage: string; fallbackTitle: string }): string {
@@ -448,22 +447,25 @@ export const POST: RequestHandler = async (event) => {
     }
   }
   const workspaceDocumentIntent = resolveWorkspaceDocumentIntent(latestUserMessage);
+  const productTourIntent = isProductTourIntent(latestUserMessage);
   const implicitSkillSelection = resolveImplicitWorkflowSkillSelection({ userMessage: latestUserMessage, pageContext, activeArtifactIsRegisteredIntake });
-  const implicitSkillIds = implicitSkillSelection.skillIds;
+  const implicitSkillIds = productTourIntent ? [] : implicitSkillSelection.skillIds;
   const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
-  const skillIds = resolveRequestSkillIds({
-    requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
-    selectedSkillFamilies: selectionResolution.skillFamilies,
-    implicitSkillIds,
-  });
+  const skillIds = productTourIntent
+    ? []
+    : resolveRequestSkillIds({
+        requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
+        selectedSkillFamilies: selectionResolution.skillFamilies,
+        implicitSkillIds,
+      });
   // Slice E toolset stability (2026-07-08): decide + telemetry the booking command-family mount
   // once here so createAgent (below) and this turn's churn telemetry agree on the same decision.
-  const commandFamilyDecision = resolveCommandFamilyMountDecision({ skillIds, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds });
+  const commandFamilyDecision = resolveCommandFamilyMountDecision({ skillIds, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, suppressCommandCatalog: productTourIntent });
   // Patch-first refinement contract (Phase 2.1): when the intake skill is active over an
   // already-active artifact, expose its current spec so the composed prompt can tell the model
   // to refine it via submitIntakeAnswer instead of regenerating it via createBookingIntakeArtifact.
   const currentIntakeArtifactSpec = hasBookingContextIntakeSkill(skillIds) ? activeIntakeArtifactSpec : null;
-  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec });
+  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, productTourIntent });
   const fallbackConversationTitle = firstUserMessage ? deriveWorkspaceSessionTitle(firstUserMessage) : "";
   const titleSession = workspaceSessionId ? await requestPersistence.getSession(workspaceSessionId).catch(() => null) : null;
   const titleGenerationEnabled = Boolean(
@@ -491,19 +493,28 @@ export const POST: RequestHandler = async (event) => {
 
   const modelMessages = await convertToModelMessages(uiMessages);
   const contextSummary = summarizeWorkspaceContext({ activeDocument: effectiveActiveDocument });
-  const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSession: hostSession ?? undefined, hostSessionMode: hostSession ? undefined : "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth });
-  const skillIndexSummary = createRuntimeSkillIndexSummary({
-    ...pageContext,
-    authenticated: hostSession?.authenticated,
-    organizationId: hostSession?.organizationId,
-    scopes: hostSession?.scopes,
-  });
-  const pageContextSummary = createCurrentPageContextSummary(pageContext);
+  const includeStartupIndexes = !productTourIntent;
+  const commandIndexSummary = includeStartupIndexes
+    ? createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSession: hostSession ?? undefined, hostSessionMode: hostSession ? undefined : "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth })
+    : "";
+  const skillIndexSummary = includeStartupIndexes
+    ? createRuntimeSkillIndexSummary({
+        ...pageContext,
+        authenticated: hostSession?.authenticated,
+        organizationId: hostSession?.organizationId,
+        scopes: hostSession?.scopes,
+      })
+    : "";
+  const trustedOrganizationDisplay = resolveSignedTrustedOrganizationDisplayFromRequest(event);
+  const pageContextSummary = createCurrentPageContextSummary({ context: pageContext, trustedOrganizationDisplay, productTourIntent });
   const conversationTitlePrompt = titleGenerationEnabled
     ? createConversationTitleGenerationPrompt({ firstUserMessage, fallbackTitle: fallbackConversationTitle })
     : "";
   const agentSettingsSummary = summarizeAgentRuntimeSettings(agentRuntimeSettings);
-  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, conversationTitlePrompt, `CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
+  const startupIndexContext = includeStartupIndexes
+    ? [`CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`]
+    : [];
+  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;
@@ -516,7 +527,7 @@ export const POST: RequestHandler = async (event) => {
     runId: smokeRunId,
     sessionId: telemetrySessionId,
     messageId: lastMessage?.id,
-    elementCount: commandIndexSummary.split("\n- ").length - 1,
+    elementCount: commandIndexSummary ? commandIndexSummary.split("\n- ").length - 1 : 0,
     surface: pageContext?.surface,
     route: pageContext?.route,
     commandFamilies: pageContext?.commandFamilies,
@@ -566,7 +577,7 @@ export const POST: RequestHandler = async (event) => {
     runId: smokeRunId,
     sessionId: telemetrySessionId,
     messageId: lastMessage?.id,
-    elementCount: skillIndexSummary.split("\n- ").length - 1,
+    elementCount: skillIndexSummary ? skillIndexSummary.split("\n- ").length - 1 : 0,
     surface: pageContext?.surface,
     route: pageContext?.route,
     commandFamilies: pageContext?.commandFamilies,
@@ -621,7 +632,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

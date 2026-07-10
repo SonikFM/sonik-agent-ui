@@ -2,12 +2,27 @@ import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 
 const MAX_IMPLICIT_SKILLS = 4;
 
+const PRODUCT_TOUR_PHRASES = [
+  "product tour",
+  "platform tour",
+  "show me around",
+  "guide me through the platform",
+  "onboarding tour",
+  "tour of the product",
+  "tour of the platform",
+];
+
 function normalize(value: unknown): string {
   return typeof value === "string" ? value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() : "";
 }
 
 function includesAny(text: string, terms: string[]): boolean {
   return terms.some((term) => text.includes(term));
+}
+
+export function isProductTourIntent(value: unknown): boolean {
+  const text = normalize(value);
+  return Boolean(text) && includesAny(text, PRODUCT_TOUR_PHRASES);
 }
 
 function contextText(pageContext?: AgentPageContext): string {
@@ -52,6 +67,7 @@ export function resolveImplicitWorkflowSkillSelection(input: {
 }): ImplicitWorkflowSkillSelection {
   const message = normalize(input.userMessage ?? input.firstUserMessage);
   if (!message) return { skillIds: [], continuitySkillIds: [] };
+  if (isProductTourIntent(message)) return { skillIds: [], continuitySkillIds: [] };
   const context = contextText(input.pageContext);
   const skills: string[] = [];
   const continuitySkills: string[] = [];
@@ -95,6 +111,7 @@ export function resolveImplicitWorkflowSkillSelection(input: {
   const reservationExecutionIntent = includesAny(message, [
     "make a reservation",
     "create a reservation",
+    "creating a reservation",
     "reservation flow",
     "booking reservation",
     "booking.reservation.create",

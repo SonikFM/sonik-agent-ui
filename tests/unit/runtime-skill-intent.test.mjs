@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { resolveImplicitWorkflowSkillIds } from "../../apps/standalone-sveltekit/src/lib/runtime-skill-intent.ts";
+import { isProductTourIntent, resolveImplicitWorkflowSkillIds } from "../../apps/standalone-sveltekit/src/lib/runtime-skill-intent.ts";
 
 const bookingPage = {
   surface: "booking-console",
@@ -118,6 +118,28 @@ assert.deepEqual(
   }),
   ["booking.context.intake"],
   "activeArtifactIsRegisteredIntake:undefined (caller couldn't tell) must preserve prior any-active-artifact behavior",
+);
+
+
+
+assert.equal(isProductTourIntent("Walk me through creating a reservation for Dan at 1pm"), false, "walk-me-through task phrasing must not be broad product-tour intent");
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({ userMessage: "Walk me through creating a reservation for Dan at 1pm", pageContext: bookingPage }),
+  ["booking.reservation.create"],
+  "walk-me-through reservation phrasing must still resolve booking.reservation.create",
+);
+
+assert.equal(isProductTourIntent("Can you give me a product tour?"), true, "product tour phrasing must be explicit tour intent");
+assert.equal(isProductTourIntent("Please guide me through the platform"), true, "guide-through-platform phrasing must be explicit tour intent");
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({ userMessage: "Give me a product tour of this booking page", pageContext: bookingPage }),
+  [],
+  "product tour intent on booking context must not seed booking/reservation workflows",
+);
+assert.deepEqual(
+  resolveImplicitWorkflowSkillIds({ userMessage: "Create a reservation for Dan at 1pm", pageContext: bookingPage }),
+  ["booking.reservation.create"],
+  "ordinary reservation intent must still seed reservation workflow after tour guard",
 );
 
 console.log("runtime-skill-intent tests passed");

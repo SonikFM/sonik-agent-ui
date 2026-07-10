@@ -54,11 +54,11 @@
     suggestions?: AgentSuggestion[];
     toolLabels?: ToolActivityLabelOverrides;
     activity?: AgentActivityStatus | null;
-    onSubmit: (text: string) => void;
-    /** Fires when a workflow launcher suggestion chip is chosen, before the
-     *  prompt is submitted. Lets the host mark the turn's analytics entry point
-     *  (workflow_launcher) distinctly from a plain composer send. */
-    onSelectSuggestion?: (suggestion: AgentSuggestion) => void;
+    onSubmit: (text: string) => boolean | void;
+    /** Launches a workflow suggestion. Return true only when a user turn was started.
+     *  When absent, AgentConversation falls back to submitting suggestion.prompt. */
+    onSelectSuggestion?: (suggestion: AgentSuggestion) => boolean | void;
+    onSuppressSuggestion?: (suggestion: AgentSuggestion, reason: "duplicate" | "busy") => void;
     onStop?: () => void;
     onClear?: () => void;
     /** Recovery affordance for a resumable/failed run, keyed off the run's error code. */
@@ -102,6 +102,7 @@
     activity = null,
     onSubmit,
     onSelectSuggestion,
+    onSuppressSuggestion,
     onStop,
     onClear,
     runRecovery = null,
@@ -122,15 +123,40 @@
 
   const isStreaming = $derived(status === "streaming" || status === "submitted");
   const isEmpty = $derived(messages.length === 0);
+  let suggestionLaunchLock: { sessionId: string | null; messageCount: number } | null = null;
 
-  function submit(text: string): void {
-    if (!text.trim() || isStreaming) return;
-    onSubmit(text.trim());
+  $effect(() => {
+    if (!suggestionLaunchLock) return;
+    if (activeSessionId !== suggestionLaunchLock.sessionId || messages.length > suggestionLaunchLock.messageCount) {
+      suggestionLaunchLock = null;
+    }
+  });
+
+  function submit(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed || isStreaming) return false;
+    return onSubmit(trimmed) !== false;
   }
 
   function clear(): void {
     input = "";
     onClear?.();
+  }
+
+  function launchSuggestion(suggestion: AgentSuggestion): void {
+    if (suggestionLaunchLock) {
+      onSuppressSuggestion?.(suggestion, "duplicate");
+      return;
+    }
+    if (isStreaming) {
+      onSuppressSuggestion?.(suggestion, "busy");
+      return;
+    }
+    suggestionLaunchLock = { sessionId: activeSessionId, messageCount: messages.length };
+    const launched = onSelectSuggestion
+      ? onSelectSuggestion(suggestion) === true
+      : submit(suggestion.prompt);
+    if (!launched) suggestionLaunchLock = null;
   }
 
   function approvalStatusLabel(status: AgentApprovalAffordance["status"] | undefined): string {
@@ -225,8 +251,9 @@
             {#each suggestions as suggestion (suggestion.label)}
               <button
                 type="button"
-                onclick={() => { onSelectSuggestion?.(suggestion); submit(suggestion.prompt); }}
-                class="group rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onclick={() => launchSuggestion(suggestion)}
+                disabled={isStreaming}
+                class="group rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                 data-workflow-suggestion={suggestion.familyId ?? suggestion.label}
                 data-workflow-readiness={suggestion.readiness ?? "ready"}
               >

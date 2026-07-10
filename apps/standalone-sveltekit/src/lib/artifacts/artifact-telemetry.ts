@@ -1,4 +1,6 @@
 import type { Spec } from "@json-render/core";
+import { sanitizeTelemetryEvent as sanitizeAgentTelemetryEvent } from "@sonik-agent-ui/agent-observability";
+import type { AgentTelemetryEvent } from "@sonik-agent-ui/agent-observability";
 
 export type ArtifactTelemetrySource = "server" | "client";
 
@@ -39,7 +41,7 @@ export interface ArtifactTelemetryEvent {
 const PREFIX = "[sonik-agent-ui]";
 
 export function logArtifactTelemetry(event: ArtifactTelemetryEvent): void {
-  const payload = sanitizeTelemetryEvent({ runId: resolveBrowserTelemetryRunId(), ...event, at: new Date().toISOString() });
+  const payload = sanitizeArtifactTelemetryEvent({ runId: resolveBrowserTelemetryRunId(), ...event, at: new Date().toISOString() });
   const line = `${PREFIX} ${JSON.stringify(payload)}`;
 
   if (payload.ok === false || payload.error) {
@@ -87,8 +89,16 @@ function postBrowserTelemetry(event: ArtifactTelemetryEvent): void {
   }
 }
 
-function sanitizeTelemetryEvent(event: ArtifactTelemetryEvent): ArtifactTelemetryEvent {
+function sanitizeArtifactTelemetryEvent(event: ArtifactTelemetryEvent): ArtifactTelemetryEvent {
+  const sanitizedEvent = sanitizeAgentTelemetryEvent(event as AgentTelemetryEvent) as unknown as Record<string, unknown>;
   return Object.fromEntries(
-    Object.entries(event).filter(([, value]) => value !== undefined && value !== ""),
-  ) as ArtifactTelemetryEvent;
+    Object.entries(event).flatMap(([key, value]) => {
+      if (value === undefined || value === "") return [];
+      const sanitizedValue = sanitizedEvent[key];
+      if (sanitizedValue !== undefined && sanitizedValue !== "") return [[key, sanitizedValue]];
+      if (typeof value === "boolean") return [[key, value]];
+      if (typeof value === "number" && Number.isFinite(value)) return [[key, value]];
+      return [];
+    }),
+  ) as unknown as ArtifactTelemetryEvent;
 }

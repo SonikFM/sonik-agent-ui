@@ -10,6 +10,7 @@ import {
   sanitizeTelemetryValue,
   traceIdFromTraceparent,
 } from "../../packages/agent-observability/src/index.ts";
+import { logArtifactTelemetry } from "../../apps/standalone-sveltekit/src/lib/artifacts/artifact-telemetry.ts";
 
 const sampleVercelKey = ["v", "ck", "_", "TESTREDACTME123"].join("");
 const sampleBearer = `Bearer ${["super", "secret", "value", "123456789"].join("-")}`;
@@ -69,6 +70,35 @@ const sampleBearer = `Bearer ${["super", "secret", "value", "123456789"].join("-
   assert.equal(sanitizeTelemetryPath(`/Users/danielletterio/Documents/key-${sampleVercelKey}`), "/Users/[user]/Documents/key-[REDACTED]");
   assert.equal(sanitizeTelemetryValue({ password: "abc", keep: "value" }).password, "[REDACTED]");
   assert.equal(readableError(new Error("boom")).message, "boom");
+}
+
+{
+  const rawSecret = `sk-${"test".repeat(4)}`;
+  const lines = [];
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+  console.info = (...args) => lines.push(args.join(" "));
+  console.warn = (...args) => lines.push(args.join(" "));
+
+  try {
+    logArtifactTelemetry({
+      source: "client",
+      event: "artifact.secret-redaction.regression",
+      title: `Generated title ${rawSecret}`,
+      reason: `Rejected because ${rawSecret}`,
+      lossy: true,
+      fixCount: 1,
+    });
+  } finally {
+    console.info = originalInfo;
+    console.warn = originalWarn;
+  }
+
+  assert.equal(lines.length, 1);
+  assert.ok(!lines[0].includes(rawSecret), "artifact telemetry console output must not include raw secret-shaped values");
+  assert.ok(lines[0].includes("[REDACTED]"), "artifact telemetry console output should include the redaction marker");
+  assert.ok(lines[0].includes('"lossy":true'), "artifact telemetry should preserve custom boolean fields");
+  assert.ok(lines[0].includes('"fixCount":1'), "artifact telemetry should preserve custom numeric fields");
 }
 
 console.log("agent-observability tests passed");
