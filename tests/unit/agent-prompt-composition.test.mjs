@@ -49,7 +49,7 @@ const MONOLITH_RULE_FRAGMENTS = [
   // Draft-only invariant (Slice A, 2026-07-08): commitCommand/commitActiveIntakeCommand are no
   // longer mounted on the agent's tool set at all; the model can only ever produce a draft/preview.
   "There is no model-callable commit tool for any write",
-  "the canonical workflow is booking.get.availability -> booking.create.guest -> booking.create.booking.",
+  "the canonical workflow is booking.get.availability -> previewBookingReservationCommand -> human Approve click.",
   "Do NOT use booking.create.hold for reservation, booking, or tee-time intents unless the user explicitly asks for a temporary hold.",
   "A standalone fixture-backed read-only booking host command may be mounted for local testing;",
   // data-binding module
@@ -162,7 +162,7 @@ const composedForReservation = composeAgentSystemPrompt({
   skillModules: reservationSkillModules,
 });
 assert.ok(composedForReservation.moduleIds.includes("booking-commands"), "reservation execution turns must keep booking command module");
-assert.ok(composedForReservation.prompt.includes("booking.get.availability -> booking.create.guest -> booking.create.booking"), "reservation prompt must retain command workflow guidance");
+assert.ok(composedForReservation.prompt.includes("booking.get.availability -> previewBookingReservationCommand"), "reservation prompt must retain command workflow guidance");
 
 // (d) Patch-first refinement contract (Phase 2.1): a currentIntakeArtifactSpec composes a
 // REFINEMENT CONTRACT section telling the model the artifact already exists and to patch it

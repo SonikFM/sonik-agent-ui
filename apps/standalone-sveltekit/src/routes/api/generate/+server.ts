@@ -21,6 +21,7 @@ import {
   type AgentRunContextSelection,
 } from "@sonik-agent-ui/tool-contracts/run-context";
 import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
+import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-transport";
 import { tapSpecStreamForTelemetry } from "$lib/server/spec-stream-tap-telemetry";
 import { createDevSmokeStream, readDevSmokeFailMode, readDevSmokeRunId, readDevSmokeScenario, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
 import { startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
@@ -81,13 +82,6 @@ function resolveRequestSkillIds(input: { requestSkillIds: unknown; selectedSkill
 }
 
 
-function createServiceBindingFetcher(binding: unknown): typeof fetch | undefined {
-  if (!binding || typeof binding !== "object") return undefined;
-  const candidate = binding as { fetch?: typeof fetch };
-  if (typeof candidate.fetch !== "function") return undefined;
-  const bindingFetch = candidate.fetch.bind(candidate);
-  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => bindingFetch(input, init)) as typeof fetch;
-}
 
 function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: WorkspaceDocumentRecord | null } = {}): AgentPageContext | undefined {
   const record = typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -399,7 +393,7 @@ export const POST: RequestHandler = async (event) => {
   const telemetryPageContext = sanitizePageContext(body?.pageContext ?? body?.workspace?.pageContext);
   const pageContextSource = resolvePageContextSource(body, activeDocument);
   const bookingServiceBaseUrl = env.SONIK_BOOKING_API_BASE_URL ?? env.BOOKING_SERVICE_BASE_URL ?? null;
-  const bookingRuntimeFetcher = createServiceBindingFetcher(event.platform?.env?.BOOKING_SERVICE);
+  const bookingRuntimeFetcher = createRequestBookingRuntimeFetcher(event);
   const rawHostContextHeaderLength = request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER)?.length ?? 0;
   const bookingRuntimeAuth = createBookingRuntimeAuthContextFromTrustedHostHeader({
     header: request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER),

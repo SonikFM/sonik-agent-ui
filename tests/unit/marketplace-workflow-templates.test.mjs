@@ -68,7 +68,7 @@ const bookingDetailSuggestions = createWorkflowSuggestions({
   commandFamilies: ["booking-reservations"],
 });
 assert.equal(bookingDetailSuggestions[0].skillId, "booking.reservation.create");
-assert.deepEqual(bookingDetailSuggestions[0].requiredCommands, ["booking.get.availability", "booking.create.guest", "booking.create.booking"]);
+assert.deepEqual(bookingDetailSuggestions[0].requiredCommands, ["booking.get.availability", "previewBookingReservationCommand", "booking.create.guest", "booking.create.booking"]);
 assert.equal(bookingDetailSuggestions[0].permissionDefaults["booking.create.booking"], "ask");
 
 const campaignSuggestions = createWorkflowSuggestions({ surface: "amplify-campaign-wizard", pageType: "campaign-template", skillFamilies: ["amplify-campaign-template"] });
@@ -122,6 +122,7 @@ const runPreview = previewWorkflowRun("booking.reservation.create", { "booking.c
 assert.ok(runPreview);
 assert.equal(runPreview.canRunWithoutTrustedApproval, false);
 assert.ok(runPreview.steps.some((step) => step.commandId === "booking.create.booking" && step.status === "blocked" && step.disabledReason === "tool_permission_off"));
+assert.ok(runPreview.steps.some((step) => step.commandId === "previewBookingReservationCommand" && step.status === "approval_required"));
 assert.ok(runPreview.steps.every((step) => step.executesOnPreview === false), "preview never executes workflow nodes");
 assert.match(runPreview.requestApprovalSemantics, /does not grant approval/i);
 

@@ -7,7 +7,8 @@ import {
   type BookingRuntimeAuthContext,
 } from "../host-command-runtime.ts";
 import { writeAgentTelemetry } from "../agent-telemetry.ts";
-import type { AgentToolPermissionMode } from "../agent-settings.ts";
+import type { AgentToolPermissionMode } from "../../agent-settings.ts";
+import { stripReservationGuestApprovalFields, validateReservationGuestForBooking } from "./reservation-guest-validation.ts";
 
 // A2 reservation-commit (2026-07-08): the human-only publish path for reservations.
 //
@@ -80,6 +81,30 @@ export interface ReservationCommitStep {
 }
 
 export async function commitBookingReservationCommand(context: ReservationCommitContext, input: ReservationCommitInput) {
+  const guestValidation = validateReservationGuestForBooking(input.guest);
+  if (!guestValidation.ok) {
+    await writeAgentTelemetry({
+      source: "server",
+      event: "commit.human_approved",
+      ok: false,
+      sessionId: context.sessionId ?? undefined,
+      toolCallId: GUEST_COMMAND_ID,
+      commandFamily: "booking-reservations",
+      reason: "invalid_reservation_guest",
+      payload: { missingFields: guestValidation.missingFields, reasons: guestValidation.reasons },
+    }).catch(() => undefined);
+    return {
+      ok: false,
+      kind: "reservation-commit" as const,
+      error: "invalid_reservation_guest" as const,
+      guestId: null,
+      steps: [],
+      missingFields: guestValidation.missingFields,
+      reasons: guestValidation.reasons,
+      message: "A confirmed, non-placeholder guest name plus a usable email or phone is required before booking this reservation.",
+    };
+  }
+
   const hostSessionInput = context.hostSession ? { hostSession: context.hostSession } : { hostSessionMode: "standalone-demo" as const };
   const bundleInput = {
     sessionId: context.sessionId,
@@ -123,7 +148,7 @@ export async function commitBookingReservationCommand(context: ReservationCommit
     return receipt;
   };
 
-  const guestReceipt = await runCommit(GUEST_COMMAND_ID, input.guest);
+  const guestReceipt = await runCommit(GUEST_COMMAND_ID, stripReservationGuestApprovalFields(input.guest));
   const steps: ReservationCommitStep[] = [{ commandId: GUEST_COMMAND_ID, receipt: guestReceipt }];
   if (!guestReceipt.ok) {
     return { ok: false, kind: "reservation-commit" as const, error: "guest_create_failed", guestId: null, steps, message: "Could not create or resolve the guest; the reservation was not booked." };

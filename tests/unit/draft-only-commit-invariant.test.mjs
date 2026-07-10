@@ -86,8 +86,8 @@ for (const { name, context } of COMMAND_CATALOG_CONTEXT_MATRIX) {
   assert.equal(typeof tools.learnCommand?.execute, "function", `createCommandCatalogTools(${name}) must still mount learnCommand`);
   assert.deepEqual(
     Object.keys(tools).sort(),
-    ["executeCommand", "learnCommand", "searchCommandCatalog"],
-    `createCommandCatalogTools(${name}) must mount exactly the read/discovery tools, nothing else`,
+    ["executeCommand", "learnCommand", "previewBookingReservationCommand", "searchCommandCatalog"],
+    `createCommandCatalogTools(${name}) must mount only read/discovery plus reservation preview tools, nothing else`,
   );
 }
 

@@ -103,7 +103,7 @@ const reservationSkill = catalog.skills.find((entry) => entry.id === "booking.re
 assert.ok(reservationSkill, "reservation skill remains registered");
 assert.equal(reservationSkill.familyId, "booking-reservation");
 assert.equal(reservationSkill.loadPolicy.mode, "surface-eager");
-assert.deepEqual(reservationSkill.commandSequence, ["booking.get.availability", "booking.create.guest", "booking.create.booking"]);
+assert.deepEqual(reservationSkill.commandSequence, ["booking.get.availability", "previewBookingReservationCommand"]);
 assert.ok(reservationSkill.forbiddenUnlessExplicit.includes("booking.create.hold"), "skill encodes hold as forbidden unless explicit");
 assert.ok(reservationSkill.contextHints.skillFamilies.includes("booking-reservation"), "skill can be selected by donated page skill family");
 assert.ok(reservationSkill.contextHints.requiredScopes.includes("booking:write"), "skill keeps write scope requirement visible");
@@ -153,7 +153,7 @@ assert.equal(startupIndex.skills.length, 0, "surface-eager skills stay lazy unti
 
 const index = createRuntimeSkillIndex(pageContext);
 assert.equal(index.skills[0].id, "booking.reservation.create", "booking reservation page prioritizes reservation workflow skill");
-assert.equal(index.skills[0].commandSequence.join(" > "), "booking.get.availability > booking.create.guest > booking.create.booking");
+assert.equal(index.skills[0].commandSequence.join(" > "), "booking.get.availability > previewBookingReservationCommand");
 assert.equal(index.skills.some((entry) => entry.id === "booking.context.intake"), false, "generic booking reservation pages must not eager-load context intake");
 
 const intakeIndex = createRuntimeSkillIndex(intakePageContext);
@@ -222,7 +222,7 @@ assert.equal(lazyCampaignSearch.skills[0].id, "amplify.campaign.template.create"
 const learned = learnRuntimeSkill({ skillId: "booking.reservation.create", aspects: ["description", "workflow", "examples", "policy", "context", "commands"] });
 assert.equal(learned.ok, true);
 assert.equal(learned.workflowRecipe.id, "booking.reservation.create");
-assert.deepEqual(learned.commandSequence, ["booking.get.availability", "booking.create.guest", "booking.create.booking"]);
+assert.deepEqual(learned.commandSequence, ["booking.get.availability", "previewBookingReservationCommand"]);
 assert.ok(learned.forbiddenUnlessExplicit.includes("booking.create.hold"));
 assert.ok(learned.negativeExamples[0].failIfCommandIds.includes("booking.create.hold"));
 
@@ -297,7 +297,7 @@ assert.equal(toolSearch.skills[0].id, "booking.reservation.create");
 const toolLearn = await tools.learnSkill.execute({ skillId: "booking.reservation.create", aspects: ["workflow", "commands", "policy"] });
 assert.equal(toolLearn.kind, "skill-learn");
 assert.equal(toolLearn.ok, true);
-assert.deepEqual(toolLearn.commandSequence, ["booking.get.availability", "booking.create.guest", "booking.create.booking"]);
+assert.deepEqual(toolLearn.commandSequence, ["booking.get.availability", "previewBookingReservationCommand"]);
 
 const intakeTools = createSkillCatalogTools({
   sessionId: "session_intake_skill_test",

@@ -23,9 +23,11 @@
 
   const commitSuccess = $derived.by(() => {
     const output = tool.output as { kind?: string; ok?: boolean; command?: { input?: { name?: unknown } } } | null | undefined;
-    if (!output || output.kind !== "intake-command-commit" || output.ok !== true) return null;
+    if (!output || output.ok !== true) return null;
+    if (output.kind === "reservation-commit") return { name: null, label: "Reservation created." };
+    if (output.kind !== "intake-command-commit") return null;
     const name = typeof output.command?.input?.name === "string" && output.command.input.name.trim() ? output.command.input.name.trim() : null;
-    return { name };
+    return { name, label: name ? `“${name}” was created.` : "Setup created." };
   });
 </script>
 
@@ -36,7 +38,7 @@
     data-commit-receipt="success"
   >
     <span aria-hidden="true">✓</span>
-    {commitSuccess.name ? `“${commitSuccess.name}” was created.` : "Setup created."}
+    {commitSuccess.label}
     <span class="font-normal text-primary/80">Approved by your workspace and saved.</span>
   </p>
 {/if}

@@ -154,10 +154,22 @@ export const TOOL_ACTIVITY_REGISTRY: Record<string, Omit<ToolActivityDescriptor,
     error: "Approval preview failed",
     phase: "approval_preview",
   },
+  previewBookingReservationCommand: {
+    pending: "Preparing reservation preview",
+    done: "Prepared reservation preview",
+    error: "Reservation preview failed",
+    phase: "approval_preview",
+  },
   commitActiveIntakeCommand: {
     pending: "Creating booking setup",
     done: "Created booking setup",
     error: "Booking setup failed",
+    phase: "trusted_write",
+  },
+  commitBookingReservationCommand: {
+    pending: "Booking reservation",
+    done: "Booked reservation",
+    error: "Reservation booking failed",
     phase: "trusted_write",
   },
   createJsonArtifact: {

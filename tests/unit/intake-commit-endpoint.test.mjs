@@ -101,6 +101,8 @@ const routeSource = await readFile("apps/standalone-sveltekit/src/routes/api/int
 assert.ok(routeSource.includes("createAgentHostSessionEnvelope"), "route must reuse the shared trusted host-session resolver, not a local copy");
 assert.ok(routeSource.includes("approvedCommandIdsFromHostSession"), "route must reuse the shared approved-command-grant resolver, not a local copy");
 assert.ok(routeSource.includes("commitBookingContextIntakeCommand"), "route must delegate manifest/readiness/host-grant logic to the shared commit function, not duplicate it");
+assert.ok(routeSource.includes("createRequestBookingRuntimeFetcher"), "route must create a request-scoped booking runtime fetcher");
+assert.ok(routeSource.includes("bookingRuntimeFetcher,"), "route must pass the booking runtime fetcher into the shared intake commit function");
 assert.ok(routeSource.includes('error: "unauthenticated"'), "route must return a typed error for the missing-trusted-session branch");
 assert.ok(routeSource.includes("status: 401"), "route must fail closed with 401 when no trusted host session is present");
 assert.ok(routeSource.includes('error(400, "artifactId is required")'), "route must require an artifactId (typed 400) before doing any work");

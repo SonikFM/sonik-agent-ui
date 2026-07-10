@@ -95,6 +95,15 @@
   } from "$lib/agent-settings";
   import { AGENT_PROMPT_CORE, AGENT_PROMPT_MODULES, CORE_MODULE_ID, composeAgentSystemPrompt } from "$lib/agent-prompt";
 
+
+  interface ReservationApprovalPreview {
+    messageId: string;
+    toolCallId: string;
+    commandId: string;
+    guest: Record<string, unknown>;
+    booking: Record<string, unknown>;
+  }
+
   interface ActiveDocumentSnapshot {
     id: string;
     session_id?: string | null;
@@ -471,6 +480,43 @@
     notifyHostCanvasOpen(`document:${latestDocumentArtifact.document.id}`, "A document was just promoted to the canvas.");
   });
 
+
+
+  function findLatestReservationApprovalPreview(): ReservationApprovalPreview | null {
+    let commitSeenAfterPreview = false;
+    for (let messageIndex = conversation.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+      const message = conversation.messages[messageIndex];
+      if (!message || message.role !== "assistant") continue;
+      const parts = snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string; output?: unknown }>;
+      for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+        const part = parts[partIndex];
+        if (part.type === "tool-commitBookingReservationCommand" && part.state === "output-available") commitSeenAfterPreview = true;
+        if (part.type !== "tool-previewBookingReservationCommand" || part.state !== "output-available") continue;
+        if (commitSeenAfterPreview) return null;
+        const output = isRecord(part.output) ? part.output : null;
+        const command = isRecord(output?.command) ? output.command : null;
+        const input = isRecord(command?.input) ? command.input : null;
+        const guest = isRecord(input?.guest) ? input.guest : null;
+        const booking = isRecord(input?.booking) ? input.booking : null;
+        if (output?.kind !== "reservation-command-preview" || output.ok !== true || !guest || !booking) continue;
+        return {
+          messageId: message.id,
+          toolCallId: typeof part.toolCallId === "string" ? part.toolCallId : `reservation-preview-${partIndex}`,
+          commandId: typeof command?.commandId === "string" ? command.commandId : "booking.create.booking",
+          guest,
+          booking,
+        };
+      }
+    }
+    return null;
+  }
+
+  function reservationPreviewSummary(preview: ReservationApprovalPreview): string {
+    const guestName = typeof preview.guest.name === "string" && preview.guest.name.trim() ? preview.guest.name.trim() : "Guest";
+    const startsAt = typeof preview.booking.startsAt === "string" ? preview.booking.startsAt : "selected time";
+    const partySize = preview.booking.partySize === undefined ? "party" : `party of ${String(preview.booking.partySize)}`;
+    return `${guestName}, ${partySize}, ${startsAt}`;
+  }
 
   function collectToolOutputErrorKeys(messages: typeof conversation.messages): string[] {
     const keys: string[] = [];
@@ -3235,6 +3281,69 @@
     }
   }
 
+
+  async function runReservationCommitEndpoint(preview: ReservationApprovalPreview): Promise<boolean> {
+    try {
+      const response = await workspaceFetch("/api/reservation/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: activeSessionId, guest: preview.guest, booking: preview.booking }),
+      });
+      const receipt = await response.json().catch(() => null) as { ok?: boolean; kind?: string; steps?: unknown[]; error?: string } | null;
+      if (!receipt) {
+        logArtifactTelemetry({
+          source: "client",
+          event: "reservation.commit_endpoint.error",
+          sessionId: activeSessionId ?? undefined,
+          ok: false,
+          error: `http_${response.status}`,
+        });
+        return false;
+      }
+      appendReservationCommitReceiptMessage(receipt);
+      logArtifactTelemetry({
+        source: "client",
+        event: receipt.ok === true ? "reservation.commit_endpoint.completed" : "reservation.commit_endpoint.error",
+        sessionId: activeSessionId ?? undefined,
+        toolCallId: preview.commandId,
+        ok: receipt.ok === true,
+        error: receipt.ok === true ? undefined : receipt.error,
+      });
+      return receipt.ok === true;
+    } catch (error) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "reservation.commit_endpoint.error",
+        sessionId: activeSessionId ?? undefined,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  function isOkReceipt(receipt: unknown): boolean {
+    return Boolean(receipt && typeof receipt === "object" && (receipt as { ok?: unknown }).ok === true);
+  }
+
+  function appendReservationCommitReceiptMessage(receipt: unknown): void {
+    conversation.messages = [
+      ...conversation.messages,
+      {
+        id: `reservation-commit-${crypto.randomUUID()}`,
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-commitBookingReservationCommand",
+            toolCallId: `reservation-commit-call-${crypto.randomUUID()}`,
+            state: isOkReceipt(receipt) ? "output-available" : "output-error",
+            output: receipt,
+          },
+        ],
+      },
+    ] as typeof conversation.messages;
+  }
+
   // Reuses the existing "commitActiveIntakeCommand" tool-activity label and
   // ToolCallBlock commit-success rendering (packages/chat-surface) — the receipt
   // shape returned by /api/intake/commit is identical to what that tool used to
@@ -3249,7 +3358,7 @@
           {
             type: "tool-commitActiveIntakeCommand",
             toolCallId: `intake-commit-call-${crypto.randomUUID()}`,
-            state: "output-available",
+            state: isOkReceipt(receipt) ? "output-available" : "output-error",
             output: receipt,
           },
         ],
@@ -3507,6 +3616,27 @@
     return { ready: true, visible: true, reason: null };
   }
 
+
+  function createReservationApprovalAffordance(): AgentApprovalAffordance | null {
+    const preview = findLatestReservationApprovalPreview();
+    if (!preview) return null;
+    return {
+      title: "Book this reservation?",
+      description: reservationPreviewSummary(preview),
+      commandId: preview.commandId,
+      artifactTitle: null,
+      status: "approval_required",
+      disabled: false,
+      disabledReason: null,
+      previewLabel: "Review reservation",
+      approveLabel: "Approve and book",
+      cancelLabel: "Cancel",
+      onRequestPreview: () => logArtifactTelemetry({ source: "client", event: "reservation.approval_preview.viewed", sessionId: activeSessionId ?? undefined, toolCallId: preview.commandId, ok: true }),
+      onApprove: () => void runReservationCommitEndpoint(preview),
+      onCancel: () => appendReservationCommitReceiptMessage({ ok: false, kind: "reservation-commit", error: "cancelled", message: "Reservation approval was cancelled." }),
+    };
+  }
+
   function createActiveIntakeApprovalAffordance(): AgentApprovalAffordance | null {
     if (!isActiveBookingIntakeArtifact()) return null;
     const readiness = getActiveIntakeApprovalReadiness();
@@ -3565,7 +3695,7 @@
       onClear={handleClear}
       runRecovery={runRecovery}
       onContinue={handleContinue}
-      approvalAffordance={createActiveIntakeApprovalAffordance()}
+      approvalAffordance={createReservationApprovalAffordance() ?? createActiveIntakeApprovalAffordance()}
       contextItems={runContextSelection.items}
       contextSources={contextCandidates.sources}
       onAttachContext={handleAttachContext}

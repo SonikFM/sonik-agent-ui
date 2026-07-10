@@ -12,11 +12,10 @@
   },
   "goodTranscript": {
     "prompt": "Create a reservation for Dan at 1pm July 1 for 3.",
-    "assistantText": "I checked availability, created/resolved Dan as the guest, and created the booking reservation.",
+    "assistantText": "I checked availability and prepared the reservation preview for human approval.",
     "toolCalls": [
       { "commandId": "booking.get.availability", "action": "execute", "inputJson": "{\"contextId\":\"ctx_123\",\"from\":\"2026-07-01T20:00:00.000Z\",\"to\":\"2026-07-01T20:10:00.000Z\",\"partySize\":3}" },
-      { "commandId": "booking.create.guest", "action": "commit", "inputJson": "{\"name\":\"Dan\",\"email\":\"dan@example.test\"}" },
-      { "commandId": "booking.create.booking", "action": "commit", "inputJson": "{\"contextId\":\"ctx_123\",\"userId\":\"guest_123\",\"startsAt\":\"2026-07-01T20:00:00.000Z\",\"endsAt\":\"2026-07-01T20:10:00.000Z\",\"partySize\":3,\"source\":\"admin\",\"clientRequestId\":\"agent-ui-reservation-demo-001\"}" }
+      { "commandId": "previewBookingReservationCommand", "action": "execute", "inputJson": "{\"guest\":{\"name\":\"Dan\",\"email\":\"dan@example.test\"},\"booking\":{\"contextId\":\"ctx_123\",\"startsAt\":\"2026-07-01T20:00:00.000Z\",\"endsAt\":\"2026-07-01T20:10:00.000Z\",\"partySize\":3,\"source\":\"admin\",\"clientRequestId\":\"agent-ui-reservation-demo-001\"}}" }
     ]
   }
 }

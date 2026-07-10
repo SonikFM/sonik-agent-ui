@@ -34,8 +34,8 @@ const bookingDetailSuggestions = createWorkflowSuggestions({
 assert.equal(bookingDetailSuggestions[0].skillId, "booking.reservation.create");
 assert.equal(bookingDetailSuggestions[0].readiness, "needs_context");
 assert.match(bookingDetailSuggestions[0].prompt, /booking\.get\.availability/);
-assert.match(bookingDetailSuggestions[0].prompt, /booking\.create\.guest/);
-assert.match(bookingDetailSuggestions[0].prompt, /booking\.create\.booking/);
+assert.match(bookingDetailSuggestions[0].prompt, /previewBookingReservationCommand/);
+assert.match(bookingDetailSuggestions[0].prompt, /human approval/);
 assert.match(bookingDetailSuggestions[0].prompt, /Do not use booking\.create\.hold/);
 
 const campaignSuggestions = createWorkflowSuggestions({
