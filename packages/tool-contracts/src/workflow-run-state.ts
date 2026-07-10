@@ -236,12 +236,23 @@ export function applyWorkflowRunEvent(state: WorkflowRunState, event: WorkflowRu
       // approval event can move the run to approved.
       if (!event.hostSigned) return reject(state, "model_supplied_approval_is_not_trusted");
       if (state.approvalState.status !== "requested") return reject(state, "approval_not_requested");
+      // Structural, not conventional (Phase 3b review): an untargeted approval
+      // (empty approvedCommandIds) covers every commit node, so in a
+      // multi-commit graph it would be the implicit-approval bug through a
+      // side door — one sloppy host approval committing everything. Runs with
+      // a single tool_commit node (reservation, all Phase 1/3a flows) keep
+      // using untargeted approvals unchanged.
+      const approvedCommandIds = event.approvedCommandIds ?? [];
+      const commitNodeCount = Object.values(state.nodeStates).filter((node) => node.type === "tool_commit").length;
+      if (approvedCommandIds.length === 0 && commitNodeCount > 1) {
+        return reject(state, "untargeted_approval_requires_explicit_commandIds");
+      }
       return {
         ok: true,
         state: {
           ...state,
           phase: "approved",
-          approvalState: { status: "approved", hostSigned: true, approvedCommandIds: event.approvedCommandIds ?? [] },
+          approvalState: { status: "approved", hostSigned: true, approvedCommandIds },
         },
       };
     }
@@ -251,6 +262,17 @@ export function applyWorkflowRunEvent(state: WorkflowRunState, event: WorkflowRu
       if (node.type !== "tool_commit") return reject(state, "commit_requires_tool_commit_node");
       if (state.approvalState.status !== "approved" || !state.approvalState.hostSigned) {
         return reject(state, "approval_required");
+      }
+      // Per-node approval cross-check (Phase 3b): approvalState is run-global,
+      // but a targeted approval (non-empty approvedCommandIds) only covers the
+      // commandId(s) it names — committing a node whose commandId isn't in
+      // that list is refused even though the run's status is "approved". An
+      // untargeted approval (empty approvedCommandIds) covers any node, which
+      // is what every single-commit-node run (reservation, Phase 1/3a) does
+      // today and keeps doing unchanged.
+      const { approvedCommandIds } = state.approvalState;
+      if (approvedCommandIds.length > 0 && node.commandId && !approvedCommandIds.includes(node.commandId)) {
+        return reject(state, "approval_does_not_cover_this_node");
       }
       const next = withNode(state, event.nodeId, { status: "committing" });
       return { ok: true, state: { ...next, phase: "committing", currentNodeId: event.nodeId } };
@@ -266,10 +288,21 @@ export function applyWorkflowRunEvent(state: WorkflowRunState, event: WorkflowRu
         ...(succeeded ? {} : { error: { code: "commit_failed", message: "Commit reported semantic failure" } }),
       });
       // Phase "committed" only on a semantic-success receipt — never on
-      // transport success alone.
+      // transport success alone — AND only once every tool_commit node in the
+      // run has reached "committed": a multi-commit-node run (Phase 3b) isn't
+      // terminal just because its first node succeeded, or a still-pending
+      // sibling node would be unreachable (event application rejects all
+      // events once phase is terminal).
+      const allCommitNodesDone = Object.values(next.nodeStates).every(
+        (candidate) => candidate.type !== "tool_commit" || candidate.status === "committed",
+      );
       return {
         ok: true,
-        state: { ...next, phase: succeeded ? "committed" : "error", receipts: [...state.receipts, receipt] },
+        state: {
+          ...next,
+          phase: succeeded ? (allCommitNodesDone ? "committed" : "committing") : "error",
+          receipts: [...state.receipts, receipt],
+        },
       };
     }
     case "node_error": {
