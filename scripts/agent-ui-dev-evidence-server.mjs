@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { readFile, watch } from "node:fs/promises";
+import { watch } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { queryEventsFromSearchParams, readEvidenceEventsFromFile } from "./lib/agent-ui-evidence-query.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const logPath = process.env.SONIK_AGENT_UI_TELEMETRY_LOG ?? path.join(repoRoot, ".omx", "logs", "agent-ui-telemetry.jsonl");
@@ -36,20 +37,11 @@ function jsonResponse(req, res, status, body) {
 }
 
 async function readEvents() {
-  if (!existsSync(logPath)) return [];
-  const text = await readFile(logPath, "utf8").catch(() => "");
-  return text.split("\n").filter(Boolean).map((line, index) => {
-    try {
-      return JSON.parse(line);
-    } catch (error) {
-      return { source: "dev-server", event: "telemetry.parse_error", ok: false, error: error instanceof Error ? error.message : String(error), line: index + 1 };
-    }
-  });
+  return readEvidenceEventsFromFile(logPath, { source: "dev-server" });
 }
 
 function filterEvents(events, url) {
-  const keys = ["requestId", "traceId", "sessionId", "event", "runId", "source"];
-  return events.filter((event) => keys.every((key) => !url.searchParams.get(key) || String(event[key] ?? "") === url.searchParams.get(key)));
+  return queryEventsFromSearchParams(events, url.searchParams);
 }
 
 function writeDashboard(req, res, events) {
@@ -99,7 +91,14 @@ const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") return jsonResponse(req, res, 200, { ok: true });
   if (url.pathname === "/health") return jsonResponse(req, res, 200, { ok: true, host, port, logPath, exists: existsSync(logPath) });
   if (url.pathname === "/stream") return writeSse(req, res);
-  if (url.pathname === "/events") return jsonResponse(req, res, 200, { ok: true, logPath, events: filterEvents(await readEvents(), url) });
+  if (url.pathname === "/events") {
+    try {
+      const result = filterEvents(await readEvents(), url);
+      return jsonResponse(req, res, 200, { ok: true, logPath, ...result });
+    } catch (error) {
+      return jsonResponse(req, res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   if (url.pathname === "/dashboard" || url.pathname === "/") return writeDashboard(req, res, await readEvents());
   return jsonResponse(req, res, 404, { ok: false, error: "not_found", routes: ["/health", "/events", "/stream", "/dashboard"] });
 });

@@ -44,7 +44,7 @@
     type ArtifactStatus,
   } from "$lib/artifacts/artifact-observability";
   import { CanvasViewport, ChatWindow, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
-  import type { AgentUiActionDescriptor, AgentUiActionRegistrySnapshot, AgentUiApprovalStateSnapshot, AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult, AgentUiTargetRegistrySnapshot, AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
+  import { createTelemetryCorrelation, sanitizeDeploymentSnapshot, sanitizeTurnCorrelationSnapshot, type AgentUiActionDescriptor, type AgentUiActionRegistrySnapshot, type AgentUiApprovalStateSnapshot, type AgentUiDeploymentSnapshot, type AgentUiPageAssertions, type AgentUiPageContextSnapshot, type AgentUiPageControl, type AgentUiSemanticActionResult, type AgentUiTargetRegistrySnapshot, type AgentUiTurnCorrelationSnapshot, type AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
   import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
     isAgentHostPageContextMessage,
@@ -95,6 +95,9 @@
     type AgentRuntimeSettings,
   } from "$lib/agent-settings";
   import { AGENT_PROMPT_CORE, AGENT_PROMPT_MODULES, CORE_MODULE_ID, composeAgentSystemPrompt } from "$lib/agent-prompt";
+  import SupportDiagnosticsMenu from "$lib/SupportDiagnosticsMenu.svelte";
+  import { createSupportDiagnosticsExport, exportTranscriptMarkdown } from "$lib/support-export";
+  import { createTurnCorrelationRecord, createTurnCorrelationRecordFromResponse, deploymentSnapshotFromHeaders, selectTurnCorrelationRecord, upsertTurnCorrelationRecord, type AgentUiTurnCorrelationInput } from "$lib/chat-correlation";
 
 
   interface ReservationApprovalPreview {
@@ -290,16 +293,26 @@
   let streamStartedAt = $state<number | null>(null);
   let activityClock = $state(Date.now());
   let lastPersistStatus = $state<AgentUiPageAssertions["lastPersistStatus"]>("idle");
+  let turnCorrelationRecords = $state<AgentUiTurnCorrelationSnapshot[]>([]);
+  let pendingTurnCorrelationByKey = new SvelteMap<string, AgentUiTurnCorrelationInput>();
+  let latestDeploymentSnapshot = $state<AgentUiDeploymentSnapshot | undefined>();
+  let supportExportStatus = $state<string | null>(null);
+  let supportExportBusy = $state(false);
 
   const conversation = new Chat({
     transport: new DefaultChatTransport({
       api: "/api/generate",
+      fetch: fetchGenerateWithSupportCorrelation,
       prepareSendMessagesRequest({ messages, id, trigger, messageId, body, headers }) {
+        const correlation = createPreparedTurnCorrelation(messageId ?? messages.at(-1)?.id);
         return {
           headers: {
             ...headers,
             ...createDevSmokeHeaders(),
             ...createWorkspaceRequestHeaders(),
+            "x-sonik-request-id": String(correlation.requestId),
+            "x-sonik-trace-id": String(correlation.traceId),
+            traceparent: String(correlation.traceparent),
           },
           body: {
             ...body,
@@ -1223,6 +1236,58 @@
     return undefined;
   }
 
+
+
+  function createPreparedTurnCorrelation(messageId: unknown): AgentUiTurnCorrelationInput {
+    const correlation = createTelemetryCorrelation();
+    const snapshot = createTurnCorrelationRecord({
+      sessionId: activeSessionId,
+      messageId,
+      requestId: correlation.requestId,
+      traceId: correlation.traceId,
+      traceparent: correlation.traceparent,
+      status: "error",
+    });
+    pendingTurnCorrelationByKey.set(correlation.requestId, snapshot);
+    return snapshot;
+  }
+
+  async function fetchGenerateWithSupportCorrelation(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const requestHeaders = new Headers(init?.headers);
+    const requestId = requestHeaders.get("x-sonik-request-id") ?? undefined;
+    const prepared = requestId ? pendingTurnCorrelationByKey.get(requestId) : undefined;
+    try {
+      const response = await fetch(input, init);
+      const deployment = deploymentSnapshotFromHeaders(response.headers);
+      if (deployment) latestDeploymentSnapshot = deployment;
+      const record = createTurnCorrelationRecordFromResponse({
+        prepared,
+        headers: response.headers,
+        status: response.ok ? "success" : "error",
+        deployment,
+      });
+      upsertSupportCorrelation(record);
+      if (requestId) pendingTurnCorrelationByKey.delete(requestId);
+      return response;
+    } catch (error) {
+      if (prepared) {
+        upsertSupportCorrelation(createTurnCorrelationRecord({ ...prepared, status: "error" }));
+        if (requestId) pendingTurnCorrelationByKey.delete(requestId);
+      }
+      throw error;
+    }
+  }
+
+  function upsertSupportCorrelation(record: AgentUiTurnCorrelationSnapshot): void {
+    turnCorrelationRecords = upsertTurnCorrelationRecord(turnCorrelationRecords, record);
+    if (record.deployment) latestDeploymentSnapshot = record.deployment;
+    syncDevPageContext("support_correlation_updated");
+  }
+
+  function getLatestActiveSessionCorrelation(): AgentUiTurnCorrelationSnapshot | undefined {
+    return selectTurnCorrelationRecord(turnCorrelationRecords, { sessionId: activeSessionId });
+  }
+
   function createDevSmokeHeaders(): Record<string, string> {
     if (!dev || typeof window === "undefined") return {};
     const searchParams = new URLSearchParams(window.location.search);
@@ -1496,6 +1561,8 @@
     const workflow = createLocalWorkflowSnapshot();
     const workflowVisibleErrors = workflow.visibleErrors.map((error) => error.message);
     const localTargetRegistry = createLocalHostUiTargetRegistry();
+    const localCorrelation = sanitizeTurnCorrelationSnapshot(getLatestActiveSessionCorrelation());
+    const localDeployment = sanitizeDeploymentSnapshot(latestDeploymentSnapshot);
     const localContext: AgentUiPageContextSnapshot = {
       route: "/",
       surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
@@ -1526,6 +1593,9 @@
         "requestApproval",
         "approveAndRun",
         "cancelApproval",
+        "support",
+        "exportChat",
+        "exportDiagnostics",
       ],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
       visibleErrors: workflowVisibleErrors.length > 0 ? workflowVisibleErrors : undefined,
@@ -1536,7 +1606,13 @@
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
       at: new Date().toISOString(),
     };
-    return mergeAgentHostPageContext(localContext, hostPageContext) as AgentUiPageContextSnapshot;
+    const mergedContext = mergeAgentHostPageContext(localContext, hostPageContext) as AgentUiPageContextSnapshot;
+    return {
+      ...mergedContext,
+      activeSessionId,
+      ...(localDeployment ? { deployment: localDeployment } : {}),
+      ...(localCorrelation ? { correlation: localCorrelation } : {}),
+    };
   }
 
   function recordConversationLifecycle(reason: string): void {
@@ -1693,6 +1769,16 @@
         enabled: Boolean(activeArtifact) && !isStreaming,
         disabledReason: activeArtifact ? (isStreaming ? "streaming" : undefined) : "missing_active_artifact",
       }),
+      createActionDescriptor("exportChat", "Export chat transcript", {
+        enabled: !visibleTranscriptDisabledReason(),
+        disabledReason: visibleTranscriptDisabledReason(),
+        effect: "read",
+      }),
+      createActionDescriptor("exportDiagnostics", "Export support diagnostics", {
+        enabled: Boolean(activeSessionId) && !supportExportBusy,
+        disabledReason: activeSessionId ? (supportExportBusy ? "export_in_progress" : undefined) : "missing_session",
+        effect: "read",
+      }),
       createActionDescriptor("requestHostAction", "Request host action", {
         kind: "host_action",
         effect: "environment",
@@ -1742,6 +1828,90 @@
       activeSessionId,
       ...extras,
     };
+  }
+
+
+
+  function visibleTranscriptDisabledReason(): string | undefined {
+    if (!activeSessionId) return "missing_session";
+    return exportTranscriptMarkdown(conversation.messages).trim() ? undefined : "empty_transcript";
+  }
+
+  function downloadSupportFile(filename: string, contents: string, type: string): void {
+    const blob = new Blob([contents], { type });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportVisibleChatTranscript(): Promise<AgentUiSemanticActionResult> {
+    const disabledReason = visibleTranscriptDisabledReason();
+    if (disabledReason) {
+      supportExportStatus = disabledReason === "missing_session" ? "Open a chat session before exporting." : "There is no visible user or assistant text to export yet.";
+      return semanticActionResult(false, supportExportStatus, disabledReason);
+    }
+    const markdown = exportTranscriptMarkdown(conversation.messages);
+    downloadSupportFile(`sonik-chat-${activeSessionId}.md`, markdown, "text/markdown;charset=utf-8");
+    supportExportStatus = "Chat transcript exported.";
+    return semanticActionResult(true, supportExportStatus);
+  }
+
+  async function exportActiveSessionDiagnostics(): Promise<AgentUiSemanticActionResult> {
+    if (!activeSessionId) {
+      supportExportStatus = "Open a chat session before exporting diagnostics.";
+      return semanticActionResult(false, supportExportStatus, "missing_session");
+    }
+    const expectedSessionId = activeSessionId;
+    supportExportBusy = true;
+    supportExportStatus = "Preparing diagnostics…";
+    try {
+      const response = await workspaceFetch(`/api/session/${encodeURIComponent(expectedSessionId)}`);
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      const detail = (await response.json()) as WorkspaceSessionDetail;
+      if (activeSessionId !== expectedSessionId || detail.session.id !== expectedSessionId) {
+        supportExportStatus = "Session changed before diagnostics finished. Try again.";
+        return semanticActionResult(false, supportExportStatus, "active_session_mismatch", { expectedSessionId });
+      }
+      const diagnostics = createSupportDiagnosticsExport({
+        sessionId: expectedSessionId,
+        correlationRecords: turnCorrelationRecords,
+        deployment: latestDeploymentSnapshot,
+        runSummaries: detail.runs ?? [],
+        telemetrySummaries: detail.telemetry ?? [],
+        collectionStatus: "complete",
+      });
+      if (!diagnostics) {
+        supportExportStatus = "Diagnostics are not available yet.";
+        return semanticActionResult(false, supportExportStatus, "diagnostics_unavailable", { expectedSessionId });
+      }
+      downloadSupportFile(`sonik-diagnostics-${expectedSessionId}.json`, `${JSON.stringify(diagnostics, null, 2)}\n`, "application/json;charset=utf-8");
+      supportExportStatus = "Diagnostics exported.";
+      return semanticActionResult(true, supportExportStatus, undefined, { expectedSessionId });
+    } catch {
+      const diagnostics = createSupportDiagnosticsExport({
+        sessionId: expectedSessionId,
+        correlationRecords: turnCorrelationRecords,
+        deployment: latestDeploymentSnapshot,
+        runSummaries: [],
+        telemetrySummaries: [],
+        collectionStatus: "partial",
+      });
+      if (diagnostics) {
+        downloadSupportFile(`sonik-diagnostics-${expectedSessionId}.json`, `${JSON.stringify(diagnostics, null, 2)}\n`, "application/json;charset=utf-8");
+        supportExportStatus = "Partial diagnostics exported.";
+        return semanticActionResult(true, supportExportStatus, undefined, { expectedSessionId });
+      }
+      supportExportStatus = "Diagnostics are not available yet.";
+      return semanticActionResult(false, supportExportStatus, "diagnostics_unavailable", { expectedSessionId });
+    } finally {
+      supportExportBusy = false;
+    }
   }
 
   async function submitPageControlQuestionAnswer(input: { questionId?: string; value?: unknown; skipped?: boolean }): Promise<AgentUiSemanticActionResult> {
@@ -1968,6 +2138,12 @@
         },
         cancelApproval: async () => {
           return runPageControlIntakeAction("cancelApproval", "Approval request cancelled.");
+        },
+        exportChat: async () => {
+          return exportVisibleChatTranscript();
+        },
+        exportDiagnostics: async () => {
+          return exportActiveSessionDiagnostics();
         },
         requestHostAction: async (input) => {
           return runPageControlHostAction(input ?? {});
@@ -3783,6 +3959,16 @@
         >
           Workspace document
         </button>
+        <SupportDiagnosticsMenu
+          activeSessionId={activeSessionId}
+          correlation={getLatestActiveSessionCorrelation()}
+          deployment={latestDeploymentSnapshot}
+          exportStatus={supportExportStatus}
+          busy={supportExportBusy}
+          transcriptDisabledReason={visibleTranscriptDisabledReason()}
+          onExportChat={() => void exportVisibleChatTranscript()}
+          onExportDiagnostics={() => void exportActiveSessionDiagnostics()}
+        />
         {#if embedMode === "chat" && hostCanvasOpenDeclined && (activeArtifact || documentEditorOpen)}
           <button
             type="button"
