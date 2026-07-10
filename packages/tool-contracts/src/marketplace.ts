@@ -218,6 +218,11 @@ export const workflowNodeDefinitionSchema = z.object({
   if (node.type === "tool_commit" && node.approvalPolicy !== "preview_then_trusted_approval") {
     ctx.addIssue({ code: "custom", path: ["approvalPolicy"], message: "Tool commit workflow nodes require trusted approval policy" });
   }
+  // A preview node is execution-inert by definition — a mutating effect under
+  // tool_preview would let the controller run a write without the commit gate.
+  if (node.type === "tool_preview" && (node.effect === "write" || node.effect === "destructive" || node.effect === "external")) {
+    ctx.addIssue({ code: "custom", path: ["effect"], message: "tool_preview nodes must be effect none or read; mutating work belongs on a tool_commit node" });
+  }
   if ((node.effect === "write" || node.effect === "destructive" || node.effect === "external") && node.approvalPolicy !== "preview_then_trusted_approval") {
     ctx.addIssue({ code: "custom", path: ["approvalPolicy"], message: "Write/destructive/external workflow nodes require preview_then_trusted_approval" });
   }

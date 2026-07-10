@@ -99,22 +99,29 @@ export const bookingReservationWorkflowManifest = marketplaceManifestSchema.pars
       triggerPhrases: ["create a reservation", "book a table", "book a tee time"],
       requiredSkills: ["booking.reservation.create"],
       requiredCommands: ["booking.get.availability", "booking.create.guest", "booking.create.booking"],
+      // Phase 3a (consensus plan, 2026-07-10): ONE tool_preview node (previewBookingReservationCommand's
+      // existing guest+booking preview semantics, unchanged) followed by ONE compound tool_commit node
+      // wrapping the existing two-write commitBookingReservationCommand. The prior four-node split
+      // (guest_preview/guest/booking_preview/booking) demanded two independent Approve interactions a
+      // literal per-node walker would enforce -- but the shipped path runs both writes behind ONE human
+      // Approve click. This shape matches that shipped behavior instead of regressing it.
       version: "0.1.0",
       nodes: [
         { nodeId: "trigger", type: "trigger", title: "Start from current booking context" },
         { nodeId: "availability", type: "tool_preview", title: "Check availability", commandId: "booking.get.availability", effect: "read", approvalPolicy: "none" },
-        { nodeId: "guest_preview", type: "tool_preview", title: "Preview guest creation", commandId: "booking.create.guest", effect: "none", approvalPolicy: "none" },
-        { nodeId: "guest", type: "tool_commit", title: "Create guest", commandId: "booking.create.guest", effect: "write", approvalPolicy: "preview_then_trusted_approval", requiredHostContext: ["organizationId", "principalId"] },
-        { nodeId: "booking_preview", type: "tool_preview", title: "Preview booking creation", commandId: "booking.create.booking", effect: "none", approvalPolicy: "none" },
-        { nodeId: "booking", type: "tool_commit", title: "Create booking", commandId: "booking.create.booking", effect: "write", approvalPolicy: "preview_then_trusted_approval", requiredHostContext: ["organizationId", "principalId"] },
+        { nodeId: "reservation_preview", type: "tool_preview", title: "Preview reservation (guest + booking)", commandId: "booking.create.booking", effect: "none", approvalPolicy: "none" },
+        { nodeId: "reservation_commit", type: "tool_commit", title: "Create guest and booking", commandId: "booking.create.booking", effect: "write", approvalPolicy: "preview_then_trusted_approval", requiredHostContext: ["organizationId", "principalId"] },
       ],
       edges: [
         { edgeId: "e1", from: "trigger", to: "availability" },
-        { edgeId: "e2", from: "availability", to: "guest_preview", condition: "capacity_available" },
-        { edgeId: "e3", from: "guest_preview", to: "guest" },
-        { edgeId: "e4", from: "guest", to: "booking_preview" },
-        { edgeId: "e5", from: "booking_preview", to: "booking" },
+        { edgeId: "e2", from: "availability", to: "reservation_preview", condition: "capacity_available" },
+        { edgeId: "e3", from: "reservation_preview", to: "reservation_commit" },
       ],
+      // Model-facing facade (audit P0: pinned, <=5 tools, no toolset churn). Both tool_preview node
+      // commandIds must be listed per the schema's facade superRefine. Approval/cancel stay host-side
+      // click handlers, never model-callable tools (Open Question 1's default; command-catalog.ts's
+      // draft-only invariant already enforces this at the tool layer).
+      facadeToolIds: ["booking.get.availability", "booking.create.booking"],
     },
   },
 });
