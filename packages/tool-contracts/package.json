@@ -18,6 +18,10 @@
     "./target-registry": {
       "types": "./dist/target-registry.d.ts",
       "default": "./dist/target-registry.js"
+    },
+    "./capability-registry": {
+      "types": "./dist/capability-registry.d.ts",
+      "default": "./dist/capability-registry.js"
     }
   },
   "files": ["dist"],
