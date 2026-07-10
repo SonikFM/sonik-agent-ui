@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { extractPipeBToolEvents, hasTelemetryEvent, hasEventName, countRelevantPipeBLines } from '../../scripts/lib/booking-pipeb-evidence.mjs';
+import { inspectIntakeCommitBody, inspectReservationCommitBody } from '../../scripts/lib/agent-ui-smoke-receipts.mjs';
 
 const matchingRecord = JSON.stringify({
   objectKey: 'workers/sonik-agent-ui/current-run.json',
@@ -123,8 +124,6 @@ assert.equal(hasTelemetryEvent(wrongSearch, 'booking.context.create', 'tool.sear
 assert.equal(countRelevantPipeBLines(`${unrelatedRecord}\n${matchingRecord}`, ['run-123']) > 0, true, 'correlated line count reports current-run evidence');
 assert.equal(countRelevantPipeBLines(unrelatedRecord, ['run-123']), 0, 'correlated line count ignores unrelated runs');
 
-console.log('booking-pipeb-evidence tests passed');
-
 
 const humanApprovedRecord = JSON.stringify({
   objectKey: 'workers/sonik-agent-ui/current-run-human-approved.json',
@@ -136,3 +135,48 @@ const humanApprovedRecord = JSON.stringify({
 });
 const humanApproved = extractPipeBToolEvents(humanApprovedRecord, { markers: ['run-123', 'workspace-session-current'] });
 assert.equal(hasTelemetryEvent(humanApproved, 'booking.create.booking', 'commit.human_approved', true), true, 'human-approved reservation endpoint commit telemetry is detected');
+
+
+const reservationSuccessBody = {
+  ok: true,
+  kind: 'reservation-commit',
+  guestId: 'guest_123',
+  steps: [
+    { commandId: 'booking.create.guest', receipt: { ok: true, summary: { body: { id: 'guest_123' } } } },
+    { commandId: 'booking.create.booking', receipt: { ok: true, summary: { receipt: { confirmation: { id: 'booking_456' } } } } },
+  ],
+};
+const reservationSuccess = inspectReservationCommitBody(reservationSuccessBody);
+assert.equal(reservationSuccess.logicalOk, true, 'reservation commit requires body ok, guest id, ok step receipts, and booking receipt id');
+assert.equal(reservationSuccess.bookingReceiptId, 'booking_456');
+
+const reservationTransport200LogicalFailure = inspectReservationCommitBody({
+  ok: false,
+  kind: 'reservation-commit',
+  guestId: 'guest_123',
+  steps: [
+    { commandId: 'booking.create.guest', receipt: { ok: true, summary: { body: { id: 'guest_123' } } } },
+    { commandId: 'booking.create.booking', receipt: { ok: false, summary: { receipt: { confirmation: { id: 'booking_456' } } } } },
+  ],
+});
+assert.equal(reservationTransport200LogicalFailure.logicalOk, false, 'HTTP 200 with body ok=false or failed booking receipt is not reservation success');
+
+const intakeSuccessBody = {
+  ok: true,
+  kind: 'intake-command-commit',
+  command: { commandId: 'booking.create.context' },
+  receipt: { ok: true, summary: { body: { id: 'ctx_789' } } },
+};
+const intakeSuccess = inspectIntakeCommitBody(intakeSuccessBody);
+assert.equal(intakeSuccess.logicalOk, true, 'intake commit requires body ok, receipt ok, and created context id');
+assert.equal(intakeSuccess.createdContextId, 'ctx_789');
+
+const intakeTransport200LogicalFailure = inspectIntakeCommitBody({
+  ok: true,
+  kind: 'intake-command-commit',
+  command: { commandId: 'booking.create.context' },
+  receipt: { ok: false, summary: { body: { id: 'ctx_789' } } },
+});
+assert.equal(intakeTransport200LogicalFailure.logicalOk, false, 'HTTP 200 with receipt ok=false is not context success');
+
+console.log('booking-pipeb-evidence tests passed');

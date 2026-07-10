@@ -58,6 +58,23 @@ try {
 
   assertJsonArtifactGuidanceExamplesValid();
 
+  async function assertRejectsWithRetryGuidance(candidate, specificPattern, message) {
+    await assert.rejects(
+      () => createJsonArtifact.execute(candidate.data),
+      (error) => {
+        const text = error instanceof Error ? error.message : String(error);
+        assert.match(text, /Invalid JSON-render artifact spec/, message);
+        assert.match(text, /Retry once changing only invalid fields/, message);
+        assert.match(text, /omit optional undefined props/, message);
+        assert.match(text, /use exact allowed enum values/, message);
+        assert.match(text, /preserve intended elements\/content\/actions/, message);
+        if (specificPattern) assert.match(text, specificPattern, message);
+        return true;
+      },
+      message,
+    );
+  }
+
   const validStarter = createJsonArtifact.inputSchema.safeParse({ title: "Starter", spec: JSON_ARTIFACT_STARTER_SPEC });
   assert.equal(validStarter.success, true, validStarter.success ? "" : JSON.stringify(validStarter.error.issues));
 
@@ -213,6 +230,33 @@ ${JSON.stringify(bookingIntakeQuestionArtifact.spec)}
   const storedTextOnlyQuestionCard = await createJsonArtifact.execute(validTextOnlyQuestionCard.data);
   assert.equal(storedTextOnlyQuestionCard.spec.elements.main.type, "QuestionCard", "short_text QuestionCard without choices must pass execute-time catalog validation");
 
+  const optionalUndefinedMetricArtifact = createJsonArtifact.inputSchema.safeParse({
+    title: "Optional undefined metric",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Metric",
+          props: {
+            label: "Conversion",
+            value: "0",
+            detail: undefined,
+            trend: undefined,
+          },
+          children: [],
+        },
+      },
+      state: {},
+    },
+  });
+  assert.equal(optionalUndefinedMetricArtifact.success, true, "tool input accepts optional undefined props before lossless repair");
+  const storedOptionalUndefinedMetric = await createJsonArtifact.execute(optionalUndefinedMetricArtifact.data);
+  const storedOptionalUndefinedMetricProps = storedOptionalUndefinedMetric.spec.elements.main.props;
+  assert.equal(storedOptionalUndefinedMetricProps.label, "Conversion", "required Metric label should survive promotion");
+  assert.equal(storedOptionalUndefinedMetricProps.value, "0", "falsy-looking Metric value should survive promotion");
+  assert.equal(Object.prototype.hasOwnProperty.call(storedOptionalUndefinedMetricProps, "detail"), false, "optional undefined detail must be omitted in promoted spec");
+  assert.equal(Object.prototype.hasOwnProperty.call(storedOptionalUndefinedMetricProps, "trend"), false, "optional undefined trend must be omitted in promoted spec");
+
   const validActionArray = createJsonArtifact.inputSchema.safeParse({
     title: "Interactive array",
     spec: {
@@ -265,12 +309,32 @@ ${JSON.stringify(bookingIntakeQuestionArtifact.spec)}
 
   const danglingChild = createJsonArtifact.inputSchema.safeParse({ title: "Bad", spec: { root: "main", elements: { main: { type: "Card", props: { title: "Bad", description: "Bad" }, children: ["missing"] } }, state: {} } });
   assert.equal(danglingChild.success, true, "tool input accepts model-shaped specs before strict execute-time validation");
-  // Phase 2.3: dangling child references are exactly what autoFixSpec's lossy
-  // pass repairs (it prunes the missing reference, which renders the same as
-  // if it were never there). The repair loop runs before Zod/catalog
-  // validation, so this now promotes a repaired artifact instead of throwing.
-  const repairedDanglingChild = await createJsonArtifact.execute(danglingChild.data);
-  assert.deepEqual(repairedDanglingChild.spec.elements.main.children, [], "the autoFixSpec repair loop must prune the dangling child reference instead of rejecting the whole artifact");
+  await assertRejectsWithRetryGuidance(
+    danglingChild,
+    /references child \"missing\" which does not exist/,
+    "dangling child ids must remain invalid and produce actionable retry guidance instead of being pruned/promoted",
+  );
+
+  const invalidButtonEnumAndUndefined = createJsonArtifact.inputSchema.safeParse({
+    title: "Bad enum",
+    spec: {
+      root: "main",
+      elements: {
+        main: {
+          type: "Button",
+          props: { label: "Save", variant: "primary", size: "default", disabled: undefined },
+          children: [],
+        },
+      },
+      state: {},
+    },
+  });
+  assert.equal(invalidButtonEnumAndUndefined.success, true, "tool input accepts model-shaped specs before strict execute-time validation");
+  await assertRejectsWithRetryGuidance(
+    invalidButtonEnumAndUndefined,
+    /variant: Invalid option/,
+    "invalid enum values and observed Button disabled: undefined input must throw with retry guidance",
+  );
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

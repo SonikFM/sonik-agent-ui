@@ -5,6 +5,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { countRelevantPipeBLines, extractPipeBToolEvents, hasEventName, hasTelemetryEvent } from './lib/booking-pipeb-evidence.mjs';
+import { inspectReservationCommitBody } from './lib/agent-ui-smoke-receipts.mjs';
 
 const defaultAgentOrigin = process.env.AGENT_UI_BASE_URL ?? 'https://sonik-agent-ui.liam-trampota.workers.dev';
 const useFakeHost = process.env.AGENT_UI_BOOKING_RESERVATION_USE_FAKE_HOST === '1';
@@ -328,7 +329,14 @@ try {
   }, { timeout: 120000 });
   await approvalButton.click();
   const commitResponse = await commitResponsePromise;
-  evidence.reservationCommitResponse = { status: commitResponse.status(), ok: commitResponse.status() < 400 };
+  const commitBody = await commitResponse.json().catch(() => null);
+  const commitInspection = inspectReservationCommitBody(commitBody);
+  evidence.reservationCommitResponse = {
+    status: commitResponse.status(),
+    transportOk: commitResponse.status() < 400,
+    logicalOk: commitInspection.logicalOk,
+    body: commitInspection,
+  };
   await frame.waitForFunction(() => document.body.innerText.includes('Reservation created') || document.body.innerText.includes('Reservation booking failed'), undefined, { timeout: 60000 }).catch(() => undefined);
   await sleep(8000);
   const after = await frame.evaluate(() => ({ context: window.__sonikAgentUI.getPageContext(), assertions: window.__sonikAgentUI.getAssertions(), text: document.body.innerText.slice(0, 16000) }));
@@ -394,7 +402,12 @@ ${pipeText}`;
     backendEndpointEvidence,
     transcriptSkillWorkflowEvidence,
     transcriptReceiptEvidence,
-    bookingReceiptId: extractBookingReceiptId(after.text),
+    bookingReceiptId: commitInspection.bookingReceiptId ?? extractBookingReceiptId(after.text),
+    reservationCommitBodyOk: commitInspection.ok,
+    reservationCommitGuestId: commitInspection.guestId,
+    reservationCommitGuestReceiptOk: commitInspection.guestReceiptOk,
+    reservationCommitBookingReceiptOk: commitInspection.bookingReceiptOk,
+    reservationCommitLogicalOk: commitInspection.logicalOk,
   };
   evidence.checks = {
     loginOk: useFakeHost || evidence.loginStatus < 400,
@@ -410,6 +423,7 @@ ${pipeText}`;
     mentionsAvailability: /booking\.get\.availability|get availability|availability/i.test(responseText),
     mentionsGuestCreate: /booking\.create\.guest|create guest|created guest/i.test(responseText),
     mentionsBookingCreate: /booking\.create\.booking|create booking|created booking|reservation/i.test(responseText),
+    reservationCommitLogicalOk: commitInspection.logicalOk === true,
     skillWorkflowEvidence: (evidence.pipeB.requiredEvidence.skillIndexContextOk === true
       && evidence.pipeB.requiredEvidence.skillSearchOk === true
       && evidence.pipeB.requiredEvidence.skillLearnOk === true)

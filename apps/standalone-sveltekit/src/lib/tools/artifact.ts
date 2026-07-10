@@ -112,6 +112,11 @@ function parseStringifiedSpecForExecution(value: unknown): unknown {
 }
 
 const createJsonArtifactSpecInputSchema = z.unknown().describe("Complete json-render flat spec object, or JSON-stringified spec object. The tool accepts flexible model input but execute strictly parses and validates against the renderer catalog before promotion.");
+const JSON_ARTIFACT_RETRY_GUIDANCE = "Retry once changing only invalid fields: omit optional undefined props; use exact allowed enum values; preserve intended elements/content/actions.";
+
+function invalidJsonArtifactSpecError(message: string): Error {
+  return new Error(`Invalid JSON-render artifact spec: ${message}. ${JSON_ARTIFACT_RETRY_GUIDANCE}`);
+}
 
 /**
  * Agent-facing canvas creation seam.
@@ -129,10 +134,10 @@ export const createJsonArtifact = tool({
   execute: async ({ title, spec }) => {
     const parsedSpec = parseStringifiedSpecForExecution(spec);
     // Tool `execute` only runs once the AI SDK has resolved the full tool
-    // input (never on a still-streaming `input-streaming` part), so the spec
-    // here is always complete: it is always safe to attempt the terminal
-    // (lossy-if-needed) repair pass before rejecting.
-    const repairAttempt = repairSpec(parsedSpec, { streamComplete: true });
+    // input (never on a still-streaming `input-streaming` part), but this
+    // agent-facing creation seam must not silently prune/promote intended
+    // elements. Apply only lossless normalization before rejecting.
+    const repairAttempt = repairSpec(parsedSpec, { streamComplete: true, allowLossy: false });
     if (repairAttempt?.repaired) {
       logArtifactTelemetry({
         source: "server",
@@ -155,7 +160,7 @@ export const createJsonArtifact = tool({
         ok: false,
         error: message,
       });
-      throw new Error(`Invalid JSON-render artifact spec: ${message}`);
+      throw invalidJsonArtifactSpecError(message);
     }
     const normalized = normalizeJsonArtifactSpec(strictSpec.data, title);
     if (normalized.recovered) {
@@ -168,7 +173,7 @@ export const createJsonArtifact = tool({
         ok: false,
         error: `Invalid JSON-render artifact spec: ${normalized.reason ?? "invalid_spec"}`,
       });
-      throw new Error(`Invalid JSON-render artifact spec: ${normalized.reason ?? "invalid_spec"}. createJsonArtifact requires root: "main" and a non-empty elements map containing elements.main.`);
+      throw invalidJsonArtifactSpecError(`${normalized.reason ?? "invalid_spec"}. createJsonArtifact requires root: "main" and a non-empty elements map containing elements.main.`);
     }
 
     const structural = validateSpec(normalized.spec);
@@ -187,7 +192,7 @@ export const createJsonArtifact = tool({
         ok: false,
         error: message,
       });
-      throw new Error(`Invalid JSON-render artifact spec: ${message}`);
+      throw invalidJsonArtifactSpecError(message);
     }
 
     logArtifactTelemetry({

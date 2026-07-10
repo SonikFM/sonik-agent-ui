@@ -28,11 +28,48 @@ import { validateSpec } from "../../packages/core/dist/index.mjs";
   assert.equal("visible" in result.spec.elements.root.props, false, "visible should be removed from props");
 }
 
+// (a2) Otherwise-valid specs still need the lossless pass: optional props
+// emitted as own undefined keys should be omitted before promotion, while
+// meaningful false/0/empty/null values must survive.
+{
+  const spec = {
+    root: "root",
+    elements: {
+      root: {
+        type: "Metric",
+        props: {
+          label: "Revenue",
+          value: "0",
+          detail: undefined,
+          trend: undefined,
+          showDelta: false,
+          count: 0,
+          note: "",
+          nullable: null,
+        },
+        children: [],
+      },
+    },
+  };
+  assert.equal(validateSpec(spec).valid, true, "fixture should start structurally valid");
+
+  const result = repairSpec(spec, { streamComplete: true, allowLossy: false });
+  assert.ok(result, "repair should attempt on a spec-shaped candidate");
+  assert.equal(result.validation.valid, true, "spec should remain valid after lossless normalization");
+  assert.equal(result.repaired, true, "lossless undefined prop removal should be reported");
+  assert.equal(result.lossy, false, "undefined prop removal must not be lossy");
+  const props = result.spec.elements.root.props;
+  assert.equal(Object.prototype.hasOwnProperty.call(props, "detail"), false, "undefined optional detail should be omitted");
+  assert.equal(Object.prototype.hasOwnProperty.call(props, "trend"), false, "undefined optional trend should be omitted");
+  assert.equal(props.showDelta, false, "false values should survive normalization");
+  assert.equal(props.count, 0, "zero values should survive normalization");
+  assert.equal(props.note, "", "empty strings should survive normalization");
+  assert.equal(props.nullable, null, "null values should survive normalization");
+}
+
 // (b) Dangling children: only fixable once lossy pruning is allowed. A
-// lossless-only attempt (streamComplete: false skips the loop entirely per
-// the mid-stream gate, so this exercises the terminal path explicitly) must
-// leave the dangling reference in place; the terminal (streamComplete: true)
-// pass prunes it.
+// lossless-only terminal attempt must leave the dangling reference in place;
+// the default terminal pass still prunes it for existing intake/runtime callers.
 {
   const spec = {
     root: "root",
@@ -43,12 +80,19 @@ import { validateSpec } from "../../packages/core/dist/index.mjs";
   };
   assert.equal(validateSpec(spec).valid, false, "fixture should start invalid (missing_child)");
 
+  const losslessOnly = repairSpec(spec, { streamComplete: true, allowLossy: false });
+  assert.ok(losslessOnly, "repair should attempt on a spec-shaped candidate");
+  assert.equal(losslessOnly.repaired, false, "lossless-only repair must not prune dangling children");
+  assert.equal(losslessOnly.lossy, false, "lossless-only repair must not report lossy fixes");
+  assert.equal(losslessOnly.validation.valid, false, "dangling child should remain invalid without lossy repair");
+  assert.deepEqual(losslessOnly.spec.elements.root.children, ["text", "ghost"], "dangling child should remain for caller error handling");
+
   const terminal = repairSpec(spec, { streamComplete: true });
   assert.ok(terminal, "repair should attempt on a spec-shaped candidate");
-  assert.equal(terminal.repaired, true, "lossy fix should be applied on the terminal attempt");
+  assert.equal(terminal.repaired, true, "lossy fix should be applied by default on the terminal attempt");
   assert.equal(terminal.lossy, true, "pruning a dangling child is a lossy fix");
   assert.equal(terminal.validation.valid, true, "spec should validate cleanly after lossy repair");
-  assert.deepEqual(terminal.spec.elements.root.children, ["text"], "dangling child should be pruned");
+  assert.deepEqual(terminal.spec.elements.root.children, ["text"], "dangling child should be pruned by default");
 }
 
 // (c) Unrepairable garbage: a repeat container with only a dangling child

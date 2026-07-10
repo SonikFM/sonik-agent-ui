@@ -3474,14 +3474,14 @@
       appendIntakeCommitReceiptMessage(receipt);
       logArtifactTelemetry({
         source: "client",
-        event: "intake.commit_endpoint.completed",
+        event: receipt.ok === true ? "intake.commit_endpoint.completed" : "intake.commit_endpoint.error",
         sessionId: activeSessionId ?? undefined,
         artifactId: artifact.id,
         artifactVersion: artifact.version,
         toolCallId: receipt.command?.commandId,
         ok: receipt.ok === true,
       });
-      return true;
+      return receipt.ok === true;
     } catch (error) {
       logArtifactTelemetry({
         source: "client",
