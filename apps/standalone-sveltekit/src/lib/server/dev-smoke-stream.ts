@@ -18,6 +18,8 @@ export const DEV_SMOKE_ARTIFACT_INPUT_SCENARIO = "artifact-input-stream";
  *  so the E2E lane can drive today's "recoverable tool failure renders as a scary
  *  red block" presentation (R2 / Slice C target). */
 export const DEV_SMOKE_TOOL_FAILURE_SCENARIO = "tool-failure-stream";
+export const DEV_SMOKE_DOCUMENT_INTENT_SCENARIO = "document-intent-stream";
+export const DEV_SMOKE_DOCUMENT_FAILURE_SCENARIO = "document-failure-stream";
 
 export interface DevSmokeStreamInput {
   requestId: string;
@@ -85,6 +87,10 @@ export function createDevSmokeStream(input: DevSmokeStreamInput): ReadableStream
     ? createDevSmokeArtifactInputStream()
     : input.scenario === DEV_SMOKE_TOOL_FAILURE_SCENARIO
     ? createDevSmokeToolFailureStream()
+    : input.scenario === DEV_SMOKE_DOCUMENT_INTENT_SCENARIO
+    ? createDevSmokeDocumentIntentStream()
+    : input.scenario === DEV_SMOKE_DOCUMENT_FAILURE_SCENARIO
+    ? createDevSmokeDocumentFailureStream()
     : createUIMessageStream({
         execute: async ({ writer }) => {
           const id = "smoke-text";
@@ -212,6 +218,69 @@ function createDevSmokeToolFailureStream(): ReadableStream<UIMessageChunk> {
       await sleep(50);
       writer.write({ type: "tool-output-error", toolCallId, errorText: "dev smoke injected tool failure" });
       await sleep(DEV_SMOKE_TOOL_FAILURE_STREAM_HOLD_MS);
+    },
+    onError: (error) => error instanceof Error ? error.message : String(error),
+  });
+}
+
+const DEV_SMOKE_DOCUMENT_OUTPUT = {
+  kind: "document-artifact",
+  action: "create",
+  document: {
+    id: "smoke-document-1",
+    session_id: "smoke-session",
+    title: "Transcript HTML Document",
+    language: "html",
+    current_content: "<article><h1>Transcript HTML Document</h1><p>Created from explicit document intent.</p></article>",
+    version_count: 1,
+    is_active: true,
+    archived: false,
+    created_at: "2026-07-10T00:00:00.000Z",
+    updated_at: "2026-07-10T00:00:00.000Z",
+  },
+  artifactId: "smoke-document-artifact-1",
+  preferredView: "preview",
+} as const;
+
+function createDevSmokeDocumentIntentStream(): ReadableStream<UIMessageChunk> {
+  const toolCallId = "smoke-document-1";
+  return createUIMessageStream({
+    execute: async ({ writer }) => {
+      const textId = "smoke-document-preamble";
+      writer.write({ type: "text-start", id: textId });
+      writer.write({ type: "text-delta", id: textId, delta: "Creating your workspace document…" });
+      writer.write({ type: "text-end", id: textId });
+      writer.write({ type: "tool-input-start", toolCallId, toolName: "createDocumentArtifact" });
+      writer.write({
+        type: "tool-input-available",
+        toolCallId,
+        toolName: "createDocumentArtifact",
+        input: { title: DEV_SMOKE_DOCUMENT_OUTPUT.document.title, language: "html", content: DEV_SMOKE_DOCUMENT_OUTPUT.document.current_content, preferredView: "preview" },
+      });
+      await sleep(50);
+      writer.write({ type: "tool-output-available", toolCallId, output: DEV_SMOKE_DOCUMENT_OUTPUT });
+    },
+    onError: (error) => error instanceof Error ? error.message : String(error),
+  });
+}
+
+function createDevSmokeDocumentFailureStream(): ReadableStream<UIMessageChunk> {
+  const toolCallId = "smoke-document-failure-1";
+  return createUIMessageStream({
+    execute: async ({ writer }) => {
+      const textId = "smoke-document-failure-preamble";
+      writer.write({ type: "text-start", id: textId });
+      writer.write({ type: "text-delta", id: textId, delta: "Creating your workspace document…" });
+      writer.write({ type: "text-end", id: textId });
+      writer.write({ type: "tool-input-start", toolCallId, toolName: "createDocumentArtifact" });
+      writer.write({
+        type: "tool-input-available",
+        toolCallId,
+        toolName: "createDocumentArtifact",
+        input: { title: "Broken document", language: "html", content: "<p>broken</p>", preferredView: "preview" },
+      });
+      await sleep(50);
+      writer.write({ type: "tool-output-error", toolCallId, errorText: "dev smoke injected document failure. Retry the document request." });
     },
     onError: (error) => error instanceof Error ? error.message : String(error),
   });
