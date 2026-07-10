@@ -28,9 +28,14 @@ const evidencePath = path.join(repoRoot, ".omx", "logs", `${runId}.json`);
 const children = [];
 const evidence = { schemaVersion: "sonik.agent_ui.run_reattach.v1", runId, sessionId, baseUrl, status: "INCONCLUSIVE", steps: [], errors: [] };
 
+const SMOKE_PERSISTENCE_HEADERS = {
+  "x-sonik-agent-ui-smoke-persistence-mode": "memory",
+};
+
 const SMOKE_HEADERS = {
   "content-type": "application/json",
   "x-sonik-agent-ui-smoke-stream": "true",
+  ...SMOKE_PERSISTENCE_HEADERS,
 };
 
 function step(name, detail = {}) {
@@ -127,7 +132,7 @@ async function postGenerate({ text, fail, sessionId: targetSessionId = sessionId
 }
 
 async function getSession(targetSessionId = sessionId) {
-  const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(targetSessionId)}`);
+  const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(targetSessionId)}`, { headers: SMOKE_PERSISTENCE_HEADERS });
   if (!response.ok) return null;
   return response.json();
 }

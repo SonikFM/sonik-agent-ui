@@ -4,6 +4,7 @@ import {
   DEPLOYMENT_METADATA_HEADERS,
   resolveDeploymentMetadata,
 } from "../../apps/standalone-sveltekit/src/lib/server/deployment-metadata.ts";
+import { GET as versionGET } from "../../apps/standalone-sveltekit/src/routes/api/version/+server.ts";
 
 assert.equal(resolveDeploymentMetadata(undefined), null, "local/non-Cloudflare requests should not expose deployment metadata");
 assert.equal(resolveDeploymentMetadata({ env: {} }), null, "missing binding should return null");
@@ -107,5 +108,41 @@ assert.deepEqual(headers, {
 });
 assert.equal(Object.values(headers).some((value) => value.includes("must-not-leak")), false, "non-version metadata must not leak into headers");
 assert.deepEqual(createDeploymentMetadataHeaders(null), {}, "no binding means no deployment headers");
+
+// --- /api/version exposes only bounded gate-compatible metadata ------------
+{
+  const response = await versionGET({
+    platform: {
+      env: {
+        CF_VERSION_METADATA: {
+          id: "version-abc",
+          tag: "354346e8b61b41e3acb2b140d2fd1e062667b8f4",
+          timestamp: "2026-07-10T03:00:00Z",
+          accountId: "must-not-leak",
+          workerName: "must-not-leak",
+        },
+        SECRET: "must-not-leak",
+      },
+    },
+  });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body).sort(), ["id", "tag", "timestamp", "version"].sort());
+  assert.deepEqual(body, {
+    version: "354346e8b61b41e3acb2b140d2fd1e062667b8f4",
+    id: "version-abc",
+    tag: "354346e8b61b41e3acb2b140d2fd1e062667b8f4",
+    timestamp: "2026-07-10T03:00:00Z",
+  });
+  assert.equal(JSON.stringify(body).includes("must-not-leak"), false, "version endpoint does not expose raw env or non-allowlisted metadata");
+  assert.equal(response.headers.get(DEPLOYMENT_METADATA_HEADERS.id), "version-abc");
+  assert.equal(response.headers.get(DEPLOYMENT_METADATA_HEADERS.tag), "354346e8b61b41e3acb2b140d2fd1e062667b8f4");
+}
+
+{
+  const response = await versionGET({ platform: { env: {} } });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { version: null, id: null, tag: null, timestamp: null });
+}
 
 console.log("deployment-metadata tests passed");

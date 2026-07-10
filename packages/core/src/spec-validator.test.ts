@@ -322,6 +322,49 @@ describe("autoFixSpec", () => {
     expect(fixes).toEqual([]);
   });
 
+  it("losslessly removes only own direct props entries that are exactly undefined", () => {
+    const nested = { keep: undefined };
+    const spec: Spec = {
+      root: "root",
+      elements: {
+        root: {
+          type: "Button",
+          props: {
+            label: "Save",
+            disabled: undefined,
+            nullable: null,
+            falsy: false,
+            zero: 0,
+            empty: "",
+            nested,
+          },
+          children: [],
+        },
+      },
+    };
+
+    const { spec: fixed, fixes, fixDetails } = autoFixSpec(spec, {
+      lossy: false,
+    });
+    const props = fixed.elements.root!.props as Record<string, unknown>;
+
+    expect(Object.prototype.hasOwnProperty.call(props, "disabled")).toBe(false);
+    expect(props.nullable).toBeNull();
+    expect(props.falsy).toBe(false);
+    expect(props.zero).toBe(0);
+    expect(props.empty).toBe("");
+    expect(props.nested).toBe(nested);
+    expect(fixes).toEqual([
+      'Removed undefined prop "disabled" from props of "root".',
+    ]);
+    expect(fixDetails).toEqual([
+      {
+        message: 'Removed undefined prop "disabled" from props of "root".',
+        lossy: false,
+      },
+    ]);
+  });
+
   it("does not prune a repeat container down to zero children", () => {
     const spec: Spec = {
       root: "list",

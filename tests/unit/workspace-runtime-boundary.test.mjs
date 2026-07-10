@@ -67,6 +67,24 @@ const localSmokeDiagnostics = resolveWorkspaceRuntimeDiagnostics({
 });
 assert.equal(localSmokeDiagnostics.policy, "auto", "localhost smoke persistence override should make embedded release gates deterministic without a live DB");
 assert.equal(localSmokeDiagnostics.mode, "memory", "localhost smoke persistence override should fall back to memory when cloud DB is absent");
+
+const reattachSmokeSource = await readFile("scripts/agent-ui-run-reattach-smoke.mjs", "utf8");
+assert.match(
+  reattachSmokeSource,
+  /const SMOKE_PERSISTENCE_HEADERS = \{[\s\S]*"x-sonik-agent-ui-smoke-persistence-mode": "memory"[\s\S]*\};/,
+  "run-reattach smoke must define the local memory persistence override once",
+);
+assert.match(
+  reattachSmokeSource,
+  /const SMOKE_HEADERS = \{[\s\S]*\.\.\.SMOKE_PERSISTENCE_HEADERS[\s\S]*\};/,
+  "run-reattach POST generate headers must include the local persistence override",
+);
+assert.match(
+  reattachSmokeSource,
+  /fetch\(`\$\{baseUrl\}\/api\/session\/\$\{encodeURIComponent\(targetSessionId\)\}`, \{ headers: SMOKE_PERSISTENCE_HEADERS \}\)/,
+  "run-reattach GET session polling must include the same local persistence override",
+);
+
 const remoteSmokeDiagnostics = resolveWorkspaceRuntimeDiagnostics({
   platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "cloud" } },
   request: new Request("https://agent.example/api/session", { headers: { "x-sonik-agent-ui-smoke-persistence-mode": "auto" } }),

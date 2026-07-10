@@ -10,13 +10,19 @@ pnpm gate:agent-ui
 ```
 
 The gate always runs every check and reports each as **PASS**, **FAIL**, or
-**SKIPPED**. A check that needs infrastructure or env it was not given reports
-**SKIPPED with a reason** — it is never silently passed. The process exits
-non-zero if any check **FAILS**; skips do not fail the gate. A JSON evidence file
-is written to `.omx/logs/agent-ui-release-gate-<timestamp>.json`.
+**SKIPPED**. Required production checks fail closed when their real-host
+credentials or parity metadata are missing. The process exits non-zero if any
+check **FAILS**; explicit skips do not fail the gate. A JSON evidence file is
+written to `.omx/logs/agent-ui-release-gate-<timestamp>.json`.
 
-Run it with no extra env ("no-live-infra mode") to exercise the local checks and
-see every deploy-time check report SKIPPED with the env it needs.
+For local-only development runs, use the explicit waiver path:
+
+```bash
+AGENT_UI_GATE_SKIP=booking-pipeb-context,booking-pipeb-document,booking-pipeb-reservation,commit-parity-agent-ui,commit-parity-booking-app,commit-parity-booking-service \
+  pnpm gate:agent-ui
+```
+
+Do not add ad-hoc bypass flags; `AGENT_UI_GATE_SKIP` is the audited waiver list.
 
 ### Local prerequisites
 
@@ -38,12 +44,13 @@ gate when neither is available (each is then reported as an explicit SKIP).
 | `unit` | local | `pnpm test` unit suite passes | always |
 | `embed-smoke` | local | Embedded host-context flow works against a locally-spawned dev server (mock stream) | always |
 | `run-reattach-smoke` | local | An interrupted run persists, reattaches from its event log, and Continue completes a new run (Phase 1) | always |
-| `booking-pipeb-document` | live | Deployed booking app + Agent UI worker create/update a document with host context, proven via Pipe-B | `TEST_EMAIL` + `TEST_PASSWORD` set |
-| `booking-pipeb-reservation` | live | Deployed reservation command flow works end-to-end via Pipe-B | `TEST_EMAIL` + `TEST_PASSWORD` set (or `AGENT_UI_BOOKING_RESERVATION_USE_FAKE_HOST=1`) |
+| `booking-pipeb-context` | live | Deployed booking app + Agent UI worker load the booking context via Pipe-B | `TEST_EMAIL` + `TEST_PASSWORD` required; missing creds FAIL unless explicitly skipped |
+| `booking-pipeb-document` | live | Deployed booking app + Agent UI worker create/update a document with host context, proven via Pipe-B | `TEST_EMAIL` + `TEST_PASSWORD` required; missing creds FAIL unless explicitly skipped |
+| `booking-pipeb-reservation` | live | Deployed reservation command flow works end-to-end via Pipe-B | `TEST_EMAIL` + `TEST_PASSWORD` required; missing creds FAIL unless explicitly skipped |
 | `migrations` | live | Postgres migrations (incl. 0003 run lifecycle / 0004 run context) are applied or up-to-date | `DATABASE_URL` set |
-| `commit-parity-agent-ui` | deploy | Deployed Agent UI worker is the expected commit (no stale deploy) | `AGENT_UI_GATE_AGENT_UI_URL` + `AGENT_UI_GATE_AGENT_UI_SHA` set |
-| `commit-parity-booking-app` | deploy | Deployed booking app is the expected commit | `AGENT_UI_GATE_BOOKING_APP_URL` + `AGENT_UI_GATE_BOOKING_APP_SHA` set |
-| `commit-parity-booking-service` | deploy | Deployed booking service is the expected commit | `AGENT_UI_GATE_BOOKING_SERVICE_URL` + `AGENT_UI_GATE_BOOKING_SERVICE_SHA` set |
+| `commit-parity-agent-ui` | deploy | Deployed Agent UI worker is the expected commit (no stale deploy) | `AGENT_UI_GATE_AGENT_UI_URL` + `AGENT_UI_GATE_AGENT_UI_SHA` required; missing values FAIL unless explicitly skipped |
+| `commit-parity-booking-app` | deploy | Deployed booking app is the expected commit | `AGENT_UI_GATE_BOOKING_APP_URL` + `AGENT_UI_GATE_BOOKING_APP_SHA` required; missing values FAIL unless explicitly skipped |
+| `commit-parity-booking-service` | deploy | Deployed booking service is the expected commit | `AGENT_UI_GATE_BOOKING_SERVICE_URL` + `AGENT_UI_GATE_BOOKING_SERVICE_SHA` required; missing values FAIL unless explicitly skipped |
 | `host-context-secret` | deploy | The shared host-context secret is present (never prints the value) | reports presence; SKIPPED when the secret is not exported |
 | `run-persistence-target` | live | Run persistence + reattach works against a deployed environment | `AGENT_UI_GATE_TARGET_BASE_URL` set |
 
@@ -55,9 +62,9 @@ gate when neither is available (each is then reported as an explicit SKIP).
 |---|---|
 | `DATABASE_URL` | Postgres URL for the `migrations` check. |
 | `AGENT_UI_GATE_APPLY_MIGRATIONS=1` | Apply pending migrations (`pnpm db:migrate`) instead of verify-only (`pnpm db:migrate:dry-run`). |
-| `TEST_EMAIL` / `TEST_PASSWORD` | Credentials for the booking Pipe-B smokes. |
+| `TEST_EMAIL` / `TEST_PASSWORD` | Required credentials for the real deployed booking-host Pipe-B smokes (`context`, `document`, `reservation`). Missing values are FAIL by default. |
 | `BOOKING_URL` | Deployed booking app origin for the Pipe-B smokes (defaults to the Pipe-B workers.dev host). |
-| `AGENT_UI_BOOKING_RESERVATION_USE_FAKE_HOST=1` | Run the reservation smoke against the Agent UI's fake host without booking-app creds. |
+| `AGENT_UI_BOOKING_RESERVATION_USE_FAKE_HOST=1` | Manual reservation smoke mode only. It can be used with `pnpm smoke:agent-ui:booking-pipeb:reservation`, but it does **not** satisfy the production release gate. |
 | `AGENT_UI_GATE_AGENT_UI_URL` / `_SHA` | Version endpoint + expected commit sha for the Agent UI worker parity check. |
 | `AGENT_UI_GATE_BOOKING_APP_URL` / `_SHA` | Version endpoint + expected sha for the booking app parity check. |
 | `AGENT_UI_GATE_BOOKING_SERVICE_URL` / `_SHA` | Version endpoint + expected sha for the booking service parity check. |
@@ -68,11 +75,27 @@ gate when neither is available (each is then reported as an explicit SKIP).
 
 ### Deployed-commit parity
 
+Deploy the Agent UI worker with the git SHA as the Cloudflare version tag:
+
+```bash
+pnpm --filter svelte-chat deploy:cloudflare -- --tag "$(git rev-parse HEAD)"
+# equivalent from the app directory:
+# wrangler deploy --tag "$(git rev-parse HEAD)"
+```
+
+Cloudflare exposes the Worker version metadata through the configured
+`CF_VERSION_METADATA` binding. The Agent UI `/api/version` endpoint returns only
+`{ version, id, tag, timestamp }`, where `version` is `tag ?? id ?? null`, and
+sets `Cache-Control: no-store`. Point `AGENT_UI_GATE_AGENT_UI_URL` at that
+endpoint and set `AGENT_UI_GATE_AGENT_UI_SHA` to the same `git rev-parse HEAD`
+value used for `--tag`.
+
 Each parity check fetches the given URL and looks for a commit sha in a response
 header (`x-commit-sha` / `x-git-sha` / `x-version` / …) or a JSON body field
 (`commit` / `sha` / `gitSha` / `version` / …), then compares it to the expected
 sha (prefix match, so short shas work). A mismatch is a FAIL; a missing sha at
-the URL is a FAIL; missing env is a SKIP.
+the URL is a FAIL; missing URL/SHA env is a FAIL unless the check is explicitly
+waived through `AGENT_UI_GATE_SKIP`.
 
 ## Example: full deploy signoff
 
@@ -82,6 +105,10 @@ AGENT_UI_GATE_APPLY_MIGRATIONS=1 \
 TEST_EMAIL='…' TEST_PASSWORD='…' \
 AGENT_UI_GATE_AGENT_UI_URL='https://sonik-agent-ui.example.workers.dev/api/version' \
 AGENT_UI_GATE_AGENT_UI_SHA="$(git rev-parse HEAD)" \
+AGENT_UI_GATE_BOOKING_APP_URL='https://booking.example.workers.dev/api/version' \
+AGENT_UI_GATE_BOOKING_APP_SHA='…' \
+AGENT_UI_GATE_BOOKING_SERVICE_URL='https://booking-service.example.workers.dev/api/version' \
+AGENT_UI_GATE_BOOKING_SERVICE_SHA='…' \
 SONIK_AGENT_UI_HOST_CONTEXT_SECRET='…' \
 AGENT_UI_GATE_TARGET_BASE_URL='https://sonik-agent-ui.example.workers.dev' \
 pnpm gate:agent-ui
