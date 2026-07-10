@@ -53,6 +53,18 @@ jobs:
       - name: Embedded Agent UI smoke
         run: pnpm smoke:agent-ui:embed
 
+      - name: Wait for embedded smoke server teardown
+        shell: bash
+        run: |
+          for _ in {1..20}; do
+            if ! curl --fail --silent http://localhost:5173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Embedded smoke dev server did not stop"
+          exit 1
+
       - name: Run persistence and reattach smoke
         run: pnpm smoke:agent-ui:run-reattach
 
