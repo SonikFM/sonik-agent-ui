@@ -8,12 +8,14 @@ import { readFile } from "node:fs/promises";
 // intake-commit-endpoint.test.mjs (the route module itself imports $env/$lib/./$types, which don't
 // resolve under plain node, so the route is source-pinned rather than invoked).
 
-const [reservationCommitModule, hostCommandRuntimeModule] = await Promise.all([
+const [reservationCommitModule, hostCommandRuntimeModule, bookingRuntimeTransportModule] = await Promise.all([
   import("../../apps/standalone-sveltekit/src/lib/server/booking-workflows/reservation-commit.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/host-command-runtime.ts"),
+  import("../../apps/standalone-sveltekit/src/lib/server/booking-runtime-transport.ts"),
 ]);
 const { commitBookingReservationCommand, extractCreatedGuestId } = reservationCommitModule;
 const { approvedCommandIdsFromHostSession } = hostCommandRuntimeModule;
+const { createServiceBindingFetcher } = bookingRuntimeTransportModule;
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "user_reservation_commit_test";
@@ -50,6 +52,7 @@ function makeFetcher() {
     calls.push({ url: String(url), method: init.method, body });
     if (String(url).endsWith("/api/v1/booking/guests") && init.method === "POST") {
       if (body?.name === "force-guest-500") return Response.json({ error: "forced" }, { status: 500 });
+      assert.equal("contactConfirmed" in body, false, "guest approval-only contactConfirmed is stripped before booking.create.guest");
       return Response.json({ id: GUEST_ID, name: body?.name, email: body?.email }, { status: 201 });
     }
     if (String(url).endsWith("/api/v1/booking/bookings") && init.method === "POST") {
@@ -75,7 +78,7 @@ function baseContext(fetcher, approvedCommandIds = ["booking.create.guest", "boo
   };
 }
 
-const guest = { name: "Dan", email: "dan@example.test" };
+const guest = { name: "Dan", email: "dan@sonik.com", contactConfirmed: true };
 const booking = { contextId: CONTEXT_ID, startsAt: "2026-07-01T20:00:00.000Z", endsAt: "2026-07-01T20:10:00.000Z", partySize: 3, source: "admin", clientRequestId: "reservation-commit-demo-001" };
 
 // 0. extractCreatedGuestId probes the common provider response shapes and rejects empties.
@@ -84,6 +87,24 @@ assert.equal(extractCreatedGuestId({ guestId: " g2 " }), "g2", "extractCreatedGu
 assert.equal(extractCreatedGuestId({ data: { userId: "g3" } }), "g3", "extractCreatedGuestId unwraps a data envelope");
 assert.equal(extractCreatedGuestId({ name: "no id" }), null, "extractCreatedGuestId returns null when no id field is present");
 assert.equal(extractCreatedGuestId(null), null, "extractCreatedGuestId tolerates a non-object summary");
+
+// 0b. Service-binding fetcher delegates directly to the platform binding with the same input/init.
+{
+  const binding = {
+    calls: [],
+    async fetch(input, init) {
+      this.calls.push({ input, init });
+      return new Response("binding-ok", { status: 202 });
+    },
+  };
+  const serviceBindingFetcher = createServiceBindingFetcher(binding);
+  assert.equal(typeof serviceBindingFetcher, "function", "service binding fetcher is created when binding.fetch is available");
+  const init = { method: "POST", body: "payload" };
+  const response = await serviceBindingFetcher("https://booking.example.test/ping", init);
+  assert.equal(response.status, 202);
+  assert.equal(await response.text(), "binding-ok");
+  assert.deepEqual(binding.calls, [{ input: "https://booking.example.test/ping", init }]);
+}
 
 // 1. Happy path: guest then booking, guest id threaded into the booking userId server-side.
 {
@@ -114,7 +135,7 @@ assert.equal(extractCreatedGuestId(null), null, "extractCreatedGuestId tolerates
 // 3. Guest creation fails -> booking never runs.
 {
   const { calls, fetcher } = makeFetcher();
-  const result = await commitBookingReservationCommand(baseContext(fetcher), { guest: { name: "force-guest-500", email: "x@example.test" }, booking });
+  const result = await commitBookingReservationCommand(baseContext(fetcher), { guest: { name: "force-guest-500", email: "x@sonik.com", contactConfirmed: true }, booking });
   assert.equal(result.ok, false, "a failed guest create fails the whole reservation");
   assert.equal(result.error, "guest_create_failed");
   assert.equal(result.steps.length, 1, "only the guest step is recorded");
@@ -142,6 +163,23 @@ assert.equal(extractCreatedGuestId(null), null, "extractCreatedGuestId tolerates
   assert.equal(result.ok, false, "an unapproved reservation commit is refused by command policy");
 }
 
+
+// 5b. Invalid guests are rejected before any runtime fetch is attempted.
+for (const [label, invalidGuest, expectedField] of [
+  ["missing contact", { name: "Dan", contactConfirmed: true }, "guest.email or guest.phone"],
+  ["placeholder contact", { name: "Dan", email: "dan@example.test", phone: "555-555-5555", contactConfirmed: true }, "guest.email or guest.phone"],
+  ["unconfirmed contact", { name: "Dan", email: "dan@sonik.com" }, "guest.contactConfirmed"],
+  ["placeholder name", { name: "Guest", email: "dan@sonik.com", contactConfirmed: true }, "guest.name"],
+]) {
+  const { calls, fetcher } = makeFetcher();
+  const result = await commitBookingReservationCommand(baseContext(fetcher), { guest: invalidGuest, booking });
+  assert.equal(result.ok, false, `${label} fails commit validation`);
+  assert.equal(result.error, "invalid_reservation_guest", `${label} returns typed validation error`);
+  assert.deepEqual(result.steps, [], `${label} records no runtime write steps`);
+  assert.ok(result.missingFields.includes(expectedField), `${label} reports ${expectedField}`);
+  assert.equal(calls.length, 0, `${label} must produce zero runtime fetches`);
+}
+
 // 6. approvedCommandIdsFromHostSession is the only grant source for the endpoint.
 assert.deepEqual(
   approvedCommandIdsFromHostSession(hostSession),
@@ -155,6 +193,8 @@ const routeSource = await readFile("apps/standalone-sveltekit/src/routes/api/res
 assert.ok(routeSource.includes("createAgentHostSessionEnvelope"), "route must reuse the shared trusted host-session resolver");
 assert.ok(routeSource.includes("approvedCommandIdsFromHostSession"), "route must reuse the shared approved-command-grant resolver");
 assert.ok(routeSource.includes("commitBookingReservationCommand"), "route must delegate to the shared reservation commit function");
+assert.ok(routeSource.includes("createRequestBookingRuntimeFetcher"), "route must create a request-scoped booking runtime fetcher");
+assert.ok(routeSource.includes("bookingRuntimeFetcher,"), "route must pass the booking runtime fetcher into the shared reservation commit function");
 assert.ok(routeSource.includes('error: "unauthenticated"'), "route must return a typed error for the missing-trusted-session branch");
 assert.ok(routeSource.includes("status: 401"), "route must fail closed with 401 when no trusted host session is present");
 assert.ok(routeSource.includes("userId: _discardedUserId"), "route must strip a client-provided booking userId before committing");

@@ -12,6 +12,7 @@ import { pipeJsonRender, pipeUiMessageStreamSafety, type Spec } from "@json-rend
 import { pipeArtifactToolOutputsToSpecParts } from "$lib/artifacts/artifact-stream";
 import { logArtifactTelemetry } from "$lib/artifacts/artifact-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
+import { createDeploymentMetadataHeaders, resolveDeploymentMetadata } from "$lib/server/deployment-metadata";
 import { createTelemetryCorrelation, sanitizePageContext } from "@sonik-agent-ui/agent-observability";
 import { classifyRunErrorCode, sanitizeAgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
 import {
@@ -21,6 +22,7 @@ import {
   type AgentRunContextSelection,
 } from "@sonik-agent-ui/tool-contracts/run-context";
 import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
+import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-transport";
 import { tapSpecStreamForTelemetry } from "$lib/server/spec-stream-tap-telemetry";
 import { createDevSmokeStream, readDevSmokeFailMode, readDevSmokeRunId, readDevSmokeScenario, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
 import { startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
@@ -29,7 +31,9 @@ import { resolveEffectiveContextDocument } from "$lib/server/run-context-documen
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
-import { resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
+import { isProductTourIntent, resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
+import { createCurrentPageContextSummary } from "$lib/page-context-summary";
+import { resolveWorkspaceDocumentIntent } from "$lib/document-intent";
 import { listPersistedQuestionIds } from "$lib/server/intake-artifacts";
 import {
   createBookingRuntimeAuthContextFromEnv,
@@ -38,7 +42,8 @@ import {
   createAgentHostSessionEnvelope,
   approvedCommandIdsFromHostSession,
 } from "$lib/server/host-command-runtime";
-import { AGENT_UI_HOST_CONTEXT_HEADER } from "$lib/server/workspace-services";
+import { AGENT_UI_HOST_CONTEXT_HEADER, resolveSignedTrustedOrganizationDisplayFromRequest } from "$lib/server/workspace-services";
+import { sanitizeAgentHostPageContext } from "@sonik-agent-ui/agent-embed";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import {
   couldStartWorkspaceSessionTitleMarker,
@@ -81,13 +86,6 @@ function resolveRequestSkillIds(input: { requestSkillIds: unknown; selectedSkill
 }
 
 
-function createServiceBindingFetcher(binding: unknown): typeof fetch | undefined {
-  if (!binding || typeof binding !== "object") return undefined;
-  const candidate = binding as { fetch?: typeof fetch };
-  if (typeof candidate.fetch !== "function") return undefined;
-  const bindingFetch = candidate.fetch.bind(candidate);
-  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => bindingFetch(input, init)) as typeof fetch;
-}
 
 function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: WorkspaceDocumentRecord | null } = {}): AgentPageContext | undefined {
   const record = typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -104,6 +102,7 @@ function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: Wo
     visibleActions: routeStringArray(record.visibleActions, "workspace.pageContext.visibleActions"),
     skillFamilies: routeStringArray(record.skillFamilies, "workspace.pageContext.skillFamilies"),
     commandFamilies: routeStringArray(record.commandFamilies, "workspace.pageContext.commandFamilies"),
+    ...resolveHostUiTargetContext(record),
   };
   if (!pageContext.activeDocumentId && defaults.activeDocument?.id) pageContext.activeDocumentId = defaults.activeDocument.id;
   if (!pageContext.artifactType && defaults.activeDocument?.language) pageContext.artifactType = defaults.activeDocument.language;
@@ -138,6 +137,17 @@ function applyRunContextSelectionToPageContext(
   return hasPageContext(next) ? next : undefined;
 }
 
+function resolveHostUiTargetContext(record: Record<string, unknown>): Pick<AgentPageContext, "hostUiTargets" | "hostUiTargetRegistry"> {
+  const sanitized = sanitizeAgentHostPageContext({
+    hostUiTargets: record.hostUiTargets,
+    hostUiTargetRegistry: record.hostUiTargetRegistry,
+  });
+  return {
+    ...(sanitized?.hostUiTargets ? { hostUiTargets: sanitized.hostUiTargets } : {}),
+    ...(sanitized?.hostUiTargetRegistry ? { hostUiTargetRegistry: sanitized.hostUiTargetRegistry } : {}),
+  };
+}
+
 function resolveActiveEntity(value: unknown): AgentPageContext["activeEntity"] | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -166,25 +176,10 @@ function hasPageContext(context: AgentPageContext): boolean {
     context.artifactType ||
     (context.visibleActions && context.visibleActions.length > 0) ||
     (context.skillFamilies && context.skillFamilies.length > 0) ||
-    (context.commandFamilies && context.commandFamilies.length > 0)
+    (context.commandFamilies && context.commandFamilies.length > 0) ||
+    (context.hostUiTargets && context.hostUiTargets.length > 0) ||
+    (context.hostUiTargetRegistry && context.hostUiTargetRegistry.targets.length > 0)
   );
-}
-
-function createCurrentPageContextSummary(context: AgentPageContext | undefined): string {
-  if (!context) return "";
-  const lines = ["CURRENT HOST/PAGE CONTEXT:"];
-  if (context.title) lines.push(`- title: ${context.title}`);
-  if (context.route) lines.push(`- route: ${context.route}`);
-  if (context.surface) lines.push(`- surface: ${context.surface}`);
-  if (context.pageType) lines.push(`- pageType: ${context.pageType}`);
-  if (context.activeEntity) {
-    lines.push(`- activeEntity: ${context.activeEntity.type} ${context.activeEntity.label ?? context.activeEntity.id} (${context.activeEntity.id})`);
-  }
-  if (context.commandFamilies?.length) lines.push(`- commandFamilies: ${context.commandFamilies.join(", ")}`);
-  if (context.skillFamilies?.length) lines.push(`- skillFamilies: ${context.skillFamilies.join(", ")}`);
-  if (context.visibleActions?.length) lines.push(`- visibleActions: ${context.visibleActions.join(", ")}`);
-  lines.push("If the user asks where they are, what page this is, or what context is attached, answer directly from this block. Do not create an artifact or dashboard unless the user explicitly asks for one.");
-  return lines.join("\n");
 }
 
 function createConversationTitleGenerationPrompt(input: { firstUserMessage: string; fallbackTitle: string }): string {
@@ -333,6 +328,42 @@ function createCorrelationHeaders(input: { requestId: string; traceId: string; t
   };
 }
 
+class MalformedJsonRequestError extends Error {
+  constructor(cause: unknown) {
+    super("Malformed JSON request");
+    this.name = "MalformedJsonRequestError";
+    this.cause = cause;
+  }
+}
+
+function resolveGenerateFailureStatus(error: unknown): number {
+  if (error instanceof MalformedJsonRequestError) return 400;
+  if ((typeof error === "object" || typeof error === "function") && error !== null && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    if (status === 400 || status === 413) return status;
+  }
+  return 500;
+}
+
+function createGenerateFailureResponse(input: {
+  error: unknown;
+  responseHeaders: Record<string, string>;
+  runRecorder?: RunRecorder | null;
+}): Response {
+  const status = resolveGenerateFailureStatus(input.error);
+  return new Response(
+    JSON.stringify({ error: status === 500 ? "Generation failed" : "Invalid request" }),
+    {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        ...input.responseHeaders,
+        ...(input.runRecorder ? { [AGENT_UI_RUN_ID_HEADER]: input.runRecorder.runId } : {}),
+      },
+    },
+  );
+}
+
 export const POST: RequestHandler = async (event) => {
   const { request } = event;
   const correlation = createTelemetryCorrelation({
@@ -341,6 +372,14 @@ export const POST: RequestHandler = async (event) => {
     traceparent: request.headers.get("traceparent"),
   });
   const correlationHeaders = createCorrelationHeaders(correlation);
+  const responseHeaders = {
+    ...correlationHeaders,
+    ...createDeploymentMetadataHeaders(resolveDeploymentMetadata(event.platform)),
+  };
+  const requestId = correlation.requestId;
+  const traceId = correlation.traceId;
+  const traceparent = correlation.traceparent;
+  const startedAt = Date.now();
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0] ?? "anonymous";
 
@@ -360,19 +399,19 @@ export const POST: RequestHandler = async (event) => {
       }),
       {
         status: 429,
-        headers: { "Content-Type": "application/json", ...correlationHeaders },
+        headers: { "Content-Type": "application/json", ...responseHeaders },
       },
     );
   }
 
-  const body = await request.json();
+  try {
+  const body = await request.json().catch((error) => {
+    throw new MalformedJsonRequestError(error);
+  });
   const uiMessages: UIMessage[] = body.messages;
+  const workspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
   const requestPersistence = getRequestWorkspacePersistence(event);
   const activeDocument = await resolveActiveDocumentForRequest(event, body?.workspace?.activeDocument);
-  const requestId = correlation.requestId;
-  const traceId = correlation.traceId;
-  const traceparent = correlation.traceparent;
-  const workspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
   const telemetrySessionId = activeDocument?.session_id ?? workspaceSessionId;
   const smokeRunId = readDevSmokeRunId(request);
   // Explicit composer context selection wins over implicit host/page context.
@@ -399,7 +438,7 @@ export const POST: RequestHandler = async (event) => {
   const telemetryPageContext = sanitizePageContext(body?.pageContext ?? body?.workspace?.pageContext);
   const pageContextSource = resolvePageContextSource(body, activeDocument);
   const bookingServiceBaseUrl = env.SONIK_BOOKING_API_BASE_URL ?? env.BOOKING_SERVICE_BASE_URL ?? null;
-  const bookingRuntimeFetcher = createServiceBindingFetcher(event.platform?.env?.BOOKING_SERVICE);
+  const bookingRuntimeFetcher = createRequestBookingRuntimeFetcher(event);
   const rawHostContextHeaderLength = request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER)?.length ?? 0;
   const bookingRuntimeAuth = createBookingRuntimeAuthContextFromTrustedHostHeader({
     header: request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER),
@@ -416,14 +455,13 @@ export const POST: RequestHandler = async (event) => {
   // telemetry analytics — never passed to createAgent, prompt composition, or
   // tool inputs. Absent/dropped hints reproduce today's behavior.
   const analyticsHints = sanitizeAgentAnalyticsHints(body?.analyticsHints ?? body?.workspace?.analyticsHints);
-  const startedAt = Date.now();
 
   if (!uiMessages || !Array.isArray(uiMessages) || uiMessages.length === 0) {
     return new Response(
       JSON.stringify({ error: "messages array is required" }),
       {
         status: 400,
-        headers: { "Content-Type": "application/json", ...correlationHeaders },
+        headers: { "Content-Type": "application/json", ...responseHeaders },
       },
     );
   }
@@ -452,22 +490,26 @@ export const POST: RequestHandler = async (event) => {
       activeArtifactIsRegisteredIntake = undefined;
     }
   }
+  const workspaceDocumentIntent = resolveWorkspaceDocumentIntent(latestUserMessage);
+  const productTourIntent = isProductTourIntent(latestUserMessage);
   const implicitSkillSelection = resolveImplicitWorkflowSkillSelection({ userMessage: latestUserMessage, pageContext, activeArtifactIsRegisteredIntake });
-  const implicitSkillIds = implicitSkillSelection.skillIds;
+  const implicitSkillIds = productTourIntent ? [] : implicitSkillSelection.skillIds;
   const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
-  const skillIds = resolveRequestSkillIds({
-    requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
-    selectedSkillFamilies: selectionResolution.skillFamilies,
-    implicitSkillIds,
-  });
+  const skillIds = productTourIntent
+    ? []
+    : resolveRequestSkillIds({
+        requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
+        selectedSkillFamilies: selectionResolution.skillFamilies,
+        implicitSkillIds,
+      });
   // Slice E toolset stability (2026-07-08): decide + telemetry the booking command-family mount
   // once here so createAgent (below) and this turn's churn telemetry agree on the same decision.
-  const commandFamilyDecision = resolveCommandFamilyMountDecision({ skillIds, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds });
+  const commandFamilyDecision = resolveCommandFamilyMountDecision({ skillIds, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, suppressCommandCatalog: productTourIntent });
   // Patch-first refinement contract (Phase 2.1): when the intake skill is active over an
   // already-active artifact, expose its current spec so the composed prompt can tell the model
   // to refine it via submitIntakeAnswer instead of regenerating it via createBookingIntakeArtifact.
   const currentIntakeArtifactSpec = hasBookingContextIntakeSkill(skillIds) ? activeIntakeArtifactSpec : null;
-  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec });
+  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, productTourIntent });
   const fallbackConversationTitle = firstUserMessage ? deriveWorkspaceSessionTitle(firstUserMessage) : "";
   const titleSession = workspaceSessionId ? await requestPersistence.getSession(workspaceSessionId).catch(() => null) : null;
   const titleGenerationEnabled = Boolean(
@@ -495,19 +537,28 @@ export const POST: RequestHandler = async (event) => {
 
   const modelMessages = await convertToModelMessages(uiMessages);
   const contextSummary = summarizeWorkspaceContext({ activeDocument: effectiveActiveDocument });
-  const commandIndexSummary = createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSession: hostSession ?? undefined, hostSessionMode: hostSession ? undefined : "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth });
-  const skillIndexSummary = createRuntimeSkillIndexSummary({
-    ...pageContext,
-    authenticated: hostSession?.authenticated,
-    organizationId: hostSession?.organizationId,
-    scopes: hostSession?.scopes,
-  });
-  const pageContextSummary = createCurrentPageContextSummary(pageContext);
+  const includeStartupIndexes = !productTourIntent;
+  const commandIndexSummary = includeStartupIndexes
+    ? createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSession: hostSession ?? undefined, hostSessionMode: hostSession ? undefined : "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth })
+    : "";
+  const skillIndexSummary = includeStartupIndexes
+    ? createRuntimeSkillIndexSummary({
+        ...pageContext,
+        authenticated: hostSession?.authenticated,
+        organizationId: hostSession?.organizationId,
+        scopes: hostSession?.scopes,
+      })
+    : "";
+  const trustedOrganizationDisplay = resolveSignedTrustedOrganizationDisplayFromRequest(event);
+  const pageContextSummary = createCurrentPageContextSummary({ context: pageContext, trustedOrganizationDisplay, productTourIntent });
   const conversationTitlePrompt = titleGenerationEnabled
     ? createConversationTitleGenerationPrompt({ firstUserMessage, fallbackTitle: fallbackConversationTitle })
     : "";
   const agentSettingsSummary = summarizeAgentRuntimeSettings(agentRuntimeSettings);
-  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, conversationTitlePrompt, `CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`].filter(Boolean).join("\n\n");
+  const startupIndexContext = includeStartupIndexes
+    ? [`CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`]
+    : [];
+  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;
@@ -520,7 +571,7 @@ export const POST: RequestHandler = async (event) => {
     runId: smokeRunId,
     sessionId: telemetrySessionId,
     messageId: lastMessage?.id,
-    elementCount: commandIndexSummary.split("\n- ").length - 1,
+    elementCount: commandIndexSummary ? commandIndexSummary.split("\n- ").length - 1 : 0,
     surface: pageContext?.surface,
     route: pageContext?.route,
     commandFamilies: pageContext?.commandFamilies,
@@ -544,6 +595,7 @@ export const POST: RequestHandler = async (event) => {
       // session's run sequence is queryable. Never influences behavior.
       analyticsHints: analyticsHints ?? null,
       agentSettings: agentRuntimeSettings,
+      workspaceDocumentIntent,
     },
     ok: true,
   }).catch(() => undefined);
@@ -569,7 +621,7 @@ export const POST: RequestHandler = async (event) => {
     runId: smokeRunId,
     sessionId: telemetrySessionId,
     messageId: lastMessage?.id,
-    elementCount: skillIndexSummary.split("\n- ").length - 1,
+    elementCount: skillIndexSummary ? skillIndexSummary.split("\n- ").length - 1 : 0,
     surface: pageContext?.surface,
     route: pageContext?.route,
     commandFamilies: pageContext?.commandFamilies,
@@ -619,12 +671,12 @@ export const POST: RequestHandler = async (event) => {
     const response = createUIMessageStreamResponse({
       stream: runRecorder ? teeRunEvents(titledSmokeStream, runRecorder) : titledSmokeStream,
     });
-    for (const [key, value] of Object.entries(correlationHeaders)) response.headers.set(key, value);
+    for (const [key, value] of Object.entries(responseHeaders)) response.headers.set(key, value);
     if (runRecorder) response.headers.set(AGENT_UI_RUN_ID_HEADER, runRecorder.runId);
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });
@@ -725,12 +777,12 @@ export const POST: RequestHandler = async (event) => {
           ok: false,
           error: message,
         }).catch(() => undefined);
-        return message;
+        return "Generation failed";
       },
     });
 
     const response = createUIMessageStreamResponse({ stream });
-    for (const [key, value] of Object.entries(correlationHeaders)) response.headers.set(key, value);
+    for (const [key, value] of Object.entries(responseHeaders)) response.headers.set(key, value);
     if (runRecorder) response.headers.set(AGENT_UI_RUN_ID_HEADER, runRecorder.runId);
     return response;
   } catch (error) {
@@ -749,7 +801,21 @@ export const POST: RequestHandler = async (event) => {
       ok: false,
       error: message,
     }).catch(() => undefined);
-    throw error;
+    return createGenerateFailureResponse({ error, responseHeaders, runRecorder });
+  }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    void writeAgentTelemetry({
+      source: "server",
+      event: "api.generate.error",
+      requestId,
+      traceId,
+      traceparent,
+      durationMs: Date.now() - startedAt,
+      ok: false,
+      error: message,
+    }).catch(() => undefined);
+    return createGenerateFailureResponse({ error, responseHeaders });
   }
 };
 

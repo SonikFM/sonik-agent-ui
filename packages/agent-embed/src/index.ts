@@ -534,7 +534,10 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
 
   const postContext = async () => {
     try {
-      const payload = sanitizeAgentHostPageContext(await getPageContext()) ?? {};
+      const payload = {
+        ...(sanitizeAgentHostPageContext(await getPageContext()) ?? {}),
+        ...(activeMode ? { mode: activeMode } : {}),
+      };
       const targetOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
       if (!targetOrigin) return;
       iframe.contentWindow?.postMessage(createAgentHostPageContextMessage(payload), targetOrigin);
@@ -548,11 +551,21 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   };
 
   const mountFrame = (slot: HTMLElement) => {
-    if (iframe.parentElement !== slot) slot.appendChild(iframe);
+    if (iframe.parentElement === slot) return;
+    const moveBefore = (slot as HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void }).moveBefore;
+    if (typeof moveBefore === "function") {
+      moveBefore.call(slot, iframe, null);
+      return;
+    }
+    slot.appendChild(iframe);
   };
 
   const setFrameMode = (mode: AgentEmbedMode) => {
-    const nextSrc = createAgentEmbedUrl({
+    if (iframe.getAttribute("src")) {
+      void postContext();
+      return;
+    }
+    iframe.src = createAgentEmbedUrl({
       agentUrl: options.agentUrl,
       mode,
       hostOrigin: options.hostOrigin ?? ownerWindow.location.origin,
@@ -560,8 +573,6 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
       smokeMockStream,
       smokeRunId,
     });
-    if (iframe.getAttribute("src") !== nextSrc) iframe.src = nextSrc;
-    else void postContext();
   };
 
   const setOpenState = (mode: AgentEmbedMode | null) => {

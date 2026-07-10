@@ -59,6 +59,36 @@ assert.equal(merged.activeEntity?.id, "booking_123", "merged context should incl
 assert.equal(merged.organizationId, "org-trusted", "trusted context should be appended explicitly");
 assert.deepEqual(merged.scopes, ["booking:read"], "trusted scopes should come from trusted context only");
 
+const spoofedSupportDiagnostics = {
+  route: "/hostile",
+  correlation: {
+    sessionId: "session-support",
+    messageId: "message-support",
+    requestId: "request-hostile",
+    traceId: "0123456789abcdef0123456789abcdef",
+    traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+    agentUiRunId: "run-hostile",
+    status: "success",
+    capturedAt: "2026-07-10T12:00:00.000Z",
+    rawHeaders: { cookie: "should-not-survive" },
+  },
+  deployment: {
+    id: "deployment-hostile",
+    tag: "release-hostile",
+    timestamp: "2026-07-10T11:59:00.000Z",
+    rawHeaders: { authorization: "Bearer should-not-survive" },
+  },
+};
+const sanitizedSpoofedSupportDiagnostics = sanitizeAgentHostPageContext(spoofedSupportDiagnostics);
+assert.equal(sanitizedSpoofedSupportDiagnostics?.correlation, undefined, "host-supplied correlation must be dropped");
+assert.equal(sanitizedSpoofedSupportDiagnostics?.deployment, undefined, "host-supplied deployment must be dropped");
+const mergedWithSpoofedSupportDiagnostics = mergeAgentHostPageContext(
+  { activeSessionId: "session-support" },
+  spoofedSupportDiagnostics,
+);
+assert.equal(mergedWithSpoofedSupportDiagnostics.correlation, undefined, "host merge must not accept spoofed correlation");
+assert.equal(mergedWithSpoofedSupportDiagnostics.deployment, undefined, "host merge must not accept spoofed deployment");
+
 // Regression: window.__sonikAgentUI.getPageContext() (the standalone route's createPageContextSnapshot)
 // always routes the local snapshot through mergeAgentHostPageContext/sanitizeAgentHostPageContext before
 // returning it, even with no embedding host present. The sanitizer's key allowlist previously omitted
@@ -327,13 +357,18 @@ assert.equal(controller.getMode(), "chat", "host controller should open and trac
 assert.equal(fakeBody.dataset.agentUiOpen, "chat", "controller should expose host body open mode");
 assert.equal(fakeSidecar.dataset.open, "true", "controller should open sidecar dataset state");
 assert.match(fakeIframe.src, /embedMode=chat/, "controller should set iframe src for chat mode");
+const chatFrameSrc = fakeIframe.src;
 await controller.postContext();
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.mode, "chat", "chat postContext should donate the current active mode");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.organizationId, "forged-org", "browser postMessage payload should carry sanitized host-asserted organization context");
 assert.deepEqual(fakeIframe.contentWindow.messages.at(-1).message.payload.scopes, ["admin:*"], "browser postMessage payload should carry sanitized host-asserted scopes");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.signature, "abc123_signature", "browser postMessage payload should preserve signed host-context fields for the cloud runtime header");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).targetOrigin, "https://agent.sonik.local", "cross-origin embeds should post page context to the agent iframe origin, not the host origin");
 fakeWindow.__sonikAgentHost.openCanvas();
 assert.equal(fakeIframe.parentElement, fakeCanvasSlot, "host controller should move iframe into canvas slot");
+assert.equal(fakeIframe.src, chatFrameSrc, "opening canvas should move the existing iframe without changing its src after chat opened");
+await controller.postContext();
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.mode, "canvas", "canvas postContext should donate the updated active mode");
 assert.equal(fakeCanvas.dataset.open, "true", "controller should open canvas dataset state");
 controller.close();
 assert.equal(controller.getMode(), null, "controller close should clear active mode");
@@ -383,8 +418,15 @@ assert.equal(timerController.getMode(), null, "destroy should close active mode"
 const localEmbedSmokeSource = await readFile("scripts/agent-ui-embed-smoke.mjs", "utf8");
 const bookingContextSmokeSource = await readFile("scripts/agent-ui-booking-context-pipeb-smoke.mjs", "utf8");
 const bookingReservationSmokeSource = await readFile("scripts/agent-ui-booking-reservation-pipeb-smoke.mjs", "utf8");
+const staticVendorEmbedSource = await readFile("apps/standalone-sveltekit/static/vendor/sonik-agent-ui/agent-embed.js", "utf8");
 assert.equal(localEmbedSmokeSource.includes("session bootstrap reused stale active session"), true, "local embed smoke should prove a fresh session instead of accepting stale state");
 assert.equal(localEmbedSmokeSource.includes("evidence.sessionBootstrap"), true, "local embed smoke should record explicit session bootstrap evidence");
+assert.equal(localEmbedSmokeSource.includes("usedManualLauncher: false"), true, "local embed smoke should prove artifact creation auto-opens canvas without the manual #open-canvas launcher");
+assert.equal(localEmbedSmokeSource.includes("Automatic canvas.open changed iframe src"), true, "local embed smoke should fail if automatic canvas opening reloads the iframe instead of moving it");
+assert.equal(localEmbedSmokeSource.includes("Automatic canvas.open did not preserve active stream state"), true, "local embed smoke should prove stream state is preserved while the iframe moves to canvas");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not render artifact above compact chat"), true, "local embed smoke should prove artifact renders above compact chat in canvas mode");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide duplicate AgentConversation header"), true, "local embed smoke should prove embedded canvas hides duplicate chat header");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide duplicate session rail/session switcher"), true, "local embed smoke should prove embedded canvas hides duplicate session chrome");
 assert.equal(bookingContextSmokeSource.includes("usedDeterministicHostController"), true, "booking context release gate should report deterministic host-controller opening");
 assert.equal(bookingContextSmokeSource.includes("Booking embed did not open through window.__sonikAgentHost"), true, "booking context release gate should fail if host controller opening is unavailable");
 assert.equal(bookingReservationSmokeSource.includes("usedDeterministicHostController"), true, "booking reservation release gate should report deterministic host-controller opening");
@@ -397,5 +439,11 @@ assert.equal(amplifySmokeSource.includes("page.mouse.click"), false, "authentica
 assert.equal(amplifySmokeSource.includes("__sonikAgentHost"), true, "authenticated release gate should prefer the deterministic host controller when available");
 assert.equal(amplifySmokeSource.includes("usedDeterministicHostController"), true, "authenticated release gate should report and require deterministic host-controller opening");
 assert.equal(amplifySmokeSource.includes("Amplify embed did not open through window.__sonikAgentHost"), true, "authenticated release gate should fail if the host controller is unavailable after Amplify consumes the SDK seam");
+assert.equal(staticVendorEmbedSource.includes("...(activeMode ? { mode: activeMode } : {})"), true, "static vendor embed should donate the active mode in postContext like package source");
+assert.equal(staticVendorEmbedSource.includes('if (iframe.getAttribute("src")) {'), true, "static vendor embed should guard against iframe src reloads after initial navigation");
+assert.equal(staticVendorEmbedSource.includes('if (iframe.getAttribute("src") !== nextSrc)'), false, "static vendor embed must not retain the old inequality reload check");
+assert.equal(staticVendorEmbedSource.includes("onRequestHostAction"), true, "static vendor embed should handle iframe host-action requests in the fake browser host");
+assert.equal(staticVendorEmbedSource.includes('request.actionKey === "canvas.open"'), true, "static vendor embed should execute safe canvas.open requests in the fake browser host");
+assert.equal(staticVendorEmbedSource.includes("slot.moveBefore(iframe, null)"), true, "static vendor embed should use state-preserving iframe moves when the browser supports moveBefore");
 
 console.log("agent-embed tests passed");

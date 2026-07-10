@@ -5,6 +5,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { countRelevantPipeBLines, extractPipeBToolEvents, hasEventName, hasTelemetryEvent } from './lib/booking-pipeb-evidence.mjs';
+import { inspectReservationCommitBody } from './lib/agent-ui-smoke-receipts.mjs';
 
 const defaultAgentOrigin = process.env.AGENT_UI_BASE_URL ?? 'https://sonik-agent-ui.liam-trampota.workers.dev';
 const useFakeHost = process.env.AGENT_UI_BOOKING_RESERVATION_USE_FAKE_HOST === '1';
@@ -25,7 +26,7 @@ const reservationStartIso =
   process.env.AGENT_UI_BOOKING_RESERVATION_START ?? nextBookableWindowStartIso();
 const reservationEndIso =
   process.env.AGENT_UI_BOOKING_RESERVATION_END ?? addMinutesIso(reservationStartIso, 60);
-const prompt = process.env.AGENT_UI_BOOKING_RESERVATION_PROMPT ?? `Use the booking command catalog to prove the reservation flow against the CURRENT HOST/PAGE CONTEXT. First call searchSkillCatalog for the reservation workflow, then call learnSkill for booking.reservation.create. Follow that learned skill exactly. Then learn the command schemas you need. Use inputJson for every executeCommand or commitCommand call. Check availability for the current booking page context from ${reservationStartIso} to ${reservationEndIso} for party size 2. Then commit booking.create.guest for Agent UI Smoke Guest with email agent-ui-smoke@example.test. Then commit booking.create.booking for that returned guest/customer id in the same context and time window with source admin, partySize 2, and clientRequestId ${clientRequestId}. Do not call booking.create.hold; this is a reservation workflow, not a hold workflow. Do not invent, edit, or provision the trusted actor userId; trusted host context supplies it. If a preflight receipt says fields are missing or unsupported, learn the command and retry once with corrected direct command inputJson. Reply with the skill id, command ids you successfully used, and the reservation or booking id.`;
+const prompt = process.env.AGENT_UI_BOOKING_RESERVATION_PROMPT ?? `Use the booking command catalog to prove the reservation flow against the CURRENT HOST/PAGE CONTEXT. First call searchSkillCatalog for the reservation workflow, then call learnSkill for booking.reservation.create. Follow that learned skill exactly. Then learn the command schemas you need. Use inputJson for every executeCommand call. Check availability for the current booking page context from ${reservationStartIso} to ${reservationEndIso} for party size 2. Then call previewBookingReservationCommand for Agent UI Smoke Guest with email agent-ui-smoke@example.test in the same context and time window with source admin, partySize 2, and clientRequestId ${clientRequestId}. Do not call booking.create.guest or booking.create.booking yourself; a human Approve click will run /api/reservation/commit. Do not call booking.create.hold; this is a reservation workflow, not a hold workflow. Do not invent, edit, or provision the trusted actor userId; trusted host context supplies it. Reply with the skill id and the previewed command ids, then stop for approval.`;
 
 if (!useFakeHost && (!email || !password)) throw new Error('Missing TEST_EMAIL/TEST_PASSWORD for booking reservation smoke.');
 
@@ -315,6 +316,28 @@ try {
   if (!submit?.ok) throw new Error(`submitPrompt failed: ${JSON.stringify(submit)}`);
   await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === true, undefined, { timeout: 45000 }).catch(() => undefined);
   await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === false && window.__sonikAgentUI.getAssertions().messageCount >= 2, undefined, { timeout: 240000 });
+  const approvalButton = frame.locator('[data-chat-approval-card] [data-approval-action="approve"]').first();
+  await approvalButton.waitFor({ state: 'visible', timeout: 60000 });
+  evidence.approvalCardVisible = true;
+  const commitResponsePromise = page.waitForResponse((response) => {
+    try {
+      const url = new URL(response.url());
+      return url.origin === agentOrigin && url.pathname === '/api/reservation/commit';
+    } catch {
+      return false;
+    }
+  }, { timeout: 120000 });
+  await approvalButton.click();
+  const commitResponse = await commitResponsePromise;
+  const commitBody = await commitResponse.json().catch(() => null);
+  const commitInspection = inspectReservationCommitBody(commitBody);
+  evidence.reservationCommitResponse = {
+    status: commitResponse.status(),
+    transportOk: commitResponse.status() < 400,
+    logicalOk: commitInspection.logicalOk,
+    body: commitInspection,
+  };
+  await frame.waitForFunction(() => document.body.innerText.includes('Reservation created') || document.body.innerText.includes('Reservation booking failed'), undefined, { timeout: 60000 }).catch(() => undefined);
   await sleep(8000);
   const after = await frame.evaluate(() => ({ context: window.__sonikAgentUI.getPageContext(), assertions: window.__sonikAgentUI.getAssertions(), text: document.body.innerText.slice(0, 16000) }));
   evidence.after = after;
@@ -333,22 +356,21 @@ ${pipeText}`;
   const trustedHostResponses = evidence.responses.filter((entry) => entry.origin === agentOrigin && ['/api/session', '/api/sessions'].includes(entry.path));
   const serverTrustedHostBoundary = trustedHostResponses.some((entry) => entry.status < 400 && entry.hostAuthenticated === 'true' && entry.hostOrg === 'present' && entry.hostUser === 'present' && entry.cloudError == null);
   const failedRuntimeFetch = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'booking.runtime.fetch.end', false);
-  const failedCommit = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'tool.commitCommand', false);
+  const failedCommit = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'tool.commitCommand', false) || hasTelemetryEvent(toolEvents, commandId, 'commit.human_approved', false);
   const successfulRuntimeFetch = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'booking.runtime.fetch.end', true);
-  const successfulCommit = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'tool.commitCommand', true);
+  const successfulCommit = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'tool.commitCommand', true) || hasTelemetryEvent(toolEvents, commandId, 'commit.human_approved', true);
   const successfulExecute = (commandId) => hasTelemetryEvent(toolEvents, commandId, 'tool.executeCommand', true);
   const reservationSkillSearchOk = hasTelemetryEvent(toolEvents, 'booking.reservation.create', 'tool.searchSkillCatalog', true)
     || toolEvents.some((line) => line.includes('"event":"tool.searchSkillCatalog"')
       && line.includes('"ok":true')
       && /reservation/i.test(line)
       && /(workflow|create booking|booking)/i.test(line));
-  const preflightFailureEvents = toolEvents.filter((line) => line.includes('command_input_preflight_failed') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand')));
-  const holdCommandEvents = toolEvents.filter((line) => line.includes('booking.create.hold') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand') || line.includes('booking.runtime.fetch')));
+  const preflightFailureEvents = toolEvents.filter((line) => line.includes('command_input_preflight_failed') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand') || line.includes('commit.human_approved')));
+  const holdCommandEvents = toolEvents.filter((line) => line.includes('booking.create.hold') && (line.includes('tool.executeCommand') || line.includes('tool.commitCommand') || line.includes('commit.human_approved') || line.includes('booking.runtime.fetch')));
   const transcriptSkillWorkflowEvidence = /booking\.reservation\.create/i.test(after.text)
     && /booking\.get\.availability/i.test(after.text)
-    && /booking\.create\.guest/i.test(after.text)
-    && /booking\.create\.booking/i.test(after.text);
-  const transcriptReceiptEvidence = /Status:\s*booked|Booking confirmed|Reservation Flow Proven|Reservation Flow — Complete/i.test(after.text)
+    && /previewBookingReservationCommand|reservation preview/i.test(after.text);
+  const transcriptReceiptEvidence = /Status:\s*booked|Booking confirmed|Reservation Flow Proven|Reservation Flow — Complete|Reservation created/i.test(after.text)
     && Boolean(extractBookingReceiptId(after.text))
     && after.text.includes(clientRequestId);
   const backendEndpointEvidence = hasBookingServiceEndpointEvidence(pipeText, 'availability')
@@ -356,6 +378,7 @@ ${pipeText}`;
     && hasBookingServiceEndpointEvidence(pipeText, 'bookings');
   const toolTelemetryComplete = successfulRuntimeFetch('booking.get.availability') === true
     && successfulExecute('booking.get.availability') === true
+    && hasTelemetryEvent(toolEvents, 'booking.create.booking', 'tool.previewBookingReservationCommand', true) === true
     && successfulRuntimeFetch('booking.create.guest') === true
     && successfulCommit('booking.create.guest') === true
     && successfulRuntimeFetch('booking.create.booking') === true
@@ -366,6 +389,7 @@ ${pipeText}`;
     skillLearnOk: hasTelemetryEvent(toolEvents, 'booking.reservation.create', 'tool.learnSkill', true),
     availabilityRuntimeFetchOk: successfulRuntimeFetch('booking.get.availability'),
     availabilityExecuteOk: successfulExecute('booking.get.availability'),
+    previewReservationOk: hasTelemetryEvent(toolEvents, 'booking.create.booking', 'tool.previewBookingReservationCommand', true),
     guestRuntimeFetchOk: successfulRuntimeFetch('booking.create.guest'),
     guestCommitOk: successfulCommit('booking.create.guest'),
     bookingRuntimeFetchOk: successfulRuntimeFetch('booking.create.booking'),
@@ -378,7 +402,12 @@ ${pipeText}`;
     backendEndpointEvidence,
     transcriptSkillWorkflowEvidence,
     transcriptReceiptEvidence,
-    bookingReceiptId: extractBookingReceiptId(after.text),
+    bookingReceiptId: commitInspection.bookingReceiptId ?? extractBookingReceiptId(after.text),
+    reservationCommitBodyOk: commitInspection.ok,
+    reservationCommitGuestId: commitInspection.guestId,
+    reservationCommitGuestReceiptOk: commitInspection.guestReceiptOk,
+    reservationCommitBookingReceiptOk: commitInspection.bookingReceiptOk,
+    reservationCommitLogicalOk: commitInspection.logicalOk,
   };
   evidence.checks = {
     loginOk: useFakeHost || evidence.loginStatus < 400,
@@ -394,6 +423,7 @@ ${pipeText}`;
     mentionsAvailability: /booking\.get\.availability|get availability|availability/i.test(responseText),
     mentionsGuestCreate: /booking\.create\.guest|create guest|created guest/i.test(responseText),
     mentionsBookingCreate: /booking\.create\.booking|create booking|created booking|reservation/i.test(responseText),
+    reservationCommitLogicalOk: commitInspection.logicalOk === true,
     skillWorkflowEvidence: (evidence.pipeB.requiredEvidence.skillIndexContextOk === true
       && evidence.pipeB.requiredEvidence.skillSearchOk === true
       && evidence.pipeB.requiredEvidence.skillLearnOk === true)

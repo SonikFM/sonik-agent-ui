@@ -259,6 +259,9 @@ const catalog = createSkillCatalog("sonik-agent-ui-runtime", [
       guestFields: BOOKING_RESERVATION_CREATE_RECIPE.guestFields,
       pageContextRequirements: BOOKING_RESERVATION_CREATE_RECIPE.pageContextRequirements,
       successEvidence: BOOKING_RESERVATION_CREATE_RECIPE.successEvidence,
+      execution: "preview_then_trusted_endpoint",
+      approval: "host_required",
+      telemetryEvents: ["tool.executeCommand", "tool.previewBookingReservationCommand", "commit.human_approved"],
     },
   },
 ], generatedAt);

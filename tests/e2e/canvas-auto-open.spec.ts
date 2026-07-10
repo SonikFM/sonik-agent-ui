@@ -20,21 +20,15 @@ test("canvas-auto-open: standalone workspace mode auto-shows the canvas once an 
 });
 
 test(
-  "canvas-auto-open: embedded chat mode (embedMode=chat) also auto-opens the canvas on artifact creation",
+  "canvas-auto-open: embedded host chat mode suppresses the local canvas pane",
   async ({ page }) => {
-    // Slice B (2026-07-08): `artifactOpen` no longer force-hides in `embedMode
-    // === "chat"` -- it follows the same "an artifact/document now exists" rule
-    // as workspace mode (+page.svelte's `artifactOpen` derivation), so the
-    // rendered surface never leaves a created artifact invisible. A real
-    // embedding host is separately, best-effort notified via `canvas.open`
-    // (packages/agent-embed/src/index.ts's host action channel) so it can make
-    // room around the iframe; that part isn't observable from this dev-smoke
-    // harness since there's no real parent host window here.
-    await gotoFreshWorkspace(page, smokeUrl(ARTIFACT_INPUT_SCENARIO, { embedMode: "chat" }));
-    await submitPrompt(page, "make a visual");
+    // This baseline intentionally does not submit the mock stream: the page is
+    // not running inside a real parent host that can receive canvas.open and
+    // donate the follow-up page-context mode change.
+    await gotoFreshWorkspace(page, smokeUrl(null, { embedMode: "chat", agentUiHostOrigin: "http://localhost" }));
 
-    await expect(page.locator(".workspace-root")).toHaveAttribute("data-artifact-open", "true", { timeout: 10_000 });
-    await expect(page.locator(".workspace-pane--artifact")).toBeVisible();
+    await expect(page.locator(".workspace-root")).toHaveAttribute("data-artifact-open", "false");
+    await expect(page.locator(".workspace-pane--artifact")).toHaveCount(0);
   },
 );
 

@@ -6,6 +6,7 @@ import {
   formatReport,
   scrubCredentials,
 } from "../../scripts/lib/agent-ui-release-gate-core.mjs";
+import { createReleaseGateChecks } from "../../scripts/agent-ui-release-gate.mjs";
 
 // Stubbed checks: the orchestration is proven without any live infra.
 function stub(name, outcome) {
@@ -124,6 +125,50 @@ function stub(name, outcome) {
   const scrubbed = scrubCredentials(evidenceJson);
   assert.ok(!scrubbed.includes("topsecret"), "the persisted evidence JSON carries no password");
   assert.match(scrubbed, /postgres:\/\/u:\*\*\*@db\.host\/app/, "the connection string is redacted, not dropped");
+}
+
+// --- release-gate registry: live booking checks require real creds ----------
+{
+  const calls = [];
+  const checks = createReleaseGateChecks({
+    env: { AGENT_UI_BOOKING_RESERVATION_USE_FAKE_HOST: "1" },
+    commandRunner: async (command, args) => {
+      calls.push([command, args]);
+      return { status: CHECK_STATUS.PASS };
+    },
+  });
+  assert.ok(checks.some((check) => check.name === "booking-pipeb-context"), "context smoke is registered as a first-class gate check");
+  const bookingChecks = checks.filter((check) => check.name.startsWith("booking-pipeb-"));
+  assert.deepEqual(bookingChecks.map((check) => check.name), ["booking-pipeb-context", "booking-pipeb-document", "booking-pipeb-reservation"]);
+  for (const check of bookingChecks) {
+    const outcome = await check.run();
+    assert.equal(outcome.status, CHECK_STATUS.FAIL, `${check.name} fails closed without TEST_EMAIL/TEST_PASSWORD`);
+    assert.match(outcome.reason, /TEST_EMAIL and TEST_PASSWORD/);
+  }
+  assert.deepEqual(calls, [], "missing real-host credentials do not run booking smoke commands");
+}
+
+// --- explicit AGENT_UI_GATE_SKIP remains the waiver path ------------------
+{
+  const check = createReleaseGateChecks({
+    env: { AGENT_UI_GATE_SKIP: "booking-pipeb-context,commit-parity-agent-ui" },
+    commandRunner: async () => ({ status: CHECK_STATUS.PASS }),
+  }).find((candidate) => candidate.name === "booking-pipeb-context");
+  const outcome = await check.run();
+  assert.equal(outcome.status, CHECK_STATUS.SKIPPED);
+  assert.match(outcome.reason, /AGENT_UI_GATE_SKIP/);
+}
+
+// --- deployed parity fails closed when URL/SHA are missing ----------------
+{
+  const check = createReleaseGateChecks({
+    env: {},
+    commandRunner: async () => ({ status: CHECK_STATUS.PASS }),
+  }).find((candidate) => candidate.name === "commit-parity-agent-ui");
+  const outcome = await check.run();
+  assert.equal(outcome.status, CHECK_STATUS.FAIL);
+  assert.match(outcome.reason, /AGENT_UI_GATE_AGENT_UI_URL/);
+  assert.match(outcome.reason, /AGENT_UI_GATE_AGENT_UI_SHA/);
 }
 
 console.log("agent-ui-release-gate.test.mjs OK");

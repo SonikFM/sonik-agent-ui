@@ -5,6 +5,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { countRelevantPipeBLines, extractPipeBToolEvents, hasEventName, hasTelemetryEvent } from './lib/booking-pipeb-evidence.mjs';
+import { inspectIntakeCommitBody } from './lib/agent-ui-smoke-receipts.mjs';
 
 const agentOrigin = process.env.AGENT_UI_BASE_URL ?? 'https://sonik-agent-ui.liam-trampota.workers.dev';
 const bookingUrl = process.env.BOOKING_URL ?? 'https://sonik-booking-app-pipe-b.liam-trampota.workers.dev';
@@ -336,8 +337,25 @@ try {
   // Publishing is exercised here through the real approveAndRun page-control
   // action -- the same call the Approve button makes -- which now calls the
   // deterministic /api/intake/commit endpoint directly, no model turn involved.
+  const commitResponsePromise = page.waitForResponse((response) => {
+    try {
+      const url = new URL(response.url());
+      return url.origin === agentOrigin && url.pathname === '/api/intake/commit';
+    } catch {
+      return false;
+    }
+  }, { timeout: 120000 });
   const approveAndRun = await frame.evaluate(async () => window.__sonikAgentUI.actions.approveAndRun());
   evidence.approveAndRun = approveAndRun;
+  const commitResponse = await commitResponsePromise;
+  const commitBody = await commitResponse.json().catch(() => null);
+  const commitInspection = inspectIntakeCommitBody(commitBody);
+  evidence.intakeCommitResponse = {
+    status: commitResponse.status(),
+    transportOk: commitResponse.status() < 400,
+    logicalOk: commitInspection.logicalOk,
+    body: commitInspection,
+  };
   if (!approveAndRun?.ok) throw new Error(`approveAndRun failed: ${JSON.stringify(approveAndRun)}`);
   await sleep(2000);
   await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
@@ -362,6 +380,10 @@ try {
     commitHumanApprovedOk: hasEventName(toolEvents, 'commit.human_approved', true),
     contextRuntimeFetchOk: hasTelemetryEvent(toolEvents, 'booking.create.context', 'booking.runtime.fetch.end', true),
     contextRuntimeFetchFailed: hasTelemetryEvent(toolEvents, 'booking.create.context', 'booking.runtime.fetch.end', false),
+    intakeCommitBodyOk: commitInspection.ok,
+    intakeCommitReceiptOk: commitInspection.receiptOk,
+    intakeCreatedContextId: commitInspection.createdContextId,
+    intakeCommitLogicalOk: commitInspection.logicalOk,
   };
   evidence.checks = {
     loginOk: evidence.loginStatus < 400,
@@ -374,6 +396,7 @@ try {
     activeSessionStable: before.context?.activeSessionId !== evidence.sessionId && after.context?.activeSessionId === evidence.sessionId,
     submitOk: submit?.ok === true,
     approveAndRunOk: approveAndRun?.ok === true,
+    intakeCommitLogicalOk: commitInspection.logicalOk === true,
     noAgentApiFailures: agentFailures.length === 0,
     serverTrustedHostBoundary,
     mentionsContextCreate: /booking\.create\.context|created booking context|context id|created context/i.test(text),
@@ -384,7 +407,8 @@ try {
       && evidence.pipeB.requiredEvidence.previewActiveIntakeOk === true
       && evidence.pipeB.requiredEvidence.commitHumanApprovedOk === true
       && evidence.pipeB.requiredEvidence.contextRuntimeFetchOk === true
-      && evidence.pipeB.requiredEvidence.contextRuntimeFetchFailed === false,
+      && evidence.pipeB.requiredEvidence.contextRuntimeFetchFailed === false
+      && evidence.pipeB.requiredEvidence.intakeCommitLogicalOk === true,
     agentFailures,
   };
   const pass = Object.entries(evidence.checks).every(([key, value]) => key === 'agentFailures' ? Array.isArray(value) && value.length === 0 : Boolean(value));

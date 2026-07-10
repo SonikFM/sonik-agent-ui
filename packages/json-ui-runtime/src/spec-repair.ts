@@ -13,6 +13,11 @@ import { autoFixSpec, validateSpec, type Spec, type SpecFix, type SpecValidation
  */
 export interface SpecRepairOptions {
   streamComplete: boolean;
+  /**
+   * Allow lossy terminal fixes such as pruning dangling children. Defaults to
+   * true to preserve existing intake/runtime repair behavior.
+   */
+  allowLossy?: boolean;
 }
 
 export interface SpecRepairResult {
@@ -52,17 +57,22 @@ export function repairSpec(candidate: unknown, options: SpecRepairOptions): Spec
   if (!options.streamComplete || !isSpecShaped(candidate)) return null;
 
   const spec = candidate;
-  const initialValidation = validateSpec(spec);
-  if (initialValidation.valid) {
-    return { spec, validation: initialValidation, repaired: false, lossy: false, fixDetails: [] };
+  const losslessFix = autoFixSpec(spec, { lossy: false });
+  let current = losslessFix.fixDetails.length > 0 ? losslessFix.spec : spec;
+  let fixDetails = losslessFix.fixDetails;
+  let validation = validateSpec(current);
+
+  if (validation.valid) {
+    return {
+      spec: current,
+      validation,
+      repaired: fixDetails.length > 0,
+      lossy: false,
+      fixDetails,
+    };
   }
 
-  const losslessFix = autoFixSpec(spec, { lossy: false });
-  let current = losslessFix.spec;
-  let fixDetails = losslessFix.fixDetails;
-  let validation = fixDetails.length > 0 ? validateSpec(current) : initialValidation;
-
-  if (!validation.valid) {
+  if (options.allowLossy !== false) {
     const lossyFix = autoFixSpec(current, { lossy: true });
     if (lossyFix.fixDetails.length > 0) {
       current = lossyFix.spec;

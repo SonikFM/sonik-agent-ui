@@ -11,6 +11,7 @@ import {
 } from "$lib/server/host-command-runtime";
 import { commitBookingContextIntakeCommand } from "$lib/tools/artifact-state";
 import { routeString, WORKSPACE_SESSION_ID_MAX_CHARS } from "$lib/server/workspace-route-limits";
+import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-transport";
 import type { RequestHandler } from "./$types";
 
 // Draft-only invariant (Slice A, 2026-07-08): this is the ONLY code path that
@@ -43,6 +44,7 @@ export const POST: RequestHandler = async (event) => {
     header: event.request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER),
     fallback: createBookingRuntimeAuthContextFromEnv(env),
   });
+  const bookingRuntimeFetcher = createRequestBookingRuntimeFetcher(event);
   const persistence = getRequestWorkspacePersistence(event);
 
   const result = await commitBookingContextIntakeCommand(
@@ -53,6 +55,7 @@ export const POST: RequestHandler = async (event) => {
       approvedCommandIds,
       bookingServiceBaseUrl,
       bookingRuntimeAuth,
+      bookingRuntimeFetcher,
     },
     artifactId,
   );

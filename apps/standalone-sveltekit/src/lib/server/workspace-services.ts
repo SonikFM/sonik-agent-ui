@@ -384,6 +384,20 @@ function resolveSignedTrustedHostContextFromRequest(request: Request | null | un
   return isSignedTrustedHostContextValid(context, secret) ? context : null;
 }
 
+
+export function resolveSignedTrustedOrganizationDisplayFromRequest(event?: WorkspaceRuntimeRequest | null): string | null {
+  const signedContext = resolveSignedTrustedHostContextFromRequest(event?.request, createEffectiveWorkspaceEnv(event ?? null));
+  if (!signedContext) return null;
+  const hostSession = signedContext.hostSession;
+  if (!isRecord(hostSession)) return null;
+  const organizationId = cleanRuntimeString(hostSession.organizationId) ?? cleanRuntimeString(signedContext.organizationId);
+  const authenticated = hostSession.authenticated === true || signedContext.authenticated === true;
+  if (!authenticated || !organizationId) return null;
+  const metadata = isRecord(hostSession.metadata) ? hostSession.metadata : {};
+  const organizationName = cleanRuntimeString(metadata.organizationName) ?? cleanRuntimeString(metadata.organizationDisplayName);
+  return organizationName ? `${organizationName} (${organizationId})` : organizationId;
+}
+
 function isUnsignedBrowserHostContextAllowed(env: Record<string, unknown> | null): boolean {
   if (readEnvString(env, "SONIK_AGENT_UI_PERSISTENCE_MODE") === "cloud") return false;
   return readEnvString(env, "SONIK_AGENT_UI_ALLOW_UNSIGNED_HOST_CONTEXT") === "true";

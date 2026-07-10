@@ -6,10 +6,10 @@
 // record which modules reached the model. Per-turn skill bodies (resolved from
 // the runtime skill registry) append after the core for that run only.
 //
-// Every module seeds unconditionally by default (`seedWhen` returns true) so the
-// monolith's current unconditional behavior is preserved; narrowing a module's
-// seeding condition (e.g. only seed booking conventions when booking runtime is
-// available) is a deliberate one-line follow-up. See the per-module notes below.
+// Most modules seed unconditionally by default (`seedWhen` returns true) so the
+// monolith's current unconditional behavior is preserved. The booking commands
+// module intentionally remains default-on and seeds unless the host explicitly
+// reports that no booking runtime is available. See the per-module notes below.
 //
 // This file imports only the render catalog and the artifact tool guidance
 // (both pure), never the AI SDK or the tool graph, so the prompt-assembly test
@@ -24,7 +24,8 @@ import { buildUserPrompt, isNonEmptySpec, type Spec } from "@json-render/core";
  *  because all default `seedWhen` predicates return true. */
 export interface AgentPromptSeedContext {
   /** True when a booking runtime/command surface is available for this turn.
-   *  Reserved for a future narrowing of the booking module; unused today. */
+   *  When explicitly false, booking command conventions are not seeded; omitted
+   *  preserves the historical default-on prompt behavior. */
   hasBookingRuntime?: boolean;
   /** True when the document tools are mounted. Reserved; unused today. */
   hasDocumentTools?: boolean;
@@ -145,17 +146,15 @@ const PAGE_CONTEXT_MODULE: AgentPromptModule = {
 const BOOKING_COMMANDS_MODULE: AgentPromptModule = {
   id: "booking-commands",
   title: "BOOKING COMMAND CONVENTIONS",
-  // Today: unconditional. In the current monolith these booking/command-catalog
-  // conventions reach the model on every turn regardless of whether booking
-  // runtime is available, so seeding stays unconditional to preserve exact
-  // behavior. Narrowing to "seed when booking runtime/commands are available"
-  // is a deliberate follow-up (a behavior change, out of this phase's scope).
-  seedWhen: ALWAYS_ON,
+  // Default-on to preserve the old monolith and empty-context behavior, but do
+  // not seed command execution conventions when the host explicitly reports that
+  // no booking runtime/command surface is available for this turn.
+  seedWhen: (context) => context.hasBookingRuntime !== false,
   body: `- The command catalog is CLI-first and context-efficient: search, learn, then execute. For any booking or ORPC-backed command, call learnCommand before executeCommand unless you already have the exact schema from this same turn. Never call executeCommand with {} unless learnCommand says the command has no required fields.
 - For generated booking/OpenAPI commands, prefer executeCommand with inputJson (a JSON string of the direct command input) instead of a loose input object. This avoids record-schema stripping and keeps the schema-aware preflight validator authoritative.
 - If executeCommand returns policy.reasons including command_input_preflight_failed, missing_required_fields, unsupported_input_fields, or summary.kind == "command_input_preflight_failed", do not repeat the same bad call. Immediately call learnCommand for that command, copy the requiredFields/exampleInput shape, remove unsupported fields, and retry once with corrected direct command input via inputJson.
 - Draft-only invariant: executeCommand can only run reads. There is no model-callable commit tool for any write — the agent's ceiling for anything that creates or publishes is a submitted draft/preview, and only a human clicking Approve on the preview card can publish it, outside your turn. Do not attempt to call a commit/write tool.
-- Booking command input convention: pass path/query/body fields directly in inputJson. Do not wrap JSON request bodies in body unless learnCommand says the schema requires body. For availability use contextId, from, to, and optional partySize/source; do not use a date field. For reservation/booking creation, the canonical workflow is booking.get.availability -> booking.create.guest -> booking.create.booking. These are writes with no model-callable commit tool yet; prepare/read what you can and report that a human commit path is not yet wired for reservations instead of attempting to execute them. Do NOT use booking.create.hold for reservation, booking, or tee-time intents unless the user explicitly asks for a temporary hold. Keep trusted actor/principal fields separate from guest/customer identity: do not invent, edit, or provision userId/principalId/organizationId from model reasoning, and do not create a guest/customer record to satisfy a trusted host principal error. When schema examples contain CURRENT_HOST_PRINCIPAL_ID, pass that literal only if learnCommand/page context explicitly requires the host principal sentinel; the trusted runtime binds it to the current host principal. Otherwise use the resolved guest/customer id only in the exact identity field required by the learned booking.create.booking schema, with contextId, startsAt, endsAt, source, partySize, and a clientRequestId.
+- Booking command input convention: pass path/query/body fields directly in inputJson. Do not wrap JSON request bodies in body unless learnCommand says the schema requires body. For availability use contextId, from, to, and optional partySize/source; do not use a date field. For reservation/booking creation, the canonical workflow is booking.get.availability -> previewBookingReservationCommand -> human Approve click. Do not call booking.create.guest or booking.create.booking yourself; those writes run only through /api/reservation/commit after the user approves the preview card. Do NOT use booking.create.hold for reservation, booking, or tee-time intents unless the user explicitly asks for a temporary hold. Keep trusted actor/principal fields separate from guest/customer identity: do not invent, edit, or provision userId/principalId/organizationId from model reasoning, and do not create a guest/customer record to satisfy a trusted host principal error. When schema examples contain CURRENT_HOST_PRINCIPAL_ID, pass that literal only if learnCommand/page context explicitly requires the host principal sentinel; the trusted runtime binds it to the current host principal. For reservation previews, provide guest fields plus booking contextId, startsAt, endsAt, source, partySize, and clientRequestId; never provide booking.userId.
 - A standalone fixture-backed read-only booking host command may be mounted for local testing; other ORPC business commands remain metadata-only unless a live adapter explicitly marks them mounted and executable.`,
 };
 

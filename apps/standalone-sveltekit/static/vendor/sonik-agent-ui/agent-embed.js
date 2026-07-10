@@ -4,7 +4,10 @@
 export const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST = "sonik:agent-ui:request-page-context";
+export const SONIK_AGENT_UI_HOST_ACTION_REQUEST = "sonik:agent-ui:action-request";
+export const SONIK_AGENT_UI_HOST_ACTION_RESULT = "sonik:agent-ui:action-result";
 
+const AGENT_ACTION_CHANNEL_VERSION = "sonik.agent_ui.host_action.v1";
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
 const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
@@ -43,6 +46,15 @@ export function createAgentEmbedUrl(input) {
 function isAgentPageContextRequestMessage(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   return value.source === "sonik-agent-ui" && value.type === SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST;
+}
+
+function isAgentHostActionRequestMessage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return value.source === "sonik-agent-ui"
+    && value.type === SONIK_AGENT_UI_HOST_ACTION_REQUEST
+    && value.version === AGENT_ACTION_CHANNEL_VERSION
+    && typeof value.requestId === "string"
+    && typeof value.actionKey === "string";
 }
 
 export function createAgentHostPageContextMessage(payload) {
@@ -90,11 +102,14 @@ export function mountSonikAgentUI(options) {
 
   const postContext = async () => {
     try {
-      const host = sanitizeAgentHostPageContext(await getPageContext()) ?? {};
+      const payload = {
+        ...(sanitizeAgentHostPageContext(await getPageContext()) ?? {}),
+        ...(activeMode ? { mode: activeMode } : {}),
+      };
       const targetOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
       if (!targetOrigin) return;
       iframe.contentWindow?.postMessage(
-        createAgentHostPageContextMessage(host),
+        createAgentHostPageContextMessage(payload),
         targetOrigin,
       );
     } catch (error) {
@@ -107,11 +122,20 @@ export function mountSonikAgentUI(options) {
   };
 
   const mountFrame = (slot) => {
-    if (iframe.parentElement !== slot) slot.appendChild(iframe);
+    if (iframe.parentElement === slot) return;
+    if (typeof slot.moveBefore === "function") {
+      slot.moveBefore(iframe, null);
+      return;
+    }
+    slot.appendChild(iframe);
   };
 
   const setFrameMode = (mode) => {
-    const nextSrc = createAgentEmbedUrl({
+    if (iframe.getAttribute("src")) {
+      void postContext();
+      return;
+    }
+    iframe.src = createAgentEmbedUrl({
       agentUrl: options.agentUrl,
       mode,
       hostOrigin: options.hostOrigin ?? ownerWindow.location.origin,
@@ -119,8 +143,6 @@ export function mountSonikAgentUI(options) {
       smokeMockStream,
       smokeRunId,
     });
-    if (iframe.getAttribute("src") !== nextSrc) iframe.src = nextSrc;
-    else void postContext();
   };
 
   const setOpenState = (mode) => {
@@ -193,11 +215,35 @@ export function mountSonikAgentUI(options) {
     if (event.origin !== resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow)) return;
     void postContext();
   };
+  const onRequestHostAction = (event) => {
+    if (event.source !== iframe.contentWindow) return;
+    if (!isAgentHostActionRequestMessage(event.data)) return;
+    if (event.origin !== resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow)) return;
+    const request = event.data;
+    const handled = request.actionKey === "canvas.open" || request.actionKey === "canvas.close";
+    if (request.actionKey === "canvas.open") open("canvas");
+    if (request.actionKey === "canvas.close") close("canvas");
+    iframe.contentWindow?.postMessage({
+      source: "sonik-agent-host",
+      type: SONIK_AGENT_UI_HOST_ACTION_RESULT,
+      version: AGENT_ACTION_CHANNEL_VERSION,
+      requestId: request.requestId,
+      actionKey: request.actionKey,
+      ok: handled,
+      status: handled ? "executed" : "unavailable",
+      policyMode: handled ? "allow" : "require",
+      ...(handled
+        ? { message: "Host action executed by fake host controller." }
+        : { disabledReason: "host_action_handler_not_registered", message: "The fake host has not registered an implementation for this action." }),
+    }, event.origin);
+  };
   iframe.addEventListener("load", onLoad);
   ownerWindow.addEventListener("message", onRequestPageContext);
+  ownerWindow.addEventListener("message", onRequestHostAction);
   disposers.push(() => {
     iframe.removeEventListener("load", onLoad);
     ownerWindow.removeEventListener("message", onRequestPageContext);
+    ownerWindow.removeEventListener("message", onRequestHostAction);
   });
   addClick(options.elements.openChat, () => open("chat"));
   addClick(options.elements.openCanvas, () => open("canvas"));

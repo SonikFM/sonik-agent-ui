@@ -249,6 +249,7 @@ export function validateSpec(
  * - `visible` inside `props` → moved to element level
  * - `on` inside `props` → moved to element level
  * - `repeat` inside `props` → moved to element level
+ * - own direct `props` entries whose value is exactly `undefined` → removed
  *
  * Returns the fixed spec and a list of fixes applied.
  */
@@ -346,6 +347,26 @@ export function autoFixSpec(
         watch: watch as UIElement["watch"],
       };
       fixes.push(`Moved "watch" from props to element level on "${key}".`);
+    }
+
+    currentProps = fixed.props as Record<string, unknown> | undefined;
+    if (currentProps) {
+      const entries = Object.entries(currentProps);
+      const definedEntries = entries.filter(([, value]) => value !== undefined);
+      if (definedEntries.length !== entries.length) {
+        const removedKeys = entries
+          .filter(([, value]) => value === undefined)
+          .map(([propKey]) => propKey);
+        fixed = {
+          ...fixed,
+          props: Object.fromEntries(definedEntries),
+        };
+        for (const propKey of removedKeys) {
+          fixes.push(
+            `Removed undefined prop "${propKey}" from props of "${key}".`,
+          );
+        }
+      }
     }
 
     fixedElements[key] = fixed;

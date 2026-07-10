@@ -10,7 +10,7 @@
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
   import { JsonRenderDevtools } from "@json-render/devtools-svelte";
-  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
+  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentSuggestion, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, createDefaultHostUiTargetRegistry, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
@@ -28,6 +28,7 @@
   import { findDocumentArtifactToolCandidate, findJsonArtifactToolCandidate, type PreferredDocumentView } from "$lib/artifacts/tool-artifact-extraction";
   import { findStreamingJsonArtifactSpecCandidate } from "$lib/artifacts/streaming-artifact";
   import { hasActiveArtifactUpdateIntent, hasExplicitArtifactIntent } from "$lib/artifacts/artifact-promotion";
+  import { hasExplicitWorkspaceDocumentIntent } from "$lib/document-intent";
   import { logArtifactTelemetry, summarizeSpec } from "$lib/artifacts/artifact-telemetry";
   import { createInMemoryArtifactWarehouse, type ArtifactWarehouseSnapshot, type ArtifactWarehouseVersion } from "$lib/artifacts/artifact-warehouse";
   import ArtifactInspector from "$lib/artifacts/ArtifactInspector.svelte";
@@ -43,7 +44,7 @@
     type ArtifactStatus,
   } from "$lib/artifacts/artifact-observability";
   import { CanvasViewport, ChatWindow, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
-  import type { AgentUiActionDescriptor, AgentUiActionRegistrySnapshot, AgentUiApprovalStateSnapshot, AgentUiPageAssertions, AgentUiPageContextSnapshot, AgentUiPageControl, AgentUiSemanticActionResult, AgentUiTargetRegistrySnapshot, AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
+  import { createTelemetryCorrelation, sanitizeDeploymentSnapshot, sanitizeTurnCorrelationSnapshot, type AgentUiActionDescriptor, type AgentUiActionRegistrySnapshot, type AgentUiApprovalStateSnapshot, type AgentUiDeploymentSnapshot, type AgentUiPageAssertions, type AgentUiPageContextSnapshot, type AgentUiPageControl, type AgentUiSemanticActionResult, type AgentUiTargetRegistrySnapshot, type AgentUiTurnCorrelationSnapshot, type AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
   import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
     isAgentHostPageContextMessage,
@@ -94,6 +95,18 @@
     type AgentRuntimeSettings,
   } from "$lib/agent-settings";
   import { AGENT_PROMPT_CORE, AGENT_PROMPT_MODULES, CORE_MODULE_ID, composeAgentSystemPrompt } from "$lib/agent-prompt";
+  import SupportDiagnosticsMenu from "$lib/SupportDiagnosticsMenu.svelte";
+  import { createSupportDiagnosticsExport, exportTranscriptMarkdown } from "$lib/support-export";
+  import { createTurnCorrelationRecord, createTurnCorrelationRecordFromResponse, deploymentSnapshotFromHeaders, selectTurnCorrelationRecord, upsertTurnCorrelationRecord, type AgentUiTurnCorrelationInput } from "$lib/chat-correlation";
+
+
+  interface ReservationApprovalPreview {
+    messageId: string;
+    toolCallId: string;
+    commandId: string;
+    guest: Record<string, unknown>;
+    booking: Record<string, unknown>;
+  }
 
   interface ActiveDocumentSnapshot {
     id: string;
@@ -240,12 +253,9 @@
   // Composer context selection for the next turn (chips + authoritative dismissals).
   let runContextSelection = $state<AgentRunContextSelection>(createEmptyAgentRunContextSelection());
   // Analytics-only run hints, computed client-side at send time. `analyticsTurnIndex`
-  // is 0-based per workspace session (reset on clear/switch); `pendingAnalyticsEntryFrom`
-  // records how the next turn started (default composer; workflow launcher / Continue
-  // override it); `pendingAnalyticsHints` is the object read by the transport for the
-  // in-flight send. Never influences behavior — analytics dimension only.
+  // is 0-based per workspace session (reset on clear/switch); `pendingAnalyticsHints`
+  // is the object read by the transport for the in-flight send.
   let analyticsTurnIndex = 0;
-  let pendingAnalyticsEntryFrom: AgentAnalyticsEntryFrom = "composer";
   let pendingAnalyticsHints: AgentAnalyticsHints | null = null;
   // Per-turn provenance: user message id -> the context items sent with that turn.
   let turnContextByMessageId = new SvelteMap<string, AgentContextItem[]>();
@@ -283,16 +293,26 @@
   let streamStartedAt = $state<number | null>(null);
   let activityClock = $state(Date.now());
   let lastPersistStatus = $state<AgentUiPageAssertions["lastPersistStatus"]>("idle");
+  let turnCorrelationRecords = $state<AgentUiTurnCorrelationSnapshot[]>([]);
+  let pendingTurnCorrelationByKey = new SvelteMap<string, AgentUiTurnCorrelationInput>();
+  let latestDeploymentSnapshot = $state<AgentUiDeploymentSnapshot | undefined>();
+  let supportExportStatus = $state<string | null>(null);
+  let supportExportBusy = $state(false);
 
   const conversation = new Chat({
     transport: new DefaultChatTransport({
       api: "/api/generate",
+      fetch: fetchGenerateWithSupportCorrelation,
       prepareSendMessagesRequest({ messages, id, trigger, messageId, body, headers }) {
+        const correlation = createPreparedTurnCorrelation(messageId ?? messages.at(-1)?.id);
         return {
           headers: {
             ...headers,
             ...createDevSmokeHeaders(),
             ...createWorkspaceRequestHeaders(),
+            "x-sonik-request-id": String(correlation.requestId),
+            "x-sonik-trace-id": String(correlation.traceId),
+            traceparent: String(correlation.traceparent),
           },
           body: {
             ...body,
@@ -338,15 +358,16 @@
   const documentFramePreferredView = $derived(documentPreferredView);
   const documentFrameSubtitle = $derived(`${documentFrameLanguage} · v${documentSeed?.version_count ?? 1}`);
   const workspaceLayoutMode = $derived<WorkspaceLayoutMode>(embedMode);
-  const workspaceRailMode = $derived<WorkspaceRailMode>(embedRailMode);
-  // Slice B (R1): embedded chat mode used to force this false unconditionally,
-  // which left a created artifact invisible until the host separately called
-  // canvas.open. It now follows the same "an artifact/document now exists"
-  // rule as workspace mode -- the surface never renders nothing for a real
-  // artifact. `notifyHostCanvasOpen` (below) separately best-effort-asks the
-  // embedding host to make room around this iframe.
+  const workspaceRailMode = $derived<WorkspaceRailMode>(
+    isEmbeddedHostContextExpected() && embedMode === "canvas" ? "hidden" : embedRailMode,
+  );
+  // Embedded chat suppresses the local artifact pane because the embedding
+  // host owns canvas opening. Standalone/workspace still follows local
+  // artifact state, while embedded canvas remains explicitly open.
   const artifactOpen = $derived(
-    embedMode === "canvas"
+    isEmbeddedHostContextExpected() && embedMode === "chat"
+      ? false
+      : embedMode === "canvas"
       ? true
       : Boolean(activeArtifact || pendingArtifactIntent || documentEditorOpen),
   );
@@ -430,6 +451,7 @@
     return null;
   });
 
+
   $effect(() => {
     if (!latestDocumentArtifact) return;
     const promotionKey = [
@@ -471,6 +493,43 @@
     notifyHostCanvasOpen(`document:${latestDocumentArtifact.document.id}`, "A document was just promoted to the canvas.");
   });
 
+
+
+  function findLatestReservationApprovalPreview(): ReservationApprovalPreview | null {
+    let commitSeenAfterPreview = false;
+    for (let messageIndex = conversation.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+      const message = conversation.messages[messageIndex];
+      if (!message || message.role !== "assistant") continue;
+      const parts = snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string; output?: unknown }>;
+      for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+        const part = parts[partIndex];
+        if (part.type === "tool-commitBookingReservationCommand" && part.state === "output-available") commitSeenAfterPreview = true;
+        if (part.type !== "tool-previewBookingReservationCommand" || part.state !== "output-available") continue;
+        if (commitSeenAfterPreview) return null;
+        const output = isRecord(part.output) ? part.output : null;
+        const command = isRecord(output?.command) ? output.command : null;
+        const input = isRecord(command?.input) ? command.input : null;
+        const guest = isRecord(input?.guest) ? input.guest : null;
+        const booking = isRecord(input?.booking) ? input.booking : null;
+        if (output?.kind !== "reservation-command-preview" || output.ok !== true || !guest || !booking) continue;
+        return {
+          messageId: message.id,
+          toolCallId: typeof part.toolCallId === "string" ? part.toolCallId : `reservation-preview-${partIndex}`,
+          commandId: typeof command?.commandId === "string" ? command.commandId : "booking.create.booking",
+          guest,
+          booking,
+        };
+      }
+    }
+    return null;
+  }
+
+  function reservationPreviewSummary(preview: ReservationApprovalPreview): string {
+    const guestName = typeof preview.guest.name === "string" && preview.guest.name.trim() ? preview.guest.name.trim() : "Guest";
+    const startsAt = typeof preview.booking.startsAt === "string" ? preview.booking.startsAt : "selected time";
+    const partySize = preview.booking.partySize === undefined ? "party" : `party of ${String(preview.booking.partySize)}`;
+    return `${guestName}, ${partySize}, ${startsAt}`;
+  }
 
   function collectToolOutputErrorKeys(messages: typeof conversation.messages): string[] {
     const keys: string[] = [];
@@ -582,6 +641,7 @@
       persistJsonRenderArtifactSnapshot(promotedSnapshot, "agent");
       activeArtifactStatus = createArtifactStatus(promotedSnapshot.artifact, event);
       pendingArtifactIntent = null;
+      notifyHostCanvasOpen(promotedSnapshot.artifact.id, "A completed artifact was promoted to the canvas.");
     }
   });
 
@@ -1176,6 +1236,58 @@
     return undefined;
   }
 
+
+
+  function createPreparedTurnCorrelation(messageId: unknown): AgentUiTurnCorrelationInput {
+    const correlation = createTelemetryCorrelation();
+    const snapshot = createTurnCorrelationRecord({
+      sessionId: activeSessionId,
+      messageId,
+      requestId: correlation.requestId,
+      traceId: correlation.traceId,
+      traceparent: correlation.traceparent,
+      status: "error",
+    });
+    pendingTurnCorrelationByKey.set(correlation.requestId, snapshot);
+    return snapshot;
+  }
+
+  async function fetchGenerateWithSupportCorrelation(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const requestHeaders = new Headers(init?.headers);
+    const requestId = requestHeaders.get("x-sonik-request-id") ?? undefined;
+    const prepared = requestId ? pendingTurnCorrelationByKey.get(requestId) : undefined;
+    try {
+      const response = await fetch(input, init);
+      const deployment = deploymentSnapshotFromHeaders(response.headers);
+      if (deployment) latestDeploymentSnapshot = deployment;
+      const record = createTurnCorrelationRecordFromResponse({
+        prepared,
+        headers: response.headers,
+        status: response.ok ? "success" : "error",
+        deployment,
+      });
+      upsertSupportCorrelation(record);
+      if (requestId) pendingTurnCorrelationByKey.delete(requestId);
+      return response;
+    } catch (error) {
+      if (prepared) {
+        upsertSupportCorrelation(createTurnCorrelationRecord({ ...prepared, status: "error" }));
+        if (requestId) pendingTurnCorrelationByKey.delete(requestId);
+      }
+      throw error;
+    }
+  }
+
+  function upsertSupportCorrelation(record: AgentUiTurnCorrelationSnapshot): void {
+    turnCorrelationRecords = upsertTurnCorrelationRecord(turnCorrelationRecords, record);
+    if (record.deployment) latestDeploymentSnapshot = record.deployment;
+    syncDevPageContext("support_correlation_updated");
+  }
+
+  function getLatestActiveSessionCorrelation(): AgentUiTurnCorrelationSnapshot | undefined {
+    return selectTurnCorrelationRecord(turnCorrelationRecords, { sessionId: activeSessionId });
+  }
+
   function createDevSmokeHeaders(): Record<string, string> {
     if (!dev || typeof window === "undefined") return {};
     const searchParams = new URLSearchParams(window.location.search);
@@ -1398,6 +1510,9 @@
       logArtifactTelemetry({ source: "client", event: "host.page_context.message_ignored", reason: "empty_context", ok: false });
       return;
     }
+    if (isEmbeddedHostContextExpected() && (nextContext.mode === "chat" || nextContext.mode === "canvas" || nextContext.mode === "workspace")) {
+      embedMode = nextContext.mode;
+    }
     hostPageContext = nextContext;
     lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext });
     applyEmbeddedThemeFromHost(nextContext.theme ?? embeddedUrlTheme);
@@ -1446,6 +1561,8 @@
     const workflow = createLocalWorkflowSnapshot();
     const workflowVisibleErrors = workflow.visibleErrors.map((error) => error.message);
     const localTargetRegistry = createLocalHostUiTargetRegistry();
+    const localCorrelation = sanitizeTurnCorrelationSnapshot(getLatestActiveSessionCorrelation());
+    const localDeployment = sanitizeDeploymentSnapshot(latestDeploymentSnapshot);
     const localContext: AgentUiPageContextSnapshot = {
       route: "/",
       surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
@@ -1476,6 +1593,9 @@
         "requestApproval",
         "approveAndRun",
         "cancelApproval",
+        "support",
+        "exportChat",
+        "exportDiagnostics",
       ],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
       visibleErrors: workflowVisibleErrors.length > 0 ? workflowVisibleErrors : undefined,
@@ -1486,7 +1606,13 @@
       skillFamilies: documentEditorOpen || activeArtifact ? ["workspace"] : ["chat"],
       at: new Date().toISOString(),
     };
-    return mergeAgentHostPageContext(localContext, hostPageContext) as AgentUiPageContextSnapshot;
+    const mergedContext = mergeAgentHostPageContext(localContext, hostPageContext) as AgentUiPageContextSnapshot;
+    return {
+      ...mergedContext,
+      activeSessionId,
+      ...(localDeployment ? { deployment: localDeployment } : {}),
+      ...(localCorrelation ? { correlation: localCorrelation } : {}),
+    };
   }
 
   function recordConversationLifecycle(reason: string): void {
@@ -1643,6 +1769,16 @@
         enabled: Boolean(activeArtifact) && !isStreaming,
         disabledReason: activeArtifact ? (isStreaming ? "streaming" : undefined) : "missing_active_artifact",
       }),
+      createActionDescriptor("exportChat", "Export chat transcript", {
+        enabled: !visibleTranscriptDisabledReason(),
+        disabledReason: visibleTranscriptDisabledReason(),
+        effect: "read",
+      }),
+      createActionDescriptor("exportDiagnostics", "Export support diagnostics", {
+        enabled: Boolean(activeSessionId) && !supportExportBusy,
+        disabledReason: activeSessionId ? (supportExportBusy ? "export_in_progress" : undefined) : "missing_session",
+        effect: "read",
+      }),
       createActionDescriptor("requestHostAction", "Request host action", {
         kind: "host_action",
         effect: "environment",
@@ -1692,6 +1828,90 @@
       activeSessionId,
       ...extras,
     };
+  }
+
+
+
+  function visibleTranscriptDisabledReason(): string | undefined {
+    if (!activeSessionId) return "missing_session";
+    return exportTranscriptMarkdown(conversation.messages).trim() ? undefined : "empty_transcript";
+  }
+
+  function downloadSupportFile(filename: string, contents: string, type: string): void {
+    const blob = new Blob([contents], { type });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportVisibleChatTranscript(): Promise<AgentUiSemanticActionResult> {
+    const disabledReason = visibleTranscriptDisabledReason();
+    if (disabledReason) {
+      supportExportStatus = disabledReason === "missing_session" ? "Open a chat session before exporting." : "There is no visible user or assistant text to export yet.";
+      return semanticActionResult(false, supportExportStatus, disabledReason);
+    }
+    const markdown = exportTranscriptMarkdown(conversation.messages);
+    downloadSupportFile(`sonik-chat-${activeSessionId}.md`, markdown, "text/markdown;charset=utf-8");
+    supportExportStatus = "Chat transcript exported.";
+    return semanticActionResult(true, supportExportStatus);
+  }
+
+  async function exportActiveSessionDiagnostics(): Promise<AgentUiSemanticActionResult> {
+    if (!activeSessionId) {
+      supportExportStatus = "Open a chat session before exporting diagnostics.";
+      return semanticActionResult(false, supportExportStatus, "missing_session");
+    }
+    const expectedSessionId = activeSessionId;
+    supportExportBusy = true;
+    supportExportStatus = "Preparing diagnostics…";
+    try {
+      const response = await workspaceFetch(`/api/session/${encodeURIComponent(expectedSessionId)}`);
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      const detail = (await response.json()) as WorkspaceSessionDetail;
+      if (activeSessionId !== expectedSessionId || detail.session.id !== expectedSessionId) {
+        supportExportStatus = "Session changed before diagnostics finished. Try again.";
+        return semanticActionResult(false, supportExportStatus, "active_session_mismatch", { expectedSessionId });
+      }
+      const diagnostics = createSupportDiagnosticsExport({
+        sessionId: expectedSessionId,
+        correlationRecords: turnCorrelationRecords,
+        deployment: latestDeploymentSnapshot,
+        runSummaries: detail.runs ?? [],
+        telemetrySummaries: detail.telemetry ?? [],
+        collectionStatus: "complete",
+      });
+      if (!diagnostics) {
+        supportExportStatus = "Diagnostics are not available yet.";
+        return semanticActionResult(false, supportExportStatus, "diagnostics_unavailable", { expectedSessionId });
+      }
+      downloadSupportFile(`sonik-diagnostics-${expectedSessionId}.json`, `${JSON.stringify(diagnostics, null, 2)}\n`, "application/json;charset=utf-8");
+      supportExportStatus = "Diagnostics exported.";
+      return semanticActionResult(true, supportExportStatus, undefined, { expectedSessionId });
+    } catch {
+      const diagnostics = createSupportDiagnosticsExport({
+        sessionId: expectedSessionId,
+        correlationRecords: turnCorrelationRecords,
+        deployment: latestDeploymentSnapshot,
+        runSummaries: [],
+        telemetrySummaries: [],
+        collectionStatus: "partial",
+      });
+      if (diagnostics) {
+        downloadSupportFile(`sonik-diagnostics-${expectedSessionId}.json`, `${JSON.stringify(diagnostics, null, 2)}\n`, "application/json;charset=utf-8");
+        supportExportStatus = "Partial diagnostics exported.";
+        return semanticActionResult(true, supportExportStatus, undefined, { expectedSessionId });
+      }
+      supportExportStatus = "Diagnostics are not available yet.";
+      return semanticActionResult(false, supportExportStatus, "diagnostics_unavailable", { expectedSessionId });
+    } finally {
+      supportExportBusy = false;
+    }
   }
 
   async function submitPageControlQuestionAnswer(input: { questionId?: string; value?: unknown; skipped?: boolean }): Promise<AgentUiSemanticActionResult> {
@@ -1771,13 +1991,10 @@
     return semanticHostActionResult(result, result.ok, result.message ?? hostActionStatusMessage(result), result.disabledReason);
   }
 
-  // Slice B (R1): best-effort request that the embedding host make room for
-  // the canvas (agent-embed's `canvas.open` host action) whenever a renderable
-  // artifact/document mounts in embedded chat mode. Fire-and-forget -- our own
-  // canvas pane already opens locally via `artifactOpen` regardless, so this
-  // never blocks or gates local rendering. If the host declines, doesn't
-  // respond, or there is no real embedding host, `hostCanvasOpenDeclined`
-  // flips true so the inline "Open canvas" fallback pill shows in chat.
+  // Best-effort request that the embedding host open its canvas whenever a
+  // renderable artifact/document mounts in embedded chat mode. Embedded chat
+  // suppresses the local artifact pane, so the host owns canvas opening. If it
+  // declines or does not answer, expose the inline fallback action in chat.
   function notifyHostCanvasOpen(id: string, intentLabel: string): void {
     if (!browser || embedMode !== "chat") return;
     if (window.parent === window) return;
@@ -1921,6 +2138,12 @@
         },
         cancelApproval: async () => {
           return runPageControlIntakeAction("cancelApproval", "Approval request cancelled.");
+        },
+        exportChat: async () => {
+          return exportVisibleChatTranscript();
+        },
+        exportDiagnostics: async () => {
+          return exportActiveSessionDiagnostics();
         },
         requestHostAction: async (input) => {
           return runPageControlHostAction(input ?? {});
@@ -2450,7 +2673,6 @@
     rehydrateRunContextState(detail);
     // Entering a session restarts its per-session analytics turn sequence.
     analyticsTurnIndex = 0;
-    pendingAnalyticsEntryFrom = "composer";
     pendingAnalyticsHints = null;
     activeDocument = detail.activeDocument;
     documentSeed = detail.activeDocument;
@@ -2929,21 +3151,18 @@
     analyticsTurnIndex = turnIndex + 1;
   }
 
-  function handleSubmit(message: string) {
+  function handleSubmit(message: string): boolean {
     const trimmed = message.trim();
-    if (getSubmitDisabledReason(trimmed)) return;
+    if (getSubmitDisabledReason(trimmed)) return false;
 
-    if (hasExplicitArtifactIntent(trimmed) || (activeArtifact && hasActiveArtifactUpdateIntent(trimmed))) {
+    if (!hasExplicitWorkspaceDocumentIntent(trimmed) && (hasExplicitArtifactIntent(trimmed) || (activeArtifact && hasActiveArtifactUpdateIntent(trimmed)))) {
       pendingArtifactIntent = trimmed;
     }
 
     logSessionTelemetry("chat.submit.start", { sessionId: activeSessionId, reason: `${trimmed.length} chars` });
     // A fresh user turn supersedes any pending run recovery.
     resumableRun = null;
-    // Entry point defaults to composer; a workflow launcher chip sets it just
-    // before this call and we consume + reset it here.
-    stampAnalyticsHints(pendingAnalyticsEntryFrom);
-    pendingAnalyticsEntryFrom = "composer";
+    stampAnalyticsHints("composer");
     maybeNameNewChat(trimmed);
     const turnContext = ($state.snapshot(runContextSelection).items ?? []) as AgentContextItem[];
     conversation.sendMessage({ text: trimmed });
@@ -2953,20 +3172,62 @@
     if (turnContext.length > 0 && sentUserMessage?.role === "user") {
       turnContextByMessageId.set(sentUserMessage.id, turnContext);
     }
+    return true;
   }
 
-  function sendUserTurnWithEntryFrom(message: string, entryFrom: AgentAnalyticsEntryFrom): void {
+
+  function workflowLauncherTelemetryBase(suggestion: AgentSuggestion) {
+    return {
+      toolCallId: "templateId" in suggestion && typeof suggestion.templateId === "string" ? suggestion.templateId : undefined,
+      runtimeStatus: suggestion.familyId,
+      mode: suggestion.readiness,
+      title: "version" in suggestion && typeof suggestion.version === "string" ? suggestion.version : undefined,
+    };
+  }
+
+  function logWorkflowLauncherSuppressed(suggestion: AgentSuggestion, reason: string): void {
+    logArtifactTelemetry({
+      source: "client",
+      event: "workflow_launcher.suppressed",
+      sessionId: activeSessionId ?? undefined,
+      reason,
+      ok: false,
+      ...workflowLauncherTelemetryBase(suggestion),
+    });
+  }
+
+  function handleWorkflowSuggestionSuppressed(suggestion: AgentSuggestion, reason: "duplicate" | "busy"): void {
+    logWorkflowLauncherSuppressed(suggestion, reason);
+  }
+
+  function handleWorkflowSuggestionLaunch(suggestion: AgentSuggestion): boolean {
+    if (isStreaming || getSubmitDisabledReason(suggestion.prompt.trim())) {
+      logWorkflowLauncherSuppressed(suggestion, isStreaming ? "busy" : "blocked");
+      return false;
+    }
+    logArtifactTelemetry({
+      source: "client",
+      event: "workflow_launcher.accepted",
+      sessionId: activeSessionId ?? undefined,
+      reason: "templateId" in suggestion && typeof suggestion.templateId === "string" ? suggestion.templateId : (suggestion.familyId ?? suggestion.label),
+      ok: true,
+      ...workflowLauncherTelemetryBase(suggestion),
+    });
+    return sendUserTurnWithEntryFrom(suggestion.prompt, "workflow_launcher");
+  }
+
+  function sendUserTurnWithEntryFrom(message: string, entryFrom: AgentAnalyticsEntryFrom): boolean {
     const trimmed = message.trim();
-    if (!trimmed || isStreaming || getSubmitDisabledReason(trimmed)) return;
+    if (!trimmed || isStreaming || getSubmitDisabledReason(trimmed)) return false;
     resumableRun = null;
     stampAnalyticsHints(entryFrom);
-    pendingAnalyticsEntryFrom = "composer";
     const turnContext = ($state.snapshot(runContextSelection).items ?? []) as AgentContextItem[];
     conversation.sendMessage({ text: trimmed });
     const sentUserMessage = conversation.messages.at(-1);
     if (turnContext.length > 0 && sentUserMessage?.role === "user") {
       turnContextByMessageId.set(sentUserMessage.id, turnContext);
     }
+    return true;
   }
 
   async function handleJsonRenderAction(actionName: string, params?: Record<string, unknown>): Promise<void> {
@@ -3213,14 +3474,14 @@
       appendIntakeCommitReceiptMessage(receipt);
       logArtifactTelemetry({
         source: "client",
-        event: "intake.commit_endpoint.completed",
+        event: receipt.ok === true ? "intake.commit_endpoint.completed" : "intake.commit_endpoint.error",
         sessionId: activeSessionId ?? undefined,
         artifactId: artifact.id,
         artifactVersion: artifact.version,
         toolCallId: receipt.command?.commandId,
         ok: receipt.ok === true,
       });
-      return true;
+      return receipt.ok === true;
     } catch (error) {
       logArtifactTelemetry({
         source: "client",
@@ -3233,6 +3494,69 @@
       });
       return false;
     }
+  }
+
+
+  async function runReservationCommitEndpoint(preview: ReservationApprovalPreview): Promise<boolean> {
+    try {
+      const response = await workspaceFetch("/api/reservation/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: activeSessionId, guest: preview.guest, booking: preview.booking }),
+      });
+      const receipt = await response.json().catch(() => null) as { ok?: boolean; kind?: string; steps?: unknown[]; error?: string } | null;
+      if (!receipt) {
+        logArtifactTelemetry({
+          source: "client",
+          event: "reservation.commit_endpoint.error",
+          sessionId: activeSessionId ?? undefined,
+          ok: false,
+          error: `http_${response.status}`,
+        });
+        return false;
+      }
+      appendReservationCommitReceiptMessage(receipt);
+      logArtifactTelemetry({
+        source: "client",
+        event: receipt.ok === true ? "reservation.commit_endpoint.completed" : "reservation.commit_endpoint.error",
+        sessionId: activeSessionId ?? undefined,
+        toolCallId: preview.commandId,
+        ok: receipt.ok === true,
+        error: receipt.ok === true ? undefined : receipt.error,
+      });
+      return receipt.ok === true;
+    } catch (error) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "reservation.commit_endpoint.error",
+        sessionId: activeSessionId ?? undefined,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  function isOkReceipt(receipt: unknown): boolean {
+    return Boolean(receipt && typeof receipt === "object" && (receipt as { ok?: unknown }).ok === true);
+  }
+
+  function appendReservationCommitReceiptMessage(receipt: unknown): void {
+    conversation.messages = [
+      ...conversation.messages,
+      {
+        id: `reservation-commit-${crypto.randomUUID()}`,
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-commitBookingReservationCommand",
+            toolCallId: `reservation-commit-call-${crypto.randomUUID()}`,
+            state: isOkReceipt(receipt) ? "output-available" : "output-error",
+            output: receipt,
+          },
+        ],
+      },
+    ] as typeof conversation.messages;
   }
 
   // Reuses the existing "commitActiveIntakeCommand" tool-activity label and
@@ -3249,7 +3573,7 @@
           {
             type: "tool-commitActiveIntakeCommand",
             toolCallId: `intake-commit-call-${crypto.randomUUID()}`,
-            state: "output-available",
+            state: isOkReceipt(receipt) ? "output-available" : "output-error",
             output: receipt,
           },
         ],
@@ -3365,7 +3689,6 @@
     turnContextByMessageId.clear();
     // New conversation → restart the per-session analytics turn sequence.
     analyticsTurnIndex = 0;
-    pendingAnalyticsEntryFrom = "composer";
     pendingAnalyticsHints = null;
     lastPersistStatus = "idle";
     input = "";
@@ -3507,6 +3830,27 @@
     return { ready: true, visible: true, reason: null };
   }
 
+
+  function createReservationApprovalAffordance(): AgentApprovalAffordance | null {
+    const preview = findLatestReservationApprovalPreview();
+    if (!preview) return null;
+    return {
+      title: "Book this reservation?",
+      description: reservationPreviewSummary(preview),
+      commandId: preview.commandId,
+      artifactTitle: null,
+      status: "approval_required",
+      disabled: false,
+      disabledReason: null,
+      previewLabel: "Review reservation",
+      approveLabel: "Approve and book",
+      cancelLabel: "Cancel",
+      onRequestPreview: () => logArtifactTelemetry({ source: "client", event: "reservation.approval_preview.viewed", sessionId: activeSessionId ?? undefined, toolCallId: preview.commandId, ok: true }),
+      onApprove: () => void runReservationCommitEndpoint(preview),
+      onCancel: () => appendReservationCommitReceiptMessage({ ok: false, kind: "reservation-commit", error: "cancelled", message: "Reservation approval was cancelled." }),
+    };
+  }
+
   function createActiveIntakeApprovalAffordance(): AgentApprovalAffordance | null {
     if (!isActiveBookingIntakeArtifact()) return null;
     const readiness = getActiveIntakeApprovalReadiness();
@@ -3560,12 +3904,13 @@
       activity={agentActivity}
       bind:input
       onSubmit={handleSubmit}
-      onSelectSuggestion={() => { pendingAnalyticsEntryFrom = "workflow_launcher"; }}
+      onSelectSuggestion={handleWorkflowSuggestionLaunch}
+      onSuppressSuggestion={handleWorkflowSuggestionSuppressed}
       onStop={handleStop}
       onClear={handleClear}
       runRecovery={runRecovery}
       onContinue={handleContinue}
-      approvalAffordance={createActiveIntakeApprovalAffordance()}
+      approvalAffordance={createReservationApprovalAffordance() ?? createActiveIntakeApprovalAffordance()}
       contextItems={runContextSelection.items}
       contextSources={contextCandidates.sources}
       onAttachContext={handleAttachContext}
@@ -3610,10 +3955,20 @@
           type="button"
           onclick={openDocumentEditor}
           class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          aria-label="Open workspace documents"
+          aria-label="Open or create a workspace document"
         >
-          Documents
+          Workspace document
         </button>
+        <SupportDiagnosticsMenu
+          activeSessionId={activeSessionId}
+          correlation={getLatestActiveSessionCorrelation()}
+          deployment={latestDeploymentSnapshot}
+          exportStatus={supportExportStatus}
+          busy={supportExportBusy}
+          transcriptDisabledReason={visibleTranscriptDisabledReason()}
+          onExportChat={() => void exportVisibleChatTranscript()}
+          onExportDiagnostics={() => void exportActiveSessionDiagnostics()}
+        />
         {#if embedMode === "chat" && hostCanvasOpenDeclined && (activeArtifact || documentEditorOpen)}
           <button
             type="button"
