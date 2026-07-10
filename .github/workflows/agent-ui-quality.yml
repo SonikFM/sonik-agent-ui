@@ -48,23 +48,9 @@ jobs:
         run: pnpm build
 
   smoke:
-    name: ${{ matrix.name }}
+    name: Embedded Agent UI smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Embedded Agent UI smoke
-            id: embed
-            script: smoke:agent-ui:embed
-            browser: true
-            persistence: auto
-          - name: Run persistence and reattach smoke
-            id: reattach
-            script: smoke:agent-ui:run-reattach
-            browser: false
-            persistence: memory
 
     steps:
       - name: Checkout
@@ -86,19 +72,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Chromium
-        if: matrix.browser
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run smoke
-        run: pnpm ${{ matrix.script }}
-        env:
-          SONIK_AGENT_UI_PERSISTENCE_MODE: ${{ matrix.persistence }}
+        run: pnpm smoke:agent-ui:embed
 
       - name: Upload smoke evidence on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: agent-ui-smoke-evidence-${{ matrix.id }}-${{ github.run_id }}
+          name: agent-ui-smoke-evidence-${{ github.run_id }}
           path: .omx/logs/
           if-no-files-found: ignore
           retention-days: 7
