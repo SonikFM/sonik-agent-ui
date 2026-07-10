@@ -13,6 +13,7 @@ const evidencePort = Number(process.env.AGENT_UI_EVIDENCE_PORT ?? 5175);
 const evidenceBaseUrl = process.env.AGENT_UI_EVIDENCE_URL ?? `http://127.0.0.1:${evidencePort}`;
 const telemetryLogPath = process.env.SONIK_AGENT_UI_TELEMETRY_LOG ?? path.join(repoRoot, ".omx", "logs", "agent-ui-telemetry.jsonl");
 const evidencePath = path.join(repoRoot, ".omx", "logs", `${runId}.json`);
+const artifactInputScenario = "artifact-input-stream";
 const startServer = process.env.AGENT_UI_SMOKE_START_SERVER !== "false";
 const useMockStream = process.env.AGENT_UI_EMBED_SMOKE_REAL_MODEL !== "true";
 const smokeHostContextEnv = {
@@ -37,6 +38,7 @@ const evidence = {
   assertions: null,
   telemetry: { commandIndexContext: [], hostContextUpdated: [], ignoredHostMessages: [], runtimeErrors: [] },
   layout: { chat: null, canvas: null },
+  autoCanvas: null,
   assistantText: "",
 };
 const watchdog = setTimeout(() => void finish("FAIL", "Embed smoke timed out."), Number(process.env.AGENT_UI_EMBED_SMOKE_TIMEOUT_MS ?? 120_000));
@@ -181,6 +183,43 @@ function assertWithinViewport(name, rect, viewport, tolerance = 1) {
   }
 }
 
+async function captureCanvasWorkspaceState(frame) {
+  return frame.evaluate(() => {
+    const serialRect = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null;
+    };
+    const isVisible = (element) => {
+      if (!element) return false;
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    };
+    const root = document.querySelector(".workspace-root");
+    const chatPane = document.querySelector(".workspace-pane--chat");
+    const artifactPane = document.querySelector(".workspace-pane--artifact");
+    const conversationHeader = document.querySelector('.workspace-pane--chat [role="log"] > header');
+    const sessionRail = document.querySelector(".workspace-rail");
+    return {
+      href: window.location.href,
+      root: {
+        artifactOpen: root?.getAttribute("data-artifact-open") ?? null,
+        hasRail: root?.getAttribute("data-has-rail") ?? null,
+        layoutMode: root?.getAttribute("data-layout-mode") ?? null,
+        railMode: root?.getAttribute("data-rail-mode") ?? null,
+      },
+      chatRect: serialRect(chatPane),
+      artifactRect: serialRect(artifactPane),
+      conversationHeaderVisible: isVisible(conversationHeader),
+      sessionRailVisible: isVisible(sessionRail),
+      sessionSwitcherVisible: isVisible(document.querySelector('[data-testid="agent-session-switcher"]')),
+      assertions: window.__sonikAgentUI?.getAssertions?.() ?? null,
+      pageContext: window.__sonikAgentUI?.getPageContext?.() ?? null,
+      bodyText: document.body.innerText,
+    };
+  });
+}
+
 function classifyTelemetry(events) {
   const requestIds = new Set(evidence.responses.map((response) => response.requestId).filter(Boolean));
   const sessionId = evidence.pageContext?.activeSessionId;
@@ -218,7 +257,7 @@ try {
 
   const hostSession = process.env.AGENT_UI_EMBED_HOST_SESSION ?? "fixture";
   const hostSessionParam = hostSession ? `&hostSession=${encodeURIComponent(hostSession)}` : "";
-  const hostUrl = `${baseUrl}/fake-booking-host.html?autoOpen=chat&smokeMockStream=${useMockStream ? "1" : "0"}&smokeRunId=${encodeURIComponent(runId)}${hostSessionParam}`;
+  const hostUrl = `${baseUrl}/fake-booking-host.html?autoOpen=chat&smokeMockStream=${useMockStream ? "1" : "0"}&smokeRunId=${encodeURIComponent(runId)}&smokeScenario=${encodeURIComponent(artifactInputScenario)}${hostSessionParam}`;
   await page.goto(hostUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
   await page.waitForFunction(() => document.body.dataset.agentUiOpen === "chat", undefined, { timeout: 20_000 });
   const initialEmbedMode = await page.evaluate(() => document.body.dataset.agentUiOpen);
@@ -239,6 +278,8 @@ try {
   const frameElement = await page.waitForSelector("iframe#agent-frame", { timeout: 15_000 });
   const frame = await frameElement.contentFrame();
   if (!frame) throw new Error("agent iframe frame was not available");
+  const chatFrameSrc = await page.locator("iframe#agent-frame").getAttribute("src");
+  if (!chatFrameSrc?.includes(`smokeScenario=${encodeURIComponent(artifactInputScenario)}`)) throw new Error(`chat iframe src did not include artifact smoke scenario: ${chatFrameSrc}`);
   await frame.waitForFunction(() => Boolean(window.__sonikAgentUI?.getPageContext), undefined, { timeout: 20_000 });
   await frame.waitForFunction(() => window.__sonikAgentUI?.getPageContext?.().surface === "booking-console", undefined, { timeout: 10_000 });
 
@@ -263,15 +304,45 @@ try {
   evidence.assertions = await frame.evaluate(() => window.__sonikAgentUI.getAssertions());
   if (preSessionId && evidence.pageContext?.activeSessionId === preSessionId) throw new Error(`session bootstrap reused stale active session: ${preSessionId}`);
 
-  const submit = await frame.evaluate(async () => window.__sonikAgentUI.actions.submitPrompt({ prompt: "Using the current page context, summarize where I am in one sentence." }));
+  const submit = await frame.evaluate(async () => window.__sonikAgentUI.actions.submitPrompt({ prompt: "Create a compact visual dashboard artifact for this booking." }));
   if (!submit?.ok) throw new Error(`semantic submit failed: ${JSON.stringify(submit)}`);
   await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === true, undefined, { timeout: 10_000 });
-  await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === false && window.__sonikAgentUI.getAssertions().messageCount >= 2, undefined, { timeout: useMockStream ? 45_000 : 90_000 });
+  const streamSessionId = await frame.evaluate(() => window.__sonikAgentUI.getPageContext().activeSessionId ?? null);
+  await page.waitForFunction(() => document.body.dataset.agentUiOpen === "canvas", undefined, { timeout: 20_000 });
+  await page.waitForSelector("#canvas-window[data-open=\"true\"]", { timeout: 15_000 });
+  evidence.layout.canvas = await captureEmbedLayout(page);
+  const autoCanvasFrameElement = await page.waitForSelector("iframe#agent-frame", { timeout: 15_000 });
+  const autoCanvasFrame = await autoCanvasFrameElement.contentFrame();
+  if (!autoCanvasFrame) throw new Error("Agent iframe was not available after automatic canvas.open.");
+  const canvasFrameSrc = await page.locator("iframe#agent-frame").getAttribute("src");
+  if (canvasFrameSrc !== chatFrameSrc) throw new Error(`Automatic canvas.open changed iframe src: ${chatFrameSrc} -> ${canvasFrameSrc}`);
+  if (evidence.layout.canvas.iframeParentId !== "canvas-frame-slot") await finish("FAIL", `Automatic canvas.open did not move iframe to canvas slot: ${evidence.layout.canvas.iframeParentId}`);
+  await autoCanvasFrame.waitForFunction(() => {
+    const root = document.querySelector(".workspace-root");
+    return root?.getAttribute("data-layout-mode") === "canvas"
+      && root?.getAttribute("data-rail-mode") === "hidden"
+      && root?.getAttribute("data-artifact-open") === "true";
+  }, undefined, { timeout: 20_000 });
+  const autoCanvasState = await captureCanvasWorkspaceState(autoCanvasFrame);
+  if (autoCanvasState.pageContext?.activeSessionId !== streamSessionId) throw new Error(`Active session changed during automatic canvas.open: ${streamSessionId} -> ${autoCanvasState.pageContext?.activeSessionId}`);
+  if (autoCanvasState.assertions?.isStreaming !== true) throw new Error(`Automatic canvas.open did not preserve active stream state at open time: ${JSON.stringify(autoCanvasState.assertions)}`);
+  if (!autoCanvasState.artifactRect || !autoCanvasState.chatRect || autoCanvasState.artifactRect.top > autoCanvasState.chatRect.top) throw new Error("Canvas layout did not render artifact above compact chat.");
+  if (autoCanvasState.conversationHeaderVisible) throw new Error("Canvas layout did not hide duplicate AgentConversation header.");
+  if (autoCanvasState.root.hasRail !== "false" || autoCanvasState.sessionRailVisible || autoCanvasState.sessionSwitcherVisible) throw new Error("Canvas layout did not hide duplicate session rail/session switcher.");
+  evidence.autoCanvas = {
+    usedManualLauncher: false,
+    chatFrameSrc,
+    canvasFrameSrc,
+    streamSessionId,
+    bodyMode: await page.evaluate(() => document.body.dataset.agentUiOpen ?? null),
+    workspace: autoCanvasState,
+  };
+  await autoCanvasFrame.waitForFunction(() => window.__sonikAgentUI.getAssertions().isStreaming === false && window.__sonikAgentUI.getAssertions().messageCount >= 2, undefined, { timeout: useMockStream ? 45_000 : 90_000 });
   await sleep(1500);
-  evidence.assistantText = await frame.evaluate(() => document.body.innerText).catch(() => "");
-  await frame.waitForFunction(() => window.__sonikAgentUI?.getPageContext?.().surface === "booking-console", undefined, { timeout: 10_000 });
-  evidence.pageContext = await frame.evaluate(() => window.__sonikAgentUI.getPageContext());
-  evidence.assertions = await frame.evaluate(() => window.__sonikAgentUI.getAssertions());
+  evidence.assistantText = await autoCanvasFrame.evaluate(() => document.body.innerText).catch(() => "");
+  await autoCanvasFrame.waitForFunction(() => window.__sonikAgentUI?.getPageContext?.().surface === "booking-console", undefined, { timeout: 10_000 });
+  evidence.pageContext = await autoCanvasFrame.evaluate(() => window.__sonikAgentUI.getPageContext());
+  evidence.assertions = await autoCanvasFrame.evaluate(() => window.__sonikAgentUI.getAssertions());
   if (evidence.assertions?.hasActiveSession !== true) throw new Error(`Embedded prompt did not create an active session: ${JSON.stringify(evidence.assertions)}`);
   const chatSessionId = evidence.pageContext?.activeSessionId ?? null;
   classifyTelemetry(await readTelemetryEvents());
@@ -296,29 +367,21 @@ try {
     await finish("FAIL", "Real-model embedded page-context answer did not mention the donated booking page context.");
   }
   if (evidence.telemetry.runtimeErrors.length > 0) await finish("FAIL", "Client runtime error telemetry observed during embed smoke.");
-  await page.focus("#agent-fab-main");
-  await page.waitForFunction(() => {
-    const button = document.querySelector("#open-canvas");
-    if (!button) return false;
-    const style = getComputedStyle(button.closest(".fab-item") ?? button);
-    return style.pointerEvents !== "none" && Number(style.opacity) > 0.9;
-  }, undefined, { timeout: 10_000 });
-  await page.click("#open-canvas");
   const canvasEmbedMode = await page.evaluate(() => document.body.dataset.agentUiOpen);
-  if (canvasEmbedMode !== "canvas") await finish("FAIL", "Fake host canvas launcher did not switch to canvas mode.");
+  if (canvasEmbedMode !== "canvas") await finish("FAIL", "Artifact creation did not automatically switch the fake host to canvas mode.");
   await page.waitForSelector("#canvas-window[data-open=\"true\"]", { timeout: 15_000 });
   evidence.layout.canvas = await captureEmbedLayout(page);
-  if (evidence.layout.canvas.canvasDisplay === "none") await finish("FAIL", "Canvas modal is not displayed after launcher switch.");
+  if (evidence.layout.canvas.canvasDisplay === "none") await finish("FAIL", "Canvas modal is not displayed after automatic canvas.open.");
   if (evidence.layout.canvas.iframeParentId !== "canvas-frame-slot") await finish("FAIL", `Canvas iframe was not mounted in canvas slot: ${evidence.layout.canvas.iframeParentId}`);
   if (evidence.layout.canvas.actionsDisplay !== "none" && overlaps(evidence.layout.canvas.actions, evidence.layout.canvas.canvas)) await finish("FAIL", "Host launcher controls overlap the canvas modal.");
   assertWithinViewport("canvas modal", evidence.layout.canvas.canvas, evidence.layout.canvas.viewport);
   assertWithinViewport("canvas iframe", evidence.layout.canvas.iframe, evidence.layout.canvas.viewport);
   const canvasFrameElement = await page.waitForSelector("iframe#agent-frame", { timeout: 15_000 });
   const canvasFrame = await canvasFrameElement.contentFrame();
-  if (!canvasFrame) await finish("FAIL", "Agent iframe was not available after canvas launcher switch.");
+  if (!canvasFrame) await finish("FAIL", "Agent iframe was not available after automatic canvas.open.");
   await canvasFrame.waitForFunction(() => {
     const root = document.querySelector(".workspace-root");
-    return root?.getAttribute("data-layout-mode") === "canvas" && root?.getAttribute("data-rail-mode") === "collapsed";
+    return root?.getAttribute("data-layout-mode") === "canvas" && root?.getAttribute("data-rail-mode") === "hidden";
   }, undefined, { timeout: 20_000 });
   await canvasFrame.waitForFunction(() => window.__sonikAgentUI?.getAssertions?.().hasActiveSession === true, undefined, { timeout: 20_000 });
   const canvasContext = await canvasFrame.evaluate(() => window.__sonikAgentUI.getPageContext());
@@ -326,9 +389,9 @@ try {
   await browser.close();
   await finish("PASS", localTelemetryRequired
     ? useMockStream
-      ? "Iframe embed accepted signed host page context, created an active session, compressed chat into a non-overlapping sidecar, persisted a mock-stream prompt, and opened canvas without launcher overlap."
-      : "Iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, opened canvas without launcher overlap, and emitted correlated command-index telemetry."
-    : "Remote iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, opened canvas without launcher overlap, and skipped local JSONL telemetry because the deployed Worker uses Cloudflare/Pipe-B evidence.");
+      ? "Iframe embed accepted signed host page context, created an active session, compressed chat into a non-overlapping sidecar, auto-opened canvas from artifact creation without reloading iframe src, preserved stream/session state, and rendered artifact above compact chat with duplicate chrome hidden."
+      : "Iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, auto-opened canvas from artifact creation without launcher overlap, and emitted correlated command-index telemetry."
+    : "Remote iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, auto-opened canvas from artifact creation, and skipped local JSONL telemetry because the deployed Worker uses Cloudflare/Pipe-B evidence.");
 } catch (error) {
   await browser?.close().catch(() => undefined);
   evidence.errors.push({ event: "harness.error", message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });

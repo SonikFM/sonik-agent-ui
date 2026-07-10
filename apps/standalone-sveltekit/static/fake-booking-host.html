@@ -362,8 +362,9 @@
         visibleActions: ["viewBooking", "listResources", "assignResource", "createReservation"],
       };
 
+      const smokeScenario = url.searchParams.get("smokeScenario");
       const agentUi = mountSonikAgentUI({
-        agentUrl: "/",
+        agentUrl: smokeScenario ? `/?smokeScenario=${encodeURIComponent(smokeScenario)}` : "/",
         hostOrigin: window.location.origin,
         theme: () => url.searchParams.get("theme") ?? "sonik-operator-dark",
         smokeMockStream: url.searchParams.get("smokeMockStream") !== "0" ? (url.searchParams.get("smokeMockStream") ?? "1") : null,
