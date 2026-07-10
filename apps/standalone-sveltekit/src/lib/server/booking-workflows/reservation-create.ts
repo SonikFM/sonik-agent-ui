@@ -6,7 +6,7 @@ export const BOOKING_RESERVATION_CREATE_RECIPE = commandWorkflowRecipeSchema.par
   description: "Canonical agent workflow for creating a durable booking reservation from page context.",
   familyId: "booking",
   intentAliases: ["create reservation", "make booking", "book tee time", "create booking", "reserve a slot"],
-  canonicalRegressionPrompt: "Create a reservation for Dan at 1pm July 1 for 3.",
+  canonicalRegressionPrompt: "Create a reservation for Dan at 1pm July 1 for 3; ask for a user-confirmed email or phone before previewing.",
   commandSequence: ["booking.get.availability", "previewBookingReservationCommand"],
   steps: [
     {
@@ -24,11 +24,13 @@ export const BOOKING_RESERVATION_CREATE_RECIPE = commandWorkflowRecipeSchema.par
   ],
   forbiddenUnlessExplicit: ["booking.create.hold"],
   actorFields: ["userId", "principalId", "organizationId"],
-  guestFields: ["guestLabel", "guestEmail", "guestId", "customerId"],
+  guestFields: ["guestLabel", "guestEmail", "guestPhone", "contactConfirmed", "guestId", "customerId"],
   trustedActorRules: [
     "Do not invent, edit, or provision trusted actor fields from model reasoning.",
     "Do not create a guest/customer record to satisfy a trusted host principal or actor userId error.",
     "Use CURRENT_HOST_PRINCIPAL_ID only when the learned schema/example explicitly requires the host principal sentinel; otherwise use resolved guest/customer identity fields exactly as the learned command schema requires.",
+    "Before previewBookingReservationCommand, ask the user to confirm a real guest email or phone and set contactConfirmed true only for that confirmed channel.",
+    "Never invent placeholder guest contact data (example emails, fake/test/placeholder addresses, 555 or 1234567890 phone numbers) to satisfy reservation preview validation.",
   ],
   pageContextRequirements: [
     "activeEntity.id or donated booking contextId",
@@ -39,12 +41,12 @@ export const BOOKING_RESERVATION_CREATE_RECIPE = commandWorkflowRecipeSchema.par
   ],
   successEvidence: [
     "booking.get.availability receipt ok=true for the requested slot",
-    "previewBookingReservationCommand receipt ok=true with guest and booking payload",
+    "previewBookingReservationCommand receipt ok=true with user-confirmed non-placeholder guest contact and booking payload",
     "commit.human_approved telemetry contains booking.create.guest and booking.create.booking after user approval",
     "Pipe B telemetry contains availability, preview, and human-approved commit events for the same session/request chain",
   ],
   negativeTranscriptRegression: {
-    prompt: "Create a reservation for Dan at 1pm July 1 for 3.",
+    prompt: "Create a reservation for Dan at 1pm July 1 for 3; ask for a user-confirmed email or phone before previewing.",
     failIfCommandIds: ["booking.create.hold"],
     failIfActorFieldsMutated: ["userId", "principalId", "organizationId"],
     failIfRationalesContain: [

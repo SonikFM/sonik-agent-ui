@@ -114,7 +114,8 @@ const bookingEventPrompt = [
 const bookingReservationPrompt = [
   "Use searchSkillCatalog to find booking.reservation.create, then learnSkill before using commands.",
   "Use the canonical reservation path: learnCommand booking.get.availability, run booking.get.availability, then call previewBookingReservationCommand and stop for human approval.",
-  "Use current page context for contextId/resource details when available, and ask for missing guest, party size, date, or time details before previewing.",
+  "Use current page context for contextId/resource details when available, and ask for missing guest, party size, date, time, and a user-confirmed guest email or phone before previewing.",
+  "Never invent placeholder contact data such as example emails or 555 phone numbers; preview only after the user confirms the contact channel.",
   "Do not use booking.create.hold unless I explicitly ask for a temporary hold.",
 ].join(" ");
 

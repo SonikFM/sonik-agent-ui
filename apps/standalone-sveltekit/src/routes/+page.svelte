@@ -3322,6 +3322,10 @@
     }
   }
 
+  function isOkReceipt(receipt: unknown): boolean {
+    return Boolean(receipt && typeof receipt === "object" && (receipt as { ok?: unknown }).ok === true);
+  }
+
   function appendReservationCommitReceiptMessage(receipt: unknown): void {
     conversation.messages = [
       ...conversation.messages,
@@ -3332,7 +3336,7 @@
           {
             type: "tool-commitBookingReservationCommand",
             toolCallId: `reservation-commit-call-${crypto.randomUUID()}`,
-            state: "output-available",
+            state: isOkReceipt(receipt) ? "output-available" : "output-error",
             output: receipt,
           },
         ],
@@ -3354,7 +3358,7 @@
           {
             type: "tool-commitActiveIntakeCommand",
             toolCallId: `intake-commit-call-${crypto.randomUUID()}`,
-            state: "output-available",
+            state: isOkReceipt(receipt) ? "output-available" : "output-error",
             output: receipt,
           },
         ],

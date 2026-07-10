@@ -10,6 +10,7 @@ import {
 } from "$lib/server/host-command-runtime";
 import { commitBookingReservationCommand } from "$lib/server/booking-workflows/reservation-commit";
 import { routeString, WORKSPACE_SESSION_ID_MAX_CHARS } from "$lib/server/workspace-route-limits";
+import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-transport";
 import type { RequestHandler } from "./$types";
 
 // A2 reservation-commit (2026-07-08): the ONLY code path that commits a reservation
@@ -42,6 +43,7 @@ export const POST: RequestHandler = async (event) => {
     header: event.request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER),
     fallback: createBookingRuntimeAuthContextFromEnv(env),
   });
+  const bookingRuntimeFetcher = createRequestBookingRuntimeFetcher(event);
 
   const result = await commitBookingReservationCommand(
     {
@@ -50,6 +52,7 @@ export const POST: RequestHandler = async (event) => {
       approvedCommandIds,
       bookingServiceBaseUrl,
       bookingRuntimeAuth,
+      bookingRuntimeFetcher,
     },
     { guest, booking: bookingInput },
   );

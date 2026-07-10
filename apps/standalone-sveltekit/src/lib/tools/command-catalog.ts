@@ -12,6 +12,7 @@ import { createStandaloneHostCommandIndex, createStandaloneHostCommandRuntimeBun
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import { writeAgentTelemetry } from "../server/agent-telemetry.ts";
 import { resolveAgentToolPermissionMode, type AgentToolPermissionMode } from "../agent-settings.ts";
+import { validateReservationGuestForBooking } from "../server/booking-workflows/reservation-guest-validation.ts";
 
 const commandAspectSchema = z.enum(["description", "schema", "examples", "policy", "output", "surfaces", "transport", "auth"]);
 const directCommandInputSchema = z.object({
@@ -21,7 +22,7 @@ const directCommandInputSchema = z.object({
 });
 
 const reservationPreviewInputSchema = z.object({
-  guest: z.record(z.string(), z.unknown()).describe("Guest/customer fields for booking.create.guest. Must include a name and at least one contact channel."),
+  guest: z.record(z.string(), z.unknown()).describe("Guest/customer fields for booking.create.guest. Must include a name plus a user-confirmed, non-placeholder email or phone, with contactConfirmed true."),
   booking: z.record(z.string(), z.unknown()).describe("booking.create.booking input without userId. Must include contextId, startsAt, endsAt, partySize, source, and clientRequestId."),
 });
 
@@ -29,11 +30,7 @@ const RESERVATION_REQUIRED_BOOKING_FIELDS = ["contextId", "startsAt", "endsAt", 
 
 function missingReservationPreviewFields(guest: Record<string, unknown>, booking: Record<string, unknown>): string[] {
   const missing: string[] = [];
-  const guestName = typeof guest.name === "string" ? guest.name.trim() : "";
-  const guestEmail = typeof guest.email === "string" ? guest.email.trim() : "";
-  const guestPhone = typeof guest.phone === "string" ? guest.phone.trim() : "";
-  if (!guestName) missing.push("guest.name");
-  if (!guestEmail && !guestPhone) missing.push("guest.email or guest.phone");
+  missing.push(...validateReservationGuestForBooking(guest).missingFields);
   for (const field of RESERVATION_REQUIRED_BOOKING_FIELDS) {
     if (!hasUsableToolInput(booking[field])) missing.push(`booking.${field}`);
   }
@@ -120,7 +117,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
     }),
     previewBookingReservationCommand: tool({
       description:
-        "Prepare the human approval preview for a booking reservation after booking.get.availability succeeds. This does not create the guest or booking. The user must click Approve, which POSTs to /api/reservation/commit outside the model turn.",
+        "Prepare the human approval preview for a booking reservation after booking.get.availability succeeds. Requires user-confirmed guest email or phone (contactConfirmed true) and rejects obvious placeholders. This does not create the guest or booking. The user must click Approve, which POSTs to /api/reservation/commit outside the model turn.",
       inputSchema: reservationPreviewInputSchema,
       execute: async ({ guest, booking }) => {
         const command = createBookingReservationPreview(guest, booking);
@@ -143,7 +140,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
           missingFields,
           nextAction: ok
             ? "Show this reservation to the user as the approval preview and stop. Do not call booking.create.guest or booking.create.booking. Publishing is a human Approve click that runs /api/reservation/commit outside this conversation."
-            : "Ask the user for the missing reservation fields before requesting approval. Do not attempt booking writes.",
+            : "Ask the user for the missing reservation fields, including a user-confirmed non-placeholder email or phone, before requesting approval. Do not attempt booking writes.",
         };
       },
     }),
