@@ -35,6 +35,10 @@
       "types": "./dist/capability-pinning.d.ts",
       "default": "./dist/capability-pinning.js"
     },
+    "./grant-synthesis": {
+      "types": "./dist/grant-synthesis.d.ts",
+      "default": "./dist/grant-synthesis.js"
+    },
     "./workflow-controller": {
       "types": "./dist/workflow-controller.d.ts",
       "default": "./dist/workflow-controller.js"

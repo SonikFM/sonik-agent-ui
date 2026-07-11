@@ -141,6 +141,33 @@ assert.deepEqual(
   { mode: "off", reason: "capability_revoked" },
 );
 
+// Direct grants take precedence over implied ones (Phase 4 review): a
+// restrictive grant on a write capability must not narrow a read capability
+// that carries its own direct allow grant.
+assert.deepEqual(
+  evaluateCapabilityAccess({
+    registry,
+    grants: [
+      { capabilityId: "booking.get.availability", mode: "allow" },
+      { capabilityId: "booking.create.hold", mode: "ask" },
+    ],
+    capabilityId: "booking.get.availability",
+  }),
+  { mode: "allow", reason: "granted", grantedVia: "booking.get.availability" },
+  "implication never narrows a directly granted capability",
+);
+
+// Sparse expansion still works: with NO direct grant, the implied mode applies.
+assert.deepEqual(
+  evaluateCapabilityAccess({
+    registry,
+    grants: [{ capabilityId: "booking.create.hold", mode: "ask" }],
+    capabilityId: "booking.get.availability",
+  }),
+  { mode: "ask", reason: "granted", grantedVia: "booking.create.hold" },
+  "implication fills the gap when no direct grant exists",
+);
+
 // Marketplace adapters: fixture manifests reference only registered capabilities.
 const appGrants = collectManifestPermissionGrants(restaurantSetupAppManifest);
 assert.equal(appGrants.length > 0, true, "app fixture carries permission grants");

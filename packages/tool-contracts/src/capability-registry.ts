@@ -152,17 +152,25 @@ export function evaluateCapabilityAccess(input: {
   const revoked = new Set(input.revokedCapabilityIds ?? []);
   if (revoked.has(input.capabilityId)) return { mode: "off", reason: "kill_switch_revoked" };
 
-  const matches: Array<{ mode: CapabilityAccessDecision["mode"]; grantedVia: string }> = [];
+  // Direct grants take precedence over implied ones: implication exists to
+  // EXPAND sparse grants (a write grant covers its reads), never to narrow a
+  // capability that carries its own grant — otherwise a restrictive grant on
+  // X bleeds onto everything X implies (Phase 4 review finding).
+  const direct: Array<{ mode: CapabilityAccessDecision["mode"]; grantedVia: string }> = [];
+  const implied: Array<{ mode: CapabilityAccessDecision["mode"]; grantedVia: string }> = [];
   for (const grant of input.grants) {
     if (revoked.has(grant.capabilityId)) continue;
     const granting = findCapability(input.registry, grant.capabilityId);
     if (!granting || granting.status === "revoked") continue;
-    if (grant.capabilityId === input.capabilityId || resolveImpliedCapabilityIds(input.registry, grant.capabilityId).includes(input.capabilityId)) {
-      matches.push({ mode: grant.mode, grantedVia: grant.capabilityId });
+    if (grant.capabilityId === input.capabilityId) {
+      direct.push({ mode: grant.mode, grantedVia: grant.capabilityId });
+    } else if (resolveImpliedCapabilityIds(input.registry, grant.capabilityId).includes(input.capabilityId)) {
+      implied.push({ mode: grant.mode, grantedVia: grant.capabilityId });
     }
   }
-  if (matches.length === 0) return { mode: "off", reason: "no_grant" };
-  const winner = matches.reduce((current, candidate) =>
+  const pool = direct.length > 0 ? direct : implied;
+  if (pool.length === 0) return { mode: "off", reason: "no_grant" };
+  const winner = pool.reduce((current, candidate) =>
     MODE_RESTRICTIVENESS[candidate.mode] < MODE_RESTRICTIVENESS[current.mode] ? candidate : current);
   return { mode: winner.mode, reason: "granted", grantedVia: winner.grantedVia };
 }
