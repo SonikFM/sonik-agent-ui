@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R2 · Workflow Competitor Analysis — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* page-specific, composed from tokens.css variables only */
+  .seq-note { color: var(--muted); font-size: var(--text-sm); margin: 4px 0 0; }
+  .file-cite { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--faint); }
+  .gate-reason { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--danger); }
+  .inline-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .two-col .panel { margin: 0; }
+  ul.tight { max-width: var(--prose-max); margin: 0 0 1em; padding-left: 20px; }
+  ul.tight li { margin-bottom: 6px; }
+  .matrix td { font-size: var(--text-xs); line-height: 1.45; }
+  .matrix td .cell-note { display: block; color: var(--muted); margin-top: 4px; }
+  .matrix th[scope="row"] { color: var(--ink); font-size: var(--text-xs); white-space: nowrap; padding-right: 14px; }
+  .matrix .sonik-col { background: var(--accent-surface); }
+  /* the two rows nobody else has — tinted so they cannot be skimmed past */
+  .matrix tr.moat-row td, .matrix tr.moat-row th[scope="row"] { background: var(--surface-3); }
+  .matrix tr.moat-row td.sonik-col { background: var(--accent-surface); }
+  .flow-node code { font-size: var(--text-xs); }
+  .flow-node small code { font-size: 0.95em; }
+  .rank { font-family: var(--font-mono); color: var(--muted); text-align: center; }
+  @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-doc="research-competitors">
+<main class="page">
+  <header class="page-head">
+    <h1>Workflow Competitor Analysis</h1>
+    <p class="lead">Composio, n8n, activepieces and Dify all converged on our architecture — workflow-as-data, one generic interpreter, versioned registries. None of the four has a trust boundary. Nobody signs approvals; nobody issues receipts. That absent category is the moat.</p>
+    <p class="doc-meta">Source: docs/research/workflow-competitors-analysis-2026-07.md · Analysis 2026-07-12 · Status updated 2026-07-12</p>
+  </header>
+
+  <section>
+    <h2>Capability matrix</h2>
+    <p>Four workflow/integration platforms read read-only against a single lens: workflows as Zod-validated JSON, one interpreter, a versioned capability registry with per-call gating and kill-switch, host-signed approval for writes, semantic receipts, immutable <code>packageVersionId</code>. The four architecture rows are close to even — the field has caught up to workflow-as-data. The two rows in the middle, <strong>approval primitive</strong> and <strong>receipts</strong>, are where the field is uniformly absent and Sonik stands alone.</p>
+    <div class="table-scroll">
+    <table class="matrix">
+      <caption>Ten capability dimensions across the four competitors and the Sonik reference architecture. Chips: <span class="chip danger">absent</span> <span class="chip warn">weak / bearer</span> <span class="chip ok">present</span> <span class="chip accent">Sonik-ahead</span>. Sonik cells cite implementation status against the 2026-07-12 addendum.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Dimension</th>
+          <th scope="col">Composio</th>
+          <th scope="col">n8n</th>
+          <th scope="col">activepieces</th>
+          <th scope="col">Dify</th>
+          <th scope="col">Sonik reference</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Workflow model</th>
+          <td>None — triggers or agent-authored code <span class="cell-note"><span class="chip danger">absent</span></span></td>
+          <td>Nodes + connections graph <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td>Recursive <code>nextAction</code> tree <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td>Graph engine <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td class="sonik-col">Zod JSON workflow doc + one interpreter <span class="cell-note"><span class="chip accent">ahead</span></span></td>
+        </tr>
+        <tr>
+          <th scope="row">Definition format</th>
+          <td>Raw JSON Schema tool defs; flat <code>TOOLKIT_ACTION</code> slugs — no flow document <span class="cell-note"><span class="chip danger">absent</span></span></td>
+          <td><code>IWorkflowBase</code>/<code>INode</code>, type-derived Zod <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td>Recursive Zod tree, <code>schemaVersion: '22'</code> <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td>DSL with import gate <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td class="sonik-col"><code>workflowDefinitionSchema</code> (Zod-validated JSON) <span class="cell-note"><span class="chip accent">ahead</span></span></td>
+        </tr>
+        <tr>
+          <th scope="row">Interpreter</th>
+          <td>None — Remote Workbench code sandbox <span class="cell-note"><span class="chip danger">absent</span></span></td>
+          <td>One: <code>WorkflowExecute</code> (2.9k lines) <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td>One + per-node-kind executor table <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td>One, extracted to <code>graphon==0.6.0</code> pip <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td class="sonik-col">One generic controller over the schema <span class="cell-note"><span class="chip accent">ahead</span> SHIPPED — not yet live-wired</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Versioning</th>
+          <td>Date-stamp toolkit versions + <code>'latest'</code> float <span class="cell-note"><span class="chip warn">weak</span></span></td>
+          <td>Doc history + per-node <code>typeVersion</code> registry <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td><code>DRAFT</code>/<code>LOCKED</code> — immutable published <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td>Three-tier import gate; <code>latest</code> = pointer <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td class="sonik-col">Immutable <code>packageVersionId</code>; versioned capability ids <span class="cell-note"><span class="chip accent">ahead</span> registry SHIPPED; version tables PLANNED</span></td>
+        </tr>
+        <tr class="moat-row">
+          <th scope="row">HITL / approval primitive</th>
+          <td>Eve advisory callback; OpenAI provider <code>require_approval:'never'</code> <span class="cell-note"><span class="chip danger">model-trusted</span></span></td>
+          <td>HMAC bearer resume URL; no who-approved <span class="cell-note"><span class="chip warn">bearer</span></span></td>
+          <td>Unguessable waitpoint URL + confirm-POST <span class="cell-note"><span class="chip warn">possession</span></span></td>
+          <td>Human-input node + multi-surface allowlist <span class="cell-note"><span class="chip warn">allowlist</span></span></td>
+          <td class="sonik-col">Host-signed; model-supplied approval unrepresentable <span class="cell-note"><span class="chip accent">ahead</span> SHIPPED</span></td>
+        </tr>
+        <tr class="moat-row">
+          <th scope="row">Receipts</th>
+          <td>None <span class="cell-note"><span class="chip danger">absent</span></span></td>
+          <td>None <span class="cell-note"><span class="chip danger">absent</span></span></td>
+          <td>None <span class="cell-note"><span class="chip danger">absent</span></span></td>
+          <td>None <span class="cell-note"><span class="chip danger">absent</span></span></td>
+          <td class="sonik-col">Semantic-success receipts required to commit <span class="cell-note"><span class="chip accent">ahead</span> SHIPPED</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Capability gating</th>
+          <td>None — no read/write split, no kill-switch <span class="cell-note"><span class="chip danger">absent</span></span></td>
+          <td><code>EngineRequest</code> chokepoint (audit, not a gate) <span class="cell-note"><span class="chip warn">chokepoint only</span></span></td>
+          <td><code>audience: human/ai/both</code> + <code>idempotent</code> flag <span class="cell-note"><span class="chip warn">declared, not enforced</span></span></td>
+          <td>Layer/middleware stack; category on/off perms <span class="cell-note"><span class="chip warn">coarse</span></span></td>
+          <td class="sonik-col">Versioned registry, per-call gate, kill-switch, 3-layer pin <span class="cell-note"><span class="chip accent">ahead</span> registry SHIPPED; live pin BLOCKED (8 vs 72)</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Sandbox / isolation</th>
+          <td>Cloud Remote Workbench (their credential) <span class="cell-note"><span class="chip warn">cloud-side</span></span></td>
+          <td>Not evidenced in this scope <span class="cell-note">—</span></td>
+          <td>Process-per-job; <code>isolated-vm</code> code piece <span class="cell-note"><span class="chip ok">present</span></span></td>
+          <td>Plugin daemon (own DB); internals unverifiable <span class="cell-note"><span class="chip warn">unverified</span></span></td>
+          <td class="sonik-col">Execution-inert renderer; effects refused off the commit gate <span class="cell-note"><span class="chip accent">ahead</span></span></td>
+        </tr>
+        <tr>
+          <th scope="row">Publishing / trust</th>
+          <td>First-party curated; no third-party publish <span class="cell-note"><span class="chip danger">closed</span></span></td>
+          <td>npm community nodes + opt-in checksum <span class="cell-note"><span class="chip warn">allowlist</span></span></td>
+          <td>Monorepo PR / bare npm; no conformance gate <span class="cell-note"><span class="chip warn">no gate</span></span></td>
+          <td>Plugin marketplace; immutability-on-republish unverified <span class="cell-note"><span class="chip warn">unverified</span></span></td>
+          <td class="sonik-col">Curated review + proof-tier (D015); immutable installs <span class="cell-note"><span class="chip accent">ahead</span> PLANNED — moderation not built</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Marketplace openness</th>
+          <td>Closed catalog; "Request Tools" button <span class="cell-note"><span class="chip danger">closed</span></span></td>
+          <td>Open via npm (allowlist) <span class="cell-note"><span class="chip warn">semi-open</span></span></td>
+          <td>Open via PR / npm <span class="cell-note"><span class="chip warn">semi-open</span></span></td>
+          <td>Open plugin marketplace <span class="cell-note"><span class="chip warn">semi-open</span></span></td>
+          <td class="sonik-col">Third-party immutable packages + install modes <span class="cell-note"><span class="chip accent">ahead</span> PLANNED — ORPC routes / install UI not built</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="callout danger">
+      <div class="callout-title">The two shaded rows are the finding</div>
+      <p>Read down the <strong>Receipts</strong> row: <span class="gate-reason">absent · absent · absent · absent</span>, then Sonik. Read the <strong>approval-primitive</strong> row: an advisory callback the model can satisfy, an HMAC bearer URL, an unguessable URL, an allowlist — no signature, no proof of who approved, anywhere. The strongest approval primitive in the entire set is a bearer-style resume URL or a client-side callback. Host-signed approval, an unrepresentable model-supplied approval, and semantic receipts exist in exactly one column. The architecture rows say the field caught up to workflow-as-data; these two rows say it never crossed the trust boundary.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Composio, head to head</h2>
+    <p>Composio is the named direct competitor: a hosted catalog of ~855 pre-authenticated toolkits, an SDK that is a client to <code>backend.composio.dev</code>, tools as raw server-side JSON Schema, flat <code>TOOLKIT_ACTION</code> slugs. There is <strong>no workflow layer at all</strong> — multi-step is either event-in/your-code-out triggers or an agent writing imperative code in their Remote Workbench sandbox. No flow document, no state machine, no resume. Their moat is not a workflow engine; it is catalog cold-start plus the meta-tool discovery pattern.</p>
+
+    <h3>Meta-tool discovery — the thing worth stealing</h3>
+    <p>Instead of dumping hundreds of tool definitions into context, the agent gets ~6 meta-tools and discovers the rest at runtime. Context stays small at 855-toolkit scale. This is the pattern we steal for R3 marketplace discovery and agent-facing capability search — never dump the namespace into context.</p>
+    <div class="flow" role="list" aria-label="Composio meta-tool discovery pipeline">
+      <div class="flow-node" role="listitem"><b>Agent</b><small>Holds ~6 meta-tools, not ~855 tool defs. Context stays small.</small></div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node" role="listitem"><b><code>SEARCH_TOOLS</code></b><small>Semantic discovery over the catalog. <code>COMPOSIO_SEARCH_TOOLS</code> returns an execution plan.</small></div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node" role="listitem"><b>Execution plan</b><small>Ranked toolkit actions + shapes via <code>GET_TOOL_SCHEMAS</code>. No namespace dump.</small></div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node" role="listitem"><b><code>MULTI_EXECUTE</code></b><small><code>MULTI_EXECUTE_TOOL</code>, up to 50 parallel calls in one step.</small></div>
+    </div>
+    <p class="seq-note">Discovery pattern per the Composio lane. Steal targets: meta-tool search/plan/execute → Marketplace R3 discovery; <code>MULTI_EXECUTE</code> batching → controller runtime, Phase 6.</p>
+
+    <h3>Compete or complement</h3>
+    <div class="two-col">
+      <div class="panel">
+        <div class="inline-chips"><span class="chip">Compete</span></div>
+        <p>Head-on on the integration factory and agent tool-availability. Their catalog and discovery UX <em>is</em> the bar — 855 pre-authenticated toolkits and a context-frugal search pattern. We match that surface or we do not enter the conversation.</p>
+      </div>
+      <div class="panel">
+        <div class="inline-chips"><span class="chip accent">Complement</span></div>
+        <p>Our defensible wedge is governed workflows, host-signed approval and receipts — categories Composio structurally lacks. A Sonik host could even consume Composio as one capability source under our governance layer: their unguarded seam is exactly where our approval boundary sits.</p>
+      </div>
+    </div>
+
+    <h3>The open seam</h3>
+    <p>Everything Composio does executes in their cloud against their stored credential. The only approval primitive is the experimental Eve provider's client-side, opt-in <code>needsApproval</code> callback; the mainstream OpenAI provider hardcodes <code>require_approval: 'never'</code>. A model-supplied approval is fully representable and fully trusted. Between the agent's decision to execute and the credential-backed API call there is nothing — that gap is where a host-signed approval boundary belongs.</p>
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 1080 320" width="1080" aria-labelledby="seam-title seam-desc">
+        <title id="seam-title">The open seam in Composio's execution path</title>
+        <desc id="seam-desc">A horizontal execution spine runs agent decision to execute, then a credential-backed API call in Composio's cloud, then a side effect on the user's connected account. Today a model-supplied approval passes straight through the seam. A marked vertical boundary shows where a host-signed approval gate would insert between agent execute and the credential-backed call.</desc>
+
+        <!-- band labels -->
+        <text x="20" y="28" fill="var(--muted)" font-size="13" font-family="var(--font-mono)">AGENT SIDE — model-drivable, untrusted</text>
+        <text x="700" y="28" fill="var(--muted)" font-size="13" font-family="var(--font-mono)">COMPOSIO CLOUD — stored credential</text>
+
+        <!-- agent-side band -->
+        <rect x="20" y="42" width="470" height="150" fill="var(--surface-2)" stroke="var(--line)" rx="8"/>
+        <!-- cloud band -->
+        <rect x="560" y="42" width="500" height="150" fill="var(--surface-1)" stroke="var(--line)" rx="8"/>
+
+        <!-- open seam band -->
+        <rect x="490" y="20" width="70" height="290" fill="var(--danger-surface)" stroke="color-mix(in srgb, var(--danger) 45%, var(--line))"/>
+        <text x="525" y="300" fill="var(--danger)" font-size="13" font-family="var(--font-mono)" text-anchor="middle" transform="rotate(-90 525 175)">OPEN SEAM</text>
+
+        <!-- spine -->
+        <line x1="40" y1="117" x2="1040" y2="117" stroke="var(--line-strong)" stroke-width="1.5"/>
+
+        <!-- agent-side nodes -->
+        <g font-family="var(--font-mono)" font-size="13">
+          <rect x="48" y="92" width="180" height="50" rx="6" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="138" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">agent decides</text>
+          <text x="138" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">SEARCH / plan</text>
+
+          <rect x="268" y="92" width="200" height="50" rx="6" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="368" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">agent execute</text>
+          <text x="368" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">MULTI_EXECUTE</text>
+        </g>
+
+        <!-- cloud-side nodes -->
+        <g font-family="var(--font-mono)" font-size="13">
+          <rect x="588" y="92" width="210" height="50" rx="6" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="693" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">credential-backed</text>
+          <text x="693" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">API call</text>
+
+          <rect x="838" y="92" width="200" height="50" rx="6" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="938" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">side effect</text>
+          <text x="938" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">user account</text>
+        </g>
+
+        <!-- today: model approval passes straight through -->
+        <line x1="368" y1="205" x2="588" y2="205" stroke="var(--danger)" stroke-width="1.5"/>
+        <path d="M588 205 l-10 -5 l0 10 z" fill="var(--danger)"/>
+        <text x="150" y="209" fill="var(--danger)" font-size="12" font-family="var(--font-mono)">today: model "approve" passes through →</text>
+
+        <!-- where our boundary would insert -->
+        <line x1="525" y1="42" x2="525" y2="192" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>
+        <text x="150" y="262" fill="var(--accent)" font-size="12" font-family="var(--font-mono)">Sonik boundary would insert here:</text>
+        <text x="150" y="280" fill="var(--accent)" font-size="12" font-family="var(--font-mono)">host-signed approval + receipt, before the credential call</text>
+        <circle cx="525" cy="117" r="10" fill="var(--accent-surface)" stroke="var(--accent)"/>
+        <line x1="520" y1="112" x2="530" y2="122" stroke="var(--accent)" stroke-width="1.5"/>
+        <line x1="530" y1="112" x2="520" y2="122" stroke="var(--accent)" stroke-width="1.5"/>
+      </svg>
+      <figcaption>Composio's execution path with the trust gap marked. Today a model-originated approval crosses the seam unchallenged into a credential-backed write. The dashed accent line is where a Sonik host would insert a host-signed approval boundary — between <code>agent execute</code> and the credential-backed API call — turning the seam into a gate. Built from the Composio lane's execution and approval findings.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Approval primitives, ranked honestly</h2>
+    <p>Every competitor pauses on a durable primitive and resumes on something the caller possesses or is allowlisted for. None of them signs, and none proves who approved after the fact. Ordered weakest to strongest, the field tops out one rung below a signature.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>The five approval mechanisms across the set, ordered by authorization strength (1 = weakest). Only the last both signs and produces a receipt.</caption>
+      <thead>
+        <tr><th scope="col">Rank</th><th scope="col">Mechanism</th><th scope="col">Platform</th><th scope="col">What authorizes the resume</th><th scope="col">Class</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="rank">1</td>
+          <td><strong>Advisory callback</strong></td>
+          <td>Composio (Eve)</td>
+          <td>Client-side, opt-in <code>needsApproval</code>; mainstream provider hardcodes <code>require_approval:'never'</code>. A model-supplied approval is representable and trusted.</td>
+          <td><span class="chip danger">model-forgeable</span></td>
+        </tr>
+        <tr>
+          <td class="rank">2</td>
+          <td><strong>HMAC resume URL</strong></td>
+          <td>n8n</td>
+          <td>Signed bearer link + per-integration <code>sendAndWait</code>. Possession of the URL is authorization; no structured "who approved" payload.</td>
+          <td><span class="chip warn">bearer</span></td>
+        </tr>
+        <tr>
+          <td class="rank">3</td>
+          <td><strong>Waitpoint URL + confirm-POST</strong></td>
+          <td>activepieces</td>
+          <td>Unguessable-ID possession over a single <code>DELAY|WEBHOOK</code> waitpoint; hardened to a confirm-page-then-POST after the prefetch incident. Still possession, not signing.</td>
+          <td><span class="chip warn">possession</span></td>
+        </tr>
+        <tr>
+          <td class="rank">4</td>
+          <td><strong>Multi-surface allowlist</strong></td>
+          <td>Dify</td>
+          <td>First-class human-input node with typed forms and timeouts; which caller-identity class may unblock which paused form. Best HITL in the set — still allowlist, no signing, no receipts.</td>
+          <td><span class="chip warn">allowlist</span></td>
+        </tr>
+        <tr>
+          <td class="rank">5</td>
+          <td><strong>Host-signed + receipts</strong></td>
+          <td>Sonik reference</td>
+          <td>A host-signed marker the model cannot forge; the schema refuses to represent <code>approved</code> without it (<span class="gate-reason">model_supplied_approval_is_not_trusted</span>). Commit terminal only on a semantic-success receipt.</td>
+          <td><span class="chip accent">signed</span> <span class="chip ok">SHIPPED</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="callout warn">
+      <div class="callout-title">Cautionary tale — link-borne approval (activepieces ADR 0005)</div>
+      <p>activepieces waitpoints originally resumed on a bare GET to a resume URL. Email security scanners <em>prefetched</em> those GET links and silently consumed the approvals — the pause was released before any human saw it. The fix was a confirm-page-then-POST so a prefetch cannot complete the action. The lesson generalizes to any link-borne approval: possession of an unguessable ID is not consent, and a GET side effect is reachable by machinery you do not control. This is why we harden the approval endpoint to confirm-then-POST and, above that, gate on a host-signed marker rather than URL possession.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The steal list</h2>
+    <p>What each competitor does better than a blank page, mapped to the lane and phase it lands in. Direction is theirs; the trust boundary underneath is ours.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Traceability from source pattern to Sonik lane, verbatim from the competitor analysis steal list.</caption>
+      <thead>
+        <tr><th scope="col">Steal</th><th scope="col">From</th><th scope="col">Lands in</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Meta-tool discovery (search/plan/execute over catalog; never dump the namespace into context)</td><td>Composio</td><td>Marketplace R3 discovery + agent-facing capability search</td></tr>
+        <tr><td><code>MULTI_EXECUTE</code> batching</td><td>Composio</td><td>Controller runtime, Phase 6</td></tr>
+        <tr><td><code>EngineRequest</code>/<code>EngineResponse</code> chokepoint for agent tool calls</td><td>n8n</td><td>Controller cutover (Phase 3a-2) / capability gate placement</td></tr>
+        <tr><td>Type-derived Zod (<code>z.ZodType&lt;T&gt;</code>)</td><td>n8n</td><td>tool-contracts hygiene</td></tr>
+        <tr><td>Per-node <code>typeVersion</code> + <code>VersionedNodeType</code> resolution</td><td>n8n</td><td>capability-registry version axis</td></tr>
+        <tr><td><code>audience: human/ai/both</code> + <code>idempotent</code> on capabilities</td><td>activepieces</td><td>capability descriptor fields</td></tr>
+        <tr><td>One waitpoint primitive under all pauses; confirm-then-POST for link-borne approvals</td><td>activepieces</td><td>approval endpoint hardening</td></tr>
+        <tr><td>Layer/middleware gating stack</td><td>Dify</td><td>pinning + kill-switch enforcement shape</td></tr>
+        <tr><td>Three-tier DSL version import gate</td><td>Dify</td><td>manifest upgrade path (<code>upgradeMarketplaceManifest</code>)</td></tr>
+        <tr><td>Two-phase node validation</td><td>Dify</td><td>workflow schema once node kinds are package-contributed</td></tr>
+        <tr><td>Multi-surface resume authorization</td><td>Dify</td><td>Review surface / approval channels under our signing</td></tr>
+        <tr><td><code>latest</code> as pointer + deprecation-with-alternative</td><td>Dify</td><td>package discovery fields</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="seq-note">Several of these have already landed: type-derived Zod and per-node version resolution feed the shipped capability registry (<span class="file-cite">packages/tool-contracts/src/capability-registry.ts</span>); the layer/middleware gating shape is realized as the three-layer most-restrictive-wins pin. Discovery, batching, and the manifest upgrade path remain <span class="chip">PLANNED</span>.</p>
+  </section>
+
+  <section>
+    <h2>Convergence is the validation; trust is the moat</h2>
+    <p>The four platforms were built by different teams for different markets, and they arrived at the same four architectural patterns. That is not a coincidence to worry about — it is the strongest available evidence that the thesis is correct at 280–855-integration scale. Three of the four patterns we share. The fourth, they all lack.</p>
+    <dl class="ledger">
+      <dt>Workflow as data</dt><dd>Workflow/graph as data + one generic interpreter — universal across all four. Validates the core thesis. We hold this. <span class="chip ok">SHIPPED</span> <span class="chip">controller not yet live-wired</span></dd>
+      <dt>Versioned registries</dt><dd>Registries resolving <code>(type, version) → implementation</code> — universal. Validates the capability-registry version axis. We hold this. <span class="chip ok">SHIPPED</span></dd>
+      <dt>Durable pause-as-data</dt><dd>Durable pause-as-data for HITL — universal; but authorization is bearer or allowlist everywhere. <strong>Nobody signs approvals; nobody issues receipts.</strong> We hold the pause <em>and</em> the signature. <span class="chip ok">SHIPPED</span></dd>
+      <dt>Publishing trust</dt><dd>Publishing trust is PR review, checksums, or first-party curation — nobody has immutable content-addressed third-party packages with install modes. The category is empty. <span class="chip">PLANNED</span></dd>
+    </dl>
+    <div class="callout ok">
+      <div class="callout-title">Ratified read</div>
+      <p>Compete with Composio on the integration factory — their catalog and discovery UX is the bar. Differentiate on governed workflows, host-signed approval, receipts, and immutable third-party packaging: four categories in which all four competitors are structurally <em>absent</em>, not merely behind. The first three of those four are shipped and full-chain green in <span class="file-cite">packages/tool-contracts/src/workflow-run-state.ts</span>; immutable packaging and the marketplace around it are the planned build. The moat is not a feature they haven't gotten to yet — it is a boundary they have no architecture to cross.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

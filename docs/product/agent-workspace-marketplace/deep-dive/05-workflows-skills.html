@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05 · Workflows, Agents, Skills &amp; Tool Packs — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .node-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 4px 0 20px; font-size: var(--text-sm); color: var(--muted); }
+  .node-legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 14px; height: 14px; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); flex: none; }
+  .swatch.preview { background: var(--accent-surface); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .swatch.commit  { background: var(--warn-surface);   border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .swatch.inert   { background: var(--surface-2); }
+  .swatch.done    { background: var(--ok-surface);     border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .swatch.fail    { background: var(--danger-surface); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+  table td .chip { margin-left: 0; }
+  .yn-no  { color: var(--muted); }
+  .yn-yes { color: var(--accent-ink); font-weight: 600; }
+</style>
+</head>
+<body data-doc="05-workflows-skills">
+<main class="page">
+  <header class="page-head">
+    <h1>Workflows, Agents, Skills &amp; Tool Packs</h1>
+    <p class="lead">A workflow is a typed graph, not a prompt. Ten node types compose installable capability, but only two of them can run: a <code>tool_preview</code> the model may call, and a <code>tool_commit</code> the host must sign. Everything between is state the reducer refuses to fake.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/05-workflows-agents-skills-tool-packs.md · Corpus 2026-07-07 · Status updated 2026-07-12</p>
+  </header>
+
+  <section>
+    <h2>Node-type reference</h2>
+    <p>The workflow schema enumerates ten node types (<code>workflowNodeTypeSchema</code>, <code>marketplace.ts:205</code>). Enumeration is not interpretation: the shipped reducer (<code>workflow-run-state.ts</code>) and controller (<code>workflow-controller.ts</code>) model five of them with real transitions and gates. The other five parse and validate but the controller returns <code>unsupported_node_type</code> — reserved surface, not live behavior. Only <code>tool_preview</code> is ever exposed to the model; <code>approval</code> and <code>tool_commit</code> stay host-side.</p>
+    <div class="node-legend">
+      <span><i class="swatch preview"></i>model-callable (in facade)</span>
+      <span><i class="swatch commit"></i>host-signed gate</span>
+      <span><i class="swatch inert"></i>enumerated, not yet interpreted</span>
+    </div>
+    <div class="table-scroll">
+    <table>
+      <caption>Ten node types with their reducer/gate semantics as shipped on <code>emdash/yellow-zebras-smell-txxjz</code>.</caption>
+      <thead>
+        <tr><th>Node type</th><th>Model-callable</th><th>Reducer / gate semantics</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>trigger</code></td>
+          <td class="yn-no">no</td>
+          <td>Graph entry. <code>startWorkflowRun</code> marks it <code>active</code> and sets <code>phase: "intake"</code>; carries no dedicated event.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><code>ask_user</code></td>
+          <td class="yn-no">no</td>
+          <td>Enters <code>awaiting_input</code>; an <code>answer</code> event moves it to <code>committed</code>. The <code>required</code> flag is what counts toward a run's required-question total.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><code>skill</code></td>
+          <td class="yn-no">no</td>
+          <td>Guidance only — never an approval grant or command receipt. Enumerated; the controller does not interpret it. Skill intent short-circuits to preview, never to a command.</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>artifact</code></td>
+          <td class="yn-no">no</td>
+          <td>Artifact-template projection. Enumerated; drives the <code>saving</code> phase in the shared vocabulary but has no dedicated reducer transition yet.</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>tool_preview</code></td>
+          <td class="yn-yes">yes</td>
+          <td>Execution-inert. A <code>preview_ready</code> event sets <code>phase: "preview_ready"</code>. The schema <em>refuses</em> <code>write</code>/<code>destructive</code>/<code>external</code> effect on this type — mutating work belongs on a commit node. The only model-callable node type.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><code>approval</code></td>
+          <td class="yn-no">no</td>
+          <td>Host-side. <code>request_approval</code> sets <code>phase: "approval_requested"</code> and approval status <code>requested</code>. The subsequent <code>approve</code> event is rejected without <code>hostSigned</code> (<code>model_supplied_approval_is_not_trusted</code>).</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><code>tool_commit</code></td>
+          <td class="yn-no">no</td>
+          <td>The gate. Callback never runs unless approval is <code>{ status: "approved", hostSigned: true }</code> — checked in the controller <em>before</em> the write fires, then again by the reducer's <code>commit_started</code> refusal. Requires a same-command preview node and <code>preview_then_trusted_approval</code> policy.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><code>remote_execution</code></td>
+          <td class="yn-no">no</td>
+          <td>Off-host execution surface. Enumerated; not interpreted by the controller.</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>evidence</code></td>
+          <td class="yn-no">no</td>
+          <td>Receipts already drive terminal success (<code>semanticStatus: "success"</code>), but there is no dedicated evidence-node interpretation.</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>branch</code></td>
+          <td class="yn-no">no</td>
+          <td>Conditional edge traversal. <code>nextNodeIds</code> exposes successors as a lookup, but no automatic edge/branch walk exists — callers step nodes explicitly (Phase 3b territory).</td>
+          <td><span class="chip warn">OPEN</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="callout">
+      <p class="callout-title">Three invariants the node types encode</p>
+      <p>The renderer is execution-inert — a <code>tool_preview</code> node cannot carry a mutating effect at all. Chat is never approval — an <code>approve</code> event without <code>hostSigned</code> is structurally refused. Success copy is receipts-only — the <code>committed</code> phase is reached on a semantic-success receipt, never on transport status.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Revised reservation workflow graph</h2>
+    <p>The corpus (2026-07-07) still describes a four-node availability → guest-preview → guest → booking split. The shipped fixture (<code>marketplace-fixtures.ts</code>, Phase 3a revision) collapses the two writes into <strong>one compound <code>tool_commit</code></strong> behind a single human Approve, matching how the live reservation path actually runs. There is one <code>reservation_preview</code> (guest + booking, effect <code>none</code>) and one <code>reservation_commit</code> wrapping both writes.</p>
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 1120 250" width="1120" xmlns="http://www.w3.org/2000/svg" aria-labelledby="graph-title graph-desc">
+        <title id="graph-title">Revised reservation workflow graph</title>
+        <desc id="graph-desc">Trigger flows to an availability preview, then to a single reservation preview, then across a host-signed approval gate into one compound reservation commit.</desc>
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--faint)"></path>
+          </marker>
+        </defs>
+
+        <!-- trigger -->
+        <rect x="16" y="70" width="180" height="82" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+        <text x="30" y="94" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">trigger</text>
+        <text x="30" y="116" font-size="14" fill="var(--ink)">Booking context</text>
+        <text x="30" y="136" font-size="12" fill="var(--muted)">effect none</text>
+
+        <line x1="196" y1="111" x2="252" y2="111" stroke="var(--line-strong)" marker-end="url(#arrow)"></line>
+
+        <!-- availability -->
+        <rect x="254" y="70" width="196" height="82" rx="8" fill="var(--accent-surface)" stroke="var(--accent)"></rect>
+        <text x="268" y="94" font-size="12" fill="var(--accent-ink)" font-family="var(--font-mono)">tool_preview · facade</text>
+        <text x="268" y="116" font-size="14" fill="var(--ink)">Check availability</text>
+        <text x="268" y="136" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">booking.get.availability · read</text>
+
+        <line x1="450" y1="111" x2="506" y2="111" stroke="var(--line-strong)" marker-end="url(#arrow)"></line>
+        <text x="478" y="102" font-size="12" fill="var(--muted)" text-anchor="middle" font-family="var(--font-mono)">capacity_available</text>
+
+        <!-- reservation_preview -->
+        <rect x="508" y="70" width="196" height="82" rx="8" fill="var(--accent-surface)" stroke="var(--accent)"></rect>
+        <text x="522" y="94" font-size="12" fill="var(--accent-ink)" font-family="var(--font-mono)">tool_preview · facade</text>
+        <text x="522" y="116" font-size="14" fill="var(--ink)">Preview reservation</text>
+        <text x="522" y="136" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">booking.create.booking · none</text>
+
+        <!-- gate -->
+        <line x1="704" y1="111" x2="812" y2="111" stroke="var(--warn)" stroke-dasharray="5 4" marker-end="url(#arrow)"></line>
+        <line x1="758" y1="40" x2="758" y2="182" stroke="var(--warn)" stroke-dasharray="3 4"></line>
+        <text x="758" y="32" font-size="12" fill="var(--warn)" text-anchor="middle" font-family="var(--font-mono)">host-signed approval gate</text>
+        <text x="758" y="200" font-size="12" fill="var(--warn)" text-anchor="middle">one Approve click</text>
+
+        <!-- reservation_commit -->
+        <rect x="814" y="70" width="196" height="82" rx="8" fill="var(--warn-surface)" stroke="var(--warn)"></rect>
+        <text x="828" y="94" font-size="12" fill="var(--warn)" font-family="var(--font-mono)">tool_commit · host-side</text>
+        <text x="828" y="116" font-size="14" fill="var(--ink)">Create guest + booking</text>
+        <text x="828" y="136" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">booking.create.booking · write</text>
+      </svg>
+      <figcaption>The compound <code>reservation_commit</code> wraps the existing two-write <code>commitBookingReservationCommand</code>; a per-node walker would have demanded two Approves, so the fixture was revised to one node to match the shipped one-Approve behavior. <code>requiredHostContext: ["organizationId", "principalId"]</code>. Edge <code>e2</code> carries the <code>capacity_available</code> condition.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Run state machine</h2>
+    <p>A run is a Zod-validated <code>WorkflowRunState</code> advanced by a pure reducer (Decider pattern) — rejections return <code>{ ok: false, reason }</code> with state unchanged, so a bad event can never corrupt a run. The reservation spine runs <code>intake</code> → <code>committed</code>; <code>idle</code> and <code>saving</code> are members of the shared phase vocabulary the spine does not exercise. The one guarded transition is <code>approval_requested → approved</code>: only a host-signed <code>approve</code> crosses it.</p>
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 1120 300" width="1120" xmlns="http://www.w3.org/2000/svg" aria-labelledby="fsm-title fsm-desc">
+        <title id="fsm-title">Workflow run state machine</title>
+        <desc id="fsm-desc">Phases advance from intake through preview ready, approval requested, a host-signed gate, approved, committing, and committed; committing can also fall to error, and any non-terminal phase can be cancelled.</desc>
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--faint)"></path>
+          </marker>
+        </defs>
+
+        <!-- main spine -->
+        <g font-family="var(--font-mono)">
+          <rect x="14" y="60" width="120" height="48" rx="8" fill="var(--surface-1)" stroke="var(--line-strong)"></rect>
+          <text x="74" y="89" font-size="13" fill="var(--muted)" text-anchor="middle">intake</text>
+
+          <line x1="134" y1="84" x2="170" y2="84" stroke="var(--line-strong)" marker-end="url(#arrow2)"></line>
+
+          <rect x="172" y="60" width="150" height="48" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="247" y="89" font-size="13" fill="var(--ink)" text-anchor="middle">preview_ready</text>
+
+          <line x1="322" y1="84" x2="358" y2="84" stroke="var(--line-strong)" marker-end="url(#arrow2)"></line>
+          <text x="340" y="76" font-size="11" fill="var(--muted)" text-anchor="middle">request</text>
+
+          <rect x="360" y="60" width="176" height="48" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="448" y="89" font-size="13" fill="var(--ink)" text-anchor="middle">approval_requested</text>
+
+          <!-- host-signed gate -->
+          <line x1="536" y1="84" x2="618" y2="84" stroke="var(--warn)" stroke-dasharray="5 4" marker-end="url(#arrow2)"></line>
+          <text x="577" y="46" font-size="11" fill="var(--warn)" text-anchor="middle">approve</text>
+          <text x="577" y="30" font-size="11" fill="var(--warn)" text-anchor="middle">hostSigned required</text>
+          <text x="577" y="76" font-size="11" fill="var(--warn)" text-anchor="middle">gate</text>
+
+          <rect x="620" y="60" width="120" height="48" rx="8" fill="var(--surface-2)" stroke="var(--warn)"></rect>
+          <text x="680" y="89" font-size="13" fill="var(--ink)" text-anchor="middle">approved</text>
+
+          <line x1="740" y1="84" x2="776" y2="84" stroke="var(--line-strong)" marker-end="url(#arrow2)"></line>
+
+          <rect x="778" y="60" width="130" height="48" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="843" y="89" font-size="13" fill="var(--ink)" text-anchor="middle">committing</text>
+
+          <line x1="908" y1="84" x2="944" y2="84" stroke="var(--line-strong)" marker-end="url(#arrow2)"></line>
+          <text x="926" y="76" font-size="11" fill="var(--muted)" text-anchor="middle">success</text>
+
+          <rect x="946" y="60" width="150" height="48" rx="8" fill="var(--ok-surface)" stroke="var(--ok)"></rect>
+          <text x="1021" y="89" font-size="13" fill="var(--ok)" text-anchor="middle">committed</text>
+
+          <!-- error terminal -->
+          <line x1="843" y1="108" x2="843" y2="214" stroke="var(--danger)" marker-end="url(#arrow2)"></line>
+          <text x="855" y="165" font-size="11" fill="var(--danger)">failure receipt</text>
+          <rect x="778" y="216" width="130" height="46" rx="8" fill="var(--danger-surface)" stroke="var(--danger)"></rect>
+          <text x="843" y="244" font-size="13" fill="var(--danger)" text-anchor="middle">error</text>
+
+          <!-- cancelled terminal -->
+          <line x1="448" y1="108" x2="300" y2="214" stroke="var(--faint)" marker-end="url(#arrow2)"></line>
+          <text x="300" y="160" font-size="11" fill="var(--muted)">cancel (any non-terminal)</text>
+          <rect x="172" y="216" width="150" height="46" rx="8" fill="var(--surface-1)" stroke="var(--line-strong)"></rect>
+          <text x="247" y="244" font-size="13" fill="var(--muted)" text-anchor="middle">cancelled</text>
+        </g>
+      </svg>
+      <figcaption><code>committing → committed</code> fires only on a semantic-success receipt <em>and</em> only once every <code>tool_commit</code> node has reached <code>committed</code>; a failure receipt or a <code>node_error</code> routes to <code>error</code>. <code>committed</code> and <code>cancelled</code> are terminal — every event is rejected with <code>run_is_terminal</code> thereafter.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Facade pinning</h2>
+    <p>The model does not see the command catalog. Each run pins a <code>facadeToolIds</code> set at start — frozen for the run's lifetime, no toolset churn mid-workflow. The reservation facade is two entries, both preview commands.</p>
+    <dl class="ledger">
+      <dt>Size ceiling</dt>
+      <dd><code>facadeToolIds: z.array(z.string()).max(5)</code> — at most five model-facing tools per run (audit P0). Empty means host-derived; existing definitions parse unchanged.</dd>
+      <dt>Preview-only default</dt>
+      <dd>The schema's facade superRefine requires every declared facade entry to map to a <code>tool_preview</code> commandId — the only model-callable node type. <code>approval</code> and <code>tool_commit</code> stay host-side click handlers, never model-callable tools.</dd>
+      <dt>Reservation facade</dt>
+      <dd><code>["booking.get.availability", "booking.create.booking"]</code> — both preview reads. The write shares <code>booking.create.booking</code>'s id but fires only through the host-side commit gate.</dd>
+      <dt>Skill-intent short-circuit</dt>
+      <dd>A <code>skill</code> node guides; it is not executable authority. With the facade pinned to preview commandIds and writes reachable only through the host-signed <code>tool_commit</code> gate, a runtime skill intent resolves to a preview — it can never become a command directly (<code>command-catalog.ts</code>'s draft-only invariant enforces this at the tool layer).</dd>
+    </dl>
+    <div class="callout warn">
+      <p class="callout-title">Live pinning is not yet wired</p>
+      <p>The controller (Phase 3a) is a working interpreter but is <strong>not on the live request path</strong> — the Phase 3a-2 cutover is an open decision. Grant synthesis reproduces the live policy through the capability registry, but pinning is <span class="chip warn">BLOCKED</span> on registry coverage: 8 registered capabilities against 72 live catalog commands.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

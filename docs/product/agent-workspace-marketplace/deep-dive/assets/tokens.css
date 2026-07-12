@@ -1,0 +1,292 @@
+/* Sonik Agent Marketplace — Deep-Dive suite design system.
+   Register: product (dense, operational, earned familiarity).
+   Hard bans (binding): no gradients, no emoji, no left/right stripe accents,
+   no Inter/Roboto, no gradient text, no glassmorphism, no per-section
+   uppercase eyebrows, no decorative shadows. */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces — cool near-black ramp (OKLCH-derived, hue ~250) */
+  --bg: #101318;
+  --surface-1: #161a21;
+  --surface-2: #1d222b;
+  --surface-3: #262c37;
+  --line: #2e3542;
+  --line-strong: #3d4554;
+
+  /* Ink ramp — body must hold >=4.5:1 on all surfaces */
+  --ink: #e9ecf1;
+  --body: #c6ccd6;
+  --muted: #97a0ad;
+  --faint: #6b7482;
+
+  /* Accent — one committed blue; actions, current selection, data series 1 */
+  --accent: #58a2ee;
+  --accent-ink: #a8cdf5;
+  --accent-surface: #16283d;
+
+  /* Status vocabulary — status semantics only, never decoration */
+  --ok: #4cc38a;
+  --ok-surface: #12291e;
+  --warn: #e2b93b;
+  --warn-surface: #2e2610;
+  --danger: #ec6a5e;
+  --danger-surface: #331a17;
+
+  /* Data-viz series (SVG charts). Series 1 is --accent. */
+  --viz-2: #9a8ff0;
+  --viz-3: #4cc38a;
+  --viz-4: #e2b93b;
+  --viz-5: #97a0ad;
+
+  /* Type — system stack (SF/Segoe), true mono for ids, code, figures */
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* Fixed rem scale, ratio ~1.2 */
+  --text-xs: 0.75rem;   /* 12 — chart labels, table meta */
+  --text-sm: 0.875rem;  /* 14 — dense table body, captions */
+  --text-base: 1rem;    /* 16 — prose */
+  --text-lg: 1.25rem;   /* 20 — h3 */
+  --text-xl: 1.5rem;    /* 24 — h2 */
+  --text-2xl: 1.875rem; /* 30 — page title */
+
+  --radius-sm: 4px;
+  --radius: 8px;
+  --pad: 20px;
+  --content-max: 1180px;
+  --prose-max: 72ch;
+
+  /* Semantic z-scale */
+  --z-nav: 30;
+  --z-overlay: 40;
+}
+
+* { box-sizing: border-box; }
+html { font-family: var(--font-sans); background: var(--bg); }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--body);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { color: var(--ink); line-height: 1.2; margin: 0 0 0.6em; text-wrap: balance; }
+h1 { font-size: var(--text-2xl); letter-spacing: -0.02em; }
+h2 { font-size: var(--text-xl); letter-spacing: -0.015em; margin-top: 2.2em; }
+h3 { font-size: var(--text-lg); margin-top: 1.8em; }
+p { max-width: var(--prose-max); margin: 0 0 1em; text-wrap: pretty; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+code, .mono { font-family: var(--font-mono); font-size: 0.9em; }
+code {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.4em;
+  color: var(--ink);
+}
+pre {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+pre code { background: none; border: 0; padding: 0; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+
+/* Page scaffold */
+.page {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 32px var(--pad) 96px;
+}
+.page-head {
+  border-bottom: 1px solid var(--line-strong);
+  padding: 20px 0 24px;
+  margin-bottom: 12px;
+}
+.page-head .doc-meta {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  margin-top: 8px;
+}
+.lead { font-size: var(--text-lg); color: var(--body); max-width: 60ch; line-height: 1.5; }
+
+/* Section rule: heading + hairline, replaces eyebrow scaffolding */
+section > h2 {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+/* Tables — the primary data surface. Dense, readable, no zebra noise. */
+table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin: 16px 0 24px; }
+caption { text-align: left; color: var(--muted); font-size: var(--text-sm); padding-bottom: 8px; }
+th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--line-strong);
+  padding: 8px 12px 8px 0;
+}
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px 10px 0;
+  vertical-align: top;
+  color: var(--body);
+}
+td strong, td b { color: var(--ink); }
+tr:hover > td { background: var(--surface-1); }
+.table-scroll { overflow-x: auto; }
+
+/* Status chips — status only, never decoration */
+.chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--body);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+.chip.ok     { color: var(--ok);     background: var(--ok-surface);     border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.chip.warn   { color: var(--warn);   background: var(--warn-surface);   border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.chip.danger { color: var(--danger); background: var(--danger-surface); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.chip.accent { color: var(--accent-ink); background: var(--accent-surface); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* Callout — full border, tinted surface. Never a side stripe. */
+.callout {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-1);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin: 20px 0;
+}
+.callout.ok     { border-color: color-mix(in srgb, var(--ok) 35%, var(--line));     background: var(--ok-surface); }
+.callout.warn   { border-color: color-mix(in srgb, var(--warn) 35%, var(--line));   background: var(--warn-surface); }
+.callout.danger { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); background: var(--danger-surface); }
+.callout > :last-child { margin-bottom: 0; }
+.callout .callout-title { color: var(--ink); font-weight: 600; margin-bottom: 6px; }
+
+/* Panels — for genuinely panel-shaped content; do not tile identical grids */
+.panel {
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  border-radius: var(--radius);
+  padding: var(--pad);
+}
+.panel > :last-child { margin-bottom: 0; }
+
+/* Figures / charts */
+figure { margin: 24px 0 32px; }
+figure svg { display: block; max-width: 100%; height: auto; }
+figcaption { color: var(--muted); font-size: var(--text-sm); margin-top: 10px; max-width: var(--prose-max); }
+.viz-frame {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  padding: 18px;
+  overflow-x: auto;
+}
+/* SVG chart conventions (builders): text >=12px fill var(--muted) or var(--ink),
+   gridlines stroke var(--line), axis stroke var(--line-strong),
+   series fills from --accent / --viz-*. No gradients, no drop shadows. */
+
+/* Flow diagrams (boxes + arrows built from divs) */
+.flow { display: flex; align-items: stretch; gap: 10px; overflow-x: auto; padding: 4px 0 10px; }
+.flow-node {
+  min-width: 130px; flex: 1;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-size: var(--text-sm);
+}
+.flow-node b { color: var(--ink); display: block; margin-bottom: 4px; }
+.flow-node small { color: var(--muted); line-height: 1.4; }
+.flow-node.trusted { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.flow-node.gated   { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.flow-arrow { align-self: center; color: var(--faint); flex: none; font-size: var(--text-lg); }
+
+/* Key-value ledgers (definition rows) */
+.ledger { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; border-top: 1px solid var(--line); }
+.ledger > dt {
+  color: var(--muted); font-size: var(--text-sm); padding: 10px 16px 10px 0;
+  border-bottom: 1px solid var(--line); margin: 0;
+}
+.ledger > dd { padding: 10px 0; border-bottom: 1px solid var(--line); margin: 0; color: var(--body); font-size: var(--text-sm); }
+.ledger code { font-size: var(--text-xs); }
+
+/* Suite navigation shell (rendered by nav.js) */
+.suite-nav {
+  position: sticky; top: 0; z-index: var(--z-nav);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border-bottom: 1px solid var(--line-strong);
+  backdrop-filter: none;
+}
+.suite-nav-inner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 0 var(--pad);
+  display: flex; align-items: center; gap: 20px;
+  min-height: 52px; flex-wrap: wrap;
+}
+.suite-title { color: var(--ink); font-weight: 650; font-size: var(--text-sm); white-space: nowrap; }
+.suite-title a { color: inherit; }
+.suite-tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+.suite-tab {
+  border: 0; background: none; cursor: pointer;
+  color: var(--muted); font: inherit; font-size: var(--text-sm);
+  padding: 6px 12px; border-radius: var(--radius-sm);
+}
+.suite-tab:hover { color: var(--ink); background: var(--surface-2); }
+.suite-tab[aria-selected="true"], .suite-tab.active { color: var(--accent-ink); background: var(--accent-surface); }
+.suite-doc-select {
+  margin-left: auto;
+  background: var(--surface-2); color: var(--body);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--text-sm); padding: 5px 8px;
+  max-width: 320px;
+}
+
+/* Prev / next footer */
+.doc-pager { display: flex; justify-content: space-between; gap: 16px; margin-top: 56px; border-top: 1px solid var(--line-strong); padding-top: 20px; }
+.doc-pager a { font-size: var(--text-sm); }
+.doc-pager .pager-label { display: block; color: var(--faint); font-size: var(--text-xs); margin-bottom: 2px; }
+
+@media (max-width: 760px) {
+  .page { padding: 20px 16px 72px; }
+  .ledger { grid-template-columns: 1fr; }
+  .ledger > dt { border-bottom: 0; padding-bottom: 0; }
+  .suite-doc-select { max-width: 100%; margin-left: 0; width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+@media print {
+  :root { color-scheme: light; }
+  body { background: #fff; color: #1d232c; }
+  .suite-nav, .doc-pager { display: none; }
+  h1, h2, h3, h4 { color: #10141a; }
+  td, th { border-color: #d3d8df; color: #333a44; }
+  .panel, .callout, .viz-frame, pre, .flow-node { background: #f5f6f8; border-color: #d3d8df; color: #333a44; }
+}

@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 · Opportunity, Story Map &amp; Release Slices — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .matrix td { text-align: center; white-space: nowrap; }
+  .matrix td:nth-child(1), .matrix td:nth-child(2) { text-align: left; white-space: normal; }
+  .matrix th { text-align: center; }
+  .matrix th:nth-child(1), .matrix th:nth-child(2) { text-align: left; }
+  .matrix .none { color: var(--faint); }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line-strong); border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+  .split > div { padding: 16px 18px; background: var(--surface-1); }
+  .split h3 { margin-top: 0; font-size: var(--text-base); }
+  .split ul { margin: 0; padding-left: 18px; font-size: var(--text-sm); color: var(--body); }
+  .split li { margin-bottom: 6px; }
+  .split li:last-child { margin-bottom: 0; }
+  @media (max-width: 760px) {
+    .split { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body data-doc="01-story-map">
+<main class="page">
+  <header class="page-head">
+    <h1>Opportunity, Story Map &amp; Release Slices</h1>
+    <p class="lead">The marketplace program as outcomes and a discover→run→share journey, staged into R0–R6 slices — reconciled against what has actually shipped on the runtime spine.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/01-opportunity-story-map-roadmap.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>Opportunity space</h2>
+    <p>The program exists to let operators build command-backed business apps from chat, install them safely, and reuse them as versioned packages — without ever confusing a UI click or a chat "approve" with authorization. The direction below is outcome-first; each opportunity carries a concrete proof in the contracts or tests, not a feature wish.</p>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Opportunity-solution tree — desired outcome → opportunity → candidate solution → proof</caption>
+      <thead>
+        <tr><th scope="col">Desired outcome</th><th scope="col">Opportunity</th><th scope="col">Candidate solution</th><th scope="col">Test / proof</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Operators create useful business apps from chat.</td>
+          <td>Freeform chat loses structure and approvals.</td>
+          <td>JSON-render command-backed app with guided question cards.</td>
+          <td><code>tests/unit/tool-contracts.test.mjs</code>, <code>marketplace-package-contracts.test.mjs</code></td>
+        </tr>
+        <tr>
+          <td>Admins install capabilities safely.</td>
+          <td>Single tools fragment; huge bundles hide permissions.</td>
+          <td>Package / version / install envelope plus bundle composition.</td>
+          <td><code>packages/tool-contracts/src/marketplace.ts</code></td>
+        </tr>
+        <tr>
+          <td>Agents reuse workflows reliably.</td>
+          <td>Skills, tools and workflows are not consistently packaged.</td>
+          <td>Package kinds: <code>workflow</code>, <code>skill</code>, <code>command_tool_pack</code>, <code>agent</code>, <code>app</code>.</td>
+          <td><code>marketplace.ts:8-18</code>, MARKETPLACE-ORPC-PLANNING</td>
+        </tr>
+        <tr>
+          <td>Writes are trustworthy.</td>
+          <td>UI clicks and chat "approve" text read as authorization.</td>
+          <td>Preview → trusted approval → receipt contract.</td>
+          <td><code>marketplace.ts:98-129</code>, <code>:207-222</code></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Current state → target state</caption>
+      <thead>
+        <tr><th scope="col">Aspect</th><th scope="col">Current</th><th scope="col">Target</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Opportunity space</strong></td><td>Workspace/design docs identify a marketplace-ready live workspace builder.</td><td>Roadmap driven by outcomes and journeys, not disconnected feature requests.</td></tr>
+        <tr><td><strong>Journey map</strong></td><td>Component inventory exists for the design handoff.</td><td>Story map covers discover → draft → preview → approve → install / run / share.</td></tr>
+        <tr><td><strong>Release state</strong></td><td>Contract-only marketplace model plus workflow templates exist.</td><td>Runtime endpoint / persistence / UI work follows the contract docs.</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Release slices R0–R6</h2>
+    <p>The corpus defined a seven-slice ramp from contract docs to a published marketplace. R0 shipped as the doc set itself. Since the 2026-07-07 corpus, the runtime spine advanced further than the roadmap predicted: an R2-adjacent workflow state machine and generic controller landed as green, committed libraries, and the R5 reservation-commit path went live. Neither is the same as a wired marketplace — the timeline marks where real code now sits versus where the plan still points.</p>
+
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 1000 270" aria-labelledby="slicetitle slicedesc" width="1000">
+        <title id="slicetitle">Release slices R0 through R6 with current shipped status</title>
+        <desc id="slicedesc">A horizontal timeline of seven slices. R0 and R1 are shipped; R2 and R5 are partial with runtime code landed since the corpus; R3, R4 and R6 remain planned.</desc>
+
+        <!-- axis -->
+        <line x1="80" y1="150" x2="920" y2="150" stroke="var(--line-strong)" stroke-width="2"/>
+
+        <!-- ticks -->
+        <line x1="80"  y1="145" x2="80"  y2="155" stroke="var(--line-strong)" stroke-width="2"/>
+        <line x1="220" y1="145" x2="220" y2="155" stroke="var(--line-strong)" stroke-width="2"/>
+        <line x1="360" y1="145" x2="360" y2="155" stroke="var(--line-strong)" stroke-width="2"/>
+        <line x1="500" y1="145" x2="500" y2="155" stroke="var(--line-strong)" stroke-width="2"/>
+        <line x1="640" y1="145" x2="640" y2="155" stroke="var(--line-strong)" stroke-width="2"/>
+        <line x1="780" y1="145" x2="780" y2="155" stroke="var(--line-strong)" stroke-width="2"/>
+        <line x1="920" y1="145" x2="920" y2="155" stroke="var(--line-strong)" stroke-width="2"/>
+
+        <!-- shipped-since markers (new runtime code landed after the corpus) -->
+        <circle cx="220" cy="96" r="5" fill="var(--ok)"/>
+        <circle cx="360" cy="96" r="5" fill="var(--ok)"/>
+        <circle cx="780" cy="96" r="5" fill="var(--ok)"/>
+        <line x1="220" y1="101" x2="220" y2="133" stroke="var(--ok)" stroke-width="1" stroke-dasharray="2 3"/>
+        <line x1="360" y1="101" x2="360" y2="133" stroke="var(--ok)" stroke-width="1" stroke-dasharray="2 3"/>
+        <line x1="780" y1="101" x2="780" y2="133" stroke="var(--ok)" stroke-width="1" stroke-dasharray="2 3"/>
+        <text x="500" y="86" text-anchor="middle" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">landed since corpus (2026-07-11)</text>
+
+        <!-- R0 shipped -->
+        <circle cx="80" cy="150" r="15" fill="var(--ok)" stroke="var(--ok)" stroke-width="2"/>
+        <text x="80" y="126" text-anchor="middle" font-size="14" fill="var(--ink)" font-weight="600">R0</text>
+        <text x="80" y="185" text-anchor="middle" font-size="12" fill="var(--muted)">Contract</text>
+        <text x="80" y="200" text-anchor="middle" font-size="12" fill="var(--muted)">docs</text>
+
+        <!-- R1 shipped -->
+        <circle cx="220" cy="150" r="15" fill="var(--ok)" stroke="var(--ok)" stroke-width="2"/>
+        <text x="220" y="126" text-anchor="middle" font-size="14" fill="var(--ink)" font-weight="600">R1</text>
+        <text x="220" y="185" text-anchor="middle" font-size="12" fill="var(--muted)">Contract</text>
+        <text x="220" y="200" text-anchor="middle" font-size="12" fill="var(--muted)">hardening</text>
+
+        <!-- R2 partial -->
+        <circle cx="360" cy="150" r="15" fill="var(--warn)" stroke="var(--warn)" stroke-width="2"/>
+        <text x="360" y="126" text-anchor="middle" font-size="14" fill="var(--ink)" font-weight="600">R2</text>
+        <text x="360" y="185" text-anchor="middle" font-size="12" fill="var(--muted)">Readable</text>
+        <text x="360" y="200" text-anchor="middle" font-size="12" fill="var(--muted)">state</text>
+
+        <!-- R3 planned -->
+        <circle cx="500" cy="150" r="15" fill="var(--surface-3)" stroke="var(--line-strong)" stroke-width="2"/>
+        <text x="500" y="126" text-anchor="middle" font-size="14" fill="var(--ink)" font-weight="600">R3</text>
+        <text x="500" y="185" text-anchor="middle" font-size="12" fill="var(--muted)">ORPC read</text>
+        <text x="500" y="200" text-anchor="middle" font-size="12" fill="var(--muted)">/ preview</text>
+
+        <!-- R4 planned -->
+        <circle cx="640" cy="150" r="15" fill="var(--surface-3)" stroke="var(--line-strong)" stroke-width="2"/>
+        <text x="640" y="126" text-anchor="middle" font-size="14" fill="var(--ink)" font-weight="600">R4</text>
+        <text x="640" y="185" text-anchor="middle" font-size="12" fill="var(--muted)">Install /</text>
+        <text x="640" y="200" text-anchor="middle" font-size="12" fill="var(--muted)">manage</text>
+
+        <!-- R5 partial -->
+        <circle cx="780" cy="150" r="15" fill="var(--warn)" stroke="var(--warn)" stroke-width="2"/>
+        <text x="780" y="126" text-anchor="middle" font-size="14" fill="var(--ink)" font-weight="600">R5</text>
+        <text x="780" y="185" text-anchor="middle" font-size="12" fill="var(--muted)">Execution</text>
+        <text x="780" y="200" text-anchor="middle" font-size="12" fill="var(--muted)">(preview→receipt)</text>
+
+        <!-- R6 planned -->
+        <circle cx="920" cy="150" r="15" fill="var(--surface-3)" stroke="var(--line-strong)" stroke-width="2"/>
+        <text x="920" y="126" text-anchor="middle" font-size="14" fill="var(--ink)" font-weight="600">R6</text>
+        <text x="920" y="185" text-anchor="middle" font-size="12" fill="var(--muted)">Publish /</text>
+        <text x="920" y="200" text-anchor="middle" font-size="12" fill="var(--muted)">moderate</text>
+
+        <!-- legend -->
+        <circle cx="90"  cy="238" r="7" fill="var(--ok)"/>
+        <text x="104" y="242" font-size="12" fill="var(--muted)">Shipped</text>
+        <circle cx="220" cy="238" r="7" fill="var(--warn)"/>
+        <text x="234" y="242" font-size="12" fill="var(--muted)">Partial — runtime code landed, not fully wired</text>
+        <circle cx="640" cy="238" r="7" fill="var(--surface-3)" stroke="var(--line-strong)" stroke-width="2"/>
+        <text x="654" y="242" font-size="12" fill="var(--muted)">Planned — no production code yet</text>
+      </svg>
+      <figcaption>Seven-slice ramp from the corpus. Green = shipped; amber = partial, meaning committed runtime code exists but the live marketplace path is not yet cut over; hollow = planned. The three small green markers flag work that landed <em>after</em> the corpus was written — the R2 state machine / controller and the R5 reservation-commit path — detailed in the reconciliation below.</figcaption>
+    </figure>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Slice reconciliation — corpus exit criteria vs implementation truth (2026-07-11)</caption>
+      <thead>
+        <tr><th scope="col">Slice</th><th scope="col">Corpus exit criteria</th><th scope="col">Status now</th><th scope="col">Load-bearing evidence</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>R0</strong> Contract docs</td>
+          <td>Docs cite sources and prove current invariants.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+          <td><code>docs/contracts/marketplace-package-contracts-v0.md</code>; this suite</td>
+        </tr>
+        <tr>
+          <td><strong>R1</strong> Contract hardening</td>
+          <td>Zod schemas, fixtures, exports, migration helper; build + marketplace tests pass.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+          <td><code>packages/tool-contracts/src/capability-registry.ts</code> (D013 registered / versioned ids, <code>evaluateCapabilityAccess</code>); <code>marketplace.ts</code></td>
+        </tr>
+        <tr>
+          <td><strong>R2</strong> Agent-readable state</td>
+          <td>Expose active workflow / intake / approval state in machine-readable context; agent stops scraping the DOM.</td>
+          <td><span class="chip ok">SHIPPED</span> reducer + controller<br><span class="chip warn">OPEN</span> live cutover</td>
+          <td><code>workflow-run-state.ts</code> (Zod <code>WorkflowRunState</code>, Decider reducer); <code>workflow-controller.ts</code> — one interpreter over <code>workflowDefinitionSchema</code>, <em>not yet wired into the live request path</em> (Phase 3a-2)</td>
+        </tr>
+        <tr>
+          <td><strong>R3</strong> ORPC read / preview</td>
+          <td>search / get / version / install-preview / validate; typed route + auth/org gate tests pass.</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>MARKETPLACE-ORPC-PLANNING:52-62 — marketplace ORPC routes not built</td>
+        </tr>
+        <tr>
+          <td><strong>R4</strong> Install / manage writes</td>
+          <td>install / update / copy / fork / pin under trusted approval; install receipts + audit rows.</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>MARKETPLACE-ORPC-PLANNING:64-74 — no persistence / RLS tables, no install UI</td>
+        </tr>
+        <tr>
+          <td><strong>R5</strong> Workflow / app execution</td>
+          <td>previewRun / requestApproval / runApproved / applyStatePatch; live preview → approval → receipt.</td>
+          <td><span class="chip ok">SHIPPED</span> reservation path<br><span class="chip">PLANNED</span> generic marketplace</td>
+          <td>A2 reservation-commit is merged and live: preview tool + approval card + <code>/api/reservation/commit</code>. Broader per-package execution endpoints still planned.</td>
+        </tr>
+        <tr>
+          <td><strong>R6</strong> Publish / moderate</td>
+          <td>Publishing, moderation, creator updates, version migrations proven across versions.</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>No production publish / moderation endpoints; no trust-tier field</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">R4 gating is blocked on registry coverage</div>
+      <p>Grant synthesis (Phase 4) reproduced the live policy exactly through the registry, but live pinning is <span class="chip warn">BLOCKED</span>: only <strong>8</strong> capabilities are registered against <strong>72</strong> live catalog commands. Until the registry covers the catalog, R4's per-command install permissions cannot pin against real grants. The kill-switch (<code>revokedCapabilityIds</code>) and write-implies-read implication are in place; coverage is the open decision.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Story map</h2>
+    <p>The user-story backbone maps a single journey — discover, inspect, install, use, fill state, preview, approve, run, then save/share — across personas and onto the slice that delivers each step. The matrix reads down as the journey and across as the ramp: an operator's write path is already live through the reservation example, while an admin's install path is still contract-only.</p>
+
+    <div class="table-scroll">
+    <table class="matrix">
+      <caption>Backbone step × persona × delivering slice. A chip marks where the step is delivered and its status; a dot means the slice does not deliver that step.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Persona</th><th scope="col">Backbone step</th>
+          <th scope="col">R0</th><th scope="col">R1</th><th scope="col">R2</th><th scope="col">R3</th><th scope="col">R4</th><th scope="col">R5</th><th scope="col">R6</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Agent</td><td>Discover package / workflow launcher</td>
+          <td class="none">·</td><td class="none">·</td><td class="none">·</td><td><span class="chip">PLANNED</span></td><td class="none">·</td><td class="none">·</td><td class="none">·</td>
+        </tr>
+        <tr>
+          <td>Admin</td><td>Inspect contents, deps, permissions, host-context</td>
+          <td class="none">·</td><td class="none">·</td><td class="none">·</td><td><span class="chip">PLANNED</span></td><td class="none">·</td><td class="none">·</td><td class="none">·</td>
+        </tr>
+        <tr>
+          <td>Admin</td><td>Install pinned / copied / forked / subscribed</td>
+          <td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td><span class="chip">PLANNED</span></td><td class="none">·</td><td class="none">·</td>
+        </tr>
+        <tr>
+          <td>Operator · Agent</td><td>Read active workflow / intake / approval state</td>
+          <td class="none">·</td><td class="none">·</td><td><span class="chip warn">PARTIAL</span></td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td>
+        </tr>
+        <tr>
+          <td>Operator</td><td>Use installed app / workflow in chat &amp; canvas</td>
+          <td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td><span class="chip warn">PARTIAL</span></td><td class="none">·</td>
+        </tr>
+        <tr>
+          <td>Operator</td><td>Preview command-backed action</td>
+          <td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td><span class="chip ok">SHIPPED</span></td><td class="none">·</td>
+        </tr>
+        <tr>
+          <td>Operator</td><td>Request trusted (host-signed) approval</td>
+          <td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td><span class="chip ok">SHIPPED</span></td><td class="none">·</td>
+        </tr>
+        <tr>
+          <td>Operator</td><td>Run approved workflow, receive command receipts</td>
+          <td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td><span class="chip ok">SHIPPED</span></td><td class="none">·</td>
+        </tr>
+        <tr>
+          <td>Creator</td><td>Save / share / update / fork / publish</td>
+          <td class="none">·</td><td class="none">·</td><td class="none">·</td><td class="none">·</td><td><span class="chip">PLANNED</span></td><td class="none">·</td><td><span class="chip">PLANNED</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <p>The three <span class="chip ok">SHIPPED</span> operator rows are the same live chain: the A2 reservation preview tool, its approval card, and <code>/api/reservation/commit</code>. Approval is <em>host-signed and structurally required</em> — a model-supplied approval is rejected (<code>model_supplied_approval_is_not_trusted</code>), and a phase reaches <code>committed</code> only on a semantic-success receipt.</p>
+  </section>
+
+  <section>
+    <h2>Scope ledger</h2>
+    <p>What the program commits to preserve, and what it explicitly refuses to build yet. The out-of-scope column is not backlog — it is a set of guardrails: shipping any of these early would break the preview → approval → receipt contract or make DOM text the source of truth.</p>
+
+    <div class="split">
+      <div>
+        <h3>In scope — invariants every slice preserves</h3>
+        <ul>
+          <li>Preview → trusted approval → receipt semantics for every write, on every slice.</li>
+          <li>R2 exposes machine-readable workflow state <strong>without</strong> granting command authority — the renderer stays execution-inert.</li>
+          <li>R3 / R4 install and update against an immutable <code>packageVersionId</code>.</li>
+          <li>Approval is host-signed and structurally required; chat "approve" text is never authorization.</li>
+          <li>A phase is <code>committed</code> only on a semantic-success receipt — receipts-only success copy.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Out of scope — deferred, deliberately</h3>
+        <ul>
+          <li>Production data model / migrations for packages or installations.</li>
+          <li>Design-approved marketplace install screen.</li>
+          <li>Public publish / moderation policy; trust-tier field; revocation UI.</li>
+          <li>A visual workflow builder before package / install / update contracts are stable.</li>
+          <li>Any jump from R0 straight to live mutating execution without R2 / R3 / R4 proof.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">Direction ratified against the July 2026 ecosystem scan</div>
+      <p>The stateful-runtimes landscape review (<code>docs/research/stateful-runtimes-landscape-2026-07.md</code>) confirmed the spine: keep the Decider-pattern reducer; no OSS engine combines JSON workflow documents, a single interpreter, and a typed host-signed approval boundary. The slices above build on that seam rather than adopting an external engine.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

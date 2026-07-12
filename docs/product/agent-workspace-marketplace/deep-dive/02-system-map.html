@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 · System Map & Boundaries — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* Page-specific: only SVG diagram typography + a legend row. Everything
+     else is tokens.css. */
+  .diagram svg { font-family: var(--font-sans); }
+  .diagram .b-title { font-size: 14px; font-weight: 600; fill: var(--ink); }
+  .diagram .b-sub   { font-size: 12px; fill: var(--muted); }
+  .diagram .b-cross { font-size: 12px; }
+  .diagram .zone-label { font-size: 12px; fill: var(--faint); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 4px 0 0; padding: 0; list-style: none; }
+  .legend li { font-size: var(--text-sm); color: var(--muted); }
+  .may-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .may-cols dt { color: var(--ok); }
+  .may-cols dt.no { color: var(--danger); }
+  @media (max-width: 760px) { .may-cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-doc="02-system-map">
+<main class="page">
+  <header class="page-head">
+    <h1>System Map &amp; Boundaries</h1>
+    <p class="lead">Four layers, one trust boundary. The renderer and the agent live on the untrusted side and may only <em>ask</em>; writes cross the boundary only behind a host-signed grant. The map below is the authority diagram, not an org chart.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/02-system-map-and-boundaries.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>The trust boundary</h2>
+    <p>The corpus system map is a flat mermaid graph; the load-bearing fact it under-draws is <strong>which edges cross the trust boundary</strong>. Everything left of the line runs inside the agent-UI iframe and is model-influenced — the <code>Agent Chat</code> proposes and the <code>Canvas</code> renders, but neither can authorize an effect. Everything right of the line is the trusted host runtime, where a real operator and a host signature are the only things that unlock a write. <code>@sonik-agent-ui/tool-contracts</code> is the shared law underneath both sides; it is a type/schema substrate, not a runtime crossing.</p>
+
+    <div class="diagram">
+    <figure class="viz-frame">
+      <svg viewBox="0 0 970 530" role="img" aria-labelledby="map-title map-desc">
+        <title id="map-title">Agent marketplace trust-boundary map</title>
+        <desc id="map-desc">An untrusted agent-UI iframe on the left and a trusted host runtime on the right, separated by a vertical trust boundary. Only a read-only request crosses left-to-right and only receipts cross right-to-left; writes require a host-signed grant. A shared tool-contracts substrate spans the bottom.</desc>
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--line-strong)"></path>
+          </marker>
+        </defs>
+
+        <!-- Zone containers -->
+        <rect x="20" y="40" width="430" height="402" rx="8" fill="none" stroke="var(--line-strong)" stroke-width="1.5"></rect>
+        <rect x="490" y="40" width="460" height="402" rx="8" fill="none" stroke="var(--line-strong)" stroke-width="1.5"></rect>
+        <text class="zone-label" x="32" y="58">Agent UI iframe · untrusted, model-influenced</text>
+        <text class="zone-label" x="502" y="58">Trusted host runtime</text>
+
+        <!-- Trust boundary line -->
+        <line x1="470" y1="36" x2="470" y2="442" stroke="var(--warn)" stroke-width="2" stroke-dasharray="6 5"></line>
+        <text class="b-cross" x="470" y="26" text-anchor="middle" fill="var(--warn)">Trust boundary</text>
+
+        <!-- LEFT (untrusted) boxes -->
+        <rect x="40" y="72" width="180" height="44" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+        <text class="b-title" x="130" y="99" text-anchor="middle">User / Operator</text>
+
+        <rect x="40" y="150" width="390" height="58" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+        <text class="b-title" x="60" y="176">Agent Chat</text>
+        <text class="b-sub"   x="60" y="196">proposes tool calls · chat is never approval</text>
+
+        <rect x="40" y="250" width="390" height="74" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+        <text class="b-title" x="60" y="276">Canvas / JSON-render Artifact</text>
+        <text class="b-sub"   x="60" y="296">execution-inert renderer · may request preview,</text>
+        <text class="b-sub"   x="60" y="312">cannot bind a direct commit</text>
+
+        <rect x="40" y="360" width="390" height="58" rx="6" fill="var(--surface-1)" stroke="var(--line)"></rect>
+        <text class="b-title" x="60" y="386">Marketplace package version + install</text>
+        <text class="b-sub"   x="60" y="406">supplies the app definition the renderer draws</text>
+
+        <!-- RIGHT (trusted) boxes -->
+        <rect x="510" y="72" width="420" height="60" rx="6" fill="var(--surface-2)" stroke="var(--ok)"></rect>
+        <text class="b-title" x="530" y="98">Trusted Host Context</text>
+        <text class="b-sub"   x="530" y="118">authority boundary · mints envelope, signs grants</text>
+
+        <rect x="510" y="172" width="420" height="76" rx="6" fill="var(--surface-2)" stroke="var(--warn)"></rect>
+        <text class="b-title" x="530" y="198">Command Catalog / ORPC</text>
+        <text class="b-sub"   x="530" y="218">capability-gated (evaluateCapabilityAccess) ·</text>
+        <text class="b-sub"   x="530" y="234">writes only behind the commit gate</text>
+
+        <rect x="510" y="288" width="420" height="52" rx="6" fill="var(--surface-2)" stroke="var(--ok)"></rect>
+        <text class="b-title" x="530" y="311">Receipts / Evidence</text>
+        <text class="b-sub"   x="530" y="329">receipts-only success · committed on semantic receipt</text>
+
+        <rect x="510" y="380" width="420" height="56" rx="6" fill="var(--surface-1)" stroke="var(--danger)" stroke-dasharray="5 4"></rect>
+        <text class="b-title" x="530" y="404" fill="var(--danger)">Marketplace ORPC routes + RLS tables</text>
+        <text class="b-sub"   x="530" y="423">not built — planned typed contracts only</text>
+
+        <!-- Shared contract substrate (spans both sides; not a runtime crossing) -->
+        <rect x="40" y="456" width="890" height="50" rx="6" fill="var(--surface-1)" stroke="var(--accent)"></rect>
+        <text class="b-title" x="485" y="480" text-anchor="middle">@sonik-agent-ui/tool-contracts — shared law</text>
+        <text class="b-sub"   x="485" y="498" text-anchor="middle">schemas · capability registry · workflow state machine (type substrate, not a runtime crossing)</text>
+
+        <!-- Crossing: request (untrusted -> trusted), read-only -->
+        <path d="M430,286 L505,224" fill="none" stroke="var(--line-strong)" stroke-width="1.5" marker-end="url(#arrow)"></path>
+        <rect x="362" y="242" width="214" height="34" rx="4" fill="var(--bg)" stroke="var(--line)"></rect>
+        <text class="b-cross" x="469" y="256" text-anchor="middle" fill="var(--body)">preview · approval · search request</text>
+        <text class="b-cross" x="469" y="270" text-anchor="middle" fill="var(--warn)">read-only — cannot bind commit</text>
+
+        <!-- Crossing: receipts (trusted -> untrusted) -->
+        <path d="M505,314 L432,302" fill="none" stroke="var(--line-strong)" stroke-width="1.5" marker-end="url(#arrow)"></path>
+        <rect x="388" y="322" width="162" height="18" rx="4" fill="var(--bg)" stroke="var(--line)"></rect>
+        <text class="b-cross" x="469" y="335" text-anchor="middle" fill="var(--ok)">receipts / evidence</text>
+
+        <!-- Trusted-side: host signs -> command gate -->
+        <path d="M720,132 L720,170" fill="none" stroke="var(--ok)" stroke-width="1.5" marker-end="url(#arrow)"></path>
+        <text class="b-sub" x="732" y="149" fill="var(--ok)">host-signed approval</text>
+        <text class="b-sub" x="732" y="164">unlocks the commit gate</text>
+
+        <!-- Trusted-side: command -> receipt -->
+        <path d="M720,248 L720,286" fill="none" stroke="var(--line-strong)" stroke-width="1.5" marker-end="url(#arrow)"></path>
+        <text class="b-sub" x="732" y="264">commit executes</text>
+        <text class="b-sub" x="732" y="279">→ receipt returned</text>
+
+        <!-- Install supplies app definition -->
+        <path d="M235,358 L235,326" fill="none" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"></path>
+        <text class="b-sub" x="248" y="346">app definition</text>
+      </svg>
+      <figcaption>
+        The only left-to-right edge is a read-only request; the only right-to-left edge is receipts. No arrow carries a write across the boundary — a write is authorized inside the trusted zone by <code>Host Context</code> signing a grant, then executed by the capability-gated command catalog. Marketplace ORPC routes and RLS tables (dashed) do not exist yet.
+      </figcaption>
+    </figure>
+    </div>
+
+    <ul class="legend" aria-label="Diagram legend">
+      <li><span class="chip ok">host-signed</span> authority / trusted edge</li>
+      <li><span class="chip warn">gated</span> capability + commit gate</li>
+      <li><span class="chip accent">contracts</span> shared type substrate</li>
+      <li><span class="chip danger">not built</span> planned, no runtime</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Host-context donation &amp; signed-grant path</h2>
+    <p>A write is not a message the model sends — it is a grant the host signs. The path below is how authority actually crosses the boundary, reconciled to the shipped one-Approve reservation behavior. The model never holds the pen: <code>model_supplied_approval_is_not_trusted</code> is enforced structurally in <code>workflow-run-state.ts</code>, so a model-fabricated approval object is rejected before it reaches the gate.</p>
+
+    <div class="flow" role="list" aria-label="Signed-grant donation path">
+      <div class="flow-node trusted" role="listitem">
+        <b>1 · Host mints envelope</b>
+        <small>identity, org, approved capability ids packed into the host-context envelope</small>
+      </div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node" role="listitem">
+        <b>2 · Donate to iframe</b>
+        <small>envelope crosses into the agent UI as authority-bearing context, not display metadata</small>
+      </div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node" role="listitem">
+        <b>3 · Renderer builds affordance</b>
+        <small>one shared approval-affordance builder (D011 seam) feeds intake and reservation, byte-identical</small>
+      </div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node trusted" role="listitem">
+        <b>4 · Operator approves, host signs</b>
+        <small>approval happens in host chrome; host signs the grant — chat cannot substitute</small>
+      </div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node gated" role="listitem">
+        <b>5 · Capability gate</b>
+        <small><code>evaluateCapabilityAccess</code> checks the signed grant; write-implies-read, kill-switch via <code>revokedCapabilityIds</code></small>
+      </div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node trusted" role="listitem">
+        <b>6 · Commit + receipt</b>
+        <small>phase reaches <code>committed</code> only on a semantic-success receipt, never on the request</small>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p class="callout-title">Live example that already runs this path</p>
+      <p>The A2 reservation commit path is merged and live: a preview tool, a host-signed approval card, and <code>/api/reservation/commit</code>. The 2026-07-08 handoff's "A2 UI half open" note is stale. The reservation workflow fixture was revised to <strong>one compound commit node</strong> so the graph matches the shipped single-Approve behavior.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What each layer may and may not do</h2>
+    <p>The permissions below are enforced at the contract layer, not by convention. A UI or artifact that tries to route around a write gate is a contract violation, not a bug to be tolerated.</p>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Per-layer authority. Status chips reconcile the corpus against implementation truth as of 2026-07-11.</caption>
+      <thead>
+        <tr><th scope="col">Layer</th><th scope="col">May</th><th scope="col">May not</th><th scope="col">Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Agent Chat</strong><br><span class="mono">model-influenced</span></td>
+          <td>propose tool calls; learn / search the command catalog (read).</td>
+          <td>approve, sign, or commit anything — chat is never approval.</td>
+          <td><span class="chip ok">ENFORCED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Canvas / renderer</strong><br><span class="mono">JSON-render app def</span></td>
+          <td>request preview / approval; render receipts.</td>
+          <td>bind a direct commit or call a backend write command.<br><span class="mono">marketplace.ts:137-193</span></td>
+          <td><span class="chip ok">ENFORCED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Tool-contracts</strong><br><span class="mono">packages/tool-contracts</span></td>
+          <td>own package / version / install / bundle validation; capability ids; workflow states.<br><span class="mono">marketplace.ts:420-609</span></td>
+          <td>be duplicated in app code or redefined by a runtime endpoint.</td>
+          <td><span class="chip ok">SHIPPED</span> <span class="chip ok">+registry</span></td>
+        </tr>
+        <tr>
+          <td><strong>Trusted Host Context</strong><br><span class="mono">embedded host/runtime</span></td>
+          <td>mint the envelope; sign approvals / grants; unlock the commit gate.<br><span class="mono">marketplace.ts:98-129</span></td>
+          <td>be treated as display-only metadata; accept a model-supplied approval.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Command Catalog / ORPC</strong><br><span class="mono">capability-gated</span></td>
+          <td>evaluate capability access; execute reads; execute writes only behind a host-signed commit gate.</td>
+          <td>run a mutating effect outside the commit gate — refused at schema and controller layers.</td>
+          <td><span class="chip ok">gate SHIPPED</span> <span class="chip">live cutover PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Marketplace services</strong><br><span class="mono">future ORPC + RLS</span></td>
+          <td><em>(target)</em> serve install / publish / moderation over typed routes.</td>
+          <td>be treated as a shipped API — planned endpoint maps are not live.<br><span class="mono">MARKETPLACE-ORPC-PLANNING.md:48-51</span></td>
+          <td><span class="chip danger">MISSING</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Contract-side state vs the corpus</h2>
+    <p>The corpus (2026-07-07) calls the capability registry and the workflow state machine "planned." They shipped this week, contract-side, full-chain green. The table is the reconciliation the build spec requires — what moved, where it lives, and what is still only a fixture, blocked, or missing.</p>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Reconciliation as of 2026-07-11, branch <span class="mono">emdash/yellow-zebras-smell-txxjz</span>.</caption>
+      <thead>
+        <tr><th scope="col">Capability</th><th scope="col">What it enforces</th><th scope="col">Where</th><th scope="col">Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Capability-ID registry (D013)</td>
+          <td>per-call gating; write-implies-read implication (direct grants win; implication never narrows); kill-switch.</td>
+          <td><span class="mono">capability-registry.ts</span></td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td>Workflow run state machine</td>
+          <td>Zod-validated state; pure Decider reducer; host-signed approval structurally required; <code>committed</code> only on receipt.</td>
+          <td><span class="mono">workflow-run-state.ts</span></td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td>Read-side convergence (Phase 2)</td>
+          <td>one approval-affordance builder feeds intake + reservation, proven byte-identical (D011 seam).</td>
+          <td><span class="mono">shared builder</span></td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td>Workflow controller (Phase 3a)</td>
+          <td>one generic interpreter over <code>workflowDefinitionSchema</code>; mutating effects refused outside the commit gate.</td>
+          <td><span class="mono">workflow-controller.ts</span></td>
+          <td><span class="chip ok">SHIPPED</span> <span class="chip warn">live cutover OPEN</span></td>
+        </tr>
+        <tr>
+          <td>Reservation fixture</td>
+          <td>revised to one compound commit node matching shipped single-Approve behavior.</td>
+          <td><span class="mono">reservation fixture</span></td>
+          <td><span class="chip accent">FIXTURE</span></td>
+        </tr>
+        <tr>
+          <td>Per-node approval (Phase 3b)</td>
+          <td>approving node A never approves node B; untargeted approvals rejected; terminal phase needs all commit nodes committed.</td>
+          <td><span class="mono">controller graph</span></td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td>Grant synthesis (Phase 4)</td>
+          <td>live policy reproduced exactly through the registry; live pinning blocked on coverage (8 registered vs 72 live commands).</td>
+          <td><span class="mono">registry policy</span></td>
+          <td><span class="chip warn">BLOCKED</span></td>
+        </tr>
+        <tr>
+          <td>Marketplace runtime</td>
+          <td>ORPC routes, persistence / RLS, install UI, publishing / moderation, trust-tier field, revocation UI, live controller cutover.</td>
+          <td><span class="mono">—</span></td>
+          <td><span class="chip danger">MISSING</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Non-negotiable invariants</h2>
+    <div class="callout danger">
+      <p class="callout-title">Do not soften these</p>
+      <p>No UI or artifact layer may bypass a contract-layer write gate. Runtime endpoints must not redefine package semantics outside <code>@sonik-agent-ui/tool-contracts</code>. Host context is an authority boundary, not display-only metadata. The renderer is execution-inert, chat is never approval, and success copy is receipts-only.</p>
+    </div>
+    <p>Everything on this page reduces to one rule: authority lives on the trusted side of the boundary and is spent only through a host-signed grant. The contracts are the source of truth today; the runtime that consumes them is still, mostly, a set of typed promises.</p>
+  </section>
+</main>
+</body>
+</html>

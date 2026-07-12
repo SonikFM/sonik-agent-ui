@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>00 · Product Strategy &amp; PRD — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* Page-specific: only sizing guards so wide SVGs scroll instead of squishing. */
+  .disambig-svg { min-width: 760px; }
+  .coverage-svg { min-width: 520px; }
+  .chip-legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; font-size: var(--text-sm); color: var(--muted); }
+  .chip-legend li { display: flex; align-items: center; gap: 6px; }
+</style>
+</head>
+<body data-doc="00-strategy">
+<main class="page">
+  <header class="page-head">
+    <h1>Product Strategy &amp; PRD</h1>
+    <p class="lead">The Agent Workspace + Marketplace is a live artifact workspace where an agent creates deterministic, contract-backed mini-apps that install as packages. Contracts and fixtures are stable; the marketplace runtime is deliberately not built until they are.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/00-product-strategy-prd.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>Three marketplaces, one overloaded word</h2>
+    <p>Decision <code>D008</code> splits a term that previously caused a phantom "missing PRD" and incompatible data-model assumptions. Every doc must name which marketplace it means. Only the first is this corpus; the sequencing between the three is unrelated.</p>
+    <figure class="viz-frame">
+      <svg class="disambig-svg" viewBox="0 0 920 372" role="img" aria-labelledby="disambig-title disambig-desc">
+        <title id="disambig-title">Disambiguation of the word "marketplace" into three distinct concepts</title>
+        <desc id="disambig-desc">The Sonik usage of "marketplace" branches into the agent/package marketplace (this corpus), the future two-sided commerce marketplace (deferred), and Meta/WhatsApp message templates (unrelated false friend).</desc>
+
+        <!-- root -->
+        <rect x="330" y="14" width="260" height="50" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+        <text x="460" y="37" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">The word &#8220;Marketplace&#8221;</text>
+        <text x="460" y="54" text-anchor="middle" font-size="12" fill="var(--muted)">Sonik usage — always name which one</text>
+
+        <!-- connectors: root bottom -> bus -> three children -->
+        <line x1="460" y1="64" x2="460" y2="92" stroke="var(--line-strong)"/>
+        <line x1="150" y1="92" x2="770" y2="92" stroke="var(--line-strong)"/>
+        <line x1="150" y1="92" x2="150" y2="128" stroke="var(--line-strong)"/>
+        <line x1="460" y1="92" x2="460" y2="128" stroke="var(--line-strong)"/>
+        <line x1="770" y1="92" x2="770" y2="128" stroke="var(--line-strong)"/>
+
+        <!-- child 1: agent/package (this corpus, accent) -->
+        <rect x="14" y="128" width="272" height="216" rx="8" fill="var(--accent-surface)" stroke="var(--accent)"/>
+        <text x="30" y="152" font-size="13" font-weight="600" fill="var(--ink)">Agent / package marketplace</text>
+        <text x="30" y="171" font-size="12" fill="var(--accent-ink)">THIS CORPUS</text>
+        <text x="30" y="196" font-size="12" fill="var(--body)"><tspan x="30">Installable capabilities: the amp.pkg</tspan><tspan x="30" dy="16">registry and workflow playbooks</tspan><tspan x="30" dy="16">converging into one surface.</tspan></text>
+        <text x="30" y="262" font-size="12" fill="var(--body)"><tspan x="30">Kinds: apps, workflows, skills, agents,</tspan><tspan x="30" dy="16">tool packs, templates, MCP add-ons,</tspan><tspan x="30" dy="16">provider integrations, bundles.</tspan></text>
+        <text x="30" y="328" font-size="12" fill="var(--muted)">Contracts + fixtures exist; runtime not built.</text>
+
+        <!-- child 2: commerce -->
+        <rect x="324" y="128" width="272" height="216" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+        <text x="340" y="152" font-size="13" font-weight="600" fill="var(--ink)">Commerce marketplace</text>
+        <text x="340" y="171" font-size="12" fill="var(--muted)">SEPARATE PRD</text>
+        <text x="340" y="196" font-size="12" fill="var(--body)"><tspan x="340">Future two-sided marketplace:</tspan><tspan x="340" dy="16">venues, talent, and ad inventory</tspan><tspan x="340" dy="16">settled over Stripe Connect.</tspan></text>
+        <text x="340" y="262" font-size="12" fill="var(--body)"><tspan x="340">The agent marketplace is a primer</tspan><tspan x="340" dy="16">for it, not the same product.</tspan></text>
+        <text x="340" y="328" font-size="12" fill="var(--muted)">Deferred; own PRD and data model.</text>
+
+        <!-- child 3: whatsapp templates -->
+        <rect x="634" y="128" width="272" height="216" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+        <text x="650" y="152" font-size="13" font-weight="600" fill="var(--ink)">WhatsApp message templates</text>
+        <text x="650" y="171" font-size="12" fill="var(--muted)">FALSE FRIEND</text>
+        <text x="650" y="196" font-size="12" fill="var(--body)"><tspan x="650">Meta&#8217;s pre-approved messaging</tspan><tspan x="650" dy="16">templates. Same word, unrelated</tspan><tspan x="650" dy="16">concept and lifecycle.</tspan></text>
+        <text x="650" y="262" font-size="12" fill="var(--body)"><tspan x="650">Never model, sequence, or scope</tspan><tspan x="650" dy="16">against the other two.</tspan></text>
+        <text x="650" y="328" font-size="12" fill="var(--muted)">Out of scope for this corpus entirely.</text>
+      </svg>
+      <figcaption>D008 — three concepts, unrelated sequencing. Source: <span class="mono">DECISIONS.md D008</span>; recon supplement resolved the phantom "Marketplace of Playbooks" PRD.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Where Sonik is ahead</h2>
+    <p>The PRD's differentiators are invariants, not features — each closes a gap that weakened surveyed competitors. Status here is reconciled against the implementation truth of 2026-07-11, not the corpus's original "planned" language.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Positioning claims from the PRD's non-negotiable invariants and "what developers must not do".</caption>
+      <thead>
+        <tr>
+          <th scope="col">Positioning claim</th>
+          <th scope="col">What it prevents</th>
+          <th scope="col">Sonik posture (PRD)</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Execution-inert renderer</strong></td>
+          <td>Arbitrary HTML/app runtimes that smuggle in unreviewable effects.</td>
+          <td>Workspace apps default to <code>JSON-render</code> for deterministic state and command binding; HTML apps are never implied to be the canonical runtime.</td>
+          <td><span class="chip accent">FIXTURE</span></td>
+        </tr>
+        <tr>
+          <td><strong>Chat is never approval</strong></td>
+          <td>Treating a UX button click or agent-supplied text as a mutation grant.</td>
+          <td>UX buttons and user text are never trusted approval grants; only a host-signed approval crosses the draft&#8594;mutation boundary.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Immutable packageVersionId</strong></td>
+          <td>Installs pinned to a mutable package id whose behavior can silently change under them.</td>
+          <td>Product copy may simplify, but contracts expose immutable version/install semantics; installs never store against mutable ids only.</td>
+          <td><span class="chip accent">FIXTURE</span></td>
+        </tr>
+        <tr>
+          <td><strong>Preview &#8594; approval &#8594; receipt</strong></td>
+          <td>Writes that skip a concrete, same-plan preview or claim success without a receipt.</td>
+          <td>Every mutating workflow moves draft&#8594;preview&#8594;trusted approval&#8594;receipt; a phase is <code>committed</code> only on a semantic-success receipt.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <ul class="chip-legend" aria-label="Status chip legend">
+      <li><span class="chip ok">SHIPPED</span> implemented, full-chain green</li>
+      <li><span class="chip accent">FIXTURE</span> encoded in contracts/tests only</li>
+      <li><span class="chip">PLANNED</span> designed, not built</li>
+      <li><span class="chip warn">BLOCKED</span> open decision or dependency</li>
+      <li><span class="chip danger">MISSING</span> not started</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Current state against target</h2>
+    <p>The PRD's core tension: the product surface and contract model already exist; runtime endpoints and persistence are held back by policy until contracts stabilize. This is a sequencing choice, not a gap to paper over.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>From the PRD current/target matrix, with status reconciled to 2026-07-11.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Aspect</th>
+          <th scope="col">Current</th>
+          <th scope="col">Target</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Product surface</strong></td>
+          <td>Chat, canvas, JSON-render artifacts, command catalogs, workflow templates in draft/runtime code.</td>
+          <td>A coherent workspace: chat collaborates, canvas hosts live objects, contracts govern action.</td>
+          <td><span class="chip accent">FIXTURE</span></td>
+        </tr>
+        <tr>
+          <td><strong>Marketplace model</strong></td>
+          <td>Contract-only package/bundle model in draft files and tests.</td>
+          <td>Packages searched, previewed, installed, updated, forked, and published through typed endpoints.</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Agent action model</strong></td>
+          <td>Command-backed artifacts and workflow templates encode preview/approval/write seams.</td>
+          <td>Users and agents move safely draft&#8594;preview&#8594;trusted approval&#8594;receipt.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Runtime maturity</strong></td>
+          <td>Endpoint map and marketplace persistence are planned, not production implementation.</td>
+          <td>Endpoints and persistence implemented only after contracts and docs stabilize.</td>
+          <td><span class="chip danger">MISSING</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Invariants ledger</h2>
+    <p>The non-negotiable invariants and the trust machinery that now enforces them. Rows carry <span class="chip ok">SHIPPED</span> where the 2026-07-11 addendum confirms a live, full-chain-green implementation on branch <span class="mono">emdash/yellow-zebras-smell-txxjz</span>.</p>
+    <dl class="ledger">
+      <dt>Host-signed approval</dt>
+      <dd><span class="chip ok">SHIPPED</span> &nbsp;<code>workflow-run-state.ts</code> — Zod-validated <code>WorkflowRunState</code>, pure Decider reducer; a model-supplied approval is structurally rejected (<code>model_supplied_approval_is_not_trusted</code>).</dd>
+
+      <dt>Committed on receipts only</dt>
+      <dd><span class="chip ok">SHIPPED</span> &nbsp;Phase reaches <code>committed</code> only on a semantic-success receipt; mutating effects refused outside the commit gate at schema and controller layers.</dd>
+
+      <dt>Per-node approval</dt>
+      <dd><span class="chip ok">SHIPPED</span> &nbsp;Approving commit node A never approves node B; untargeted approvals rejected in multi-commit graphs; terminal phase requires all commit nodes committed.</dd>
+
+      <dt>Capability-ID gating</dt>
+      <dd><span class="chip ok">SHIPPED</span> &nbsp;<code>capability-registry.ts</code> (D013) — registered/versioned ids, per-call <code>evaluateCapabilityAccess</code>, write-implies-read implication that never narrows, kill-switch via <code>revokedCapabilityIds</code>.</dd>
+
+      <dt>A2 reservation commit</dt>
+      <dd><span class="chip ok">SHIPPED</span> &nbsp;Preview tool + approval card + <code>/api/reservation/commit</code> merged and live. The 2026-07-08 handoff's "A2 UI half open" note is stale.</dd>
+
+      <dt>Immutable version/install</dt>
+      <dd><span class="chip accent">FIXTURE</span> &nbsp;Immutable <code>packageVersionId</code> semantics encoded in <code>packages/tool-contracts/src/marketplace.ts</code> and contract tests; no persistence layer yet.</dd>
+
+      <dt>JSON-render default</dt>
+      <dd><span class="chip accent">FIXTURE</span> &nbsp;Deterministic JSON-render is the encoded package default; the execution-inert marketplace runtime that binds it is not built.</dd>
+
+      <dt>Live-catalog pinning</dt>
+      <dd><span class="chip warn">BLOCKED</span> &nbsp;Live policy reproduced exactly through the registry, but pinning is blocked on coverage — 8 registered capabilities against 72 live catalog commands (open decision).</dd>
+
+      <dt>Live controller cutover</dt>
+      <dd><span class="chip">PLANNED</span> &nbsp;<code>workflow-controller.ts</code> — one generic interpreter over <code>workflowDefinitionSchema</code> — is proven but not yet wired into the live request path (Phase 3a-2 open decision).</dd>
+
+      <dt>Marketplace runtime</dt>
+      <dd><span class="chip danger">MISSING</span> &nbsp;ORPC routes, persistence/RLS tables, install UI, publishing/moderation, trust-tier field, and revocation UI are not started.</dd>
+    </dl>
+
+    <figure class="viz-frame">
+      <svg class="coverage-svg" viewBox="0 0 700 132" role="img" aria-labelledby="cov-title cov-desc">
+        <title id="cov-title">Capability registry coverage: 8 registered versus 72 live catalog commands</title>
+        <desc id="cov-desc">A registered-ids bar of 8 is far shorter than the live-catalog bar of 72, showing why live pinning is blocked on registry coverage.</desc>
+        <!-- axis baseline -->
+        <line x1="150" y1="102" x2="630" y2="102" stroke="var(--line-strong)"/>
+        <!-- live catalog bar (full scale = 72 over 480px) -->
+        <text x="140" y="42" text-anchor="end" font-size="12" fill="var(--muted)">Live catalog</text>
+        <rect x="150" y="28" width="480" height="22" fill="var(--viz-5)"/>
+        <text x="638" y="44" font-size="12" fill="var(--ink)">72 commands</text>
+        <!-- registered bar (8/72 * 480 = 53) -->
+        <text x="140" y="86" text-anchor="end" font-size="12" fill="var(--muted)">Registered ids</text>
+        <rect x="150" y="72" width="53" height="22" fill="var(--accent)"/>
+        <text x="211" y="88" font-size="12" fill="var(--ink)">8 capabilities</text>
+      </svg>
+      <figcaption>Registry coverage gap (Phase 4). Live pinning stays <span class="chip warn">BLOCKED</span> until the 72-command catalog is registered; grant synthesis already reproduces live policy exactly through the 8 that are.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Held back on purpose</h2>
+    <p>Out-of-scope items are deferred because the endpoint docs explicitly label marketplace endpoints as planned typed contracts only. This is the guardrail against reading the PRD as permission to ship writes without the trust chain.</p>
+    <div class="callout warn">
+      <p class="callout-title">Do not build ahead of the contracts</p>
+      <p>Deferred: production marketplace ORPC implementation, the visual workflow builder, any new runtime/sandbox for arbitrary HTML apps, and creator monetization / public moderation / external publishing policy. Do not treat this PRD as permission to build writes without preview/approval/receipt, do not expose <code>bundle</code> as the only package kind, and do not store installs against mutable package ids only.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

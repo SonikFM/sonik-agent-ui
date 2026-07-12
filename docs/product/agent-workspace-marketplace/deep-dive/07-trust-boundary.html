@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>07 · Permissions, Approval & Trust Boundary — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* page-specific, composed from tokens.css variables only */
+  .seq-note { color: var(--muted); font-size: var(--text-sm); margin: 4px 0 0; }
+  .flow-node.rejected { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+  .flow-node code { font-size: var(--text-xs); }
+  .gate-reason { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--danger); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .two-col .panel { margin: 0; }
+  .file-cite { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--faint); }
+  .inline-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  ul.tight { max-width: var(--prose-max); margin: 0 0 1em; padding-left: 20px; }
+  ul.tight li { margin-bottom: 6px; }
+  @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-doc="07-trust-boundary">
+<main class="page">
+  <header class="page-head">
+    <h1>Permissions, Approval &amp; Trust Boundary</h1>
+    <p class="lead">The line between what a model can say and what the host will do. Chat text is never approval; a write side effect fires only behind a host-signed gate — and as of this week that gate is enforced by the reducer's structure, not by reviewer discipline.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/07-permissions-approval-trust-boundary.md · Corpus 2026-07-07 · Status updated 2026-07-12</p>
+  </header>
+
+  <section>
+    <h2>The approval sequence</h2>
+    <p>A run walks one phase pipeline. The first three phases are drivable by untrusted inputs — model output, chat, JSON-render patches, artifact state. Everything from <code>approved</code> onward requires a host-signed marker the model cannot forge. The boundary is not a convention between those two halves; it is where the reducer refuses transitions.</p>
+
+    <div class="flow" role="list" aria-label="Workflow run phase pipeline">
+      <div class="flow-node" role="listitem"><b>draft / intake</b><small>User answers, form fields, JSON-render state. <code>idle → intake → saving</code></small></div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node gated" role="listitem"><b>preview_ready</b><small>Non-mutating command preview: <code>commandId</code>, <code>stableInputHash</code>, effect, <code>approvalRequired</code>. No write runs.</small></div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node gated" role="listitem"><b>approval_requested</b><small>Preview handed to the host surface. <code>approvalState.status = "requested"</code>.</small></div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node trusted" role="listitem"><b>approved</b><small>Host-signed only. <code>hostSigned: true</code> or the schema refuses to represent it.</small></div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node trusted" role="listitem"><b>committing</b><small>Injected write callback invoked — never before this gate passes.</small></div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-node trusted" role="listitem"><b>committed</b><small>Terminal only on a semantic-success receipt, once every commit node is done.</small></div>
+    </div>
+    <p class="seq-note">Phases per <code>WORKFLOW_RUN_PHASES</code> in <span class="file-cite">packages/tool-contracts/src/workflow-run-state.ts</span>. Off-path terminals <code>error</code> and <code>cancelled</code> omitted from the strip.</p>
+
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 1080 380" width="1080" aria-labelledby="seq-title seq-desc">
+        <title id="seq-title">Trust boundary crossing in the approval sequence</title>
+        <desc id="seq-desc">Six sequence stages on a horizontal spine. The first three stages are authorable by untrusted inputs; a vertical trust-boundary band precedes the host-signed approve stage; the last three stages are host-signed and receipt-backed. Model-originated approval attempts are bounced at the boundary.</desc>
+
+        <!-- band labels -->
+        <text x="20" y="30" fill="var(--muted)" font-size="13" font-family="var(--font-mono)">UNTRUSTED ORIGIN — model / chat / JSON-render / artifact</text>
+        <text x="700" y="30" fill="var(--ok)" font-size="13" font-family="var(--font-mono)">TRUSTED — host-signed + receipts</text>
+
+        <!-- untrusted band shading -->
+        <rect x="20" y="42" width="588" height="150" fill="var(--surface-2)" stroke="var(--line)" rx="8"/>
+        <!-- trusted band shading -->
+        <rect x="640" y="42" width="420" height="150" fill="var(--ok-surface)" stroke="color-mix(in srgb, var(--ok) 35%, var(--line))" rx="8"/>
+
+        <!-- boundary band -->
+        <rect x="608" y="20" width="32" height="340" fill="var(--warn-surface)" stroke="color-mix(in srgb, var(--warn) 45%, var(--line))"/>
+        <text x="624" y="352" fill="var(--warn)" font-size="13" font-family="var(--font-mono)" text-anchor="middle" transform="rotate(-90 624 200)">TRUST BOUNDARY</text>
+
+        <!-- spine -->
+        <line x1="40" y1="117" x2="1040" y2="117" stroke="var(--line-strong)" stroke-width="1.5"/>
+
+        <!-- untrusted-side stage nodes -->
+        <g font-family="var(--font-mono)" font-size="13">
+          <rect x="48" y="92" width="150" height="50" rx="6" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="123" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">draft / intake</text>
+          <text x="123" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">saving</text>
+
+          <rect x="238" y="92" width="150" height="50" rx="6" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="313" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">preview_ready</text>
+          <text x="313" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">non-mutating</text>
+
+          <rect x="428" y="92" width="160" height="50" rx="6" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="508" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">approval_requested</text>
+          <text x="508" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">preview to host</text>
+        </g>
+
+        <!-- trusted-side stage nodes -->
+        <g font-family="var(--font-mono)" font-size="13">
+          <rect x="668" y="92" width="150" height="50" rx="6" fill="var(--surface-1)" stroke="color-mix(in srgb, var(--ok) 45%, var(--line))"/>
+          <text x="743" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">approved</text>
+          <text x="743" y="130" fill="var(--ok)" text-anchor="middle" font-size="12">hostSigned</text>
+
+          <rect x="828" y="92" width="120" height="50" rx="6" fill="var(--surface-1)" stroke="color-mix(in srgb, var(--ok) 45%, var(--line))"/>
+          <text x="888" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">committing</text>
+          <text x="888" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">callback</text>
+
+          <rect x="958" y="92" width="98" height="50" rx="6" fill="var(--surface-1)" stroke="color-mix(in srgb, var(--ok) 45%, var(--line))"/>
+          <text x="1007" y="112" fill="var(--ink)" text-anchor="middle" font-size="13">committed</text>
+          <text x="1007" y="130" fill="var(--muted)" text-anchor="middle" font-size="12">receipt</text>
+        </g>
+
+        <!-- bounced model-approval attempt -->
+        <line x1="508" y1="200" x2="600" y2="200" stroke="var(--danger)" stroke-width="1.5"/>
+        <path d="M600 200 l-10 -5 l0 10 z" fill="var(--danger)"/>
+        <line x1="600" y1="192" x2="600" y2="208" stroke="var(--danger)" stroke-width="2"/>
+        <text x="330" y="204" fill="var(--danger)" font-size="12" font-family="var(--font-mono)">model / chat "approve" →</text>
+        <text x="330" y="222" fill="var(--danger)" font-size="12" font-family="var(--font-mono)">rejected at boundary</text>
+
+        <!-- host-signed token crosses -->
+        <line x1="588" y1="255" x2="668" y2="255" stroke="var(--ok)" stroke-width="1.5"/>
+        <path d="M668 255 l-10 -5 l0 10 z" fill="var(--ok)"/>
+        <text x="360" y="259" fill="var(--ok)" font-size="12" font-family="var(--font-mono)">host-signed approval →</text>
+        <text x="360" y="277" fill="var(--ok)" font-size="12" font-family="var(--font-mono)">crosses</text>
+
+        <!-- gate markers -->
+        <g font-family="var(--font-mono)" font-size="12">
+          <circle cx="624" cy="92" r="10" fill="var(--warn-surface)" stroke="var(--warn)"/>
+          <text x="624" y="96" fill="var(--warn)" text-anchor="middle" font-size="12">G1</text>
+          <circle cx="888" cy="167" r="10" fill="var(--warn-surface)" stroke="var(--warn)"/>
+          <text x="888" y="171" fill="var(--warn)" text-anchor="middle" font-size="12">G2</text>
+          <text x="828" y="192" fill="var(--muted)" font-size="12">callback pre-check</text>
+        </g>
+      </svg>
+      <figcaption>The sequence spine with its trust boundary. G1 and G2 are the two independent write-blocking gates (reducer <code>approve</code> and the controller's pre-callback check). Model- or chat-originated approval is bounced; only a host-signed marker crosses. Built from the phase list and reducer transitions in <span class="file-cite">workflow-run-state.ts</span> and <span class="file-cite">workflow-controller.ts</span>.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Three separate states</h2>
+    <p>The corpus names three states that the contracts keep disjoint. Draft and preview are cheap and model-drivable; only the third carries authority. Conflating any two is the class of bug this boundary exists to prevent.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Draft, preview, and trusted-approval states, with what each may and may not carry</caption>
+      <thead>
+        <tr><th>State</th><th>What it is</th><th>May carry</th><th>Must never carry</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Draft / input</strong></td>
+          <td>User answers, JSON-render state patches, form fields.</td>
+          <td>Arbitrary user text, including the literal word "approve".</td>
+          <td>Trusted principal credentials or approval tokens.</td>
+        </tr>
+        <tr>
+          <td><strong>Preview</strong></td>
+          <td>Non-mutating command/workflow preview: inputs, effects, required context, expected receipts.</td>
+          <td>Human-readable command shape and <code>stableInputHash</code>.</td>
+          <td>Any mutating side effect — preview runs no write.</td>
+        </tr>
+        <tr>
+          <td><strong>Trusted approval</strong></td>
+          <td>Host-authorized approval for a specific preview.</td>
+          <td><code>hostSigned: true</code> and the <code>approvedCommandIds</code> it authorizes.</td>
+          <td>Model provenance — the schema refuses <code>approved</code> without the host-signed marker.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="callout danger">
+      <div class="callout-title">Invariants — not softened</div>
+      <ul class="tight">
+        <li>User text saying "approve" is not sufficient. <span class="chip ok">SHIPPED</span></li>
+        <li>JSON-render state is not trusted approval state. <span class="chip ok">SHIPPED</span></li>
+        <li>Write / destructive / external effects require host context and a commit gate. <span class="chip ok">SHIPPED</span></li>
+        <li>Command receipts are required for completed writes; success copy derives from receipts, never transport status. <span class="chip ok">SHIPPED</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Structurally enforced gates</h2>
+    <p>The corpus (2026-07-06) listed these as contract-level intentions. As of this week they are enforced by the run-state reducer and controller — a wrong transition returns a typed rejection instead of proceeding. Each row cites the exact reason string the machine emits.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>The write-gate refusals now enforced in shipped code, with reason strings and sites</caption>
+      <thead>
+        <tr><th>Gate</th><th>What it refuses</th><th>Reason string</th><th>Site</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Model-supplied approval</strong></td>
+          <td>An <code>approve</code> event without the host-signed marker. The approval schema also refuses to <em>represent</em> <code>status:"approved"</code> without <code>hostSigned</code>.</td>
+          <td><span class="gate-reason">model_supplied_approval_is_not_trusted</span></td>
+          <td class="file-cite">workflow-run-state.ts (reducer <code>approve</code> + <code>workflowRunApprovalStateSchema</code>)</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Unapproved commit</strong></td>
+          <td>The injected write callback is never invoked unless the run is already host-signed approved — checked before the callback runs, independent of the reducer's own <code>commit_started</code> refusal.</td>
+          <td><span class="gate-reason">approval_required</span></td>
+          <td class="file-cite">workflow-controller.ts (pre-callback) + workflow-run-state.ts (<code>commit_started</code>)</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Per-node approval</strong></td>
+          <td>A targeted approval only covers the <code>commandId</code>s it names; committing a node whose <code>commandId</code> is not in <code>approvedCommandIds</code> is refused even while the run's status is <code>approved</code>.</td>
+          <td><span class="gate-reason">approval_does_not_cover_this_node</span></td>
+          <td class="file-cite">workflow-run-state.ts (<code>commit_started</code>)</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Untargeted approval in multi-commit graphs</strong></td>
+          <td>An empty <code>approvedCommandIds</code> would cover every commit node — the implicit-approval bug through a side door. Rejected when the graph has more than one <code>tool_commit</code> node. Single-commit runs (reservation, all Phase 1/3a flows) keep using untargeted approvals unchanged.</td>
+          <td><span class="gate-reason">untargeted_approval_requires_explicit_commandIds</span></td>
+          <td class="file-cite">workflow-run-state.ts (reducer <code>approve</code>)</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Terminal only on receipt</strong></td>
+          <td>Phase <code>committed</code> is reached only on a semantic-success receipt — never transport success alone — and only once every <code>tool_commit</code> node has reached <code>committed</code>.</td>
+          <td class="file-cite">semanticStatus === "success" &amp;&amp; allCommitNodesDone</td>
+          <td class="file-cite">workflow-run-state.ts (<code>commit_result</code>)</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="callout ok">
+      <div class="callout-title">Why two independent commit gates</div>
+      <p>The controller re-checks <code>approvalState.status === "approved" &amp;&amp; hostSigned</code> before it ever calls the injected write callback, on top of the reducer's own <code>commit_started</code> refusal. A write side effect can therefore never fire on an unapproved run even if a future caller skips the reducer transition entirely. Belt and suspenders, on purpose — the mutation is the irreversible act.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Three-layer grant resolution</h2>
+    <p>One effective mode is pinned per registered capability at run start and frozen for the run's lifetime, so two enforcement paths can never disagree mid-run. Three authority inputs feed it, each with deliberately different absence semantics; the pin is most-restrictive-wins across all three.</p>
+
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 1080 360" width="1080" aria-labelledby="grant-title grant-desc">
+        <title id="grant-title">Three-layer grant resolution to a most-restrictive-wins pin</title>
+        <desc id="grant-desc">Three input layers — capability grants (default-deny), toolPermissionModes (default-allow), and approvedCommandIds (host-signed write-gate) — each contribute a mode for a worked example capability. The three contributions funnel into a most-restrictive-wins reducer that pins one effective mode.</desc>
+
+        <!-- worked example header -->
+        <text x="20" y="28" fill="var(--muted)" font-size="13" font-family="var(--font-mono)">worked example: capability booking.create.booking (effect: write)</text>
+
+        <!-- layer rows -->
+        <g font-family="var(--font-mono)" font-size="13">
+          <!-- capability grants -->
+          <rect x="20" y="48" width="470" height="72" rx="8" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="36" y="74" fill="var(--ink)" font-size="14">capability grants</text>
+          <text x="36" y="94" fill="var(--muted)" font-size="12">default-DENY — no grant ⇒ off</text>
+          <text x="36" y="112" fill="var(--body)" font-size="12">grant present: allow</text>
+          <rect x="410" y="66" width="66" height="30" rx="6" fill="var(--surface-3)" stroke="var(--line-strong)"/>
+          <text x="443" y="86" fill="var(--ink)" font-size="13" text-anchor="middle">allow</text>
+
+          <!-- toolPermissionModes -->
+          <rect x="20" y="136" width="470" height="72" rx="8" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+          <text x="36" y="162" fill="var(--ink)" font-size="14">toolPermissionModes</text>
+          <text x="36" y="182" fill="var(--muted)" font-size="12">default-ALLOW — absent key ⇒ no contribution</text>
+          <text x="36" y="200" fill="var(--body)" font-size="12">absent for this id: —</text>
+          <rect x="410" y="154" width="66" height="30" rx="6" fill="var(--surface-3)" stroke="var(--line-strong)"/>
+          <text x="443" y="174" fill="var(--muted)" font-size="13" text-anchor="middle">—</text>
+
+          <!-- approvedCommandIds -->
+          <rect x="20" y="224" width="470" height="88" rx="8" fill="var(--surface-1)" stroke="color-mix(in srgb, var(--warn) 40%, var(--line))"/>
+          <text x="36" y="250" fill="var(--ink)" font-size="14">approvedCommandIds</text>
+          <text x="36" y="270" fill="var(--muted)" font-size="12">host-signed write-gate — write effect only</text>
+          <text x="36" y="288" fill="var(--body)" font-size="12">provided, does not name this id ⇒ ask</text>
+          <text x="36" y="304" fill="var(--faint)" font-size="12">(read-effect capabilities: not consulted)</text>
+          <rect x="410" y="252" width="66" height="30" rx="6" fill="var(--warn-surface)" stroke="var(--warn)"/>
+          <text x="443" y="272" fill="var(--warn)" font-size="13" text-anchor="middle">ask</text>
+        </g>
+
+        <!-- funnel arrows -->
+        <g stroke="var(--line-strong)" stroke-width="1.5" fill="none">
+          <path d="M490 84 C 620 84, 640 168, 760 178"/>
+          <path d="M490 172 C 620 172, 660 176, 760 180"/>
+          <path d="M490 268 C 620 268, 640 192, 760 182"/>
+        </g>
+
+        <!-- reducer node -->
+        <rect x="760" y="130" width="300" height="104" rx="8" fill="var(--accent-surface)" stroke="color-mix(in srgb, var(--accent) 45%, var(--line))"/>
+        <text x="910" y="162" fill="var(--accent-ink)" font-size="14" font-family="var(--font-mono)" text-anchor="middle">most-restrictive-wins</text>
+        <text x="910" y="182" fill="var(--muted)" font-size="12" font-family="var(--font-mono)" text-anchor="middle">off &gt; ask &gt; allow</text>
+        <text x="910" y="204" fill="var(--body)" font-size="12" font-family="var(--font-mono)" text-anchor="middle">min(allow, —, ask)</text>
+        <rect x="866" y="212" width="88" height="14" rx="4" fill="none"/>
+
+        <!-- pinned result -->
+        <rect x="820" y="258" width="180" height="44" rx="8" fill="var(--warn-surface)" stroke="var(--warn)"/>
+        <text x="910" y="285" fill="var(--warn)" font-size="15" font-family="var(--font-mono)" text-anchor="middle">pinned: ask</text>
+        <line x1="910" y1="234" x2="910" y2="258" stroke="var(--line-strong)" stroke-width="1.5"/>
+        <path d="M910 258 l-5 -10 l10 0 z" fill="var(--line-strong)"/>
+      </svg>
+      <figcaption>The write-gate bites: a capability the user granted <code>allow</code> still pins to <code>ask</code> because the host-signed <code>approvedCommandIds</code> list did not name it. Preview is allowed; the commit needs approval. Logic per <code>resolveEffectivePinnedCapabilities</code> in <span class="file-cite">packages/tool-contracts/src/capability-pinning.ts</span>.</figcaption>
+    </figure>
+
+    <h3>Direct grants precede implication</h3>
+    <p>Within the capability-grant layer, a write grant covers its declared reads (<code>booking.create.booking</code> implies <code>booking.get.availability</code>). But implication exists only to <em>expand</em> sparse grants, never to narrow a capability that carries its own grant: if a capability has a direct grant, only direct grants resolve it. Otherwise a restrictive grant on <code>X</code> would bleed onto everything <code>X</code> implies.</p>
+    <dl class="ledger">
+      <dt>Default-deny</dt><dd>Capability grants: no grant, unregistered id, revoked descriptor, or kill-switched id all evaluate to <code>off</code>.</dd>
+      <dt>Direct beats implied</dt><dd>Matching direct grants form the resolution pool; implied grants are used only when the pool is empty (<code>evaluateCapabilityAccess</code>).</dd>
+      <dt>No privilege escalation</dt><dd>An <code>implies</code> edge may never point at a more dangerous effect — implication can only lower privilege (write implies read), enforced at registry parse.</dd>
+      <dt>Frozen per run</dt><dd>The controller resolves the pin once at run start and freezes it; <code>facadeToolIds</code> and pinned modes never change mid-run.</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Kill-switch mechanics</h2>
+    <p>Revocation and the capability namespace are one mechanism, not two. There is no separate revocation machinery: revoking a capability id makes the next call evaluate to <code>off</code>. Because a revoked granting capability contributes nothing to resolution, its implications stop flowing in the same step.</p>
+    <dl class="ledger">
+      <dt>Revocation = off next call</dt><dd>A kill-switched id (<code>revokedCapabilityIds</code>) returns <span class="gate-reason">kill_switch_revoked</span> on the next <code>evaluateCapabilityAccess</code>; a descriptor marked <code>status: "revoked"</code> returns <span class="gate-reason">capability_revoked</span>. No in-flight commit is retroactively undone — the gate simply bites at the next call.</dd>
+      <dt>Implication flow stops</dt><dd>A revoked granting capability is skipped before its implied ids are expanded, so revoking a write capability also drops the reads it would have covered — unless those reads carry their own grant.</dd>
+      <dt>Default-deny reasons</dt><dd><code>capability_not_registered</code>, <code>capability_revoked</code>, <code>kill_switch_revoked</code>, and <code>no_grant</code> all pin to <code>off</code>; only <code>granted</code> yields a mode.</dd>
+      <dt>Pins to off</dt><dd>In the three-layer pin, a revoked id forces <code>off</code> regardless of what <code>toolPermissionModes</code> or <code>approvedCommandIds</code> say — most-restrictive-wins guarantees it.</dd>
+    </dl>
+    <p class="seq-note">Per-install kill-switch is D012; the namespace and gating are D013. Both in <span class="file-cite">packages/tool-contracts/src/capability-registry.ts</span>. The revocation UI is <span class="chip">PLANNED</span> — the enforcement mechanism is live, the operator surface is not.</p>
+  </section>
+
+  <section>
+    <h2>Why per-call, not install-time-only</h2>
+    <p>The research corpus converged from three lanes on one finding: install-time vetting is where every 2025–2026 marketplace breach succeeded, and it is insufficient on its own — the worst exploits are runtime and update-time, against an already-approved, already-installed capability. Our gate re-evaluates on the next call, so a trusted-publisher malicious update or a runtime injection meets a live gate, not a frozen attestation.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Install-time-only failures the corpus cites, versus where our per-call boundary sits</caption>
+      <thead>
+        <tr><th>Incident</th><th>What broke</th><th>Why install-time review missed it</th><th>Where our model gates it</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>ForcedLeak</strong><br><span class="file-cite">Salesforce Agentforce · CVSS 9.4 · Sep 2025</span></td>
+          <td>Indirect prompt injection via a 42k-char Web-to-Lead field; a stale CSP allowlist domain re-registered for ~$5 became a trusted exfiltration channel.</td>
+          <td>The agent had passed Salesforce's pre-listing security review. The exploit was runtime, against approved config — a one-time review cannot see it.</td>
+          <td>Chat/data text is never approval; a write/external effect needs a host-signed commit gate per call, not a per-install trust decision.</td>
+        </tr>
+        <tr>
+          <td><strong>ClawHavoc</strong><br><span class="file-cite">ClawHub / OpenClaw · Feb 2026</span></td>
+          <td>341 of 2,857 audited skills malicious (later 800+): disguised utilities shipping the AMOS infostealer; five evaded the marketplace's VirusTotal + "ClawScan" layer via base64 / file padding.</td>
+          <td>Static scanning at publish is evadable and point-in-time; malicious behavior ran at execution, inside "legitimate" skills.</td>
+          <td>Every mutating command routes through a preview-then-host-signed-commit gate; the renderer is execution-inert, so a skill cannot self-authorize a write.</td>
+        </tr>
+        <tr>
+          <td><strong>Shai-Hulud</strong><br><span class="file-cite">npm worm · CISA alert Sep 2025</span></td>
+          <td>Self-propagating worm: postinstall scripts harvested secrets with a bundled TruffleHog, then auto-republished trojanized versions — 194 packages / 582 versions. Motivated OWASP A03:2025.</td>
+          <td>The malicious payload arrived as a <em>trusted publisher's update</em> to an already-installed package — the exact case an install-time gate treats as already-trusted.</td>
+          <td>Immutable <code>packageVersionId</code> installs plus a per-install kill-switch: a poisoned update is a new version, and revocation pins the id to <code>off</code> on the next call fleet-wide.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="seq-note">Incident detail from <span class="file-cite">docs/research/lane-L1-agent-marketplaces-2026-07.md</span>, <span class="file-cite">lane-L3-permission-trust-supplychain-2026-07.md</span>, and <span class="file-cite">agent-marketplace-foundational-synthesis-2026-07.md</span>.</p>
+  </section>
+
+  <section>
+    <h2>Still not built</h2>
+    <p>The enforcement mechanism is live and full-chain green; the operator- and marketplace-facing surfaces around it are not. Honest status, reconciled against the 2026-07-12 addendum:</p>
+    <div class="two-col">
+      <div class="panel">
+        <div class="inline-chips"><span class="chip ok">SHIPPED</span></div>
+        <ul class="tight">
+          <li>Host-signed reducer + two independent commit gates.</li>
+          <li>Capability-ID registry with per-call gating and kill-switch.</li>
+          <li>Three-layer pin (most-restrictive-wins), frozen per run.</li>
+          <li>Per-node and multi-commit-graph approval refusals.</li>
+          <li>A2 reservation commit path — preview tool, approval card, <code>/api/reservation/commit</code> — merged and live.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="inline-chips"><span class="chip warn">BLOCKED / OPEN</span> <span class="chip">PLANNED</span></div>
+        <ul class="tight">
+          <li>Live controller cutover into the request path — <span class="chip warn">OPEN</span> (Phase 3a-2 decision).</li>
+          <li>Live capability pinning — <span class="chip warn">BLOCKED</span>: 8 registered capabilities vs 72 live catalog commands.</li>
+          <li>Production approval records + machine-readable active approval in page context — <span class="chip">PLANNED</span>.</li>
+          <li>Revocation UI, trust-tier field, install / publishing / moderation — <span class="chip">PLANNED</span>.</li>
+          <li>Marketplace ORPC routes, persistence / RLS tables — <span class="chip">PLANNED</span>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

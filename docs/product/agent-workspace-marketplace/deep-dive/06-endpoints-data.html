@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>06 · Endpoint Map & Data Model — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .matrix-note { color: var(--muted); font-size: var(--text-sm); max-width: var(--prose-max); }
+  .matrix tr.grp td {
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+    font-size: var(--text-xs); font-weight: 600; padding-top: 18px; border-bottom-color: var(--line-strong);
+  }
+  .matrix td .chip + .chip { margin-left: 5px; }
+  .matrix td code { white-space: nowrap; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: var(--text-sm); color: var(--muted); margin: 0 0 4px; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
+</style>
+</head>
+<body data-doc="06-endpoints-data">
+<main class="page">
+  <header class="page-head">
+    <h1>Endpoint Map &amp; Data Model</h1>
+    <p class="lead">Twenty typed endpoint names and seven persistence tables, committed as planning
+      contracts ahead of any runtime. Zero routes and zero tables exist; the shapes and the trust
+      boundary they encode do.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/06-orpc-endpoint-map-data-model.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>Endpoint coverage matrix</h2>
+    <p>Per ratified decision <strong>D007</strong>, these endpoint names are planning contracts:
+      typed request/response shapes and an approval doctrine are committed before a single ORPC
+      route ships. The matrix below is honest about that — every <em>route</em> is
+      <span class="chip">PLANNED</span>. What has shipped is the logic those routes would call
+      (state machine, controller, capability registry) and one bespoke commit path; that
+      reconciliation follows the table.</p>
+
+    <figure class="viz-frame">
+      <div class="legend" aria-hidden="true">
+        <span><i style="background:var(--accent)"></i>Read / non-mutating</span>
+        <span><i style="background:var(--viz-2)"></i>Write / mutating</span>
+      </div>
+      <svg role="img" viewBox="0 0 820 210" width="820" aria-labelledby="bar-t bar-d">
+        <title id="bar-t">Endpoint counts by surface, split read versus write</title>
+        <desc id="bar-d">marketplace: 7 read and 7 write; workflow and app preview: 2 read and 4 write.</desc>
+        <!-- gridlines at 0,5,10,15 endpoints; 40px per endpoint from x=180 -->
+        <g stroke="var(--line)" stroke-width="1">
+          <line x1="180" y1="26" x2="180" y2="150"></line>
+          <line x1="380" y1="26" x2="380" y2="150"></line>
+          <line x1="580" y1="26" x2="580" y2="150"></line>
+          <line x1="780" y1="26" x2="780" y2="150"></line>
+        </g>
+        <line x1="180" y1="150" x2="780" y2="150" stroke="var(--line-strong)" stroke-width="1"></line>
+        <g fill="var(--muted)" font-size="12" text-anchor="middle" font-family="var(--font-mono)">
+          <text x="180" y="168">0</text>
+          <text x="380" y="168">5</text>
+          <text x="580" y="168">10</text>
+          <text x="780" y="168">15</text>
+          <text x="480" y="192" fill="var(--muted)">endpoints declared</text>
+        </g>
+        <!-- marketplace.* : read 7 (280px), write 7 (280px) -->
+        <g>
+          <text x="170" y="62" text-anchor="end" fill="var(--ink)" font-size="13"><tspan font-family="var(--font-mono)">marketplace.*</tspan></text>
+          <rect x="180" y="42" width="280" height="34" fill="var(--accent)"></rect>
+          <rect x="460" y="42" width="280" height="34" fill="var(--viz-2)"></rect>
+          <text x="320" y="64" text-anchor="middle" fill="var(--bg)" font-size="12" font-family="var(--font-mono)">7 read</text>
+          <text x="600" y="64" text-anchor="middle" fill="var(--bg)" font-size="12" font-family="var(--font-mono)">7 write</text>
+        </g>
+        <!-- workflow / app.* : read 2 (80px), write 4 (160px) -->
+        <g>
+          <text x="170" y="122" text-anchor="end" fill="var(--ink)" font-size="13"><tspan font-family="var(--font-mono)">workflow / app.*</tspan></text>
+          <rect x="180" y="102" width="80" height="34" fill="var(--accent)"></rect>
+          <rect x="260" y="102" width="160" height="34" fill="var(--viz-2)"></rect>
+          <text x="220" y="124" text-anchor="middle" fill="var(--bg)" font-size="12" font-family="var(--font-mono)">2</text>
+          <text x="340" y="124" text-anchor="middle" fill="var(--bg)" font-size="12" font-family="var(--font-mono)">4 write</text>
+        </g>
+      </svg>
+      <figcaption>Nine read / non-mutating endpoints against eleven write / mutating ones. The
+        mutating half is where the trust boundary lives: previews and validation are free, commits
+        are gated.</figcaption>
+    </figure>
+
+    <div class="table-scroll">
+    <table class="matrix">
+      <caption>Endpoint × read/write × approval requirement × route status. Approval column derived
+        from the corpus invariants and trust-boundary doctrine, not yet enforced (no routes exist).</caption>
+      <thead>
+        <tr>
+          <th>Endpoint</th>
+          <th>R/W</th>
+          <th>Approval requirement</th>
+          <th>Route status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="grp"><td colspan="4">Marketplace — read / search</td></tr>
+        <tr><td><code>marketplace.searchPackages</code></td><td>Read</td><td>None — read-only</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.getPackage</code></td><td>Read</td><td>None — read-only</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.getPackageVersion</code></td><td>Read</td><td>None — read-only</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.listInstallations</code></td><td>Read</td><td>None — read-only</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.getInstallation</code></td><td>Read</td><td>None — read-only</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.getInstallPreview</code></td><td>Read</td><td>None — preview</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.validateManifest</code></td><td>Read</td><td>None — validation (fail-safe on unknown schema)</td><td><span class="chip">PLANNED</span></td></tr>
+
+        <tr class="grp"><td colspan="4">Marketplace — install / manage</td></tr>
+        <tr><td><code>marketplace.installPackage</code></td><td>Write</td><td>Human-only mutation · targets <code>packageVersionId</code></td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.uninstallPackage</code></td><td>Write</td><td>Human-only mutation</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.updateInstallation</code></td><td>Write</td><td>Human-only mutation · targets <code>installationId</code></td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.setInstallationPermissionPolicy</code></td><td>Write</td><td>Human-only mutation</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.pinInstallationVersion</code></td><td>Write</td><td>Human-only mutation</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.copyInstallation</code></td><td>Write</td><td>Human-only mutation · preserves source lineage</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>marketplace.forkInstallation</code></td><td>Write</td><td>Human-only mutation · preserves source lineage</td><td><span class="chip">PLANNED</span></td></tr>
+
+        <tr class="grp"><td colspan="4">Workflow / app preview</td></tr>
+        <tr><td><code>workflow.previewRun</code></td><td>Read</td><td>None — non-mutating preview</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>workflow.requestApproval</code></td><td>Write</td><td>Issues approval request</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>workflow.runApproved</code></td><td>Write</td><td>Host-signed approval · prior record + host context</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>app.previewCommandBinding</code></td><td>Read</td><td>None — non-mutating preview</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>app.requestCommandApproval</code></td><td>Write</td><td>Issues approval request</td><td><span class="chip">PLANNED</span></td></tr>
+        <tr><td><code>app.applyStatePatch</code></td><td>Write</td><td>Host-signed approval · commit gate only</td><td><span class="chip">PLANNED</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="matrix-note">Nothing here silently coerces: <code>validateManifest</code> must fail safe
+      for unknown schema versions or require review, never coerce arbitrary payloads. Install and
+      update always target an immutable <code>packageVersionId</code> or an <code>installationId</code>,
+      never a mutable package id alone.</p>
+
+    <div class="callout ok">
+      <div class="callout-title">Reconciliation — routes are PLANNED, the logic behind them has shipped</div>
+      <p>The endpoint names above have no live ORPC routes. But the machinery they front is real and
+        full-chain green as of 2026-07-11:</p>
+      <dl class="ledger">
+        <dt><span class="chip ok">SHIPPED</span></dt>
+        <dd>Workflow run state machine — <code>workflow-run-state.ts</code>. Zod-validated
+          <code>WorkflowRunState</code>, pure Decider reducer, host-signed approval structurally
+          required (<code>model_supplied_approval_is_not_trusted</code>); phase reaches
+          <code>committed</code> only on a semantic-success receipt. This is what
+          <code>workflow.runApproved</code> would enforce.</dd>
+        <dt><span class="chip ok">SHIPPED</span></dt>
+        <dd>Workflow controller — <code>workflow-controller.ts</code>. One generic interpreter over
+          <code>workflowDefinitionSchema</code>; mutating effects refused outside the commit gate at
+          both schema and controller layers. <span class="chip warn">OPEN</span> Not yet wired into
+          the live request path (Phase 3a-2 cutover pending).</dd>
+        <dt><span class="chip ok">SHIPPED</span></dt>
+        <dd>Capability-ID registry (D013) — <code>capability-registry.ts</code>. Per-call gating via
+          <code>evaluateCapabilityAccess</code>, write-implies-read implication, kill-switch through
+          <code>revokedCapabilityIds</code>. <span class="chip warn">BLOCKED</span> Live pinning held
+          on coverage: 8 registered capabilities vs 72 live catalog commands.</dd>
+        <dt><span class="chip ok">SHIPPED</span></dt>
+        <dd>A2 reservation commit path — preview tool + approval card + <code>/api/reservation/commit</code>,
+          merged and live. It ships today as a bespoke route, not the generic
+          <code>workflow.runApproved</code> ORPC endpoint this map proposes.</dd>
+      </dl>
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">Still not built</div>
+      <p>Marketplace ORPC routes, persistence and RLS tables, install UI, publishing / moderation,
+        the trust-tier field, revocation UI, and the live controller cutover. No migrations, no RLS
+        or org-context design finalized for marketplace tables, and no package-update migration runner.
+        <code>workflow.runApproved</code> must never execute without a prior approval record and host
+        context — a constraint currently held only by contract, since the route is unbuilt.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Proposed data model</h2>
+    <p>Seven tables mirror the contract boundaries. Lineage runs left to right —
+      <code>package → version → installation</code> — and every mutating path terminates at a
+      receipt only after a host-signed approval. Three tables already have committed Zod shapes in
+      <code>packages/tool-contracts/src/marketplace.ts</code>; the rest are proposed with no schema yet.</p>
+
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 860 430" width="860" aria-labelledby="er-t er-d">
+        <title id="er-t">Entity-relation diagram of the seven proposed marketplace tables</title>
+        <desc id="er-d">Packages have many versions; installations reference an immutable package
+          version; installations own audit events and workflow run previews; previews raise approval
+          requests; an approved, host-signed request is the gate before a command receipt.</desc>
+        <defs>
+          <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="var(--line-strong)"></path>
+          </marker>
+          <marker id="ahA" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"></path>
+          </marker>
+        </defs>
+
+        <!-- edges (under boxes) -->
+        <g stroke="var(--line-strong)" stroke-width="1.5" fill="none">
+          <line x1="124" y1="132" x2="124" y2="208" marker-end="url(#ah)"></line>
+          <line x1="435" y1="230" x2="435" y2="298" marker-end="url(#ah)"></line>
+          <line x1="540" y1="146" x2="622" y2="80" marker-end="url(#ah)"></line>
+          <line x1="730" y1="124" x2="730" y2="174" marker-end="url(#ah)"></line>
+        </g>
+        <!-- lineage-critical FK (accent) -->
+        <line x1="224" y1="256" x2="328" y2="180" stroke="var(--accent)" stroke-width="1.75" marker-end="url(#ahA)"></line>
+        <!-- host-signed gate edge (accent) -->
+        <line x1="730" y1="272" x2="730" y2="322" stroke="var(--accent)" stroke-width="1.75" marker-end="url(#ahA)"></line>
+
+        <!-- edge labels -->
+        <g font-size="12" fill="var(--muted)" font-family="var(--font-mono)">
+          <text x="132" y="176">1 : N versions</text>
+          <text x="277" y="204" text-anchor="middle" fill="var(--accent)">sourceVersionId · FK</text>
+          <text x="445" y="270">1 : N audit</text>
+          <text x="582" y="104" text-anchor="middle">1 : N previews</text>
+          <text x="740" y="154">requests</text>
+          <text x="740" y="302" fill="var(--accent)">host-signed gate</text>
+        </g>
+
+        <!-- boxes -->
+        <g>
+          <rect x="24" y="40" width="200" height="92" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="38" y="62" fill="var(--ink)" font-size="13" font-family="var(--font-mono)">marketplace_packages</text>
+          <g fill="var(--muted)" font-size="12">
+            <text x="38" y="84">id · PK</text>
+            <text x="38" y="102">currentVersionId · FK</text>
+            <text x="38" y="120">org discovery index</text>
+          </g>
+        </g>
+        <g>
+          <rect x="24" y="210" width="200" height="92" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="38" y="232" fill="var(--ink)" font-size="13" font-family="var(--font-mono)">marketplace_package_versions</text>
+          <g fill="var(--muted)" font-size="12">
+            <text x="38" y="254">packageVersionId · PK</text>
+            <text x="38" y="272">packageId · FK</text>
+            <text x="38" y="290">manifest + manifestHash (immutable)</text>
+          </g>
+        </g>
+        <g>
+          <rect x="330" y="120" width="210" height="110" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="344" y="142" fill="var(--ink)" font-size="13" font-family="var(--font-mono)">marketplace_installations</text>
+          <g fill="var(--muted)" font-size="12">
+            <text x="344" y="164">installationId · PK</text>
+            <text x="344" y="182">sourcePackageVersionId · FK</text>
+            <text x="344" y="200">scope · mode · permissions</text>
+            <text x="344" y="218">source lineage on copy / fork</text>
+          </g>
+        </g>
+        <g>
+          <rect x="330" y="300" width="210" height="92" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="344" y="322" fill="var(--ink)" font-size="13" font-family="var(--font-mono)">marketplace_installation_events</text>
+          <g fill="var(--muted)" font-size="12">
+            <text x="344" y="344">eventId · PK</text>
+            <text x="344" y="362">installationId · FK</text>
+            <text x="344" y="380">install/update/copy/fork/policy audit</text>
+          </g>
+        </g>
+        <g>
+          <rect x="624" y="32" width="212" height="92" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="638" y="54" fill="var(--ink)" font-size="13" font-family="var(--font-mono)">workflow_run_previews</text>
+          <g fill="var(--muted)" font-size="12">
+            <text x="638" y="76">previewId · PK</text>
+            <text x="638" y="94">installationId · FK</text>
+            <text x="638" y="112">non-mutating preview record</text>
+          </g>
+        </g>
+        <g>
+          <rect x="624" y="176" width="212" height="96" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="638" y="198" fill="var(--ink)" font-size="13" font-family="var(--font-mono)">workflow_approval_requests</text>
+          <g fill="var(--muted)" font-size="12">
+            <text x="638" y="220">requestId · PK</text>
+            <text x="638" y="238">previewId · FK</text>
+            <text x="638" y="256">trusted approval state</text>
+          </g>
+        </g>
+        <g>
+          <rect x="624" y="324" width="212" height="92" rx="6" fill="var(--surface-2)" stroke="var(--line-strong)"></rect>
+          <text x="638" y="346" fill="var(--ink)" font-size="13" font-family="var(--font-mono)">command_receipts</text>
+          <g fill="var(--muted)" font-size="12">
+            <text x="638" y="368">receiptId · PK</text>
+            <text x="638" y="386">installationId · FK</text>
+            <text x="638" y="404">executed binding receipt</text>
+          </g>
+        </g>
+      </svg>
+      <figcaption>Blue edges mark the two load-bearing relations: installs bind to an
+        <em>immutable</em> package version, and a command receipt is reachable only through a
+        host-signed approval request. Everything else is discovery and audit around that spine.</figcaption>
+    </figure>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Table purpose, contract source, and reconciled status.</caption>
+      <thead>
+        <tr><th>Table</th><th>Purpose</th><th>Contract source</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>marketplace_packages</code></td>
+          <td>Mutable index / discovery record with <code>currentVersionId</code>.</td>
+          <td><code>marketplace.ts:496-510</code></td>
+          <td><span class="chip ok">CONTRACT</span> <span class="chip">TABLE PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>marketplace_package_versions</code></td>
+          <td>Immutable <code>packageVersionId</code> + manifest + <code>manifestHash</code>.</td>
+          <td><code>marketplace.ts:544-570</code></td>
+          <td><span class="chip ok">CONTRACT</span> <span class="chip">TABLE PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>marketplace_installations</code></td>
+          <td>Installed version, mode, scope, permissions, <code>sourcePackageVersionId</code>.</td>
+          <td><code>marketplace.ts:577-609</code></td>
+          <td><span class="chip ok">CONTRACT</span> <span class="chip">TABLE PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>marketplace_installation_events</code></td>
+          <td>Audit log for install / update / copy / fork / approval-policy changes.</td>
+          <td>Proposed — no current schema.</td>
+          <td><span class="chip danger">NO SCHEMA</span> <span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>workflow_run_previews</code></td>
+          <td>Non-mutating preview records tied to package / install / workflow.</td>
+          <td>Proposed — endpoint names only.</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>workflow_approval_requests</code></td>
+          <td>Trusted approval request state — the boundary chat can never cross.</td>
+          <td><code>marketplace.ts:207-222</code> (invariant); logic in <code>workflow-run-state.ts</code>.</td>
+          <td><span class="chip ok">INVARIANT SHIPPED</span> <span class="chip">TABLE PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><code>command_receipts</code></td>
+          <td>Receipts for executed command bindings; success is receipts-only, never chat copy.</td>
+          <td>Command-catalog tests imply receipts; marketplace table unimplemented.</td>
+          <td><span class="chip ok">A2 RECEIPTS LIVE</span> <span class="chip">MKT TABLE PLANNED</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Persistence notes</h2>
+    <p>None of these tables is committed to a runtime yet, which is deliberate — the July 2026
+      stateful-runtimes scan (<code>docs/research/stateful-runtimes-landscape-2026-07.md</code>)
+      settled the direction before the schema hardens. Keep the Decider-pattern reducer as the core;
+      persist through Durable Objects when durability lands.</p>
+
+    <div class="callout">
+      <div class="callout-title">Storage-shape constraints carried forward from the July scan</div>
+      <dl class="ledger">
+        <dt>Durable Objects</dt>
+        <dd>Read-your-write consistency — the right home for approval and run state, where a request
+          must observe its own prior write. <code>workflow_approval_requests</code> and
+          <code>workflow_run_previews</code> need this; the reducer <code>stateSchema</code> is
+          structurally close to a DO's persisted state.</dd>
+        <dt>KV</dt>
+        <dd>Eventually consistent — a documented footgun for state that gates execution. Acceptable
+          for discovery-side reads (<code>marketplace_packages</code> index) where staleness is
+          tolerable, unsafe for anything on the approval path.</dd>
+        <dt>D1</dt>
+        <dd>Hard 10&nbsp;GB cap per database. Immutable, ever-growing tables —
+          <code>marketplace_package_versions</code>, <code>marketplace_installation_events</code>,
+          <code>command_receipts</code> — must plan for that ceiling before they are the system of
+          record.</dd>
+      </dl>
+    </div>
+
+    <p class="matrix-note">Ratified: the typed host-signed approval boundary remains uncommoditized —
+      no OSS engine combines JSON workflow documents, one interpreter, and a typed host-signed
+      approval seam. It is the moat, and it is what <code>workflow_approval_requests</code> exists
+      to persist.</p>
+  </section>
+</main>
+</body>
+</html>
