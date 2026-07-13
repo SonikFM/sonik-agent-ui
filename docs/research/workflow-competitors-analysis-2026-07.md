@@ -132,6 +132,58 @@ flat `TOOLKIT_ACTION` slugs; per-toolkit date-stamp versions (`20250909_00`) wit
 | Multi-surface resume authorization | Dify | Review surface / approval channels under our signing |
 | `latest` as pointer + deprecation-with-alternative | Dify | package discovery fields |
 
+## Second wave (2026-07-12): Langflow, Flowise, dify-plugin-daemon
+
+**Langflow** — flow-as-data (React-Flow-ish nodes/edges, TypedDict-only, NO
+document-boundary validation), one generic interpreter with layered topological
+parallelism and cycle support bounded only by max_iterations. NO pause/resume
+primitive. Its "approval" flow is the canonical anti-pattern: the MODEL emits an
+"awaiting_user_approval" text sentinel and recognizes its own continuation string
+as authorization — no host signature; they shipped bug #13641 from models
+narrating approval gates with no structural backing. Store is social-trust
+(likes/downloads, overwritable uploads). Steal: layer-parallel execution,
+playground-separate-from-canvas, per-vertex failure tolerance.
+
+**Flowise** — flowData is raw React Flow JSON in a text column, zero runtime
+validation (Zod installed, unused for documents). TWO parallel engines mid-
+migration (legacy chatflow chains vs agentflow-v2 generic interpreter) with three
+list screens for one concept — the accretion failure our one-interpreter
+commitment avoids. HITL is a HumanInput node = "a Condition node whose branch a
+human picks" (steal the uniformity), resume authorized by nothing but session
+possession. Marketplace = static JSON files on disk. Steal: the IWaitingNode
+join-barrier scheduler for fan-in; HITL-as-condition; dynamic approval-prompt
+copy. Rich admin UI inventory (executions viewer, evaluators/evaluations,
+schedules, workspace/roles multi-tenancy) — the best Tier-2 admin benchmark in
+the OSS set.
+
+**dify-plugin-daemon** (settles the prior pass's two unverified flags) —
+(1) Isolation: shipped self-hosted mode = bare exec.Command subprocess sharing
+the daemon container's filesystem/network/user; no rlimits/cgroups/seccomp; the
+manifest Memory field enforces NOTHING (templated into a scaffold string only);
+the only real-sandbox mode delegates to a closed external serverless connector.
+Dify's actual security boundary is curated review + optional signing — precedent
+for review-only trust, NOT a sandbox to imitate. (2) Immutability: settled —
+PluginUniqueIdentifier = identity@sha256, content-addressed storage keys; same
+bytes idempotent, different bytes = different package. (3) Per-call enforcement
+IS real: every plugin→daemon RPC passes checkPermission() via one dispatch table
+before execution (coarse boolean categories; upload-file hardcoded allow — a
+gap). (4) Signature verification off by default; the stricter verified-publisher
+gate is dead code. Steal: content-addressed package identity; the RPC-boundary
+dispatch-table permission gate; offline RSA signature over file-hashes. Avoid:
+declared-but-unenforced resource fields; opt-in-off verification.
+
+**Open Agent (from Dan's list): unresolved** — no repo of that name plays at
+n8n/Dify/Flowise/Langflow scale (best guess xlang-ai/OpenAgents, ~4.7k stars,
+dormant chat platform, not a builder). Awaiting Dan's pointer; Botpress/Rivet
+suggested as actual fifth heavy-hitters if wanted.
+
+**Registry correction (Dan, 2026-07-12):** the true Sonik capability denominator
+is the booking-service SDK generated registry — 113 commands / 15 families with
+CLI+MCP projections (`packages/sonik-sdk/docs/sonik-command-registry.generated.json`,
+manifest `bookingOperationManifest.contract.ts`, drift verifier
+`check-agent-command-registry.mjs`). Capability registration should be GENERATED
+from that manifest, not hand-written.
+
 ## Ratified read
 
 Compete with Composio on the integration factory (their catalog + discovery UX is

@@ -237,9 +237,8 @@ figcaption { color: var(--muted); font-size: var(--text-sm); margin-top: 10px; m
 /* Suite navigation shell (rendered by nav.js) */
 .suite-nav {
   position: sticky; top: 0; z-index: var(--z-nav);
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  background: var(--bg);
   border-bottom: 1px solid var(--line-strong);
-  backdrop-filter: none;
 }
 .suite-nav-inner {
   max-width: var(--content-max);

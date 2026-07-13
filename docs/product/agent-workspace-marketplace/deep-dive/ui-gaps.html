@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UG · UI Gaps — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .gap {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface-1);
+    padding: 18px 20px;
+    margin: 14px 0;
+  }
+  .gap.invent { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+  .gap-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .gap-head h3 { margin: 0; font-size: var(--text-lg); }
+  .gap-id { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--faint); }
+  .gap-body { color: var(--body); font-size: var(--text-sm); margin: 8px 0 4px; max-width: 90ch; }
+  .gap-study { color: var(--muted); font-size: var(--text-sm); margin: 0 0 10px; }
+  .gap-study strong { color: var(--body); font-weight: 600; }
+  .attach-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
+  .attach-btn {
+    border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--body);
+    font: inherit; font-size: var(--text-xs); padding: 5px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .attach-btn:hover { color: var(--ink); background: var(--surface-3); }
+  .attach-note {
+    flex: 1; min-width: 200px; background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); color: var(--body); font: inherit; font-size: var(--text-xs); padding: 5px 9px;
+  }
+  .shot-list { list-style: none; padding: 0; margin: 8px 0 0; }
+  .shot-list li {
+    display: flex; gap: 10px; align-items: baseline;
+    font-family: var(--font-mono); font-size: var(--text-xs); color: var(--body);
+    padding: 4px 0; border-bottom: 1px solid var(--line);
+  }
+  .shot-list li:last-child { border-bottom: 0; }
+  .shot-list .shot-note { color: var(--muted); font-family: var(--font-sans); }
+  .shot-list .shot-remove { margin-left: auto; border: 0; background: none; color: var(--faint); cursor: pointer; font: inherit; font-size: var(--text-xs); }
+  .shot-list .shot-remove:hover { color: var(--danger); }
+  .toolbar { display: flex; gap: 12px; align-items: center; margin: 20px 0; flex-wrap: wrap; }
+  .toolbar button {
+    border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--body);
+    font: inherit; font-size: var(--text-sm); padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .toolbar button:hover { color: var(--ink); background: var(--surface-3); }
+  #export-out { width: 100%; min-height: 120px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius); color: var(--body); font-family: var(--font-mono); font-size: var(--text-xs); padding: 12px; display: none; }
+  .progress-note { color: var(--muted); font-size: var(--text-sm); }
+</style>
+</head>
+<body data-doc="ui-gaps">
+<main class="page">
+  <header class="page-head">
+    <h1>UI Gaps — the Walkthrough Review Lens</h1>
+    <p class="lead">The fifteen surfaces Sonik has committed to build, split by whether anyone has built them before. During each platform session: when a screen speaks to one of these, attach the screenshot (name + note — files stay wherever you saved them locally) so every gap accumulates its evidence.</p>
+    <p class="doc-meta">Sources: admin-console plan addendum 4.5 (A1–C3) · D011/D012 · seven source analyses · Attachments persist in this browser (localStorage); Export bundles them as JSON for the findings list</p>
+  </header>
+
+  <div class="toolbar">
+    <button id="export-btn" type="button">Export JSON</button>
+    <button id="clear-btn" type="button">Clear all attachments</button>
+    <span class="progress-note" id="progress"></span>
+  </div>
+  <textarea id="export-out" readonly aria-label="Exported JSON"></textarea>
+
+  <section aria-labelledby="invent-h">
+    <h2 id="invent-h">No precedent exists — we are inventing these</h2>
+    <p>Confirmed across all seven analyzed codebases: nothing in the field ships these. Screenshots here are contrast evidence — the nearest thing each platform has, and where it falls short.</p>
+    <div data-gap-group="invent"></div>
+  </section>
+
+  <section aria-labelledby="bench-h">
+    <h2 id="bench-h">Benchmarks exist — steal the best version</h2>
+    <p>The field has real implementations. Screenshots here are candidates: the version worth stealing, or the mistake worth avoiding.</p>
+    <div data-gap-group="bench"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const KEY = "deepdive-ui-gaps-v1";
+
+  const GAPS = [
+    { id: "UG-01", group: "invent", name: "Review surface (D011)", body: "One fused card for every human approval: what runs, against what inputs, touching what, under whose authority — then Approve/Cancel. Rendered from the same execution plan that runs; verbose on first use per category, lighter on repeat.", study: "Dify human-input form (closest, still just a form), n8n Wait confirm page, Flowise HumanInput chat prompt — all pauses, none trust screens." },
+    { id: "UG-02", group: "invent", name: "Approvals queue", body: "Every pending approval across all runs in one inbox, plus history where each row links its receipt. Admin view of the Review surface.", study: "Confirmed absent in Dify (exhaustive grep), and everywhere else. Nearest: n8n executions filtered to waiting — capture how unfindable pending approvals are there." },
+    { id: "UG-03", group: "invent", name: "Install screen with permission disclosure", body: "Before install, the human sees what the package may touch — grants rendered from the manifest, effects and host-context requirements legible.", study: "Dify install modal (name/icon/version ONLY — screenshot as Exhibit A), n8n community-node verification prompt (closest gesture: a checksum warning)." },
+    { id: "UG-04", group: "invent", name: "Kill-switch / revocation panel (D012)", body: "Per-install and per-capability revoke, effective next call, with an audit trail of who revoked what and when.", study: "Nothing in the field revokes at capability level. Nearest: Dify plugin uninstall, n8n node deactivation — both all-or-nothing removals." },
+    { id: "UG-05", group: "invent", name: "Standing-grant manager", body: "Approve-once-run-many grants: the list of what agents may do recurringly (WS6 agent calendar is consumer #1), each with expiry-as-data, scope, and one-click revoke.", study: "No equivalent anywhere. Flowise schedules screen shows recurring EXECUTION without grant semantics — capture it as the half that exists." },
+    { id: "UG-06", group: "invent", name: "Receipts viewer", body: "Semantic receipts as first-class objects: what actually happened, attached to the run and the message, distinguishable from transport success.", study: "Nobody issues receipts. Nearest: n8n execution output panes, Dify trace payloads — capture what 'proof' looks like when it's only logs." },
+    { id: "UG-12", group: "invent", name: "Endpoint exposure toggles (B5)", body: "Per-environment, per-org switches for which platform endpoints are live — Dan's 'expose when I'm ready' as an admin control.", study: "No governance equivalent found. Nearest: API-key scoping screens (Dify api-tokens, Langflow API keys) — capture for the shape of per-surface control." },
+    { id: "UG-07", group: "bench", name: "Runs timeline (A3)", body: "Run list with filters, then per-run node-level trace: phases, inputs/outputs, errors, receipts, joined by workflowRunId.", study: "n8n executions view (the bar to clear), Flowise agentexecutions, Dify /app/:id/logs + trace panel, activepieces runs." },
+    { id: "UG-08", group: "bench", name: "Agent profiles (B1)", body: "Create/edit an agent: model, declared skills, pinned toolbox, permission grants, org scope. The saved thing a client eventually manages.", study: "Dan's Dify fork /agents + /agents/:id/monitoring (prior art!), Onyx assistants/personas admin." },
+    { id: "UG-09", group: "bench", name: "Capability registry browser (A2)", body: "All 113 commands: family, effect, per-org grant state, revocation state. The permission dictionary made visible.", study: "Onyx connector management (registry-shaped), Dify tools list, Composio catalog (docs only). Nobody shows grant state — that half is ours." },
+    { id: "UG-10", group: "bench", name: "Workflow library + versions (B2)", body: "Authored + installed workflows, graph view, DRAFT/LOCKED lifecycle, version history.", study: "activepieces draft→publish→locked (the doctrine we adopted — capture it live), n8n workflow version history, Dify canvas." },
+    { id: "UG-11", group: "bench", name: "Playground (A4)", body: "Test bench against a draft agent with simulated page context and a TEST-mode approval flow; run inspector inline.", study: "Langflow Playground (separate from canvas — the pattern), Dify debug/preview panel, OpenAgent chat workspace." },
+    { id: "UG-13", group: "bench", name: "Marketplace browse + discovery", body: "Search the catalog, package detail with trust tier, versions, install. Plus the agent-side meta-search contract behind the same index.", study: "Dify /marketplace (the IA), OpenAgent skill marketplace (search→install→lazy-load loop — closest to our R3), n8n community nodes." },
+    { id: "UG-14", group: "bench", name: "Org / tenant admin (C1)", body: "Members, roles, client workspaces — the internal-admin-becomes-client-admin evolution.", study: "Onyx admin (users/groups/SSO — richest free example), Dify members modal, Flowise workspace/roles (EE-gated — capture the gate itself)." },
+    { id: "UG-15", group: "bench", name: "Skills catalog + attach (B3)", body: "Browse skills artifact-first, attach declared skills to a workflow, see what a workflow will read before it runs.", study: "OpenAgent load_skill UX (thin catalog, content on demand), Dify fork snippets, odysseus skill files (structure only)." },
+  ];
+
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { state = {}; }
+  function save() { localStorage.setItem(KEY, JSON.stringify(state)); updateProgress(); }
+
+  function renderShots(gapId, listEl) {
+    listEl.textContent = "";
+    const shots = (state[gapId] || {}).shots || [];
+    shots.forEach((shot, index) => {
+      const li = document.createElement("li");
+      const name = document.createElement("span"); name.textContent = shot.name;
+      const note = document.createElement("span"); note.className = "shot-note"; note.textContent = shot.note || "";
+      const remove = document.createElement("button");
+      remove.type = "button"; remove.className = "shot-remove"; remove.textContent = "remove";
+      remove.setAttribute("aria-label", "Remove " + shot.name);
+      remove.addEventListener("click", () => {
+        state[gapId].shots.splice(index, 1); save(); renderShots(gapId, listEl);
+      });
+      li.append(name, note, remove);
+      listEl.appendChild(li);
+    });
+  }
+
+  for (const gap of GAPS) {
+    const host = document.querySelector('[data-gap-group="' + gap.group + '"]');
+    const card = document.createElement("article");
+    card.className = "gap" + (gap.group === "invent" ? " invent" : "");
+
+    const head = document.createElement("div"); head.className = "gap-head";
+    const id = document.createElement("span"); id.className = "gap-id"; id.textContent = gap.id;
+    const title = document.createElement("h3"); title.textContent = gap.name;
+    const chip = document.createElement("span");
+    chip.className = "chip " + (gap.group === "invent" ? "warn" : "accent");
+    chip.textContent = gap.group === "invent" ? "NO PRECEDENT" : "BENCHMARKS EXIST";
+    head.append(id, title, chip);
+
+    const body = document.createElement("p"); body.className = "gap-body"; body.textContent = gap.body;
+    const study = document.createElement("p"); study.className = "gap-study";
+    const studyLabel = document.createElement("strong"); studyLabel.textContent = "Study: ";
+    study.append(studyLabel, document.createTextNode(gap.study));
+
+    const attach = document.createElement("div"); attach.className = "attach-row";
+    const fileInput = document.createElement("input");
+    fileInput.type = "file"; fileInput.multiple = true; fileInput.accept = "image/*";
+    fileInput.style.display = "none";
+    fileInput.setAttribute("aria-label", "Attach screenshots for " + gap.name);
+    const attachBtn = document.createElement("button");
+    attachBtn.type = "button"; attachBtn.className = "attach-btn"; attachBtn.textContent = "Attach screenshots";
+    attachBtn.addEventListener("click", () => fileInput.click());
+    const noteInput = document.createElement("input");
+    noteInput.className = "attach-note"; noteInput.type = "text";
+    noteInput.placeholder = "note for next attachment (platform, verdict)…";
+    noteInput.setAttribute("aria-label", "Attachment note for " + gap.name);
+
+    const shotList = document.createElement("ul"); shotList.className = "shot-list";
+
+    fileInput.addEventListener("change", () => {
+      const entry = state[gap.id] || { shots: [] };
+      for (const file of fileInput.files) {
+        entry.shots.push({ name: file.name, note: noteInput.value.trim(), at: new Date().toISOString() });
+      }
+      state[gap.id] = entry; save();
+      noteInput.value = ""; fileInput.value = "";
+      renderShots(gap.id, shotList);
+    });
+
+    attach.append(attachBtn, noteInput, fileInput);
+    card.append(head, body, study, attach, shotList);
+    host.appendChild(card);
+    renderShots(gap.id, shotList);
+  }
+
+  function updateProgress() {
+    const covered = GAPS.filter((gap) => ((state[gap.id] || {}).shots || []).length > 0).length;
+    const total = Object.values(state).reduce((sum, entry) => sum + ((entry && entry.shots) ? entry.shots.length : 0), 0);
+    document.getElementById("progress").textContent = covered + " / " + GAPS.length + " gaps evidenced · " + total + " screenshots attached";
+  }
+  updateProgress();
+
+  document.getElementById("export-btn").addEventListener("click", () => {
+    const out = document.getElementById("export-out");
+    out.value = JSON.stringify({ exportedAt: new Date().toISOString(), gaps: state }, null, 2);
+    out.style.display = "block";
+    out.select();
+  });
+  document.getElementById("clear-btn").addEventListener("click", () => {
+    if (!confirm("Clear all attachments and notes?")) return;
+    state = {}; save();
+    window.location.reload();
+  });
+})();
+</script>
+</body>
+</html>

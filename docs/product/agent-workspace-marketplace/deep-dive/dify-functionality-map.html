@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R3 &middot; Dify Functionality Map — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* Page-specific, composed from tokens.css variables only. */
+
+  .minitoc {
+    position: sticky; top: 52px; z-index: var(--z-nav);
+    background: var(--bg); border-bottom: 1px solid var(--line);
+    display: flex; flex-wrap: wrap; gap: 2px; padding: 8px 0; margin: 0 0 4px;
+  }
+  .minitoc a { font-size: var(--text-sm); color: var(--muted); padding: 4px 10px; border-radius: var(--radius-sm); }
+  .minitoc a:hover { color: var(--ink); background: var(--surface-2); text-decoration: none; }
+
+  /* Live coverage strip */
+  .coverage { margin: 18px 0 8px; }
+  .cov-head { display: flex; flex-wrap: wrap; gap: 8px 26px; font-size: var(--text-sm); color: var(--muted); margin-bottom: 12px; }
+  .cov-head b { color: var(--ink); font-family: var(--font-mono); font-size: var(--text-lg); margin-right: 4px; }
+  .covbar {
+    display: flex; height: 22px; border-radius: 999px; overflow: hidden;
+    border: 1px solid var(--line-strong); background: var(--surface-2);
+  }
+  .covbar .seg { height: 100%; width: 0; }
+  .covbar .seg-mapped { background: var(--accent); }
+  .covbar .seg-gap { background: var(--warn); }
+  .covbar .seg-unmapped { background: var(--surface-3); }
+  .cov-key { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 10px; font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono); }
+  .cov-key span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+  .cov-key .k-mapped::before { background: var(--accent); }
+  .cov-key .k-gap::before { background: var(--warn); }
+  .cov-key .k-unmapped::before { background: var(--surface-3); border: 1px solid var(--line-strong); }
+  .cov-note { font-size: var(--text-sm); color: var(--muted); max-width: var(--prose-max); }
+  .cov-note b { color: var(--ink); font-family: var(--font-mono); }
+
+  /* "How Sonik meets this" domain summary under each h2 */
+  .how b:first-child { color: var(--ink); }
+
+  /* Functionality tree tables (two columns: Dify surface | Sonik mapping) */
+  .maptree { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin: 14px 0 24px; table-layout: fixed; }
+  .maptree col.c-dify { width: 44%; }
+  .maptree col.c-map { width: 56%; }
+  .maptree > thead th {
+    text-align: left; color: var(--muted); font-weight: 600; font-size: var(--text-xs);
+    text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--line-strong);
+    padding: 8px 14px 8px 0;
+  }
+  .maptree th.branch {
+    text-align: left; color: var(--ink); font-weight: 650; font-size: var(--text-sm);
+    text-transform: none; letter-spacing: 0; padding: 16px 0 6px;
+    border-bottom: 1px solid var(--line); border-top: 1px solid var(--line);
+  }
+  .maptree tbody td {
+    border-bottom: 1px solid var(--line); padding: 9px 14px 9px 0; vertical-align: top; color: var(--body);
+  }
+  .maptree td.dify { padding-left: 16px; }
+  .maptree td.dify b { color: var(--ink); font-weight: 600; }
+  .maptree td.dify small { display: block; color: var(--muted); font-size: var(--text-xs); line-height: 1.45; margin-top: 2px; }
+  .maptree td.map { font-size: var(--text-xs); }
+  .maptree tbody tr:hover > td { background: var(--surface-1); }
+
+  /* Row semantics by mapping class */
+  .maptree tr[data-map="unmapped"] td.dify b { color: var(--body); font-weight: 500; }
+  .maptree tr[data-map="converge"] > td { background: var(--accent-surface); }
+  .maptree tr[data-map="converge"]:hover > td { background: var(--accent-surface); }
+
+  /* Mapping chips: unmapped (dashed, distinct) + convergence marker */
+  .chip.unmapped { color: var(--faint); background: transparent; border: 1px dashed var(--line-strong); }
+  .chip.converge { color: var(--accent-ink); background: var(--accent-surface); border-color: var(--accent); font-weight: 600; }
+  .map .tier { color: var(--faint); font-family: var(--font-mono); font-size: var(--text-xs); }
+  .map .note { display: block; color: var(--body); margin-top: 5px; font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.45; }
+  .map .note code { font-size: 0.85em; }
+
+  /* Convergence callout — accent framed, not a side stripe */
+  .converge-callout { border-color: var(--accent); background: var(--accent-surface); }
+  .converge-callout .callout-title { color: var(--accent-ink); }
+
+  @media print { .minitoc { display: none; } }
+  @media (max-width: 760px) {
+    .minitoc { top: 0; }
+    .maptree, .maptree tbody, .maptree tr, .maptree td, .maptree col { display: revert; }
+    .maptree col.c-dify, .maptree col.c-map { width: auto; }
+    .maptree { table-layout: auto; }
+  }
+</style>
+</head>
+<body data-doc="dify-map">
+<main class="page">
+  <header class="page-head">
+    <h1>Dify Functionality Map</h1>
+    <p class="lead">Dify is the best-in-practice reference — so before we slice anything down by audience, here is <em>all</em> of it. Every surface witnessed live on self-hosted 1.16.x, each branch annotated not just with which Sonik contract maps to it but with <em>how</em> Sonik meets that requirement — the mechanism and what the organizer or guest actually sees — or an honest "not yet built" / "deliberately not". Start from the whole, then break down.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/deep-dive/HANDOFF-dify-functionality-map.md &middot; Witnessed 2026-07-12/13 on self-hosted Dify 1.16.x &middot; Mapping reconciled to STATUS ADDENDUM 2026-07-11 &middot; Branch emdash/yellow-zebras-smell-txxjz</p>
+  </header>
+
+  <nav class="minitoc" aria-label="Sections">
+    <a href="#coverage">Coverage</a>
+    <a href="#studio">Studio</a>
+    <a href="#orchestrate">Orchestrate</a>
+    <a href="#agents">Agents</a>
+    <a href="#canvas">Canvas</a>
+    <a href="#access">Access points</a>
+    <a href="#knowledge">Knowledge</a>
+    <a href="#integrations">Integrations</a>
+    <a href="#marketplace">Marketplace</a>
+    <a href="#workspace">Workspace</a>
+  </nav>
+
+  <section id="coverage" aria-labelledby="cov-h">
+    <h2 id="cov-h">Coverage, computed live from the tree below</h2>
+    <div class="panel coverage">
+      <div class="cov-head">
+        <span><b id="cov-total">&mdash;</b>witnessed leaves</span>
+        <span><b id="cov-mapped">&mdash;</b>mapped</span>
+        <span><b id="cov-gap">&mdash;</b>deliberate-gap</span>
+        <span><b id="cov-unmapped">&mdash;</b>unmapped</span>
+      </div>
+      <div class="covbar" role="img" aria-label="Share of witnessed Dify surfaces covered by a Sonik contract, deliberately dropped, or unmapped">
+        <div class="seg seg-mapped" id="seg-mapped"></div>
+        <div class="seg seg-gap" id="seg-gap"></div>
+        <div class="seg seg-unmapped" id="seg-unmapped"></div>
+      </div>
+      <div class="cov-key">
+        <span class="k-mapped">mapped &mdash; a Sonik contract, decision, or package kind covers it</span>
+        <span class="k-gap">deliberate-gap &mdash; we choose not to replicate it</span>
+        <span class="k-unmapped">unmapped &mdash; required or in-scope, not yet built</span>
+      </div>
+      <p class="cov-note" style="margin-top:14px">Every number above is counted at load from the <code>[data-map]</code> leaves in the tables below &mdash; nothing here is hand-entered. Mapped includes <b id="cov-converge">&mdash;</b> confirmed convergence (<code>/sonik-tool-creation</code>, flagged in Integrations). Reconciled to the STATUS ADDENDUM (2026-07-11): several map targets ship today &mdash; <code>capability-registry</code>, the <code>WorkflowRunState</code> reducer, the dynamic model picker &mdash; while marketplace routes, install UI, and the trust-tier field do not. Each row's right column states the mechanism (which contract does the work) and, where it matters, what the user sees.</p>
+    </div>
+  </section>
+
+  <section id="studio" aria-labelledby="studio-h">
+    <h2 id="studio-h">Studio &mdash; app creation</h2>
+    <p>Where a Dify build begins: an entry choice, a small set of app archetypes, and a curated template catalog. The archetypes map cleanly onto our package kinds; the catalog taxonomy does not exist yet.</p>
+    <p class="how"><b>How Sonik meets this:</b> Sonik's package kinds <em>are</em> the archetypes — an organizer creating something picks a workflow, an app, or an agent, each authored as a JSON-first render document (D016) and installed under a pinned version (D014). The organizer never faces a blank canvas; they answer a short setup. The multi-app template catalog and the standalone sidebar are simply unbuilt — they arrive with the marketplace routes; nothing here is a deliberate skip.</p>
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">Entry</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Create from blank</b></td><td class="map"><span class="chip accent">app</span> <span class="chip accent">D016 JSON-first</span><span class="note">Met by the <code>app</code> kind: a blank build is an execution-inert JSON render document (D016), not a live canvas. The organizer starts from an empty artifact and its page-slots.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Create from template</b></td><td class="map"><span class="chip accent">artifact_template</span> <span class="chip accent">bundle</span><span class="note">Met by the <code>artifact_template</code> and <code>bundle</code> kinds: a template is a prefilled artifact, or a bundle of packages the organizer installs and then edits.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Import DSL file</b><small>Upload a serialized app definition.</small></td><td class="map"><span class="chip accent">workflowDefinitionSchema</span> <span class="chip">D014 install</span><span class="note">Met by <code>workflowDefinitionSchema</code> + D014 install: an exported JSON definition reinstalls as a pinned version, validated by the schema before anything runs.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">App types (the archetype, = what the thing can do)</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Chatflow</b><small>Chat-oriented workflow; starts User Input &#8594; Answer.</small></td><td class="map"><span class="chip accent">workflow</span> <span class="tier">chat entry</span><span class="note">Met by <code>workflowDefinitionSchema</code> run through the one controller interpreter (<code>workflow-controller.ts</code>): a chat-entry workflow is the same document with a conversational start node.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Workflow</b><small>Automation graph, no chat framing.</small></td><td class="map"><span class="chip accent">workflowDefinitionSchema</span> <span class="chip ok">SHIPPED</span><span class="note">Met, shipped: <code>workflow-controller.ts</code> interprets the definition and the <code>WorkflowRunState</code> reducer tracks the run. The organizer sees a running workflow; the graph editor stays internal (debug-only P3).</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Chatbot</b><small>Direct config, no canvas.</small></td><td class="map"><span class="chip accent">app</span> <span class="tier">JSON-render</span><span class="note">Met by the <code>app</code> kind rendered JSON-first through the execution-inert renderer &mdash; the no-canvas config is just an app artifact the organizer fills in.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Agent</b></td><td class="map"><span class="chip accent">agent</span> <span class="chip">agentDefinitionSchema PLANNED</span><span class="note">Not yet met &mdash; ratified required. Proposed: an <code>agent</code> package authored from <code>agentDefinitionSchema</code>; the organizer hires an agent by identity and configures it after.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Text Generator</b></td><td class="map"><span class="chip accent">app</span><span class="note">Met by the <code>app</code> kind: a single-shot generator is an app artifact with one output slot.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Catalog &amp; shell</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Template gallery categories</b><small>Dify 101, Customer Service &amp; Operations, Knowledge Retrieval, Data Analysis, Marketing, AI Coding, Research, Utilities.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: the category taxonomy arrives with marketplace routes (PLANNED). No organizer-facing catalog exists today.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Left sidebar IA</b><small>Home, Studio, Agents (BETA), Knowledge, Integrations, Marketplace, Web Apps list.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met, partly out of shape: Sonik embeds one agent workspace inside the host page rather than a standalone multi-app console. This navigation is unbuilt.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="orchestrate" aria-labelledby="orch-h">
+    <h2 id="orch-h">Chatbot Orchestrate surface &mdash; no-canvas app config</h2>
+    <p>The direct-config screen for a Chatbot app. Its debug/preview loop and dynamic model flyout are near-identical to what we already ship; its variable, knowledge, and vision plumbing is not modeled.</p>
+    <p class="how"><b>How Sonik meets this:</b> The two load-bearing pieces already ship &mdash; the organizer debugs in a live preview and picks a Gateway-discovered model, exactly as here. The instruction prompt maps to our editable system prompt, and form variables to intake artifacts rendered JSON-first. The inline-insert editor tricks, endpoint-bound variables, and vision are unbuilt; knowledge is in scope but deferred to its own unpack (see Knowledge).</p>
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">Instructions &amp; variables</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Instructions panel</b><small>Prompt editor with a <b>Generate</b> assist.</small></td><td class="map"><span class="chip accent">additional-system-prompt</span> <span class="chip ok">SHIPPED</span><span class="note">Met, shipped: the editable additional system prompt steers the session. The organizer types instructions in plain language; the Generate assist is unverified on our side.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Inline inserts</b><small><code>{</code> inserts a variable; <code>/</code> inserts a prompt content block.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: variable and prompt-block insertion is an editor affordance we haven't built. Low-cost to add when the prompt editor gets richer.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Form variables</b><small>text / paragraph / select.</small></td><td class="map"><span class="chip accent">intake artifact</span> <span class="tier">JSON-render</span><span class="note">Met by intake artifacts rendered JSON-first: text and select fields are page-slots in an execution-inert form the organizer or guest fills.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>API-based variables</b><small>Type=api; bound to a Custom Endpoint; value pulled at runtime.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: pulling a value from an external endpoint at runtime needs a custom-endpoint registry we don't have. Deferred alongside Custom Endpoint (Integrations).</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Knowledge &amp; vision</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Knowledge attach</b><small>Attach KBs; Retrieval Setting; Metadata Filtering (disabled/enabled).</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met &mdash; knowledge is in scope but deferred (see Knowledge). When it ships, retrieval settings and metadata filtering stay hidden by design.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Vision toggle</b><small>Plus settings.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: image input is unbuilt and has no ratified requirement yet.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Right rail</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Debug &amp; Preview chat</b></td><td class="map"><span class="chip accent">preview tool</span> <span class="chip">D011 preview-then-approval</span><span class="note">Met by the D011 preview surface: the organizer sees exactly what a command will do before approving. Preview is never approval &mdash; that separation is the invariant.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Model settings flyout</b><small>Dynamic searchable model list per provider (OpenRouter et al.), context-size badges (e.g. 163K), an <b>Incompatible</b> flag on unfit models at config time.</small></td><td class="map"><span class="chip accent">dynamic model picker</span> <span class="chip ok">SHIPPED</span><span class="note">Met, shipped: the dynamic picker discovers models per provider through the Vercel AI Gateway, with context-size and compatibility badges &mdash; the same flyout, already live.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Publish dropdown</b></td><td class="map"><span class="chip">D014 publish semantics</span><span class="note">Met by D014: publishing mints a new pinned version. The organizer clicks publish; anyone who installed the prior version keeps running it until they choose to move.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="agents" aria-labelledby="agents-h">
+    <h2 id="agents-h">Agents (BETA) &mdash; identity-first agent builder</h2>
+    <p>A separate, non-canvas builder. The load-bearing detail: <b>Skills and Tools are distinct first-class sections</b> &mdash; the exact taxonomy split our contracts already make. Sandbox/memory posture is an open trust decision, not a copyable feature.</p>
+    <p class="how"><b>How Sonik meets this:</b> The Skills-vs-Tools split our contracts already draw is the convergence that matters &mdash; skills are a package kind, tools run through the per-call <code>capability-registry</code> that ships today, so an organizer toggling a tool on still leaves the host authorizing each call. Identity-first creation maps to a planned <code>agentDefinitionSchema</code>. Sandbox and memory are a deliberate open trust decision (review-only trust vs a real sandbox), not a copied power-user toggle; the list UI, file context, and knowledge retrieval are unbuilt or deferred.</p>
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">List &amp; create</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Agent list</b><small>All / Published(n) / Drafts(n); Created-by-me filter; sort; Create.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: the list, draft, and publish UI arrives with the marketplace surface (PLANNED).</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Create modal (identity-first)</b><small>Name (req), Role (opt, "e.g. Research Assistant"), Description (opt), avatar. Config comes after.</small></td><td class="map"><span class="chip accent">agentDefinitionSchema</span> <span class="chip">PLANNED</span><span class="note">Not yet met &mdash; required. Proposed: <code>agentDefinitionSchema</code> captures name, role, and description first; the organizer hires by identity, then configures.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Configure screen</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>MODEL</b><small>Auto Router by default.</small></td><td class="map"><span class="chip accent">pinned model facade</span> <span class="tier">dynamic picker</span><span class="note">Met by the pinned model facade over the dynamic picker: an agent's model resolves through the Gateway and is pinned so the run reproduces. The organizer picks one or leaves it on auto.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>PROMPT</b><small>"/" insert.</small></td><td class="map"><span class="chip accent">additional-system-prompt</span><span class="note">Met by the editable additional system prompt &mdash; the same steering field, scoped to the agent.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>SKILLS</b><small>"Reusable expertise it can call while working."</small></td><td class="map"><span class="chip accent">skill</span><span class="note">Met by the <code>skill</code> package kind: reusable expertise the agent loads. The organizer adds a skill from a bundle &mdash; no code.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>FILES</b><small>"Docs the agent can read &mdash; specs, templates, guidelines."</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: agent-readable file context is unbuilt. Proposed as artifacts attached to the agent when the builder ships.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>TOOLS</b><small>"Let the agent act, like searching the web or calling your apps."</small></td><td class="map"><span class="chip accent">command_tool_pack</span> <span class="chip accent">capability-registry</span> <span class="chip ok">SHIPPED</span><span class="note">Met, shipped: tools arrive as a <code>command_tool_pack</code> and every call is gated per-call by <code>capability-registry.ts</code> (write-implies-read; kill-switch via revoked ids). The organizer flips a tool on; the host still authorizes each call.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>KNOWLEDGE RETRIEVAL</b></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met &mdash; knowledge is in scope but deferred to its own unpack (see Knowledge).</span></td></tr>
+        <tr data-map="gap"><td class="dify"><b>ADVANCED SETTINGS</b><small>"For power users. Env vars, sandbox &amp; memory."</small></td><td class="map"><span class="chip warn">deliberate-gap</span><span class="note">Deliberately not met as a copied toggle: sandbox and isolation are an explicit open trust decision (review-only trust vs a real sandbox), settled by decision, not exposed as a power-user switch. Env and memory follow that ruling.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Model of the domain</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Skills, not Tools</b><small>Distinct first-class sections, not synonyms.</small></td><td class="map"><span class="chip accent">skill</span> vs <span class="chip accent">command_tool_pack</span><span class="note">Met by our taxonomy: <code>skill</code> (expertise) and <code>command_tool_pack</code> (gated actions) are already separate kinds. The distinction Dify draws in the UI, we draw in the contract.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Build / Preview split</b><small>"Unpublished changes &middot; Saved n min ago"; Publish update (Cmd+Shift+P); version-history icon.</small></td><td class="map"><span class="chip">D014</span> <span class="tier">immutable versions</span><span class="note">Met by D014 immutable versions: draft vs published is a version boundary. The organizer sees "unpublished changes" until they publish a new pinned version.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="canvas" aria-labelledby="canvas-h">
+    <h2 id="canvas-h">Workflow / Chatflow canvas &mdash; the visual builder</h2>
+    <p>The React-Flow graph editor. We model the workflow <em>document</em> and its execution semantics; the visual editor chrome around it is not built. The <b>Human Input</b> node is where their model meets our approval boundary.</p>
+    <p class="how"><b>How Sonik meets this:</b> We model the workflow document and its execution, not the visual editor &mdash; the canvas is a debug-only P3 surface and organizers never see it (workflows are invisible to them by design). Human Input is where their graph meets our host-signed approval boundary, which ships today: resuming a write demands an approval the host signed, and the organizer approves it on the D011 Review card. Control and terminal nodes map to the schema; compute nodes, the editor chrome, ENV, moderation, and chat feature toggles are unbuilt.</p>
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">Canvas shell</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>React-Flow canvas</b><small>Start / User Input node; comment notes (with author); auto-positioning; mini-map; toolbar (pointer/hand modes, add node, add note).</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not built, and not organizer-facing by design: the graph editor is a debug-only P3 surface. Organizers never build on a canvas &mdash; workflows are invisible to them (setup-as-interview). The JSON document is the real artifact; the editor chrome is unbuilt.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Node types (add-node panel, witnessed)</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Human Input</b></td><td class="map"><span class="chip accent">WorkflowRunState</span> <span class="chip accent">host-signed approval</span> <span class="chip ok">SHIPPED</span><span class="note">Met, shipped: a pause is a phase of the <code>WorkflowRunState</code> reducer; resuming a write requires a host-signed approval envelope (a model-supplied approval is refused). The organizer sees the D011 Review card &mdash; approving there is the only way forward.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>LLM</b><small>Model per node (Auto Router CHAT badge).</small></td><td class="map"><span class="chip accent">workflowDefinitionSchema</span> <span class="tier">pinned model facade</span><span class="note">Met: an LLM node is a schema node; its model resolves through the pinned facade so the run reproduces.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Agent</b><small>An agent as a node inside a workflow.</small></td><td class="map"><span class="chip accent">agent</span><span class="note">Met by the <code>agent</code> kind nested as a workflow node &mdash; an agent can run inside a workflow, same as here.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Control nodes</b><small>Question (Classifier), If/Else, Iteration, Loop.</small></td><td class="map"><span class="chip accent">workflowDefinitionSchema</span> <span class="tier">controller interpreter</span><span class="note">Met: branch, loop, and classifier nodes are interpreted by the one <code>workflow-controller.ts</code>. Control flow lives in the document, not in bespoke code.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Answer / Output</b></td><td class="map"><span class="chip accent">workflowDefinitionSchema</span> <span class="tier">terminal</span><span class="note">Met: a terminal node in the schema; the controller ends the run and emits the result.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Compute nodes</b><small>Code, Template, Variable Aggregator, Doc Extractor, Variable Assigner.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: these data-shaping node types aren't modeled. Add node kinds to <code>workflowDefinitionSchema</code> when a workflow actually needs them.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Knowledge Retrieval</b></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met &mdash; knowledge deferred (see Knowledge).</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Add-node panel</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Panel tabs</b><small>Nodes / Tools / Start / Snippets (Snippets unexplored, <em>unverified</em>).</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: the add-node panel is editor chrome, tied to the debug-only canvas. Snippets tab unverified.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Tools filter</b><small>All / Tool Plugin / Swagger API / Workflow / MCP + "Find more in Marketplace" &mdash; a "tool" is any of 4 sources, unified.</small></td><td class="map"><span class="chip accent">command_tool_pack</span> <span class="chip accent">workflow</span> <span class="chip accent">mcp_addon</span> <span class="chip accent">provider_integration</span><span class="note">Met by package-kind unification: a "tool" is a <code>command_tool_pack</code>, <code>workflow</code>, <code>mcp_addon</code>, or <code>provider_integration</code> &mdash; four sources, one gated call path. The same unification Dify shows, enforced by the registry.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Header &amp; features</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Header controls</b><small>Auto-Saved timestamp &middot; Unpublished; Preview (test run); feature toggles; ENV (environment variables); Features panel; Publish; history.</small></td><td class="map"><span class="chip">D014</span> <span class="tier">draft / publish / version</span><span class="note">Met for draft/publish/versioning by D014; auto-save and Preview map to the run state and the D011 preview. ENV variables are unmodeled.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Features panel (chatflow)</b><small>Conversation Opener, Follow-up (next-question suggestions), File Upload, Citations and Attributions.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: openers, follow-ups, file upload, and citations are chat feature toggles we haven't built. Some become P1-guest polish later.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Content Moderation</b><small>Moderation API or word list.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: a moderation pipeline (API or word list) is unbuilt. Required before third-party-facing publishing.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="access" aria-labelledby="access-h">
+    <h2 id="access-h">Per-app access points &mdash; publish surfaces</h2>
+    <p>How one app becomes a Web App, an HTTP API, and an MCP server at once. The API response metadata is the richest convergence: usage, unit prices, currency, latency, a first-class <code>trace_id</code>, and a <code>workflow_id</code> that pins a version &mdash; the shape of our semantic receipts and telemetry vocabulary.</p>
+    <p class="how"><b>How Sonik meets this:</b> This is the richest convergence. The API's usage, cost, and trace metadata is the exact shape of our semantic receipts &mdash; and ours carry cost <em>inside</em> the receipt, the attribute Dify's own spans lack. Version-pinning by <code>workflow_id</code>, the embeddable Web App, and writing your own client against the API all map today or are cleanly planned. The per-app admin rails, web-app cosmetics, and the step-level thought stream are unbuilt.</p>
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">App detail header</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Edit Info / Duplicate / Export DSL / More</b></td><td class="map"><span class="chip accent">D016 JSON-first</span><span class="note">Met for Export DSL by D016 JSON-first: an app exports as its render document. Edit and Duplicate are unbuilt shell actions.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Web App</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Web App surface</b><small>IN SERVICE toggle; Public URL <code>/chat/&lt;id&gt;</code>; actions: Launch / Embedded / Customize / Settings.</small></td><td class="map"><span class="chip accent">embeddable sidecar</span> <span class="chip accent">Sonik SDK embed</span><span class="note">Met by the embeddable sidecar: the agent workspace drops into the host page. The in-service toggle and public URL map to the SDK embed; the organizer flips it on per surface.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Customize paths</b><small>WAY 1: fork <code>Dify-WebClient</code> &#8594; Vercel, env <code>NEXT_PUBLIC_APP_ID</code>/<code>APP_KEY</code>/<code>API_URL</code>. WAY 2: write your own client against the API.</small></td><td class="map"><span class="chip accent">Sonik SDK</span> <span class="tier">own client vs API</span><span class="note">Met by the Sonik SDK: write your own client against the same API (their WAY 2). We don't ship a fork-and-deploy path &mdash; the SDK is the supported route.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Web App settings</b><small>Name, description, icon (replace-bot toggle), language, chat color theme (+inverted), Workflow Details show/hide, author, privacy policy.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: web-app cosmetics (naming, theming, icon) are unbuilt. Theme hints already arrive from the host; the rest is a later settings surface.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Backend Service API</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>API surface</b><small>IN SERVICE; endpoint <code>/v1</code>; API Key mgmt; auto-generated API Reference (~25 endpoints: chat-messages with SSE, files, stop generate, feedbacks, suggested questions, conversation history/list/delete/rename, conversation variables get/update, audio&#8596;text, info, parameters, meta, site, annotations CRUD).</small></td><td class="map"><span class="chip accent">ORPC endpoint map</span> <span class="chip">PLANNED</span> <span class="tier">command-catalog</span><span class="note">Not yet met &mdash; planned. The ORPC endpoint map plays the <code>/v1</code> role; the 113-command catalog (generated internally from <code>bookingOperationManifest</code>) is the callable surface. Key management and routes are unbuilt.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Usage metadata</b><small>prompt/completion/total tokens + unit prices + total price + currency + latency.</small></td><td class="map"><span class="chip accent">semantic-receipts</span><span class="note">Met by semantic receipts: tokens, unit price, total, currency, and latency ride in the receipt that also carries the success copy and audit record. The organizer sees a real dollar figure because every receipt carries it.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Trace identifiers</b><small><code>trace_id</code> / <code>X-Trace-Id</code> + <code>trace_session_id</code>, first-class.</small></td><td class="map"><span class="chip accent">telemetry vocabulary</span><span class="note">Met by the telemetry vocabulary: trace and session ids are first-class fields on every run, so a receipt is traceable end to end.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Version pin</b><small><code>workflow_id</code> pins a specific version.</small></td><td class="map"><span class="chip accent">workflowDefinitionSchema</span> <span class="tier">version pin</span><span class="note">Met: a run pins the <code>workflowDefinitionSchema</code> version, so a result is reproducible against the exact document that produced it (their <code>workflow_id</code>).</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>agent_thought events</b><small>thought / tool / tool_input / observation stream.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: a structured thought/tool/observation stream isn't emitted. Proposed as a telemetry event type when agent runs need step-level trace.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">MCP Server</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>App as MCP server</b><small>IN SERVICE; Server URL <code>/mcp/server/&lt;token&gt;/mcp</code> &mdash; the app itself is an MCP server.</small></td><td class="map"><span class="chip accent">mcp_addon</span> <span class="chip">PLANNED</span><span class="note">Not yet met &mdash; planned. We consume MCP servers via the <code>mcp_addon</code> kind; exposing a Sonik app <em>as</em> a server is the inverse and unbuilt.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Per-app left rail</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Orchestrate / API Access / Logs / Annotations</b></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: the per-app admin rail is unbuilt shell. Logs and annotations arrive with the workspace surface.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Monitoring</b><small>Total Messages, Active Users, Avg. Session Interactions, Token Output Speed, User Satisfaction Rate, Token Usage with ~$ cost; date range; source filter.</small></td><td class="map"><span class="chip accent">semantic-receipts</span> <span class="tier">telemetry readiness</span><span class="note">Met by aggregating semantic receipts: message counts, token-output speed, and token-usage-with-cost come from the receipt stream. The dollar total is trustworthy because each receipt carries its own cost.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="knowledge" aria-labelledby="know-h">
+    <h2 id="know-h">Knowledge &mdash; in scope, deferred to its own deep-dive</h2>
+    <p>Ratified in-scope (Dan 07-13): "if we make knowledge incredibly simple and effective, we will cook." Dify's stack proves the ceiling; ours must hide all of it. Structural note kept: their custom pipeline reuses the same workflow-as-data pattern.</p>
+    <p class="how"><b>How Sonik meets this:</b> In scope, deliberately deferred to its own unpack session (Dan 07-13) &mdash; so these rows read "in scope &middot; unmodeled," not unmapped: the requirement is ratified, only the mechanism is a later design pass. The proposed shape is the "What your agent knows" panel below: the organizer's live pages <em>are</em> the knowledge, dropped files just work, and every word of retrieval vocabulary stays hidden. The win we're chasing is that the ingestion, chunking, and freshness all run invisibly.</p>
+
+    <div class="callout">
+      <div class="callout-title">Proposed UX &mdash; "What your agent knows"</div>
+      <p>One panel, three sources, zero retrieval vocabulary. (1) <b>Your pages are the knowledge</b>: the agent reads the organizer's live Sonik surfaces &mdash; event pages, policies, menus, lineups &mdash; through the <code>sonik-agent-ui</code> contract. Nothing to upload, never stale, and an answer cites the page it came from. (2) <b>Drop anything else in</b>: PDFs and docs just work; chunking, embeddings, retrieval settings, and metadata filtering are never shown &mdash; the pipeline runs invisibly. (3) <b>Learned service knowledge</b>: customer-service best-practice datasets that self-organize and garbage-collect &mdash; when a source page changes, facts derived from it expire instead of lingering as wrong answers. Plus a <b>"teach it"</b> box: type a correction once, it becomes a pinned fact with provenance. What the organizer sees is a source list with freshness stamps and per-source on/off &mdash; that is the entire surface. Deep design reserved for a dedicated unpack session.</p>
+    </div>
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">Three creation paths</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Ready-to-use KB</b><small>Upload docs, Dify handles it &mdash; RECOMMENDED.</small></td><td class="map"><span class="chip unmapped">in scope &middot; unmodeled</span><span class="note">Ratified in-scope (Dan 07-13), sidelined for its own unpack session. Vision: knowledge made incredibly simple &mdash; garbage-collected, self-organizing datasets of customer-service best practice. Organizer drops a file; everything else is invisible.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Custom knowledge pipeline</b><small>Workflow-style graph; node templates: Blank, General Mode-ECO, Parent-child-HQ, Simple Q&amp;A, Convert to Markdown, LLM Generated Q&amp;A; Import from DSL.</small></td><td class="map"><span class="chip unmapped">in scope &middot; unmodeled</span><span class="note">Ratified in-scope, deferred unpack. The graph reuses the <code>workflowDefinitionSchema</code> pattern; second ingestion source: agents reading live pages via <code>sonik-agent-ui</code> (pages as knowledge, not uploads). The organizer never sees the pipeline.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Connect external KB via API</b><small>No migration.</small></td><td class="map"><span class="chip unmapped">in scope &middot; unmodeled</span><span class="note">Not yet met &mdash; in scope, deferred. An external-KB connector is plausible but unscoped; the first two ingestion sources (live pages, dropped files) come first.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Attach point</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Attach to apps / agents</b><small>Via Knowledge sections; retrieval settings + metadata filtering at the attach point.</small></td><td class="map"><span class="chip unmapped">in scope &middot; unmodeled</span><span class="note">Not yet met &mdash; in scope, deferred. In our shape there is no separate attach step: the agent already reads the organizer's live pages, and extra sources toggle on in the same panel. Retrieval settings stay hidden.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="integrations" aria-labelledby="int-h">
+    <h2 id="int-h">Integrations &mdash; the workspace-level plugin system</h2>
+    <p>The plugin taxonomy that our package kinds mirror &mdash; and where the sharpest contrasts live. <b>Swagger-API-as-Tool</b> is a confirmed convergence with <code>/sonik-tool-creation</code>; their permission model and ambient credential are exactly what we deliberately go finer than.</p>
+    <p class="how"><b>How Sonik meets this:</b> Their plugin taxonomy is our package kinds, one-to-one; install sources and pinned-by-default updates map to D014. The sharp edges are deliberate: their single ambient credential and their two-question permission model both become per-call capability gating through <code>capability-registry.ts</code>, which ships today. The Swagger-paste convergence is real as a generation pattern &mdash; but we generate the catalog internally from the booking manifest, so an organizer never pastes an OpenAPI doc.</p>
+
+    <div class="callout converge-callout">
+      <div class="callout-title">Confirmed convergence &mdash; Swagger-API-as-Tool &#8594; /sonik-tool-creation</div>
+      <p>Paste an OpenAPI/Swagger doc and Dify generates a full toolset instantly &mdash; witnessed: the Sonik booking OpenAPI produced <b>113 tools</b> in one paste. That is precisely the <code>/sonik-tool-creation</code> pattern, and their UX proves it. What we add on top: <b>effect-typing</b> per operation, <b>per-call gating</b> through the <code>capability-registry</code>, and an <b>approval binding</b> to the host-signed commit. Their auth is one ambient credential (an API key in a header or cookie) applied to <em>all</em> generated operations with no per-op gating &mdash; that gap is the whole reason our version exists. One difference in framing: our 113 commands are generated internally from <code>bookingOperationManifest</code> and drift-verified, never pasted by an end user.</p>
+    </div>
+
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">Sub-nav (the plugin taxonomy)</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Integration kinds</b><small>Model Provider / Tools (&#8594; Tool Plugin, MCP, Workflow as Tool, Swagger API as Tool) / Data Source / Trigger / Agent Strategy / Extension / Custom Endpoint; bottom: Debugging / Permissions.</small></td><td class="map"><span class="chip accent">provider_integration</span> <span class="chip accent">command_tool_pack</span> <span class="chip accent">mcp_addon</span> <span class="chip accent">workflow</span><span class="note">Met one-to-one: their kinds are our package kinds. The same taxonomy, expressed as installable packages the organizer adds rather than a plugin menu.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Install</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Install sources</b><small>Marketplace / GitHub / Local Package File.</small></td><td class="map"><span class="chip">D014 install semantics</span><span class="note">Met by D014 install semantics: install from the registry, and every install resolves to a pinned, content-addressed version &mdash; not a floating reference.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Auto-update modes</b><small>LATEST vs FIX ONLY.</small></td><td class="map"><span class="chip">D014</span><span class="note">Met by D014, with the default inverted: pinned by default, <code>latest</code> is opt-in. Their LATEST-by-default becomes our safe default &mdash; an organizer's installed version never moves under them without consent.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Model Provider</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Provider cards</b><small>Installed with version + Configure vs "Configuration required &mdash; API key required" state; per-provider models list; Default Models.</small></td><td class="map"><span class="chip accent">provider_integration</span> <span class="tier">model picker</span><span class="note">Met by the <code>provider_integration</code> kind plus the dynamic picker: a provider installs, needs its API key configured, then exposes its models. The same "configuration required" state.</span></td></tr>
+        <tr data-map="gap"><td class="dify"><b>Install counts on cards</b></td><td class="map"><span class="chip warn">deliberate-gap</span><span class="note">Deliberately not met: popularity is not trust. We replace the download tally with verifiable trust tiers &mdash; a package earns standing by proof, not installs.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Swagger API as Tool</th></tr>
+        <tr data-map="converge"><td class="dify"><b>Paste OpenAPI &#8594; full toolset</b><small>Sonik booking OpenAPI &#8594; 113 tools instantly.</small></td><td class="map"><span class="chip converge">/sonik-tool-creation</span> <span class="chip accent">command-catalog &middot; 113</span><span class="note">Met by <code>/sonik-tool-creation</code>, with a deliberate difference: we generate the 113-command catalog internally from <code>bookingOperationManifest</code>, drift-verified &mdash; the organizer never pastes a doc. Their UX proves the generation pattern; ours adds effect-typing, per-call gating, and approval binding.</span></td></tr>
+        <tr data-map="gap"><td class="dify"><b>Ambient credential auth</b><small>One API key in header or cookie, applied to ALL generated ops &mdash; no per-op gating (their weakness).</small></td><td class="map"><span class="chip warn">deliberate-gap</span><span class="note">Deliberately not met: one credential for every operation is the anti-pattern. Each generated command is gated per-call by <code>capability-registry.ts</code> &mdash; access is decided per operation, not once for all.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Permissions &amp; endpoints</th></tr>
+        <tr data-map="gap"><td class="dify"><b>Permissions popover (entire model)</b><small>"Who can install and manage?" + "Who can debug?" &mdash; Everyone / Admins / No one. Nothing else.</small></td><td class="map"><span class="chip warn">deliberate-gap</span><span class="note">Deliberately not met at that grain: three role options is too coarse. Authorization is per-call through the capability-registry and bound to host-signed approval (D011), not a workspace-wide switch.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Custom Endpoint</b><small>Register an external API as a reusable module ("centralized API management"; used by API-based variables).</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met: no custom-endpoint registry. Deferred with API-based variables (Orchestrate) &mdash; the same centralized-endpoint need.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="marketplace" aria-labelledby="mkt-h">
+    <h2 id="mkt-h">Dify Marketplace &mdash; marketplace.dify.ai</h2>
+    <p>The public plugin catalog. Categories map onto our package kinds; the install-count metric on every card is the one thing we map to <code>deliberate-gap</code> &mdash; charted below because it is exactly what we are choosing not to build.</p>
+    <p class="how"><b>How Sonik meets this:</b> Categories are our package kinds; the browsable routes are planned. Two ratified requirements live here: triggers and extensions become the <b>Channels</b> UX &mdash; the organizer provisions a WhatsApp number, an agent can own it &mdash; and strategies ship as bundles, never a concept the organizer names. The one deliberate drop is install counts: popularity replaced by verifiable trust tiers, charted below.</p>
+
+    <figure>
+      <div class="viz-frame">
+      <svg viewBox="0 0 760 170" role="img" aria-label="Witnessed Dify Marketplace plugin install counts">
+        <title>Witnessed Dify Marketplace install counts &mdash; the popularity signal Sonik deliberately does not replicate</title>
+        <g font-family="ui-monospace, Menlo, monospace" font-size="12">
+          <line x1="160" y1="12" x2="160" y2="146" stroke="var(--line-strong)"/>
+          <text x="150" y="36" fill="var(--ink)" text-anchor="end">DeepSeek</text>
+          <rect x="160" y="24" width="500" height="20" rx="3" fill="var(--viz-5)"/>
+          <text x="668" y="39" fill="var(--muted)">1.25M</text>
+          <text x="150" y="76" fill="var(--ink)" text-anchor="end">Gemini</text>
+          <rect x="160" y="64" width="139" height="20" rx="3" fill="var(--viz-5)"/>
+          <text x="307" y="79" fill="var(--muted)">347k</text>
+          <text x="150" y="116" fill="var(--ink)" text-anchor="end">JSON Process</text>
+          <rect x="160" y="104" width="92" height="20" rx="3" fill="var(--viz-5)"/>
+          <text x="260" y="119" fill="var(--muted)">231k</text>
+        </g>
+      </svg>
+      </div>
+      <figcaption>Install counts sit on every card (three witnessed). Muted on purpose: it is the one metric we map to <span class="chip warn">deliberate-gap</span>. Popularity is not trust; Sonik replaces the download tally with verifiable trust tiers.</figcaption>
+    </figure>
+
+    <div class="callout">
+      <div class="callout-title">Proposed UX &mdash; Channels, not trigger plugins</div>
+      <p>The organizer never sees "webhook trigger plugins." They see a <b>Channels</b> panel on their agent: <b>WhatsApp</b>, SMS, the web widget &mdash; voice later. "Connect WhatsApp" is one flow: provision a phone number right there (numbers are a purchasable Sonik resource), pick which agent answers it, set hours and the escalation policy. Each channel gets one in-service toggle &mdash; Dify's own per-surface switch, aimed at channels, because half the value is meeting guests where they already are. The endgame primitive: <b>an agent can own its number</b> &mdash; personal or customer-facing &mdash; so it sits in a guest's contacts like a staff member; "hire staff, not deploy software" made literal. Strategies never appear as a concept the organizer touches: bundles ship behavior preconfigured.</p>
+    </div>
+
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">Structure</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>Categories</b><small>Models (142) / Tools / Data Sources (28) / Agent Strategies / Triggers (21) / Extensions / Bundles; sort by Most Popular; tags (SEARCH / UTILITIES / PRODUCTIVITY / RAG / NEWS); Featured / Latest rows.</small></td><td class="map"><span class="chip accent">package kinds</span> <span class="chip">routes PLANNED</span><span class="note">Met at the kind level: each category is a package kind. Not yet met as a browsable catalog &mdash; marketplace routes are PLANNED, and sort/tags/rows follow once the routes exist.</span></td></tr>
+        <tr data-map="gap"><td class="dify"><b>Install counts everywhere</b><small>DeepSeek 1.25M, Gemini 347k, JSON Process 231k.</small></td><td class="map"><span class="chip warn">deliberate-gap</span><span class="note">Deliberately not met: the popularity number on every card becomes verifiable trust tiers (charted above). Trust is earned by proof, not downloads.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Plugin kinds observed</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Triggers</b><small>Webhook trigger plugins: Gmail, Telegram, Outlook, GitHub, Notion, Slack, Google Calendar/Drive, Stripe, Zendesk, Twilio, WooCommerce, Airtable, Typeform, Linear, Discord, RSS.</small></td><td class="map"><span class="chip unmapped">required &middot; unmodeled</span><span class="note">Ratified REQUIRED (Dan 07-13): "half the value is meeting them where they are at." Delivered as the Channels panel &mdash; WhatsApp first, organizers provision numbers, those numbers eventually purchasable for agents. The trigger/channel kind is still to be modeled.</span></td></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Extensions</b><small>Endpoint-ish integrations: Slack Bot, WeCom, Line, Cron self-call, Moderation, LlamaCloud / VikingDB / AWS Bedrock KB connectors, DSL&#8594;mermaid convertor, novelty items.</small></td><td class="map"><span class="chip unmapped">required &middot; unmodeled</span><span class="note">Ratified REQUIRED (Dan 07-13): channel endpoints are the meet-them-where-they-are surface (WhatsApp / Slack-bot class), delivered as Channels. Kind still to be modeled.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>A2A Server extension</b><small>"Expose Dify apps as A2A protocol agents."</small></td><td class="map"><span class="chip accent">agent</span> <span class="chip accent">host_action.v1</span><span class="note">Met in shape by <code>host_action.v1</code> + the target registry: exposing an agent over a protocol is our UI-tool / host-action seam. The organizer-facing form is the Channels panel, not a raw A2A endpoint.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Agent Strategies</b><small>Installable reasoning strategies (a plugin kind).</small></td><td class="map"><span class="chip accent">bundle</span><span class="note">Met, ratified (Dan 07-13): strategies ship as bundle compositions, not a separate kind. The organizer installs a bundle; the strategy inside it is never a concept they name.</span></td></tr>
+        <tr data-map="mapped"><td class="dify"><b>Bundles</b><small>Grouped multi-plugin packages.</small></td><td class="map"><span class="chip accent">bundle</span> <span class="tier">direct</span><span class="note">Met directly by the <code>bundle</code> kind: a grouped multi-package install. This is where strategies and channel presets ship, preconfigured.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="workspace" aria-labelledby="ws-h">
+    <h2 id="ws-h">Workspace &amp; self-host &mdash; the shell around it</h2>
+    <p>The container chrome and the self-host telemetry flag. The one load-bearing lesson: Dify's OTel spans carry no token/cost attributes &mdash; cost lives only in the API response &mdash; which is exactly why Sonik puts cost inside the semantic receipt.</p>
+    <p class="how"><b>How Sonik meets this:</b> The container chrome &mdash; switcher, global search, per-app logs &mdash; is unbuilt shell, because Sonik embeds one agent workspace in the host rather than a standalone console. The win is telemetry: Dify's spans carry no cost, so cost lives only in their API response; our semantic receipts carry it inside the receipt by design, which is the whole reason our monitoring numbers are trustworthy.</p>
+    <table class="maptree">
+      <colgroup><col class="c-dify"><col class="c-map"></colgroup>
+      <thead><tr><th scope="col">Dify surface</th><th scope="col">How Sonik meets it</th></tr></thead>
+      <tbody>
+        <tr><th class="branch" colspan="2" scope="colgroup">Shell</th></tr>
+        <tr data-map="unmapped"><td class="dify"><b>Workspace chrome</b><small>Workspace switcher; account menu; global search (Cmd-K); Explore / template gallery; Web Apps list in sidebar; Logs per app; Annotations (Q/A pairs, hit counts) per app.</small></td><td class="map"><span class="chip unmapped">unmapped</span><span class="note">Not yet met, mostly out of shape: Sonik embeds one agent workspace in the host page rather than a standalone multi-app console. Switcher, global search, and per-app logs are unbuilt.</span></td></tr>
+
+        <tr><th class="branch" colspan="2" scope="colgroup">Self-host telemetry</th></tr>
+        <tr data-map="mapped"><td class="dify"><b>ENABLE_OTEL &#8594; OTLP export</b><small>langgenius/dify + dify-plugin-daemon services; spans lack token/cost attrs &mdash; cost lives only in API responses.</small></td><td class="map"><span class="chip accent">telemetry readiness</span> <span class="chip accent">semantic-receipts</span><span class="note">Met, and deliberately better: we export telemetry too, but cost rides inside the semantic receipt rather than only in an API response. Their spans lack token/cost attributes; ours carry them.</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  function fill() {
+    var leaves = document.querySelectorAll("[data-map]");
+    var counts = { mapped: 0, converge: 0, unmapped: 0, gap: 0 };
+    leaves.forEach(function (n) {
+      var k = n.getAttribute("data-map");
+      if (counts[k] !== undefined) counts[k]++;
+    });
+    var total = leaves.length;
+    var mappedTotal = counts.mapped + counts.converge;
+    set("cov-total", total);
+    set("cov-mapped", mappedTotal);
+    set("cov-gap", counts.gap);
+    set("cov-unmapped", counts.unmapped);
+    set("cov-converge", counts.converge);
+    width("seg-mapped", mappedTotal, total);
+    width("seg-gap", counts.gap, total);
+    width("seg-unmapped", counts.unmapped, total);
+  }
+  function set(id, v) { var e = document.getElementById(id); if (e) e.textContent = String(v); }
+  function width(id, n, d) { var e = document.getElementById(id); if (e && d) e.style.width = (100 * n / d).toFixed(1) + "%"; }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fill);
+  else fill();
+})();
+</script>
+</body>
+</html>
