@@ -65,7 +65,7 @@ assert.equal(rootSource.includes('grid-template-areas: "artifact" "chat"'), true
 // Narrow canvas now keeps a usable conversation pane; wide canvas places chat
 // beside the artifact behind the resizable split variable.
 assert.equal(rootSource.includes('grid-template-rows: minmax(0, 1.4fr) minmax(14rem, 1fr)'), true, "narrow canvas must keep a usable conversation pane, not a composer sliver");
-assert.equal(rootSource.includes('.workspace-pane--chat\n    :global([role="log"] > header)'), true, "embedded hidden-rail canvas should narrowly hide the conversation header");
+assert.equal(rootSource.includes('.workspace-pane--chat\n    :global([role="log"] > header)'), false, "canvas must NOT hide the conversation header — it carries the chat-history switcher");
 assert.equal(rootSource.includes('--workspace-canvas-pane-split'), true, "desktop canvas must place chat beside the artifact behind the resizable split seam");
 assert.equal(agentObservabilitySource.includes("createSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the fresh-session semantic action");
 assert.equal(agentObservabilitySource.includes("sessionId?: string | null"), true, "agent page-control submit type should accept an expected session id");

@@ -546,7 +546,16 @@
       const parts = snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string; output?: unknown }>;
       for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
         const part = parts[partIndex];
-        if (part.type === "tool-commitBookingReservationCommand" && part.state === "output-available") commitSeenAfterPreview = true;
+        // A successful commit OR an explicit user cancel consumes the preview.
+        // Failed commits keep it so the human can retry — but Cancel must
+        // always dismiss (2026-07-13 live report: "the approval module won't
+        // go away" — cancel receipts carry state output-error, which the old
+        // success-only check ignored).
+        if (part.type === "tool-commitBookingReservationCommand") {
+          const committed = part.state === "output-available";
+          const cancelled = isRecord(part.output) && (part.output as { error?: unknown }).error === "cancelled";
+          if (committed || cancelled) commitSeenAfterPreview = true;
+        }
         if (part.type !== "tool-previewBookingReservationCommand" || part.state !== "output-available") continue;
         if (commitSeenAfterPreview) return null;
         const output = isRecord(part.output) ? part.output : null;

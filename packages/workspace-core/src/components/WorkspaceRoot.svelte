@@ -48,7 +48,23 @@
 
   let gridElement: HTMLDivElement | null = $state(null);
   let resizing = $state(false);
+  // Snap-back animation is scoped to explicit resets only: a blanket
+  // grid-template-columns transition also animated the artifact pane OPENING,
+  // shifting the transcript's scroll geometry mid-stream (CI-reproducible
+  // stream-follows-bottom failure).
+  let resetting = $state(false);
+  let resetTimer = 0;
   let resizeFrame = 0;
+
+  function animateSplitReset(): void {
+    if (!onSplitReset) return;
+    resetting = true;
+    window.clearTimeout(resetTimer);
+    resetTimer = window.setTimeout(() => {
+      resetting = false;
+    }, 220);
+    onSplitReset();
+  }
 
   const SPLIT_MIN = 0.25;
   const SPLIT_MAX = 0.75;
@@ -85,7 +101,7 @@
   function handleSplitKeydown(event: KeyboardEvent): void {
     if (!gridElement || !onSplitChange) return;
     if (event.key === "Escape") {
-      onSplitReset?.();
+      animateSplitReset();
       return;
     }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -115,6 +131,7 @@
     bind:this={gridElement}
     class="workspace-grid"
     class:workspace-grid--artifact-open={artifactOpen}
+    class:workspace-grid--resetting={resetting}
     data-resizing={resizing}
     style={splitStyle}
   >
@@ -139,7 +156,7 @@
           aria-label="Resize chat and canvas panes. Arrow keys adjust; Escape or double-click resets."
           tabindex="0"
           onpointerdown={startSplitDrag}
-          ondblclick={() => onSplitReset?.()}
+          ondblclick={animateSplitReset}
           onkeydown={handleSplitKeydown}
         ></div>
       {/if}
@@ -248,14 +265,16 @@
     outline-offset: -2px;
   }
 
-  /* Snap-back on reset animates; live drags track 1:1 (transition suspended
-     while data-resizing). */
-  .workspace-grid--artifact-open[data-resizing="false"] {
+  /* Snap-back animates ONLY during an explicit reset (double-click/Escape);
+     live drags track 1:1, and layout changes like the artifact pane opening
+     must never animate — a blanket transition shifted the transcript's scroll
+     geometry mid-stream. */
+  .workspace-grid--resetting {
     transition: grid-template-columns 180ms ease-out;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .workspace-grid--artifact-open[data-resizing="false"] {
+    .workspace-grid--resetting {
       transition: none;
     }
   }
@@ -268,11 +287,10 @@
     grid-template-rows: minmax(0, 1.4fr) minmax(14rem, 1fr);
   }
 
-  .workspace-root[data-layout-mode="canvas"][data-rail-mode="hidden"]
-    .workspace-pane--chat
-    :global([role="log"] > header) {
-    display: none;
-  }
+  /* The conversation header stays visible in embedded canvas: it now carries
+     the chat-history switcher, and the chat pane is a full column beside the
+     artifact (2026-07-13 live report: "chat history no longer shows on the
+     canvas"). The old hide rule dated from the compact-strip era. */
 
   @media (max-width: 820px) {
     .workspace-root[data-has-rail="true"] {
