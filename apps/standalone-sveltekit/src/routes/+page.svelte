@@ -3974,6 +3974,57 @@
   }
 
 
+  // Chat<->canvas pane split (drag divider in WorkspaceRoot). Fractions are
+  // remembered per layout mode in localStorage — the chat rail you size in
+  // chat/workspace mode is independent of the canvas layout's split.
+  const PANE_SPLIT_STORAGE_KEY = "sonik.agent_ui.pane_split.v1";
+
+  function readStoredPaneSplits(): { workspace?: number; canvas?: number } {
+    if (typeof window === "undefined") return {};
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(PANE_SPLIT_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
+      const fraction = (value: unknown) => (typeof value === "number" && value >= 0.25 && value <= 0.75 ? value : undefined);
+      return { workspace: fraction(parsed.workspace), canvas: fraction(parsed.canvas) };
+    } catch {
+      return {};
+    }
+  }
+
+  let paneSplits = $state<{ workspace?: number; canvas?: number }>(readStoredPaneSplits());
+
+  function paneSplitModeKey(): "workspace" | "canvas" {
+    return workspaceLayoutMode === "canvas" ? "canvas" : "workspace";
+  }
+
+  function paneSplitTemplate(mode: "workspace" | "canvas"): string | undefined {
+    const fraction = paneSplits[mode];
+    if (fraction === undefined) return undefined;
+    const chat = Math.round(fraction * 1000) / 1000;
+    const artifact = Math.round((1 - fraction) * 1000) / 1000;
+    // Same px floors as WorkspaceRoot's defaults so a drag can't collapse a pane.
+    return mode === "canvas"
+      ? `minmax(320px, ${chat}fr) minmax(480px, ${artifact}fr)`
+      : `minmax(360px, ${chat}fr) minmax(420px, ${artifact}fr)`;
+  }
+
+  function persistPaneSplits(): void {
+    try {
+      window.localStorage.setItem(PANE_SPLIT_STORAGE_KEY, JSON.stringify(paneSplits));
+    } catch {
+      // Sizing is a convenience; storage failures must never break the workspace.
+    }
+  }
+
+  function handlePaneSplitChange(chatFraction: number): void {
+    paneSplits = { ...paneSplits, [paneSplitModeKey()]: chatFraction };
+    persistPaneSplits();
+  }
+
+  function handlePaneSplitReset(): void {
+    paneSplits = { ...paneSplits, [paneSplitModeKey()]: undefined };
+    persistPaneSplits();
+  }
+
   function createReservationApprovalAffordance(): AgentApprovalAffordance | null {
     // Hide the card the moment Approve is clicked; it only returns if the
     // commit fails (in-flight resets in runReservationCommitEndpoint's finally).
@@ -4011,7 +4062,16 @@
 {#if workspaceMode === "workflow-builder"}
 <WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} onExit={() => { workspaceMode = "workspace"; }} />
 {:else}
-<WorkspaceRoot title="Sonik Chat" {artifactOpen} layoutMode={workspaceLayoutMode} railMode={workspaceRailMode}>
+<WorkspaceRoot
+  title="Sonik Chat"
+  {artifactOpen}
+  layoutMode={workspaceLayoutMode}
+  railMode={workspaceRailMode}
+  chatArtifactSplit={paneSplitTemplate("workspace")}
+  canvasChatArtifactSplit={paneSplitTemplate("canvas")}
+  onSplitChange={handlePaneSplitChange}
+  onSplitReset={handlePaneSplitReset}
+>
   {#snippet rail()}
     <SessionRail
       {sessions}
