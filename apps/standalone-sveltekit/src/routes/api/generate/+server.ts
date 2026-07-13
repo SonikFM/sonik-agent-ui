@@ -516,9 +516,14 @@ export const POST: RequestHandler = async (event) => {
   const draftAgentId = typeof body?.draftAgentId === "string" ? body.draftAgentId : null;
   const draftAgentDefinition = !publishedAgentDefinition && draftAgentId ? agentDefinitionStore.getDraft(draftAgentId)?.definition ?? null : null;
   const resolvedAgentDefinition = publishedAgentDefinition ?? draftAgentDefinition;
-  const agentRuntimeSettings = resolvedAgentDefinition
+  const resolvedRuntimeSettings = resolvedAgentDefinition
     ? definitionToRuntimeSettings(resolvedAgentDefinition, (body?.agentSettings ?? body?.workspace?.agentSettings) as Partial<AgentRuntimeSettings> | undefined)
     : sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
+  // Phase 6 gate, server-set only (sanitize drops any client-sent copy): the
+  // draftWorkflow tool mounts only for builder Debug & Preview DRAFT requests.
+  const agentRuntimeSettings: AgentRuntimeSettings = draftAgentDefinition
+    ? { ...resolvedRuntimeSettings, workflowBuilderMode: true }
+    : resolvedRuntimeSettings;
   const skillIds = productTourIntent
     ? []
     : resolveRequestSkillIds({

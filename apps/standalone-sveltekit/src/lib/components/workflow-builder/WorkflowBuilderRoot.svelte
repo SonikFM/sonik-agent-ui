@@ -1,12 +1,14 @@
 <script lang="ts" module>
-  export interface WorkflowBuilderSnapshot {
+  // type alias (not interface) so the snapshot satisfies the __sonikAgentUI
+  // Record<string, unknown> boundary via TS's implicit index signature rule
+  export type WorkflowBuilderSnapshot = {
     agentId: string;
     tab: "config" | "canvas" | "preview";
     saveStatus: "idle" | "saving" | "saved" | "error";
     saveMessage: string;
     definitionValid: boolean;
     workflowValid: boolean;
-  }
+  };
 
   export interface WorkflowBuilderController {
     snapshot(): WorkflowBuilderSnapshot;
@@ -51,8 +53,9 @@
     return `agent_${Math.random().toString(36).slice(2, 10)}`;
   }
 
-  let agentId = $state(freshAgentId());
-  let definition = $state<AgentDefinition>(createEmptyAgentDefinition(agentId));
+  const initialAgentId = freshAgentId();
+  let agentId = $state(initialAgentId);
+  let definition = $state<AgentDefinition>(createEmptyAgentDefinition(initialAgentId));
   let tab = $state<WorkflowBuilderSnapshot["tab"]>("config");
   let saveStatus = $state<WorkflowBuilderSnapshot["saveStatus"]>("idle");
   let saveMessage = $state("");
@@ -61,7 +64,7 @@
   // proof; the user's own draft workflow is editable alongside it.
   const exampleWorkflow = bookingReservationWorkflowManifest.payload.workflow as WorkflowDefinition;
   let exampleLockState: WorkflowLockState = "locked";
-  let draftWorkflow = $state<WorkflowDefinition>(createEmptyWorkflowDefinition(`${agentId}.workflow`));
+  let draftWorkflow = $state<WorkflowDefinition>(createEmptyWorkflowDefinition(`${initialAgentId}.workflow`));
   let draftLockState = $state<WorkflowLockState>("draft");
 
   const definitionValidation = $derived(validateAgentDefinition(definition));
