@@ -30,7 +30,9 @@ import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncReques
 import { resolveEffectiveContextDocument } from "$lib/server/run-context-document";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
-import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
+import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings, type AgentRuntimeSettings } from "$lib/agent-settings";
+import { definitionToRuntimeSettings } from "$lib/agent-runtime-adapter";
+import { resolvePublishedAgentDefinition, agentDefinitionStore } from "$lib/server/agent-definition-store";
 import { isProductTourIntent, resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
 import { createCurrentPageContextSummary } from "$lib/page-context-summary";
 import { resolveWorkspaceDocumentIntent } from "$lib/document-intent";
@@ -494,7 +496,29 @@ export const POST: RequestHandler = async (event) => {
   const productTourIntent = isProductTourIntent(latestUserMessage);
   const implicitSkillSelection = resolveImplicitWorkflowSkillSelection({ userMessage: latestUserMessage, pageContext, activeArtifactIsRegisteredIntake });
   const implicitSkillIds = productTourIntent ? [] : implicitSkillSelection.skillIds;
-  const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
+  // Phase 4 (agent-creation-tool-plan-2026-07-13.md): resolve a PUBLISHED agent
+  // definition via the Task-A adapter when the request names one -- edit ->
+  // publish -> next conversation uses it, zero code deploy. Optional and
+  // fallback-safe: absent `publishedAgentId` (every request today), this is a
+  // no-op and behavior is byte-identical to before this change. Session tweaks
+  // are the RAW client-submitted settings, not pre-sanitized -- sanitizeAgentRuntimeSettings
+  // always fully materializes every family with a default, so sanitizing first
+  // would mask every grant the published definition sets (definitionToRuntimeSettings
+  // sanitizes once, at the end, after merging the definition's defaults with
+  // whatever sparse overrides the client actually sent).
+  const publishedAgentId = typeof body?.publishedAgentId === "string" ? body.publishedAgentId : null;
+  const publishedAgentDefinition = publishedAgentId ? resolvePublishedAgentDefinition(publishedAgentId) : null;
+  // Phase 5 workflow-builder Debug & Preview: a narrow mirror of the
+  // publishedAgentId path above, resolving an unpublished DRAFT definition by
+  // id so the builder can test edits before publish. Same fallback-safe null
+  // handling; absent `draftAgentId` (every non-builder request), this is a
+  // no-op. publishedAgentId takes precedence if a request somehow sent both.
+  const draftAgentId = typeof body?.draftAgentId === "string" ? body.draftAgentId : null;
+  const draftAgentDefinition = !publishedAgentDefinition && draftAgentId ? agentDefinitionStore.getDraft(draftAgentId)?.definition ?? null : null;
+  const resolvedAgentDefinition = publishedAgentDefinition ?? draftAgentDefinition;
+  const agentRuntimeSettings = resolvedAgentDefinition
+    ? definitionToRuntimeSettings(resolvedAgentDefinition, (body?.agentSettings ?? body?.workspace?.agentSettings) as Partial<AgentRuntimeSettings> | undefined)
+    : sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
   const skillIds = productTourIntent
     ? []
     : resolveRequestSkillIds({

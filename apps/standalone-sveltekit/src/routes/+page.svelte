@@ -103,6 +103,7 @@
   import SupportDiagnosticsMenu from "$lib/SupportDiagnosticsMenu.svelte";
   import { createSupportDiagnosticsExport, exportTranscriptMarkdown } from "$lib/support-export";
   import { createTurnCorrelationRecord, createTurnCorrelationRecordFromResponse, deploymentSnapshotFromHeaders, selectTurnCorrelationRecord, upsertTurnCorrelationRecord, type AgentUiTurnCorrelationInput } from "$lib/chat-correlation";
+  import WorkflowBuilderRoot, { type WorkflowBuilderController } from "$lib/components/workflow-builder/WorkflowBuilderRoot.svelte";
 
 
   interface ReservationApprovalPreview {
@@ -225,6 +226,15 @@
   let pendingActiveArtifactStateChanges: JsonRenderStateChange[] = [];
   let pendingArtifactIntent = $state<string | null>(null);
   let documentEditorOpen = $state(false);
+  // Phase 5 (agent-creation-tool-plan-2026-07-13.md, Decision 3): a third
+  // top-level workspace mode, sibling to the existing chat/canvas/document
+  // workspace (WorkspaceRoot below) -- independent of embedMode (the host
+  // embed launcher's "workspace"/"chat"/"canvas" union, agent-embed.ts), which
+  // stays untouched. builderController is populated by WorkflowBuilderRoot so
+  // its state/actions can be surfaced through the shared __sonikAgentUI
+  // page-control contract below.
+  let workspaceMode = $state<"workspace" | "workflow-builder">("workspace");
+  let builderController = $state<WorkflowBuilderController | null>(null);
   let activeDocument = $state<ActiveDocumentSnapshot | null>(null);
   let documentSeed = $state<ActiveDocumentSnapshot | null>(null);
   let documentPreferredView = $state<PreferredDocumentView>("auto");
@@ -2067,6 +2077,7 @@
       getTargetRegistry: snapshotTargetRegistry,
       getActiveWorkflowState: snapshotActiveWorkflowState,
       getApprovalState: snapshotApprovalState,
+      getBuilderState: () => builderController?.snapshot() ?? null,
       actions: {
         createSession: async () => {
           if (isStreaming) return semanticActionResult(false, "Stop the current stream before creating a new session.", "streaming");
@@ -2164,6 +2175,18 @@
         },
         requestApprovalPreview: async (input = {}) => {
           return runPageControlHostAction({ actionKey: "approval.requestPreview", targetId: input.targetId, targetInstanceId: input.targetInstanceId, entityRef: input.entityRef, intentLabel: "Request approval preview for a command-backed action." });
+        },
+        setWorkspaceMode: ({ mode }) => {
+          if (mode !== "workspace" && mode !== "workflow-builder") {
+            return semanticActionResult(false, `Unknown workspace mode: ${mode}.`, "invalid_mode");
+          }
+          workspaceMode = mode;
+          return semanticActionResult(true, `Workspace mode set to ${mode}.`);
+        },
+        saveAgentDefinitionDraft: async () => {
+          if (!builderController) return semanticActionResult(false, "The workflow builder is not mounted.", "workflow_builder_not_mounted");
+          const result = await builderController.saveDraft();
+          return semanticActionResult(result.ok, result.message, result.ok ? undefined : "save_failed");
         },
       },
     };
@@ -3867,6 +3890,9 @@
   }
 </script>
 
+{#if workspaceMode === "workflow-builder"}
+<WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} />
+{:else}
 <WorkspaceRoot title="Sonik Chat" {artifactOpen} layoutMode={workspaceLayoutMode} railMode={workspaceRailMode}>
   {#snippet rail()}
     <SessionRail
@@ -3956,6 +3982,16 @@
         >
           Workspace document
         </button>
+        {#if !isEmbeddedHostContextExpected()}
+          <button
+            type="button"
+            onclick={() => { workspaceMode = workspaceMode === "workspace" ? "workflow-builder" : "workspace"; }}
+            class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            aria-label={workspaceMode === "workspace" ? "Open the workflow builder" : "Return to the chat workspace"}
+          >
+            {workspaceMode === "workspace" ? "Workflow Builder" : "Back to chat"}
+          </button>
+        {/if}
         <SupportDiagnosticsMenu
           activeSessionId={activeSessionId}
           correlation={getLatestActiveSessionCorrelation()}
@@ -4048,3 +4084,4 @@
     </CanvasViewport>
   {/snippet}
 </WorkspaceRoot>
+{/if}

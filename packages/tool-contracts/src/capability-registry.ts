@@ -18,6 +18,7 @@ import {
   type MarketplaceManifest,
   type MarketplacePermissionGrant,
 } from "./marketplace.js";
+import generatedCapabilityRegistryJson from "./sonik-capability-registry.generated.json" with { type: "json" };
 
 export const CAPABILITY_REGISTRY_SCHEMA_VERSION = "sonik-agent-ui.capability-registry.v1" as const;
 
@@ -206,19 +207,14 @@ export function findUnregisteredCapabilityIds(grants: MarketplacePermissionGrant
   return [...unregistered].sort();
 }
 
-// Seed registry: the booking command namespace already live in
-// host-command-runtime and the marketplace fixtures, with write-implies-read
-// edges declared per D013.
-export const sonikBookingCapabilityRegistry: CapabilityRegistry = capabilityRegistrySchema.parse({
-  schemaVersion: CAPABILITY_REGISTRY_SCHEMA_VERSION,
-  capabilities: [
-    { capabilityId: "booking.list.contexts", version: 1, title: "List booking contexts", effect: "read" },
-    { capabilityId: "booking.get.availability", version: 1, title: "Read availability", effect: "read" },
-    { capabilityId: "booking.get.hold", version: 1, title: "Read a hold", effect: "read" },
-    { capabilityId: "booking.create.hold", version: 1, title: "Create a hold", effect: "write", implies: ["booking.get.hold", "booking.get.availability"] },
-    { capabilityId: "booking.release.hold", version: 1, title: "Release a hold", effect: "write", implies: ["booking.get.hold"] },
-    { capabilityId: "booking.create.guest", version: 1, title: "Create a guest", effect: "write" },
-    { capabilityId: "booking.create.booking", version: 1, title: "Create a booking", effect: "write", implies: ["booking.get.availability"] },
-    { capabilityId: "booking.create.context", version: 1, title: "Create a booking context", effect: "write", implies: ["booking.list.contexts"] },
-  ],
-});
+// Generated registry (Decision 1, D018): the booking command namespace's 113
+// commands generated from the vendored, SHA-pinned booking-service SDK
+// command registry (packages/tool-contracts/vendor/, generator at
+// packages/tool-contracts/scripts/generate-capability-registry.mjs), unioned
+// with the hand-authored Amplify campaign capability set (Decision 1 rider).
+// The original 8-entry seed set's effect/family/implies survive
+// byte-identical inside the generated output (R4(a) superset-preservation,
+// see tests/unit/capability-registry-generation.test.mjs).
+export const sonikBookingCapabilityRegistry: CapabilityRegistry = capabilityRegistrySchema.parse(
+  generatedCapabilityRegistryJson,
+);

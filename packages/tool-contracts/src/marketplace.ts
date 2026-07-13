@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { knowledgeRefSchema } from "./knowledge-ref.js";
 
 export const marketplaceSchemaVersionSchema = z.literal("1");
 export type MarketplaceSchemaVersion = z.infer<typeof marketplaceSchemaVersionSchema>;
@@ -317,6 +318,25 @@ export const commandToolPackDefinitionSchema = z.object({
 });
 export type CommandToolPackDefinition = z.infer<typeof commandToolPackDefinitionSchema>;
 
+/** Ordered prompt-module refs plus an inline override map, mirroring
+ *  `promptModuleOverrides`/`skillPromptOverrides` (`agent-settings.ts`):
+ *  keyed by module id, an empty string suppresses that module, a missing key
+ *  uses the module's default body. `moduleIds` orders which modules compose
+ *  for this agent; an empty array preserves today's host-derived composition. */
+export const agentPromptModulesSchema = z.object({
+  moduleIds: z.array(z.string().min(1)).default([]),
+  overrides: z.record(z.string(), z.string()).default({}),
+}).strict();
+export type AgentPromptModules = z.infer<typeof agentPromptModulesSchema>;
+
+/** Optional inline model policy, an alternative to `modelPolicyRef` for
+ *  definitions that pin a model without a separately published policy. */
+export const agentModelPolicySchema = z.object({
+  modelId: z.string().min(1),
+  requireZdr: z.boolean().default(false),
+}).strict();
+export type AgentModelPolicy = z.infer<typeof agentModelPolicySchema>;
+
 export const agentDefinitionSchema = z.object({
   agentId: z.string().min(1),
   title: z.string().min(1),
@@ -325,6 +345,9 @@ export const agentDefinitionSchema = z.object({
   requiredSkills: z.array(z.string()).default([]),
   requiredToolPacks: z.array(z.string()).default([]),
   toolPolicy: z.record(z.string(), marketplacePermissionModeSchema).default({}),
+  promptModules: agentPromptModulesSchema.default({ moduleIds: [], overrides: {} }),
+  knowledgeRefs: z.array(knowledgeRefSchema).default([]),
+  modelPolicy: agentModelPolicySchema.optional(),
 }).strict();
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 

@@ -3,7 +3,7 @@
 Status: draft
 Audience: reviewers, implementers, design agents
 Verified against: `c9011e4` plus uncommitted marketplace/workspace draft files
-Last updated: 2026-07-07 (D008–D017 ratified from the July research pass + recon supplement)
+Last updated: 2026-07-13 (D018–D020 ratified from `.omc/plans/agent-creation-tool-plan-2026-07-13.md`; D008–D017 ratified from the July research pass + recon supplement)
 
 ## D001 — Use one marketplace package envelope with first-class kinds
 
@@ -142,3 +142,27 @@ Decision: Free tier with paid premium capability precedes any take-rate; usage-m
 Evidence: `docs/research/agent-marketplace-decision-brief-2026-07.md` DR-8; `workflow-builder-prd:813-817` (internal free-first precedent); `recon-supplement` corrections.
 
 Rationale: Monetization is unsettled market-wide; reputation-first matches both the research and the May vision.
+
+## D018 — Capability registry is generated from a vendored, SHA-pinned booking-service manifest; no legacy-fallback carve-out
+
+Decision: The capability registry expands from 8 hand-written entries to the full command surface by generating rows from a vendored copy of the booking-service SDK's committed `sonik-command-registry.generated.json` (copied into `packages/tool-contracts/vendor/`, source commit SHA recorded alongside it), instead of letting unregistered commands fall back to `toolPermissionModes`/`approvedCommandIds`. The Amplify-campaign capability rows (`amplify.campaign.preview`, `amplify.campaign.create`) have no generator source and are hand-authored, carrying a `source: "hand-authored"` provenance flag so a future Amplify SDK generator won't double-register them.
+
+Evidence: `.omc/plans/agent-creation-tool-plan-2026-07-13.md` §2 Decision 1 (capability-registry coverage, rejected legacy-fallback option, hand-authored rider), §4 Phase 2 (generator scope, vendored path, drift test, superset-preservation and live-reachability proofs), §6 risk 2 (hermetic vendoring mitigation). `packages/tool-contracts/src/capability-registry.ts:212-222` (today's 8-entry `sonikBookingCapabilityRegistry`), `capability-registry.ts:142` (`evaluateCapabilityAccess` default-deny).
+
+Rationale: A legacy-fallback carve-out would leave 105 of 113 commands ungoverned by the registry, reviving the free-string/coverage rot D013 warns against and keeping two enforcement authorities alive. Generating from a committed, SHA-pinned artifact keeps booking-service reads-only and hermetic (no live dependency on a sibling worktree), while superset-preservation and live-reachability tests turn an unregistered-but-reachable command into a build failure instead of a silent runtime default-deny.
+
+## D019 — The Amplify campaign wow-demo is scoped to the 5 controller-live workflow node types; campaign artifacts ride tool_commit receipts, not the artifact node
+
+Decision: The campaign workflow is a linear graph (`trigger → ask_user → tool_preview → approval → tool_commit`) built only from the 5 node types the controller currently executes (`trigger, ask_user, tool_preview, approval, tool_commit`); `skill, artifact, remote_execution, evidence, branch` stay out of scope for this demo and are rejected by the drafting agent's live-type gate. The campaign artifact is emitted as the `tool_commit` node's semantic-receipt payload, rendered execution-inert via json-render (D004) — never through the parse-only `artifact` node — and any model-side `createJsonArtifact` output on this path is preview-only content, never the success surface (D006). No conditional `branch` and no new Amplify backend; the campaign write persists to the file-based Knowledge v1 store, host-signed and receipted.
+
+Evidence: `.omc/plans/agent-creation-tool-plan-2026-07-13.md` §2 Decision 2 (node-type scoping, R3 trust pinning), §4 Phase 6 (drafting-agent live-type gate) and Phase 7 (R2 campaign-path trust invariants), §6 risk 3 (branch/artifact scope-creep mitigation).
+
+Rationale: Reaching for `branch`/`artifact` would be a manufactured requirement for a demo that needs no conditional logic, and would parse but silently no-op (`unsupported_node_type`) if it ever reached the controller. Pinning the artifact to the commit receipt keeps the "it worked" affordance sourced only from a host-signed receipt, never a model-drawn preview, preserving the D004/D005/D006 trust boundary while still satisfying the wow-demo acceptance criterion.
+
+## D020 — The third workspace mode absorbs console-track B1 (agent config) + B2 (workflow builder) now; A2–A5 console items sequence after, consuming the same definitions
+
+Decision: A new workflow-builder workspace mode inside `apps/standalone-sveltekit` (not a separate admin app) delivers B1 (model, prompt-module, tool-scoping, knowledge-attach config) and B2 (workflow library, graph builder, draft/locked versions, test-run). The capability-registry browser (A2), runs/observability (A3), and the remaining console items (A4, B4, B5) are deferred as natural follow-ons once the generated registry (D018) and workflow-run-id stamping make them cheap; B5 (endpoint-exposure toggle semantics) remains the only item needing fresh trust design and stays explicitly out of v1.
+
+Evidence: `.omc/plans/agent-creation-tool-plan-2026-07-13.md` §2 Decision 3 (confirms consensus §4.5 sequencing), §4 Phase 5 (builder-mode scope), citing `docs/product/agent-workspace-marketplace`'s companion consensus plan `workflow-state-machine-consensus-2026-07-10.md` §4.5 (console addendum origin).
+
+Rationale: Building the builder chrome once, inside the existing app shell, avoids standing up a second admin surface and lets the config/canvas/preview loop reuse the shipped adapter and controller; deferring A2–A5 holds scope to the phases with concrete acceptance criteria while keeping the console items' sequencing on record for the next follow-on.

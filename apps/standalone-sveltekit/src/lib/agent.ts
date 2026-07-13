@@ -19,6 +19,7 @@ import { createCommandCatalogTools } from "./tools/command-catalog";
 import { createArtifactStateTools } from "./tools/artifact-state";
 import { createSkillCatalogTools } from "./tools/skill-catalog";
 import { createMarketplaceWorkflowTools } from "./tools/marketplace-workflows";
+import { draftWorkflow } from "./tools/drafting-agent";
 import { shouldMountJsonArtifactTool, type WorkspaceDocumentIntent } from "./document-intent";
 import { gateway, resolveGatewayModelId } from "./ai-gateway";
 import type { AgentRuntimeSettings } from "./agent-settings";
@@ -26,6 +27,7 @@ import type { SystemModelMessage } from "ai";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
+import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
 import type { Spec } from "@json-render/core";
 import {
   hasBookingContextCreateSkill,
@@ -39,7 +41,14 @@ import {
 export { hasBookingContextIntakeSkill, resolveCommandFamilyMountDecision } from "./command-family-mount";
 export type { CommandFamilyMountDecision } from "./command-family-mount";
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean };
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean;
+  /** Set by the workflow-builder workspace mode (Phase 5) to mount the draft-from-description
+   *  tool (Phase 6). Regular chat never sets this, so draftWorkflow stays unmounted there. */
+  workflowBuilderMode?: boolean;
+  /** Carried through from a resolved AgentDefinition (agent-runtime-adapter.ts) for the
+   *  knowledge-v1 module (Phase 9) to read into context. Not yet resolved here. */
+  knowledgeRefs?: AgentDefinition["knowledgeRefs"];
+};
 
 /**
  * Composes the per-turn system prompt for a run: the always-on core plus the
@@ -113,6 +122,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
       ...skillCatalogTools,
       ...marketplaceWorkflowTools,
       ...commandCatalogTools,
+      ...(context.workflowBuilderMode ? { draftWorkflow } : {}),
     },
     stopWhen: stepCountIs(12),
     temperature: 0.35,
