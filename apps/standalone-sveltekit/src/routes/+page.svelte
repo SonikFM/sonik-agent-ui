@@ -2976,6 +2976,29 @@
         }
         continue;
       }
+      // Stale-echo guard, worker side: a snapshot queued BEFORE a version
+      // restore/agent update must not PATCH the old content back over the
+      // server's newer version (2026-07-13 revert-loop report). The
+      // handleDocumentEvent guard stops new stale events; this stops ones
+      // that were already queued when the version bumped.
+      if (
+        activeDocument &&
+        snapshot.id === activeDocument.id &&
+        (snapshot.version_count ?? 1) < (activeDocument.version_count ?? 1)
+      ) {
+        if (pendingDocumentSnapshot && createDocumentSnapshotSignature(pendingDocumentSnapshot) === signature) {
+          pendingDocumentSnapshot = null;
+        }
+        logArtifactTelemetry({
+          source: "client",
+          event: "document_persist.stale_snapshot_dropped",
+          documentId: snapshot.id,
+          documentVersion: snapshot.version_count,
+          reason: `behind_v${activeDocument.version_count}`,
+          ok: true,
+        });
+        continue;
+      }
 
       const response = await workspaceFetch(`/api/document/${encodeURIComponent(snapshot.id)}`, {
         method: "PATCH",
@@ -3852,6 +3875,29 @@
       if (event.type === "view") {
         logArtifactTelemetry({ source: "client", event: "document_frame.view", mode: documentPreferredView, ok: true });
       }
+      return;
+    }
+    // Stale-echo guard (2026-07-13 live report: restored/agent-updated versions
+    // "kept switching back to v1"): the island's snapshot loop can deliver an
+    // event queued BEFORE a version restore or agent update. Adopting it would
+    // regress activeDocument, and the persistence worker would then PATCH the
+    // old content back over the server's newer version — a last-write-wins
+    // revert loop. Same-version events are normal edits; only strictly older
+    // version_counts for the same document are echoes.
+    if (
+      activeDocument &&
+      event.document.id === activeDocument.id &&
+      (event.document.version_count ?? 1) < (activeDocument.version_count ?? 1)
+    ) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "document_frame.stale_event_dropped",
+        documentId: event.document.id,
+        documentVersion: event.document.version_count,
+        reason: `behind_v${activeDocument.version_count}`,
+        mode: documentPreferredView,
+        ok: true,
+      });
       return;
     }
     activeDocument = event.document;
