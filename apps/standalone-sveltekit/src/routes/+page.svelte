@@ -287,6 +287,10 @@
   // so an inline "Open canvas" fallback can be offered in chat.
   let hostCanvasOpenRequestedIds = new SvelteSet<string>();
   let hostCanvasOpenDeclined = $state(false);
+  // True once any agent stream has started in this page lifetime. Gates host
+  // canvas escalation to freshly streamed artifacts — restored history must
+  // never force the host's canvas open (see notifyHostCanvasOpen).
+  let hasStreamedSinceMount = false;
   let messagePersistInFlight = false;
   let pendingDocumentSnapshot: ActiveDocumentSnapshot | null = null;
   let documentPersistPromise: Promise<void> | null = null;
@@ -375,6 +379,9 @@
   const isStreaming = $derived(
     conversation.status === "streaming" || conversation.status === "submitted",
   );
+  $effect(() => {
+    if (isStreaming) hasStreamedSinceMount = true;
+  });
   const currentSession = $derived(sessions.find((session) => session.id === activeSessionId) ?? null);
   const activeArtifactRawSpec = $derived(
     activeArtifact ? JSON.stringify(activeArtifact.content, null, 2) : "",
@@ -2031,8 +2038,17 @@
   // renderable artifact/document mounts in embedded chat mode. Embedded chat
   // suppresses the local artifact pane, so the host owns canvas opening. If it
   // declines or does not answer, expose the inline fallback action in chat.
+  //
+  // Escalation is gated to artifacts born from a stream in THIS page lifetime:
+  // restored persisted sessions re-run the promotion effects on load (the
+  // dedup sets are in-memory), and mode switches remount the iframe in hosts
+  // without moveBefore — so without this gate an old artifact force-opens the
+  // host canvas on every load and re-opens it after every "dock chat"
+  // (2026-07-13 live report: stale reservation receipt trapped the booking
+  // embed in the canvas modal).
   function notifyHostCanvasOpen(id: string, intentLabel: string): void {
     if (!browser || embedMode !== "chat") return;
+    if (!hasStreamedSinceMount) return;
     if (window.parent === window) return;
     if (hostCanvasOpenRequestedIds.has(id)) return;
     hostCanvasOpenRequestedIds.add(id);
@@ -2257,9 +2273,22 @@
     applyEmbeddedThemeFromHost(embeddedUrlTheme);
   }
 
+  // The booking host donates ITS design-system theme names, which collide with
+  // this app's registry: the host's "neumorphic-light" is its clean white/gray
+  // booking theme, while our "neumorphic-light" is the experimental warm-taupe
+  // soft-UI theme. Unmapped, the embed renders a muddy tan surface inside a
+  // white host page (documented 2026-07-02 manual test run, re-reported live
+  // 2026-07-13). Host vocabulary maps onto booking-parity themes here; the
+  // standalone theme picker is unaffected.
+  const EMBEDDED_HOST_THEME_ALIASES: Record<string, string> = {
+    "neumorphic-light": "light",
+    "neumorphic-dark": "sonik-operator-dark",
+  };
+
   function applyEmbeddedThemeFromHost(hostTheme?: string | null): void {
     if (!isEmbeddedHostContextExpected()) return;
-    applyEmbeddedThemeSetting({ hostTheme });
+    const trimmed = hostTheme?.trim();
+    applyEmbeddedThemeSetting({ hostTheme: (trimmed && EMBEDDED_HOST_THEME_ALIASES[trimmed]) ?? hostTheme });
   }
 
   function installDevLongTaskTelemetry(): (() => void) | undefined {
