@@ -32,7 +32,7 @@ import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings, type AgentRuntimeSettings } from "$lib/agent-settings";
 import { definitionToRuntimeSettings } from "$lib/agent-runtime-adapter";
-import { resolvePublishedAgentDefinition, agentDefinitionStore } from "$lib/server/agent-definition-store";
+import { resolveAgentDefinitionStore } from "$lib/server/agent-definition-store";
 import { resolveKnowledgeContext, formatKnowledgeContextSections } from "$lib/knowledge/resolve-knowledge-context";
 import { defaultKnowledgeRoot } from "$lib/knowledge/knowledge-store";
 import { isProductTourIntent, resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
@@ -508,15 +508,18 @@ export const POST: RequestHandler = async (event) => {
   // would mask every grant the published definition sets (definitionToRuntimeSettings
   // sanitizes once, at the end, after merging the definition's defaults with
   // whatever sparse overrides the client actually sent).
+  // P0 #1 (production-readiness ledger): Neon-backed when a DB env is
+  // configured, in-memory fallback otherwise -- see agent-definition-store.ts.
+  const requestAgentDefinitionStore = resolveAgentDefinitionStore(event.platform?.env as Record<string, unknown> | undefined);
   const publishedAgentId = typeof body?.publishedAgentId === "string" ? body.publishedAgentId : null;
-  const publishedAgentDefinition = publishedAgentId ? resolvePublishedAgentDefinition(publishedAgentId) : null;
+  const publishedAgentDefinition = publishedAgentId ? await requestAgentDefinitionStore.resolvePublished(publishedAgentId) : null;
   // Phase 5 workflow-builder Debug & Preview: a narrow mirror of the
   // publishedAgentId path above, resolving an unpublished DRAFT definition by
   // id so the builder can test edits before publish. Same fallback-safe null
   // handling; absent `draftAgentId` (every non-builder request), this is a
   // no-op. publishedAgentId takes precedence if a request somehow sent both.
   const draftAgentId = typeof body?.draftAgentId === "string" ? body.draftAgentId : null;
-  const draftAgentDefinition = !publishedAgentDefinition && draftAgentId ? agentDefinitionStore.getDraft(draftAgentId)?.definition ?? null : null;
+  const draftAgentDefinition = !publishedAgentDefinition && draftAgentId ? (await requestAgentDefinitionStore.getDraft(draftAgentId))?.definition ?? null : null;
   const resolvedAgentDefinition = publishedAgentDefinition ?? draftAgentDefinition;
   const resolvedRuntimeSettings = resolvedAgentDefinition
     ? definitionToRuntimeSettings(resolvedAgentDefinition, (body?.agentSettings ?? body?.workspace?.agentSettings) as Partial<AgentRuntimeSettings> | undefined)

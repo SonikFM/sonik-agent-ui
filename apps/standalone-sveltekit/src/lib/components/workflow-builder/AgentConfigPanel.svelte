@@ -13,21 +13,39 @@
   import { Label } from "$lib/components/ui/label";
   import { Badge } from "$lib/components/ui/badge";
   import { Separator } from "$lib/components/ui/separator";
-  import { AGENT_MODEL_OPTIONS, DEFAULT_AGENT_MODEL_ID, MAX_AGENT_PROMPT_OVERRIDE_CHARS, type AgentToolPermissionMode } from "$lib/agent-settings";
+  import { AGENT_MODEL_OPTIONS, DEFAULT_AGENT_MODEL_ID, MAX_AGENT_PROMPT_OVERRIDE_CHARS, type AgentModelOption, type AgentToolPermissionMode } from "$lib/agent-settings";
   import { AGENT_PROMPT_MODULES, CORE_MODULE_ID } from "$lib/agent-prompt";
   import { groupCapabilitiesByFamily, effectiveFamilyMode, type KnowledgeRef } from "./builder-model";
+  import { isModelIncompatible, formatModelContextWindow } from "./builder-model";
   import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
 
   interface Props {
     definition: AgentDefinition;
     validationIssues?: string[];
+    modelOptions?: AgentModelOption[];
+    modelCatalogStatus?: "idle" | "loading" | "ready" | "fallback" | "error";
+    modelCatalogMessage?: string | null;
+    onModelCatalogRefresh?: () => void;
   }
-  let { definition = $bindable(), validationIssues = [] }: Props = $props();
+  let {
+    definition = $bindable(),
+    validationIssues = [],
+    modelOptions = AGENT_MODEL_OPTIONS,
+    modelCatalogStatus = "idle",
+    modelCatalogMessage = null,
+    onModelCatalogRefresh,
+  }: Props = $props();
 
   const TOOL_MODES: AgentToolPermissionMode[] = ["off", "ask", "allow"];
   const capabilityFamilies = groupCapabilitiesByFamily();
 
   let expandedFamilyIds = $state<string[]>([]);
+  let modelQuery = $state("");
+  const filteredModelOptions = $derived(modelOptions.filter((option) => {
+    const query = modelQuery.trim().toLowerCase();
+    if (!query) return true;
+    return [option.label, option.id, option.provider, option.description].filter(Boolean).join(" ").toLowerCase().includes(query);
+  }));
 
   function setTitle(value: string): void {
     definition = { ...definition, title: value };
@@ -148,16 +166,39 @@
       <Card.Description>Pins the runtime model this definition resolves to (agent-runtime-adapter.ts modelPolicy mapping).</Card.Description>
     </Card.Header>
     <Card.Content class="flex flex-col gap-3">
-      <Select.Root type="single" value={definition.modelPolicy?.modelId ?? ""} onValueChange={(value) => setModel(value ?? "")}>
-        <Select.Trigger aria-label="Model">
-          {AGENT_MODEL_OPTIONS.find((option) => option.id === definition.modelPolicy?.modelId)?.label ?? "Host-derived default"}
-        </Select.Trigger>
-        <Select.Content>
-          {#each AGENT_MODEL_OPTIONS as option}
-            <Select.Item value={option.id}>{option.label} &middot; {option.provider}</Select.Item>
-          {/each}
-        </Select.Content>
-      </Select.Root>
+      <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Badge variant="outline">Catalog: {modelCatalogStatus}</Badge>
+        {#if modelCatalogMessage}<span>{modelCatalogMessage}</span>{/if}
+        <Button variant="ghost" size="sm" onclick={() => onModelCatalogRefresh?.()}>
+          {modelCatalogStatus === "loading" ? "Refreshing…" : "Refresh"}
+        </Button>
+      </div>
+      <Input placeholder="Search models" bind:value={modelQuery} aria-label="Search models" />
+      <div class="flex flex-col divide-y divide-border rounded-md border border-border" role="listbox" aria-label="Model">
+        {#each filteredModelOptions as option (option.id)}
+          {@const incompatible = isModelIncompatible(definition, option)}
+          {@const selected = (definition.modelPolicy?.modelId ?? "") === option.id}
+          <button
+            type="button"
+            class="flex items-start justify-between gap-3 p-2 text-left text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {selected ? 'bg-accent/30' : ''}"
+            role="option"
+            aria-selected={selected}
+            onclick={() => setModel(option.id)}
+          >
+            <span class="flex min-w-0 flex-col gap-1">
+              <span class="flex flex-wrap items-center gap-2">
+                <span class="font-medium">{option.label}</span>
+                <span class="text-xs text-muted-foreground">{option.provider}</span>
+                {#if option.recommended}<Badge variant="secondary">Recommended</Badge>{/if}
+                {#if incompatible}<Badge variant="destructive">No tool-use support</Badge>{/if}
+              </span>
+              <span class="text-xs text-muted-foreground">{option.id} &middot; {formatModelContextWindow(option.contextWindow)}</span>
+            </span>
+          </button>
+        {:else}
+          <p class="p-3 text-sm text-muted-foreground">No models match &ldquo;{modelQuery}&rdquo;.</p>
+        {/each}
+      </div>
       <label class="flex items-center gap-2 text-sm text-muted-foreground">
         <input
           type="checkbox"

@@ -140,6 +140,15 @@ export type AgentEmbedMountOptions = {
    * registry-gated server-side via the signed host-context envelope.
    */
   publishedAgentId?: string | null;
+  /**
+   * P1 #10 (production-readiness ledger): restricts which iframe origins this
+   * mount will accept page-context-request / action-request messages from, on
+   * top of the existing exact-match check against the mounted agentUrl's
+   * origin. Absent/undefined = today's behavior (no extra restriction) so
+   * existing embeds are unaffected. Accepts the same comma-separated /
+   * wildcard-pattern shape as `parseAgentOriginAllowlist`.
+   */
+  allowedOrigins?: string | readonly string[];
   initialMode?: AgentEmbedMode | null;
   contextPostDelaysMs?: readonly number[];
   minChatWidth?: number;
@@ -671,12 +680,14 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
     if (event.source !== iframe.contentWindow) return;
     if (!isAgentPageContextRequestMessage(event.data)) return;
     if (event.origin !== resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow)) return;
+    if (options.allowedOrigins !== undefined && !isAgentOriginAllowed(event.origin, options.allowedOrigins)) return;
     void postContext();
   };
   const onRequestHostAction = (event: MessageEvent) => {
     if (event.source !== iframe.contentWindow) return;
     const agentOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
     if (!agentOrigin || event.origin !== agentOrigin) return;
+    if (options.allowedOrigins !== undefined && !isAgentOriginAllowed(event.origin, options.allowedOrigins)) return;
     const parsed = hostActionRequestSchema.safeParse(event.data);
     if (!parsed.success) return;
     void handleEmbeddedHostAction({

@@ -3,9 +3,10 @@
 // handler delegating everything to $lib/server/agent-definition-store.
 
 import {
-  agentDefinitionStore,
+  resolveAgentDefinitionStore,
 } from "$lib/server/agent-definition-store";
 import { agentDefinitionSchema, type MarketplaceManifest } from "@sonik-agent-ui/tool-contracts/marketplace";
+import { agentDefinitionsRateLimiter, readJsonBodyWithSizeCap } from "$lib/server/request-abuse-guard";
 import type { RequestHandler } from "./$types";
 
 // P1 (verify-wave code review, 2026-07-13): this route fronts a shared MUTABLE
@@ -13,32 +14,45 @@ import type { RequestHandler } from "./$types";
 // in-memory single-process demo tier. Before any multi-tenant deploy it MUST be
 // gated behind the auth/org context (credentials lane) and drafts/published
 // versions scoped per org. Global draft enumeration already removed below.
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, platform }) => {
   const agentId = url.searchParams.get("agentId");
   if (!agentId) {
     // No cross-session enumeration: drafts can carry prompts/overrides that
     // must not be disclosed across sessions. Fetch by explicit agentId only.
     return Response.json({ ok: false, error: "agentId_required" }, { status: 400 });
   }
+  // P0 #1: Neon-backed when a DB env is configured, in-memory fallback otherwise.
+  const agentDefinitionStore = resolveAgentDefinitionStore(platform?.env as Record<string, unknown> | undefined);
   return Response.json({
-    draft: agentDefinitionStore.getDraft(agentId),
-    publishedVersions: agentDefinitionStore.listPublishedVersions(agentId),
+    draft: await agentDefinitionStore.getDraft(agentId),
+    publishedVersions: await agentDefinitionStore.listPublishedVersions(agentId),
   });
 };
 
-export const POST: RequestHandler = async ({ request }) => {
-  const body = await request.json().catch(() => null);
+export const POST: RequestHandler = async ({ request, getClientAddress, platform }) => {
+  // P1 #6 (production-readiness ledger): abuse guards on this shared mutable
+  // route -- per-process rate limit + payload cap ahead of any auth/org lane.
+  if (!agentDefinitionsRateLimiter.tryConsume(getClientAddress())) {
+    return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+  }
+  const parsedBody = await readJsonBodyWithSizeCap(request);
+  if (!parsedBody.ok) {
+    return Response.json({ ok: false, error: parsedBody.error }, { status: parsedBody.status });
+  }
+  const body = parsedBody.body;
   if (!body || typeof body !== "object") {
     return Response.json({ ok: false, error: "invalid_json_body" }, { status: 400 });
   }
   const action = (body as Record<string, unknown>).action;
+  // P0 #1: Neon-backed when a DB env is configured, in-memory fallback otherwise.
+  const agentDefinitionStore = resolveAgentDefinitionStore(platform?.env as Record<string, unknown> | undefined);
 
   if (action === "save_draft") {
     const parsed = agentDefinitionSchema.safeParse((body as Record<string, unknown>).definition);
     if (!parsed.success) {
       return Response.json({ ok: false, error: "invalid_agent_definition", issues: parsed.error.issues }, { status: 400 });
     }
-    const draft = agentDefinitionStore.saveDraft(parsed.data);
+    const draft = await agentDefinitionStore.saveDraft(parsed.data);
     return Response.json({ ok: true, draft });
   }
 
@@ -52,7 +66,7 @@ export const POST: RequestHandler = async ({ request }) => {
       // publisher could claim first-party ("sonik") trust. Until the auth lane
       // provides a real org identity, everything published here is community.
       const serverAssignedPublisher: MarketplaceManifest["publisher"] = { publisherId: "workspace-internal", displayName: "Workspace (internal)", type: "creator" };
-      const version = agentDefinitionStore.publish({
+      const version = await agentDefinitionStore.publish({
         agentId,
         packageSemver,
         title: typeof title === "string" ? title : undefined,

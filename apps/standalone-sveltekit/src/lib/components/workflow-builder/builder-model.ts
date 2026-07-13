@@ -110,3 +110,24 @@ export function validateWorkflowDefinition(candidate: unknown): WorkflowDefiniti
   if (parsed.success) return { ok: true, workflow: parsed.data };
   return { ok: false, issues: parsed.error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`) };
 }
+
+/** True once any tool family is granted "ask"/"allow" -- an agent with no
+ *  grants at all can run on a model with no tool-use support. */
+export function agentRequiresToolUse(definition: AgentDefinition): boolean {
+  return Object.values(definition.toolPolicy).some((mode) => mode !== "off");
+}
+
+/** Dify-bar incompatible-model flag for the config panel's model picker:
+ *  only flags an explicit `supportsTools === false` (never `undefined` --
+ *  the static fallback catalog doesn't report capability metadata, and an
+ *  unknown capability must not read as a false incompatibility). */
+export function isModelIncompatible(definition: AgentDefinition, model: { supportsTools?: boolean }): boolean {
+  return agentRequiresToolUse(definition) && model.supportsTools === false;
+}
+
+export function formatModelContextWindow(value: number | undefined): string {
+  if (!value) return "context unknown";
+  if (value >= 1_000_000) return `${Math.round(value / 1_000_000)}M context`;
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K context`;
+  return `${value} context`;
+}

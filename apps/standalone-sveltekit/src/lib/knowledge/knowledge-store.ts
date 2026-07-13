@@ -13,6 +13,7 @@
 import { mkdir, readFile as readFileFs, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { neon } from "@neondatabase/serverless";
 import type { KnowledgeFileRef, KnowledgeRef } from "../../../../../packages/tool-contracts/src/knowledge-ref.ts";
 
 export type KnowledgeStore = {
@@ -41,7 +42,29 @@ export function defaultKnowledgeRoot(): string {
   return process.env.SONIK_AGENT_UI_KNOWLEDGE_ROOT?.trim() || path.join(process.cwd(), ".data", "knowledge");
 }
 
+function readKnowledgeDatabaseUrl(): string | null {
+  // Same env var names/precedence as workspace-services.ts / agent-definition-store.ts,
+  // so one deploy env config (SONIK_AGENT_UI_DATABASE_URL) backs all three stores.
+  for (const key of ["SONIK_AGENT_UI_DATABASE_URL", "DATABASE_URL", "POSTGRES_URL", "NEON_DATABASE_URL"]) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+/** P0 #1 (production-readiness-agent-creation-2026-07-13.md): on Cloudflare
+ *  Workers there is no durable disk, so the file-based store below is
+ *  ephemeral there. Dispatches to Neon when a DB env is configured, else
+ *  keeps today's file-based behavior (local dev + existing tests, which set
+ *  no DATABASE_URL, are unaffected). `rootDir` is only meaningful for the
+ *  file-based fallback; resolveKnowledgeContext.ts is untouched -- it just
+ *  calls this same exported function name with the same signature. */
 export function createKnowledgeStore(rootDir: string): KnowledgeStore {
+  const databaseUrl = readKnowledgeDatabaseUrl();
+  return databaseUrl ? createNeonKnowledgeStore(databaseUrl) : createFileKnowledgeStore(rootDir);
+}
+
+function createFileKnowledgeStore(rootDir: string): KnowledgeStore {
   function storeDir(storeId: string): string {
     return path.join(rootDir, sanitizeId(storeId));
   }
@@ -111,6 +134,76 @@ export function createKnowledgeStore(rootDir: string): KnowledgeStore {
     // Campaign tool_commit write path (Decision 2 dependency): same CRUD,
     // create-if-missing since a campaign may target a store on first commit.
     await createStore({ storeId, title });
+    const fileRef = await addFile(storeId, { title, content });
+    return { storeId, fileRef };
+  }
+
+  return { createStore, addFile, listFiles, readFile, removeFile, writeArtifactFile };
+}
+
+/** Neon-backed KnowledgeStore. Files are small human-readable markdown/plaintext
+ *  (v1 doctrine, see file header) so content lives in Neon text alongside
+ *  metadata rather than splitting across FS + DB -- the smaller diff, and it
+ *  actually fixes durability on Workers (a file-content-on-disk split would
+ *  still be ephemeral there). Schema: packages/workspace-session/migrations/
+ *  postgres/0006_agent_knowledge.sql. Large-blob future: swap content storage
+ *  to R2, same interface, if knowledge files stop being small/text-only. */
+function createNeonKnowledgeStore(databaseUrl: string): KnowledgeStore {
+  const sql = neon(databaseUrl.trim());
+
+  async function ensureStoreExists(storeId: string): Promise<void> {
+    const rows = await sql`select 1 from sonik_agent_ui.agent_knowledge_stores where store_id = ${storeId}`;
+    if (rows.length === 0) throw new Error(`Knowledge store not found: ${storeId}`);
+  }
+
+  async function createStore(input: { storeId: string; title: string }): Promise<KnowledgeRef> {
+    const storeId = sanitizeId(input.storeId);
+    // org scoping seam: add organization_id + filter once the auth/org lane
+    // resolves a trusted caller identity -- knowledge stores are process-wide
+    // across tenants until then.
+    await sql`
+      insert into sonik_agent_ui.agent_knowledge_stores (store_id, title)
+      values (${storeId}, ${input.title})
+      on conflict (store_id) do nothing
+    `;
+    const rows = await sql`select title from sonik_agent_ui.agent_knowledge_stores where store_id = ${storeId}`;
+    const title = (rows[0] as { title: string } | undefined)?.title ?? input.title;
+    return { storeId, title, fileRefs: await listFiles(storeId), readable: true };
+  }
+
+  async function addFile(storeId: string, input: { title: string; content: string; fileId?: string }): Promise<KnowledgeFileRef> {
+    await ensureStoreExists(storeId);
+    const fileId = input.fileId ?? randomUUID();
+    await sql`
+      insert into sonik_agent_ui.agent_knowledge_files (store_id, file_id, title, content)
+      values (${storeId}, ${fileId}, ${input.title}, ${input.content})
+      on conflict (store_id, file_id) do update set title = excluded.title, content = excluded.content
+    `;
+    return { fileId, title: input.title, path: `${storeId}/${fileId}` };
+  }
+
+  async function listFiles(storeId: string): Promise<KnowledgeFileRef[]> {
+    await ensureStoreExists(storeId);
+    const rows = await sql`
+      select file_id, title from sonik_agent_ui.agent_knowledge_files
+      where store_id = ${storeId}
+      order by created_at asc
+    `;
+    return (rows as { file_id: string; title: string }[]).map((row) => ({ fileId: row.file_id, title: row.title, path: `${storeId}/${row.file_id}` }));
+  }
+
+  async function readFile(storeId: string, fileId: string): Promise<string> {
+    const rows = await sql`select content from sonik_agent_ui.agent_knowledge_files where store_id = ${storeId} and file_id = ${fileId}`;
+    if (rows.length === 0) throw new Error(`Knowledge file not found: ${storeId}/${fileId}`);
+    return (rows[0] as { content: string }).content;
+  }
+
+  async function removeFile(storeId: string, fileId: string): Promise<void> {
+    await sql`delete from sonik_agent_ui.agent_knowledge_files where store_id = ${storeId} and file_id = ${fileId}`; // idempotent no-op if absent, matches file-based store
+  }
+
+  async function writeArtifactFile(storeId: string, title: string, content: string): Promise<{ storeId: string; fileRef: KnowledgeFileRef }> {
+    await sql`insert into sonik_agent_ui.agent_knowledge_stores (store_id, title) values (${storeId}, ${title}) on conflict (store_id) do nothing`;
     const fileRef = await addFile(storeId, { title, content });
     return { storeId, fileRef };
   }

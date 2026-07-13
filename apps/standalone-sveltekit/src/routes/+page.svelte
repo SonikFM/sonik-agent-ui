@@ -3912,7 +3912,7 @@
 </script>
 
 {#if workspaceMode === "workflow-builder"}
-<WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} />
+<WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} onExit={() => { workspaceMode = "workspace"; }} />
 {:else}
 <WorkspaceRoot title="Sonik Chat" {artifactOpen} layoutMode={workspaceLayoutMode} railMode={workspaceRailMode}>
   {#snippet rail()}

@@ -9,6 +9,9 @@ import {
   validateWorkflowDefinition,
   WORKFLOW_NODE_TYPES,
   LIVE_CONTROLLER_NODE_TYPES,
+  agentRequiresToolUse,
+  isModelIncompatible,
+  formatModelContextWindow,
 } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts";
 
 // Phase 5 (agent-creation-tool-plan-2026-07-13.md, Decision 3): the missing
@@ -65,6 +68,23 @@ for (const family of families) {
   assert.deepEqual(ids, ids.slice().sort((a, b) => a.localeCompare(b)), `capabilities within family ${family.familyId} must be sorted`);
 }
 
+// -- builder-model.ts: model-picker helpers (Dify-bar incompatible flag) ----
+
+assert.equal(agentRequiresToolUse(emptyAgent), false, "a fresh agent with no tool grants must not require tool-use");
+const toolGrantedAgent = { ...emptyAgent, toolPolicy: { [families[0].familyId]: "ask" } };
+assert.equal(agentRequiresToolUse(toolGrantedAgent), true, "any non-off family grant means the agent requires tool-use");
+const offOnlyAgent = { ...emptyAgent, toolPolicy: { [families[0].familyId]: "off" } };
+assert.equal(agentRequiresToolUse(offOnlyAgent), false, "an explicit off grant must not count as requiring tool-use");
+
+assert.equal(isModelIncompatible(emptyAgent, { supportsTools: false }), false, "no tool grants at all means no model can be incompatible on tool-use grounds");
+assert.equal(isModelIncompatible(toolGrantedAgent, { supportsTools: false }), true, "a tool-granted agent on a model that explicitly lacks tool-use must flag incompatible");
+assert.equal(isModelIncompatible(toolGrantedAgent, { supportsTools: true }), false, "a model that explicitly supports tools must never flag incompatible");
+assert.equal(isModelIncompatible(toolGrantedAgent, {}), false, "unknown tool-use capability (undefined) must never read as a false incompatibility");
+
+assert.equal(formatModelContextWindow(undefined), "context unknown");
+assert.equal(formatModelContextWindow(8_000), "8K context");
+assert.equal(formatModelContextWindow(2_000_000), "2M context");
+
 assert.equal(effectiveFamilyMode(emptyAgent, families[0].familyId), "off", "an ungranted family must read as off, never silently allow");
 const grantedAgent = { ...emptyAgent, toolPolicy: { [families[0].familyId]: "allow" } };
 assert.equal(effectiveFamilyMode(grantedAgent, families[0].familyId), "allow", "effectiveFamilyMode must reflect an actual grant");
@@ -119,9 +139,9 @@ assert.equal(
   "app shell should conditionally mount the workflow builder instead of the chat workspace",
 );
 assert.equal(
-  pageSource.includes('<WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} />'),
+  pageSource.includes('<WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} onExit={() => { workspaceMode = "workspace"; }} />'),
   true,
-  "app shell should mount WorkflowBuilderRoot and capture its controller",
+  "app shell should mount WorkflowBuilderRoot, capture its controller, and pass an onExit that returns to chat (the builder toolbar toggle unmounts in builder mode)",
 );
 assert.equal(
   pageSource.includes("getBuilderState: () => builderController?.snapshot() ?? null"),
@@ -212,6 +232,40 @@ assert.equal(
   configPanelSource.includes("definition = { ...definition, toolPolicy: { ...definition.toolPolicy, [familyId]: mode } }"),
   true,
   "tool-scoping edits should patch toolPolicy on the bindable definition for the parent to validate/save",
+);
+assert.equal(
+  configPanelSource.includes('import { isModelIncompatible, formatModelContextWindow } from "./builder-model"'),
+  true,
+  "config panel's model picker must source incompatible-flagging and context-window formatting from the shared builder-model helpers",
+);
+assert.equal(
+  configPanelSource.includes("modelOptions?: AgentModelOption[]"),
+  true,
+  "config panel must accept the live model catalog as a prop rather than hardcoding the static list",
+);
+assert.equal(
+  configPanelSource.includes("Search models"),
+  true,
+  "the model picker must be searchable (Dify-bar UX), not a plain static select",
+);
+assert.equal(
+  configPanelSource.includes("isModelIncompatible(definition, option)"),
+  true,
+  "each rendered model option must be checked against the current definition's tool grants for incompatible flagging",
+);
+
+// -- WorkflowBuilderRoot.svelte: owns the model-catalog fetch (D016-adjacent
+// separation -- AgentConfigPanel above asserts it never calls fetch itself) --
+
+assert.equal(
+  builderRootSource.includes('fetch("/api/agent-models")'),
+  true,
+  "WorkflowBuilderRoot must fetch the live model catalog itself since AgentConfigPanel is not allowed to call the network",
+);
+assert.equal(
+  builderRootSource.includes("modelOptions={modelOptions}") || builderRootSource.includes("{modelOptions}"),
+  true,
+  "WorkflowBuilderRoot must pass the fetched model catalog down into AgentConfigPanel",
 );
 
 // -- DebugPreviewPane.svelte: sends draftAgentId ----------------------------
