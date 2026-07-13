@@ -218,10 +218,11 @@
         <Card.Root>
           <Card.Header>
             <Card.Title>Your workflow (draft)</Card.Title>
-            <Card.Description>Editable. Schema-validated against workflowDefinitionSchema on every change.</Card.Description>
+            <Card.Description>Editable. Schema-validated against workflowDefinitionSchema on every change. Describe one in Debug &amp; Preview and it loads here; Run drives it through the controller.</Card.Description>
           </Card.Header>
-          <Card.Content>
+          <Card.Content class="flex flex-col gap-4">
             <WorkflowCanvas bind:workflow={draftWorkflow} lockState={draftLockState} />
+            <WorkflowRunPanel workflow={draftWorkflow} />
           </Card.Content>
         </Card.Root>
         <Card.Root>
@@ -247,7 +248,17 @@
     </Tabs.Content>
 
     <Tabs.Content value="preview">
-      <DebugPreviewPane draftAgentId={agentId} />
+      <DebugPreviewPane
+        draftAgentId={agentId}
+        onWorkflowDrafted={(drafted) => {
+          // Describe -> draft -> canvas: the drafting agent's validated workflow
+          // loads into the editable draft and jumps to the canvas so it's ready
+          // to inspect and Run.
+          draftWorkflow = drafted;
+          draftLockState = "draft";
+          setTab("canvas");
+        }}
+      />
     </Tabs.Content>
   </Tabs.Root>
 </div>

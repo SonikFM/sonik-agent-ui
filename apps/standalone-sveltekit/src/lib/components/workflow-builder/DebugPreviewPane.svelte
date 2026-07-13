@@ -19,13 +19,43 @@
   import type { DataPart } from "@json-render/svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
+  import type { WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
 
   interface Props {
     draftAgentId: string;
+    /** Fired when the drafting agent returns a validated workflow, so the shell
+     *  can load it onto the canvas (describe -> draft -> canvas). */
+    onWorkflowDrafted?: (workflow: WorkflowDefinition) => void;
   }
-  let { draftAgentId }: Props = $props();
+  let { draftAgentId, onWorkflowDrafted }: Props = $props();
 
   let input = $state("");
+  let lastDraftedSignature = "";
+
+  // Scan the chat for the draftWorkflow tool's validated output and surface it
+  // to the shell. Defensive: the tool result rides in message parts as
+  // `{ kind: "workflow-draft", ok, workflow }`; unknown part shapes are ignored.
+  function scanForDraftedWorkflow(): void {
+    if (!onWorkflowDrafted) return;
+    for (let i = preview.messages.length - 1; i >= 0; i -= 1) {
+      for (const part of (preview.messages[i].parts ?? []) as unknown[]) {
+        const output = (part as { output?: unknown }).output;
+        if (!output || typeof output !== "object") continue;
+        const draft = output as { kind?: unknown; ok?: unknown; workflow?: WorkflowDefinition };
+        if (draft.kind !== "workflow-draft" || draft.ok !== true || !draft.workflow) continue;
+        const signature = JSON.stringify(draft.workflow);
+        if (signature === lastDraftedSignature) return;
+        lastDraftedSignature = signature;
+        onWorkflowDrafted(draft.workflow);
+        return;
+      }
+    }
+  }
+  $effect(() => {
+    // depend on the messages array so the scan reruns as the stream lands parts
+    void preview.messages.length;
+    scanForDraftedWorkflow();
+  });
 
   const preview = new Chat({
     transport: new DefaultChatTransport({

@@ -201,9 +201,19 @@ assert.equal(
   "saveDraft must call the Phase 4 agent-definitions endpoint",
 );
 assert.equal(
-  builderRootSource.includes("<DebugPreviewPane draftAgentId={agentId} />"),
+  builderRootSource.includes("draftAgentId={agentId}"),
   true,
   "the preview tab must pass the current working agentId into Debug & Preview",
+);
+assert.equal(
+  builderRootSource.includes("onWorkflowDrafted") && builderRootSource.includes("setTab(\"canvas\")"),
+  true,
+  "Debug & Preview drafts must load onto the canvas (describe -> draft -> canvas)",
+);
+assert.equal(
+  builderRootSource.includes("<WorkflowRunPanel workflow={draftWorkflow} />"),
+  true,
+  "the user's own draft workflow must be runnable, not only the shipped fixtures",
 );
 
 // -- AgentConfigPanel.svelte: reflects grants, never issues them ------------
