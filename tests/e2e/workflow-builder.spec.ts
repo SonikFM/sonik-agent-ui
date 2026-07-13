@@ -90,6 +90,12 @@ test("the shipped reservation fixture renders LOCKED alongside an editable DRAFT
   await page.getByRole("tab", { name: "Canvas" }).click();
 
   await expect(page.getByText("Example: booking reservation workflow")).toBeVisible();
-  await expect(page.getByText("LOCKED", { exact: true })).toBeVisible();
+  // Scope LOCKED to the reservation fixture's own card: the canvas now also
+  // renders a second locked fixture (the runnable campaign workflow), so a
+  // page-wide getByText("LOCKED") matches two badges and trips strict mode.
+  const reservationCard = page
+    .locator('[data-slot="card"]')
+    .filter({ hasText: "Example: booking reservation workflow" });
+  await expect(reservationCard.getByText("LOCKED", { exact: true })).toBeVisible();
   await expect(page.getByText("DRAFT", { exact: true })).toBeVisible();
 });
