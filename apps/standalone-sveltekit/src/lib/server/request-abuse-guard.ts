@@ -19,7 +19,10 @@ export async function readJsonBodyWithSizeCap(request: Request, maxBytes = MAX_J
     return { ok: false, status: 413, error: "payload_too_large" };
   }
   const raw = await request.text();
-  if (raw.length > maxBytes) {
+  // P3: byte length, not UTF-16 code-unit length -- multi-byte characters (emoji,
+  // most non-Latin scripts) make `raw.length` undercount the actual payload size.
+  // TextEncoder (not Buffer) so this works identically under the Cloudflare adapter.
+  if (new TextEncoder().encode(raw).byteLength > maxBytes) {
     return { ok: false, status: 413, error: "payload_too_large" };
   }
   try {
@@ -31,15 +34,34 @@ export async function readJsonBodyWithSizeCap(request: Request, maxBytes = MAX_J
 
 export interface RateLimiter {
   tryConsume(key: string): boolean;
+  /** Number of buckets currently held. Mainly for tests/observability of the idle-eviction guard below. */
+  size(): number;
 }
 
-/** In-memory token bucket, one bucket per key. */
-export function createTokenBucketRateLimiter(opts: { capacity: number; refillPerMs: number; now?: () => number }): RateLimiter {
+/** In-memory token bucket, one bucket per key.
+ *  P2: unbounded key spaces (e.g. keyed by client IP) would otherwise grow this
+ *  map forever. Idle buckets (untouched for `idleEvictMs`) are swept lazily on
+ *  a call rather than on a timer -- ponytail: no background interval to leak or
+ *  clean up, and the sweep itself is throttled to once per idleEvictMs so it
+ *  doesn't turn every call into an O(map size) scan. */
+export function createTokenBucketRateLimiter(opts: { capacity: number; refillPerMs: number; now?: () => number; idleEvictMs?: number }): RateLimiter {
   const buckets = new Map<string, { tokens: number; last: number }>();
   const now = opts.now ?? Date.now;
+  const idleEvictMs = opts.idleEvictMs ?? 10 * 60_000;
+  let lastSweep = now();
+
+  function evictIdleBuckets(nowMs: number): void {
+    if (nowMs - lastSweep < idleEvictMs) return;
+    lastSweep = nowMs;
+    for (const [key, bucket] of buckets) {
+      if (nowMs - bucket.last >= idleEvictMs) buckets.delete(key);
+    }
+  }
+
   return {
     tryConsume(key: string): boolean {
       const nowMs = now();
+      evictIdleBuckets(nowMs);
       const bucket = buckets.get(key) ?? { tokens: opts.capacity, last: nowMs };
       const refilled = Math.min(opts.capacity, bucket.tokens + Math.max(0, nowMs - bucket.last) * opts.refillPerMs);
       if (refilled < 1) {
@@ -48,6 +70,9 @@ export function createTokenBucketRateLimiter(opts: { capacity: number; refillPer
       }
       buckets.set(key, { tokens: refilled - 1, last: nowMs });
       return true;
+    },
+    size(): number {
+      return buckets.size;
     },
   };
 }

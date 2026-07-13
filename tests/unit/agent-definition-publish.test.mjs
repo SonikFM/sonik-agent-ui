@@ -47,6 +47,20 @@ assert.throws(
 // A version bump publishes cleanly and becomes the new "current" resolution.
 const editedDraft = agentDefinitionSchema.parse({ ...draftDefinition, title: "Campaign Drafter v2", toolPolicy: { "booking-resources": "allow", booking: "off" } });
 store.saveDraft(editedDraft);
+
+// P1: publish rejects any packageSemver that doesn't advance past the latest published version,
+// not just an exact duplicate (D002 above only catches the identical-version case).
+assert.throws(
+  () => store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.0.9" }),
+  /monotonic increase required/,
+  "publishing a semver lower than the latest published version is rejected",
+);
+assert.throws(
+  () => store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.1.0" }),
+  /already published/,
+  "publishing the exact latest-published semver again still hits the D002 duplicate check",
+);
+
 const versionTwo = store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.2.0" });
 assert.equal(store.listPublishedVersions(draftDefinition.agentId).length, 2, "both published versions are retained (append-only)");
 assert.deepEqual(store.resolvePublished(draftDefinition.agentId), editedDraft, "resolvePublished resolves the MOST RECENT published version");

@@ -55,6 +55,11 @@ export interface WorkflowRunsDeps {
    *  so a configured DATABASE_URL/SONIK_AGENT_UI_DATABASE_URL makes this durable with no caller change. */
   store?: AsyncWorkflowRunStore;
   knowledgeStore?: KnowledgeStore;
+  /** P0 #1: platform.env on Cloudflare (secrets aren't on process.env there) --
+   *  threaded into createKnowledgeStore so the campaign commit path's
+   *  writeArtifactFile actually durably persists on Workers. Ignored when
+   *  knowledgeStore is passed directly (tests/callers that override it). */
+  env?: Record<string, unknown> | null;
 }
 
 /** Registered node-callback factories, keyed by the workflow's own workflowId (not packageVersionId
@@ -100,6 +105,16 @@ function nodeById(definition: WorkflowDefinition, nodeId: string) {
   return definition.nodes.find((node) => node.nodeId === nodeId);
 }
 
+// P3: `action.runId` on "start" is client-supplied (used to resume/pin a specific run id);
+// a colliding value hits agent_workflow_runs's `run_id text primary key` and throws a
+// Postgres unique_violation, which would otherwise surface as an unhandled 500.
+function isRunIdConflictError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  if ((error as { code?: unknown }).code === "23505") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /duplicate key/i.test(message);
+}
+
 export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps: WorkflowRunsDeps): Promise<WorkflowRunsResult> {
   const store = deps.store ?? wrapWorkflowRunStoreAsync(workflowRunStore);
 
@@ -133,8 +148,19 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     }
 
     const runId = action.runId ?? randomUUID();
+    if (action.runId) {
+      const existingRun = await store.getRun(runId);
+      if (existingRun) return { ok: false, reason: "run_id_conflict" };
+    }
     const state = startControllerRun(definition, { runId, workflowVersionId, artifactId: action.artifactId ?? null });
-    await store.createRun({ workflowId: definition.workflowId, workflowVersionId, definition, input: runInput, state });
+    try {
+      await store.createRun({ workflowId: definition.workflowId, workflowVersionId, definition, input: runInput, state });
+    } catch (error) {
+      // Race past the getRun check above straight into the store's run_id primary key --
+      // surface that as a clean conflict result too, not an unhandled 500.
+      if (isRunIdConflictError(error)) return { ok: false, reason: "run_id_conflict" };
+      throw error;
+    }
     return { ok: true, run: state };
   }
 
@@ -145,7 +171,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     const node = nodeById(row.definition, action.nodeId);
     if (!node) return { ok: false, reason: "unknown_node", run: row.state };
     if (node.type !== "tool_preview") return { ok: false, reason: "node_is_not_tool_preview", run: row.state };
-    const callbacks = resolveCallbacks(row.workflowId, row.input, deps.knowledgeStore);
+    const callbacks = resolveCallbacks(row.workflowId, row.input, deps.knowledgeStore, deps.env);
     const result = await runWorkflowNode(row.state, row.definition, action.nodeId, callbacks);
     const updated = (await store.updateRunState(action.runId, result.state)) ?? row;
     return result.ok ? { ok: true, run: updated.state } : { ok: false, reason: result.reason, run: updated.state };
@@ -179,15 +205,15 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
   const node = nodeById(row.definition, action.nodeId);
   if (!node) return { ok: false, reason: "unknown_node", run: row.state };
   if (node.type !== "tool_commit") return { ok: false, reason: "node_is_not_tool_commit", run: row.state };
-  const callbacks = resolveCallbacks(row.workflowId, row.input, deps.knowledgeStore);
+  const callbacks = resolveCallbacks(row.workflowId, row.input, deps.knowledgeStore, deps.env);
   const result = await runWorkflowNode(row.state, row.definition, action.nodeId, callbacks);
   const updated = (await store.updateRunState(action.runId, result.state)) ?? row;
   return result.ok ? { ok: true, run: updated.state } : { ok: false, reason: result.reason, run: updated.state };
 }
 
-function resolveCallbacks(workflowId: string, input: unknown, knowledgeStoreOverride?: KnowledgeStore): WorkflowControllerCallbacks {
+function resolveCallbacks(workflowId: string, input: unknown, knowledgeStoreOverride?: KnowledgeStore, env?: Record<string, unknown> | null): WorkflowControllerCallbacks {
   const registered = registeredWorkflows[workflowId];
   if (!registered) return {};
-  const knowledgeStore = knowledgeStoreOverride ?? createKnowledgeStore(defaultKnowledgeRoot());
+  const knowledgeStore = knowledgeStoreOverride ?? createKnowledgeStore(defaultKnowledgeRoot(), env);
   return registered.buildCallbacks(input, knowledgeStore);
 }

@@ -36,6 +36,13 @@ async function assertAgentDefinitionStoreContract(store, label) {
 
   const editedDraft = agentDefinitionSchema.parse({ ...draftDefinition, title: "Contract Test Agent v2" });
   await store.saveDraft(editedDraft);
+
+  await assert.rejects(
+    () => store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.0.9" }),
+    /monotonic increase required/,
+    `${label}: publishing a semver lower than the latest published version is rejected`,
+  );
+
   const versionTwo = await store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.2.0" });
   assert.notEqual(versionTwo.packageVersionId, versionOne.packageVersionId, `${label}: version bump publishes a distinct packageVersionId`);
 

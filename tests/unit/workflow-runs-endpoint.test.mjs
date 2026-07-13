@@ -95,6 +95,17 @@ try {
   assert.deepEqual(JSON.parse(persistedContent), assembleAmplifyCampaignContent(brief));
 
   console.log("workflow-runs-endpoint: full lifecycle + persistence passed");
+
+  // 7. NEGATIVE: a client-supplied runId colliding with an existing run must be a clean
+  // conflict result, not an unhandled 500 (P3, production-readiness ledger).
+  const collisionRunId = "workflow-run-collision-test";
+  const firstStart = await handleWorkflowRunsAction({ action: "start", runId: collisionRunId, workflowId: "amplify.campaign.create", brief }, deps(null));
+  assert.equal(firstStart.ok, true, "first start with an explicit runId succeeds");
+  const collidingStart = await handleWorkflowRunsAction({ action: "start", runId: collisionRunId, workflowId: "amplify.campaign.create", brief }, deps(null));
+  assert.equal(collidingStart.ok, false, "a colliding client-supplied runId must be rejected, not thrown");
+  assert.equal(collidingStart.reason, "run_id_conflict");
+
+  console.log("workflow-runs-endpoint: colliding client-supplied runId returns a clean conflict result");
 } finally {
   await rm(knowledgeRoot, { recursive: true, force: true });
 }

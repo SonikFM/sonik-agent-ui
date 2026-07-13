@@ -92,6 +92,12 @@ export const workflowRunApprovalStateSchema = z.object({
   status: z.enum(["none", "requested", "approved", "rejected"]),
   hostSigned: z.boolean().default(false),
   approvedCommandIds: z.array(z.string()).default([]),
+  // Input tamper-evidence: the stableInputHash of each covered commandId's
+  // preview, captured at approve time (keyed by commandId). It lives INSIDE the
+  // host-signed approval state, so on a persisted/resumed run (Neon) a commit is
+  // refused if the preview it commits no longer hashes to what was approved —
+  // closing the approve-input-X / commit-input-Y hole. See commit_started.
+  approvedInputHashes: z.record(z.string(), z.string()).default({}),
 }).strict().superRefine((approval, ctx) => {
   if (approval.status === "approved" && !approval.hostSigned) {
     ctx.addIssue({ code: "custom", path: ["hostSigned"], message: "model_supplied_approval_is_not_trusted" });
@@ -247,12 +253,24 @@ export function applyWorkflowRunEvent(state: WorkflowRunState, event: WorkflowRu
       if (approvedCommandIds.length === 0 && commitNodeCount > 1) {
         return reject(state, "untargeted_approval_requires_explicit_commandIds");
       }
+      // Capture the stableInputHash of every previewed commandId this approval
+      // covers, so commit_started can refuse a commit whose preview drifted from
+      // what was approved (see schema comment). Untargeted approval covers all
+      // previewed commandIds; a targeted one only its named commandIds.
+      const approvedInputHashes: Record<string, string> = {};
+      for (const node of Object.values(state.nodeStates)) {
+        const hash = node.preview?.stableInputHash;
+        if (!hash || !node.commandId) continue;
+        if (approvedCommandIds.length === 0 || approvedCommandIds.includes(node.commandId)) {
+          approvedInputHashes[node.commandId] = hash;
+        }
+      }
       return {
         ok: true,
         state: {
           ...state,
           phase: "approved",
-          approvalState: { status: "approved", hostSigned: true, approvedCommandIds },
+          approvalState: { status: "approved", hostSigned: true, approvedCommandIds, approvedInputHashes },
         },
       };
     }
@@ -270,9 +288,24 @@ export function applyWorkflowRunEvent(state: WorkflowRunState, event: WorkflowRu
       // untargeted approval (empty approvedCommandIds) covers any node, which
       // is what every single-commit-node run (reservation, Phase 1/3a) does
       // today and keeps doing unchanged.
-      const { approvedCommandIds } = state.approvalState;
+      const { approvedCommandIds, approvedInputHashes } = state.approvalState;
       if (approvedCommandIds.length > 0 && node.commandId && !approvedCommandIds.includes(node.commandId)) {
         return reject(state, "approval_does_not_cover_this_node");
+      }
+      // Input tamper-evidence: the preview this commit executes must still hash
+      // to what was approved. On a persisted/resumed run a swapped/re-hydrated
+      // preview no longer matches the hash captured inside the host-signed
+      // approval, so the commit is refused — closing approve-X / commit-Y.
+      if (node.commandId) {
+        const approvedHash = approvedInputHashes[node.commandId];
+        if (approvedHash) {
+          const currentHash = Object.values(state.nodeStates).find(
+            (candidate) => candidate.commandId === node.commandId && candidate.preview?.stableInputHash,
+          )?.preview?.stableInputHash;
+          if (currentHash && currentHash !== approvedHash) {
+            return reject(state, "commit_input_hash_mismatch");
+          }
+        }
       }
       const next = withNode(state, event.nodeId, { status: "committing" });
       return { ok: true, state: { ...next, phase: "committing", currentNodeId: event.nodeId } };

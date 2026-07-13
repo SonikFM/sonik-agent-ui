@@ -126,4 +126,28 @@ assert.equal(
   "approved-without-hostSigned is structurally invalid",
 );
 
+// Input tamper-evidence: a commit whose preview drifted from the approved
+// stableInputHash is refused (approve-input-X / commit-input-Y).
+{
+  let s = startWorkflowRun({
+    type: "start", runId: "tamper", workflowId: "w", workflowVersionId: "w@1.0.0",
+    facadeToolIds: ["booking.create.booking"],
+    nodes: [
+      { nodeId: "p", type: "tool_preview", commandId: "booking.create.booking", effect: "write" },
+      { nodeId: "c", type: "tool_commit", commandId: "booking.create.booking", effect: "write" },
+    ],
+    entryNodeId: "p",
+  });
+  s = applyWorkflowRunEvent(s, { type: "preview_ready", nodeId: "p", preview: { commandId: "booking.create.booking", stableInputHash: "approved-hash", effect: "write", approvalRequired: true } }).state;
+  s = applyWorkflowRunEvent(s, { type: "request_approval", nodeId: "c" }).state;
+  s = applyWorkflowRunEvent(s, { type: "approve", hostSigned: true, approvedCommandIds: ["booking.create.booking"] }).state;
+  assert.equal(s.approvalState.approvedInputHashes["booking.create.booking"], "approved-hash", "approved input hash captured into host-signed approval");
+  // Untampered commit proceeds.
+  assert.equal(applyWorkflowRunEvent(s, { type: "commit_started", nodeId: "c" }).ok, true, "matching preview commits");
+  // Tamper the persisted preview after approval → commit refused.
+  const tampered = { ...s, nodeStates: { ...s.nodeStates, p: { ...s.nodeStates.p, preview: { ...s.nodeStates.p.preview, stableInputHash: "swapped-hash" } } } };
+  const blocked = applyWorkflowRunEvent(tampered, { type: "commit_started", nodeId: "c" });
+  assert.deepEqual({ ok: blocked.ok, reason: blocked.reason }, { ok: false, reason: "commit_input_hash_mismatch" }, "commit refused when preview drifts from approved hash");
+}
+
 console.log("workflow-run-state.test.mjs passed");

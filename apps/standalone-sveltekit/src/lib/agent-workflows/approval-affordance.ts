@@ -57,7 +57,7 @@ function baseRunState(input: {
         required: false,
       },
     },
-    approvalState: { status: "none", hostSigned: false, approvedCommandIds: [] },
+    approvalState: { status: "none", hostSigned: false, approvedCommandIds: [], approvedInputHashes: {} },
     receipts: [],
   };
 }

@@ -59,6 +59,40 @@ function manifestHashFor(manifestWithoutHash: Record<string, unknown>): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(manifestWithoutHash)).digest("hex")}`;
 }
 
+// P1 (production-readiness ledger): publish must reject a packageSemver that
+// doesn't move a published agent forward, not just an exact duplicate (D002
+// only catches the identical-version case). ponytail: numeric major.minor.patch
+// prefix only, no pre-release/build-tag ordering -- semverLikeSchema allows a
+// trailing "-beta"/"+build" suffix, which this ignores when comparing; upgrade
+// to a real semver lib if pre-release ordering ever matters here.
+function parseSemverPrefix(semver: string): [number, number, number] | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(semver.trim());
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+/** Positive when `next` is newer than `latest`, 0 when equal, negative when older.
+ *  Unparsable input (shouldn't happen past agentDefinitionSchema/semverLikeSchema
+ *  validation) never blocks -- publish's other checks still catch the real
+ *  duplicate case. */
+function compareSemverPrefix(next: string, latest: string): number {
+  const nextParts = parseSemverPrefix(next);
+  const latestParts = parseSemverPrefix(latest);
+  if (!nextParts || !latestParts) return 1;
+  for (let i = 0; i < 3; i++) {
+    if (nextParts[i] !== latestParts[i]) return nextParts[i] - latestParts[i];
+  }
+  return 0;
+}
+
+function assertSemverAdvancesPast(agentId: string, packageSemver: string, latestPublishedSemver: string | undefined): void {
+  if (latestPublishedSemver === undefined) return;
+  if (compareSemverPrefix(packageSemver, latestPublishedSemver) <= 0) {
+    throw new Error(
+      `packageSemver ${packageSemver} must be greater than the latest published semver ${latestPublishedSemver} for ${agentId} (monotonic increase required)`,
+    );
+  }
+}
+
 /** Shared by every backing (in-memory + Neon): builds the immutable published
  *  MarketplacePackageVersion{kind:"agent"} envelope for a draft (D002). Pulled
  *  out so the Neon-backed store (below) doesn't hand-roll a second copy of the
@@ -102,14 +136,18 @@ export function createInMemoryAgentDefinitionStore(): AgentDefinitionStore {
     return record;
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands --
+  // drafts are process-wide across tenants until then (same seam as saveDraft above).
   function getDraft(agentId: string): AgentDefinitionDraftRecord | null {
     return drafts.get(agentId) ?? null;
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands.
   function listDrafts(): AgentDefinitionDraftRecord[] {
     return [...drafts.values()];
   }
 
+  // org scoping seam: scope the delete by organization_id once the auth/org lane lands.
   function deleteDraft(agentId: string): boolean {
     return drafts.delete(agentId);
   }
@@ -122,15 +160,19 @@ export function createInMemoryAgentDefinitionStore(): AgentDefinitionStore {
     if (existing.some((version) => version.packageVersionId === packageVersionId)) {
       throw new Error(`Package version ${packageVersionId} is already published (packageVersionId is immutable, D002) -- bump packageSemver`);
     }
+    assertSemverAdvancesPast(draft.agentId, input.packageSemver, existing.at(-1)?.packageSemver);
     const version = buildAgentDefinitionPackageVersion(draft.definition, input, packageVersionId);
     publishedVersions.set(draft.agentId, [...existing, version]);
     return version;
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands --
+  // published versions are process-wide across tenants until then.
   function listPublishedVersions(agentId: string): MarketplacePackageVersion[] {
     return publishedVersions.get(agentId) ?? [];
   }
 
+  // org scoping seam: same as listPublishedVersions above.
   function resolvePublished(agentId: string): AgentDefinition | null {
     const versions = publishedVersions.get(agentId);
     if (!versions || versions.length === 0) return null;
@@ -213,6 +255,8 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     return { agentId: parsed.agentId, definition: parsed, updatedAt };
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands --
+  // drafts are process-wide across tenants until then (same seam as saveDraft above).
   async function getDraft(agentId: string): Promise<AgentDefinitionDraftRecord | null> {
     const rows = await sql`select agent_id, definition, updated_at from sonik_agent_ui.agent_definition_drafts where agent_id = ${agentId}`;
     if (rows.length === 0) return null;
@@ -220,6 +264,7 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     return { agentId: row.agent_id, definition: row.definition, updatedAt: new Date(row.updated_at).toISOString() };
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands.
   async function listDrafts(): Promise<AgentDefinitionDraftRecord[]> {
     const rows = await sql`select agent_id, definition, updated_at from sonik_agent_ui.agent_definition_drafts`;
     return (rows as { agent_id: string; definition: AgentDefinition; updated_at: string }[]).map((row) => ({
@@ -229,6 +274,7 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     }));
   }
 
+  // org scoping seam: scope the delete by organization_id once the auth/org lane lands.
   async function deleteDraft(agentId: string): Promise<boolean> {
     const rows = await sql`delete from sonik_agent_ui.agent_definition_drafts where agent_id = ${agentId} returning agent_id`;
     return rows.length > 0;
@@ -242,6 +288,13 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     if (existing.length > 0) {
       throw new Error(`Package version ${packageVersionId} is already published (packageVersionId is immutable, D002) -- bump packageSemver`);
     }
+    const latestRows = await sql`
+      select version ->> 'packageSemver' as package_semver from sonik_agent_ui.agent_definition_published_versions
+      where agent_id = ${input.agentId}
+      order by seq desc
+      limit 1
+    `;
+    assertSemverAdvancesPast(draft.agentId, input.packageSemver, (latestRows[0] as { package_semver: string } | undefined)?.package_semver);
     const version = buildAgentDefinitionPackageVersion(draft.definition, input, packageVersionId);
     // org scoping seam: same as saveDraft above.
     await sql`
@@ -251,6 +304,8 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     return version;
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands --
+  // published versions are process-wide across tenants until then.
   async function listPublishedVersions(agentId: string): Promise<MarketplacePackageVersion[]> {
     const rows = await sql`
       select version from sonik_agent_ui.agent_definition_published_versions
@@ -260,6 +315,7 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     return (rows as { version: unknown }[]).map((row) => marketplacePackageVersionSchema.parse(row.version));
   }
 
+  // org scoping seam: same as listPublishedVersions above.
   async function resolvePublished(agentId: string): Promise<AgentDefinition | null> {
     const rows = await sql`
       select version from sonik_agent_ui.agent_definition_published_versions

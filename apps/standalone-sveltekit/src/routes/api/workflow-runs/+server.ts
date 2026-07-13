@@ -19,7 +19,8 @@ export const POST: RequestHandler = async (event) => {
   }
 
   const hostSession = createAgentHostSessionEnvelope(event);
-  const store = resolveWorkflowRunStore(event.platform?.env as Record<string, unknown> | undefined);
-  const result = await handleWorkflowRunsAction(action, { hostSession, store });
+  const env = event.platform?.env as Record<string, unknown> | undefined;
+  const store = resolveWorkflowRunStore(env);
+  const result = await handleWorkflowRunsAction(action, { hostSession, store, env });
   return json(result, { status: 200 });
 };

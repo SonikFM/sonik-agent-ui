@@ -42,11 +42,13 @@ export function defaultKnowledgeRoot(): string {
   return process.env.SONIK_AGENT_UI_KNOWLEDGE_ROOT?.trim() || path.join(process.cwd(), ".data", "knowledge");
 }
 
-function readKnowledgeDatabaseUrl(): string | null {
+function readKnowledgeDatabaseUrl(env?: Record<string, unknown> | null): string | null {
   // Same env var names/precedence as workspace-services.ts / agent-definition-store.ts,
   // so one deploy env config (SONIK_AGENT_UI_DATABASE_URL) backs all three stores.
+  // `env` (platform.env on Cloudflare, where secrets never reach process.env) is
+  // checked first; process.env stays a fallback for node/local dev/tests.
   for (const key of ["SONIK_AGENT_UI_DATABASE_URL", "DATABASE_URL", "POSTGRES_URL", "NEON_DATABASE_URL"]) {
-    const value = process.env[key];
+    const value = env?.[key] ?? process.env[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
@@ -57,10 +59,11 @@ function readKnowledgeDatabaseUrl(): string | null {
  *  ephemeral there. Dispatches to Neon when a DB env is configured, else
  *  keeps today's file-based behavior (local dev + existing tests, which set
  *  no DATABASE_URL, are unaffected). `rootDir` is only meaningful for the
- *  file-based fallback; resolveKnowledgeContext.ts is untouched -- it just
- *  calls this same exported function name with the same signature. */
-export function createKnowledgeStore(rootDir: string): KnowledgeStore {
-  const databaseUrl = readKnowledgeDatabaseUrl();
+ *  file-based fallback. `env` should be `platform.env` on Cloudflare (secrets
+ *  live there, not on process.env) -- callers that omit it keep today's
+ *  process.env-only dispatch. */
+export function createKnowledgeStore(rootDir: string, env?: Record<string, unknown> | null): KnowledgeStore {
+  const databaseUrl = readKnowledgeDatabaseUrl(env);
   return databaseUrl ? createNeonKnowledgeStore(databaseUrl) : createFileKnowledgeStore(rootDir);
 }
 
@@ -89,6 +92,10 @@ function createFileKnowledgeStore(rootDir: string): KnowledgeStore {
     await writeFile(metaPath(meta.storeId), JSON.stringify(meta, null, 2), "utf-8");
   }
 
+  // org scoping seam: add organization_id + filter once the auth/org lane
+  // resolves a trusted caller identity -- knowledge stores are process-wide
+  // across tenants until then (dev-only file backing; same seam as the Neon
+  // backing below).
   async function createStore(input: { storeId: string; title: string }): Promise<KnowledgeRef> {
     await mkdir(storeDir(input.storeId), { recursive: true });
     const existing = await readMeta(input.storeId).catch(() => null);
@@ -100,6 +107,7 @@ function createFileKnowledgeStore(rootDir: string): KnowledgeStore {
     return { storeId: meta.storeId, title: meta.title, fileRefs: [], readable: true };
   }
 
+  // org scoping seam: same as createStore above.
   async function addFile(storeId: string, input: { title: string; content: string; fileId?: string }): Promise<KnowledgeFileRef> {
     const meta = await readMeta(storeId);
     const fileId = input.fileId ?? randomUUID();
@@ -110,11 +118,13 @@ function createFileKnowledgeStore(rootDir: string): KnowledgeStore {
     return fileRef;
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands.
   async function listFiles(storeId: string): Promise<KnowledgeFileRef[]> {
     const meta = await readMeta(storeId);
     return meta.files;
   }
 
+  // org scoping seam: same as listFiles above.
   async function readFile(storeId: string, fileId: string): Promise<string> {
     const meta = await readMeta(storeId);
     const fileRef = meta.files.find((f) => f.fileId === fileId);
@@ -122,6 +132,7 @@ function createFileKnowledgeStore(rootDir: string): KnowledgeStore {
     return readFileFs(filePath(storeId, fileId), "utf-8");
   }
 
+  // org scoping seam: scope the delete by organization_id once the auth/org lane lands.
   async function removeFile(storeId: string, fileId: string): Promise<void> {
     const meta = await readMeta(storeId);
     if (!meta.files.some((f) => f.fileId === fileId)) return; // ponytail: idempotent no-op, not a CRUD error path
@@ -151,6 +162,8 @@ function createFileKnowledgeStore(rootDir: string): KnowledgeStore {
 function createNeonKnowledgeStore(databaseUrl: string): KnowledgeStore {
   const sql = neon(databaseUrl.trim());
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands
+  // (shared existence check underneath every read/mutation below).
   async function ensureStoreExists(storeId: string): Promise<void> {
     const rows = await sql`select 1 from sonik_agent_ui.agent_knowledge_stores where store_id = ${storeId}`;
     if (rows.length === 0) throw new Error(`Knowledge store not found: ${storeId}`);
@@ -171,6 +184,7 @@ function createNeonKnowledgeStore(databaseUrl: string): KnowledgeStore {
     return { storeId, title, fileRefs: await listFiles(storeId), readable: true };
   }
 
+  // org scoping seam: same as createStore above.
   async function addFile(storeId: string, input: { title: string; content: string; fileId?: string }): Promise<KnowledgeFileRef> {
     await ensureStoreExists(storeId);
     const fileId = input.fileId ?? randomUUID();
@@ -182,6 +196,7 @@ function createNeonKnowledgeStore(databaseUrl: string): KnowledgeStore {
     return { fileId, title: input.title, path: `${storeId}/${fileId}` };
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands.
   async function listFiles(storeId: string): Promise<KnowledgeFileRef[]> {
     await ensureStoreExists(storeId);
     const rows = await sql`
@@ -192,16 +207,19 @@ function createNeonKnowledgeStore(databaseUrl: string): KnowledgeStore {
     return (rows as { file_id: string; title: string }[]).map((row) => ({ fileId: row.file_id, title: row.title, path: `${storeId}/${row.file_id}` }));
   }
 
+  // org scoping seam: same as listFiles above.
   async function readFile(storeId: string, fileId: string): Promise<string> {
     const rows = await sql`select content from sonik_agent_ui.agent_knowledge_files where store_id = ${storeId} and file_id = ${fileId}`;
     if (rows.length === 0) throw new Error(`Knowledge file not found: ${storeId}/${fileId}`);
     return (rows[0] as { content: string }).content;
   }
 
+  // org scoping seam: scope the delete by organization_id once the auth/org lane lands.
   async function removeFile(storeId: string, fileId: string): Promise<void> {
     await sql`delete from sonik_agent_ui.agent_knowledge_files where store_id = ${storeId} and file_id = ${fileId}`; // idempotent no-op if absent, matches file-based store
   }
 
+  // org scoping seam: same as createStore above.
   async function writeArtifactFile(storeId: string, title: string, content: string): Promise<{ storeId: string; fileRef: KnowledgeFileRef }> {
     await sql`insert into sonik_agent_ui.agent_knowledge_stores (store_id, title) values (${storeId}, ${title}) on conflict (store_id) do nothing`;
     const fileRef = await addFile(storeId, { title, content });

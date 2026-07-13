@@ -596,7 +596,7 @@ export const POST: RequestHandler = async (event) => {
   // knowledgeRefs are read from the file store and folded into system context
   // so the live agent actually answers from attached info.
   const knowledgeContext = resolvedAgentDefinition?.knowledgeRefs?.length
-    ? formatKnowledgeContextSections(await resolveKnowledgeContext(resolvedAgentDefinition.knowledgeRefs, { rootDir: defaultKnowledgeRoot() }))
+    ? formatKnowledgeContextSections(await resolveKnowledgeContext(resolvedAgentDefinition.knowledgeRefs, { rootDir: defaultKnowledgeRoot(), env: event.platform?.env as Record<string, unknown> | undefined }))
     : "";
   const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, knowledgeContext, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext

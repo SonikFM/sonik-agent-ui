@@ -50,10 +50,13 @@ export function createInMemoryWorkflowRunStore(): WorkflowRunStore {
     return row;
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands --
+  // runs are process-wide across tenants until then (same seam as createRun above).
   function getRun(runId: string): WorkflowRunRow | null {
     return rows.get(runId) ?? null;
   }
 
+  // org scoping seam: scope the update by organization_id once the auth/org lane lands.
   function updateRunState(runId: string, state: WorkflowRunState): WorkflowRunRow | null {
     const existing = rows.get(runId);
     if (!existing) return null;
@@ -140,12 +143,14 @@ export function createNeonWorkflowRunStore(databaseUrl: string): AsyncWorkflowRu
     };
   }
 
+  // org scoping seam: filter by organization_id once the auth/org lane lands.
   async function getRun(runId: string): Promise<WorkflowRunRow | null> {
     const rows = await sql`select * from sonik_agent_ui.agent_workflow_runs where run_id = ${runId}`;
     if (rows.length === 0) return null;
     return rowFromColumns(rows[0] as WorkflowRunRowColumns);
   }
 
+  // org scoping seam: scope the update by organization_id once the auth/org lane lands.
   async function updateRunState(runId: string, state: WorkflowRunState): Promise<WorkflowRunRow | null> {
     const rows = await sql`
       update sonik_agent_ui.agent_workflow_runs
