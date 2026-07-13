@@ -3573,6 +3573,9 @@
         return false;
       }
       appendIntakeCommitReceiptMessage(receipt);
+      // Same durability rule as the reservation path: persist the receipt now,
+      // not on the next stream turn (see runReservationCommitEndpoint).
+      void persistConversationMessages();
       logArtifactTelemetry({
         source: "client",
         event: receipt.ok === true ? "intake.commit_endpoint.completed" : "intake.commit_endpoint.error",
@@ -3598,12 +3601,22 @@
   }
 
 
+  // Double-commit hazard guards (2026-07-13 live report: the Approve card
+  // reappeared after opening the canvas and stayed clickable). Three layers:
+  // this in-flight flag hides the card the instant Approve is clicked; the
+  // receipt message is persisted immediately after commit (not on the next
+  // stream turn) so a session reload can't resurrect the card; and the commit
+  // endpoint dedupes on previewToolCallId server-side as the final backstop.
+  let reservationCommitInFlight = $state(false);
+
   async function runReservationCommitEndpoint(preview: ReservationApprovalPreview): Promise<boolean> {
+    if (reservationCommitInFlight) return false;
+    reservationCommitInFlight = true;
     try {
       const response = await workspaceFetch("/api/reservation/commit", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: activeSessionId, guest: preview.guest, booking: preview.booking }),
+        body: JSON.stringify({ sessionId: activeSessionId, previewToolCallId: preview.toolCallId, guest: preview.guest, booking: preview.booking }),
       });
       const receipt = await response.json().catch(() => null) as { ok?: boolean; kind?: string; steps?: unknown[]; error?: string } | null;
       if (!receipt) {
@@ -3617,6 +3630,10 @@
         return false;
       }
       appendReservationCommitReceiptMessage(receipt);
+      // Persist the receipt NOW: message persistence otherwise waits for the
+      // next stream turn, and a canvas-driven session reload in that window
+      // drops the receipt and resurrects the Approve card.
+      void persistConversationMessages();
       logArtifactTelemetry({
         source: "client",
         event: receipt.ok === true ? "reservation.commit_endpoint.completed" : "reservation.commit_endpoint.error",
@@ -3635,6 +3652,8 @@
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
+    } finally {
+      reservationCommitInFlight = false;
     }
   }
 
@@ -3956,6 +3975,9 @@
 
 
   function createReservationApprovalAffordance(): AgentApprovalAffordance | null {
+    // Hide the card the moment Approve is clicked; it only returns if the
+    // commit fails (in-flight resets in runReservationCommitEndpoint's finally).
+    if (reservationCommitInFlight) return null;
     const preview = findLatestReservationApprovalPreview();
     if (!preview) return null;
     return createApprovalAffordanceFromWorkflowRun(deriveReservationWorkflowRunState(preview), {
