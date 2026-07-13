@@ -23,7 +23,6 @@ import { draftWorkflow } from "./tools/drafting-agent";
 import { shouldMountJsonArtifactTool, type WorkspaceDocumentIntent } from "./document-intent";
 import { gateway, resolveGatewayModelId } from "./ai-gateway";
 import type { AgentRuntimeSettings } from "./agent-settings";
-import type { SystemModelMessage } from "ai";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
@@ -67,18 +66,14 @@ export function resolveAgentPromptComposition(context: AgentRuntimeContext = {})
 }
 
 
-function createAgentInstructions(context: AgentRuntimeContext): string | SystemModelMessage {
-  const prompt = resolveAgentPromptComposition(context).prompt;
-  if (!context.agentSettings?.requireZdr) return prompt;
-  return {
-    role: "system",
-    content: prompt,
-    providerOptions: {
-      gateway: {
-        zeroDataRetention: true,
-      },
-    },
-  };
+// AI SDK 7: instructions must be a plain string — passing a SystemModelMessage
+// object (the v6 way to attach providerOptions to the system prompt) now throws
+// AI_InvalidPromptError ("System messages are not allowed in the prompt or
+// messages fields") on every turn. ZDR routing rides agent-level
+// providerOptions in createAgent instead (2026-07-13 live-embed outage: every
+// requireZdr turn 503'd).
+function createAgentInstructions(context: AgentRuntimeContext): string {
+  return resolveAgentPromptComposition(context).prompt;
 }
 
 export function createAgent(context: AgentRuntimeContext = {}) {
@@ -118,11 +113,22 @@ export function createAgent(context: AgentRuntimeContext = {}) {
       ...commandCatalogTools,
       ...(context.agentSettings?.workflowBuilderMode ? { draftWorkflow } : {}),
     },
+    // The generate route prepends per-turn workspace context (page summary,
+    // command/skill startup indexes, knowledge) as a system message in
+    // `messages` — legal in v6, rejected by default in v7 with
+    // AI_InvalidPromptError, which 503'd every real embedded turn
+    // (2026-07-13 live-embed outage).
+    allowSystemInMessages: true,
     stopWhen: isStepCount(12),
     // AI SDK 7 wall-clock bounds (we previously had only the step cap): a stalled
     // provider stream or a hung tool now aborts instead of holding the request open.
     timeout: { totalMs: 120_000, stepMs: 60_000, toolMs: 30_000 },
     temperature: 0.35,
+    // ZDR is a per-call gateway routing constraint in v7 (was a SystemModelMessage
+    // providerOptions rider in v6 — see createAgentInstructions).
+    ...(context.agentSettings?.requireZdr
+      ? { providerOptions: { gateway: { zeroDataRetention: true } } }
+      : {}),
   });
 }
 
