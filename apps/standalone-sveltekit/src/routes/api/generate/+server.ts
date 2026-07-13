@@ -33,6 +33,8 @@ import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings, type AgentRuntimeSettings } from "$lib/agent-settings";
 import { definitionToRuntimeSettings } from "$lib/agent-runtime-adapter";
 import { resolvePublishedAgentDefinition, agentDefinitionStore } from "$lib/server/agent-definition-store";
+import { resolveKnowledgeContext, formatKnowledgeContextSections } from "$lib/knowledge/resolve-knowledge-context";
+import { defaultKnowledgeRoot } from "$lib/knowledge/knowledge-store";
 import { isProductTourIntent, resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
 import { createCurrentPageContextSummary } from "$lib/page-context-summary";
 import { resolveWorkspaceDocumentIntent } from "$lib/document-intent";
@@ -587,7 +589,13 @@ export const POST: RequestHandler = async (event) => {
   const startupIndexContext = includeStartupIndexes
     ? [`CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`]
     : [];
-  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
+  // Knowledge v1 read-side (AC-10, verify-wave fix): a resolved definition's
+  // knowledgeRefs are read from the file store and folded into system context
+  // so the live agent actually answers from attached info.
+  const knowledgeContext = resolvedAgentDefinition?.knowledgeRefs?.length
+    ? formatKnowledgeContextSections(await resolveKnowledgeContext(resolvedAgentDefinition.knowledgeRefs, { rootDir: defaultKnowledgeRoot() }))
+    : "";
+  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, knowledgeContext, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;

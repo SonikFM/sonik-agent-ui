@@ -8,6 +8,22 @@ import type { KnowledgeRef } from "../../../../../packages/tool-contracts/src/kn
 
 export type KnowledgeContextSection = { storeId: string; title: string; content: string };
 
+/** Render resolved knowledge sections as one prompt-ready system-context block.
+ *  Returns "" when there is nothing to attach so callers can `filter(Boolean)`. */
+export function formatKnowledgeContextSections(result: {
+  sections: KnowledgeContextSection[];
+  truncated: boolean;
+}): string {
+  if (result.sections.length === 0) return "";
+  const body = result.sections
+    .map((section) => `## ${section.title} (store: ${section.storeId})\n${section.content}`)
+    .join("\n\n");
+  const truncationNote = result.truncated
+    ? "\n\n(Note: attached knowledge was truncated to fit the context budget; older sections were cut first.)"
+    : "";
+  return `ATTACHED KNOWLEDGE (agent definition knowledgeRefs):\n${body}${truncationNote}`;
+}
+
 export const DEFAULT_KNOWLEDGE_CONTEXT_MAX_CHARS = 24_000;
 
 export async function resolveKnowledgeContext(

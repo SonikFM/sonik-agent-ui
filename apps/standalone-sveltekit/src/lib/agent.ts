@@ -42,9 +42,6 @@ export { hasBookingContextIntakeSkill, resolveCommandFamilyMountDecision } from 
 export type { CommandFamilyMountDecision } from "./command-family-mount";
 
 export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean;
-  /** Carried through from a resolved AgentDefinition (agent-runtime-adapter.ts) for the
-   *  knowledge-v1 module (Phase 9) to read into context. Not yet resolved here. */
-  knowledgeRefs?: AgentDefinition["knowledgeRefs"];
 };
 
 /**

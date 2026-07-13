@@ -99,6 +99,42 @@ try {
     "run-explicit-caller",
     "a caller-supplied workflowRunId must win over the (here, absent) ambient run scope",
   );
+
+  // Concurrent isolation (verify-wave P3): two interleaved runs must never
+  // cross-stamp each other's workflowRunId — AsyncLocalStorage binds each
+  // callback's async continuation chain to its own run scope. Run A suspends
+  // mid-callback while run B executes fully inside the suspension window.
+  const runA = startControllerRun(definition, { runId: "run-concurrent-A", workflowVersionId: "fixture.telemetry.join_key@0.1.0" });
+  const runB = startControllerRun(definition, { runId: "run-concurrent-B", workflowVersionId: "fixture.telemetry.join_key@0.1.0" });
+  let releaseA;
+  const gateA = new Promise((resolve) => { releaseA = resolve; });
+  const concurrentPreview = { commandId: "fixture.telemetry.create", stableInputHash: "hash", effect: "write", approvalRequired: true };
+  const promiseA = runWorkflowNode(runA, definition, "preview", {
+    preview: async () => {
+      await gateA; // hold A across B's full execution
+      await writeAgentTelemetry({ source: "server", event: "test.concurrent.A", ok: true });
+      return { kind: "preview", ok: true, preview: concurrentPreview };
+    },
+  });
+  const resultB = await runWorkflowNode(runB, definition, "preview", {
+    preview: async () => {
+      await writeAgentTelemetry({ source: "server", event: "test.concurrent.B", ok: true });
+      return { kind: "preview", ok: true, preview: concurrentPreview };
+    },
+  });
+  releaseA();
+  const resultA = await promiseA;
+  assert.equal(resultA.ok && resultB.ok, true, "both concurrent preview transitions must succeed");
+  assert.equal(
+    emitted.find((event) => event.event === "test.concurrent.A")?.workflowRunId,
+    "run-concurrent-A",
+    "run A's callback telemetry must carry run A's id even though run B executed fully while A was suspended",
+  );
+  assert.equal(
+    emitted.find((event) => event.event === "test.concurrent.B")?.workflowRunId,
+    "run-concurrent-B",
+    "run B's callback telemetry must carry run B's id while interleaved inside run A's suspension window",
+  );
 } finally {
   console.info = originalConsoleInfo;
 }

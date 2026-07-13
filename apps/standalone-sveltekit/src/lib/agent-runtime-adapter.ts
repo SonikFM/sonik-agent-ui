@@ -32,6 +32,15 @@ export type { PinnedCapabilities, PinnedCapabilityMode };
  * replace outright when the tweak supplies them). All validation is
  * delegated to `sanitizeAgentRuntimeSettings` -- this stays a pure mapping,
  * not a second sanitizer.
+ *
+ * SECURITY NOTE (verify-wave, 2026-07-13): the definition's `toolPolicy` is a
+ * DEFAULT overlay, not an authorization ceiling — session tweaks (which on the
+ * generate route come from the raw client body) can re-widen a family the
+ * definition set "off". That is intended (Debug & Preview needs it) and safe:
+ * the real ceiling is structural — command-catalog's draft_only_invariant
+ * unconditionally refuses non-read effects, the capability registry pin is
+ * default-deny, and writes fire only through host-signed approval. Never treat
+ * toolPolicy alone as a security boundary.
  */
 export function definitionToRuntimeSettings(
   definition: AgentDefinition,

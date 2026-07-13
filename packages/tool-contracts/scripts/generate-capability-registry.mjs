@@ -59,7 +59,9 @@ const AMPLIFY_HAND_AUTHORED_CAPABILITIES = [
 ];
 
 function byCapabilityId(a, b) {
-  return a.capabilityId.localeCompare(b.capabilityId);
+  // Locale-independent (verify-wave P2): localeCompare varies by runtime
+  // locale/ICU and would break the byte-identical drift gate across machines.
+  return a.capabilityId < b.capabilityId ? -1 : a.capabilityId > b.capabilityId ? 1 : 0;
 }
 
 async function buildRegistry() {
