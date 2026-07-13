@@ -50,7 +50,7 @@ export async function generatePersonaTurn({ persona, transcript, openQuestions, 
 
   const result = await generateText({
     model: gateway(resolvedModel),
-    system: systemPrompt,
+    instructions: systemPrompt,
     prompt: userPrompt,
     maxOutputTokens: 300,
   });

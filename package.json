@@ -49,6 +49,6 @@
     "playwright": "1.61.1",
     "@playwright/test": "1.61.1",
     "@ai-sdk/gateway": "^3.0.46",
-    "ai": "^6.0.86"
+    "ai": "^7.0.22"
   }
 }

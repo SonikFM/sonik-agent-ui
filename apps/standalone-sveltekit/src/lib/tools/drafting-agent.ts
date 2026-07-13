@@ -1,10 +1,10 @@
-import { generateText, tool } from "ai";
+import { generateText, Output, tool } from "ai";
 import { z } from "zod";
+import { workflowDefinitionSchema } from "@sonik-agent-ui/tool-contracts/marketplace";
 import { gateway, resolveGatewayModelId } from "../ai-gateway";
 import {
   buildDraftWorkflowPrompt,
   DRAFT_WORKFLOW_INSTRUCTIONS,
-  extractDraftedWorkflowJson,
   validateDraftedWorkflow,
 } from "../agent-workflows/drafting-agent";
 
@@ -21,23 +21,25 @@ export const draftWorkflow = tool({
     constraints: z.array(z.string()).optional().describe("Optional extra requirements, e.g. specific commands or steps to include."),
   }),
   execute: async ({ outcomeDescription, constraints }) => {
-    let text: string;
+    let drafted: unknown;
     try {
+      // AI SDK 7 Output.object forces the model to emit workflowDefinitionSchema-
+      // shaped JSON (no manual parse, no "unparseable JSON" failure mode). Our
+      // validateDraftedWorkflow still adds the stricter gate the schema can't
+      // express: only the 5 controller-live node types, approval-before-commit,
+      // edges referencing existing nodes. timeout bounds a stalled model.
       const result = await generateText({
         model: gateway(resolveGatewayModelId(undefined)),
         prompt: buildDraftWorkflowPrompt(outcomeDescription, constraints),
+        output: Output.object({ schema: workflowDefinitionSchema }),
+        timeout: { totalMs: 45_000 },
       });
-      text = result.text;
+      drafted = result.output;
     } catch (error) {
       return { kind: "workflow-draft" as const, ok: false, reasons: [`Draft generation failed: ${error instanceof Error ? error.message : "unknown error"}`] };
     }
 
-    const json = extractDraftedWorkflowJson(text);
-    if (json === undefined) {
-      return { kind: "workflow-draft" as const, ok: false, reasons: ["Model did not return parseable JSON."] };
-    }
-
-    const result = validateDraftedWorkflow(json);
+    const result = validateDraftedWorkflow(drafted);
     return result.ok
       ? { kind: "workflow-draft" as const, ok: true, workflow: result.workflow }
       : { kind: "workflow-draft" as const, ok: false, reasons: result.reasons };

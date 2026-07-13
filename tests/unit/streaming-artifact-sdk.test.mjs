@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 // this exercises the exact processUIMessageStream path @ai-sdk/svelte's Chat
 // runs: tool-input-delta chunks accumulated by toolCallId and parsed with the
 // SDK's own parsePartialJson into a DeepPartial tool input.
-import { readUIMessageStream } from "../../apps/standalone-sveltekit/node_modules/ai/dist/index.mjs";
+import { readUIMessageStream } from "../../apps/standalone-sveltekit/node_modules/ai/dist/index.js";
 import { findStreamingJsonArtifactSpecCandidate } from "../../apps/standalone-sveltekit/src/lib/artifacts/streaming-artifact.ts";
 import { findJsonArtifactToolCandidate } from "../../apps/standalone-sveltekit/src/lib/artifacts/tool-artifact-extraction.ts";
 

@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs } from "ai";
+import { ToolLoopAgent, isStepCount } from "ai";
 import { getWeather } from "./tools/weather";
 // Demo starter tools from the upstream svelte-chat harness (github/crypto/HN)
 // are unmounted for the booking surface: with them mounted, "what can you do"
@@ -118,7 +118,10 @@ export function createAgent(context: AgentRuntimeContext = {}) {
       ...commandCatalogTools,
       ...(context.agentSettings?.workflowBuilderMode ? { draftWorkflow } : {}),
     },
-    stopWhen: stepCountIs(12),
+    stopWhen: isStepCount(12),
+    // AI SDK 7 wall-clock bounds (we previously had only the step cap): a stalled
+    // provider stream or a hung tool now aborts instead of holding the request open.
+    timeout: { totalMs: 120_000, stepMs: 60_000, toolMs: 30_000 },
     temperature: 0.35,
   });
 }
