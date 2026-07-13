@@ -230,6 +230,11 @@ export interface AgentTelemetryEvent<TPayload = Record<string, unknown>> {
   schemaVersion?: typeof AGENT_UI_TELEMETRY_SCHEMA_VERSION;
   eventId?: string;
   runId?: string;
+  /** Phase 10 (agent-creation-tool-plan-2026-07-13.md): join key stamping every event
+   *  emitted while a workflow-controller WorkflowRunState is active, distinct from the
+   *  per-turn `runId` (agent-ui generation run) already above. Additive/optional --
+   *  events emitted outside an active workflow run are unchanged. */
+  workflowRunId?: string;
   source: AgentTelemetrySource;
   event: string;
   phase?: string;
@@ -339,6 +344,7 @@ export function sanitizeTelemetryEvent<TPayload = Record<string, unknown>>(event
     source: event.source,
     event: redactTelemetryString(event.event),
     runId: cleanOptionalString(event.runId),
+    workflowRunId: cleanOptionalString(event.workflowRunId),
     phase: cleanOptionalString(event.phase),
     requestId: cleanOptionalString(event.requestId),
     traceId: trustedTraceId(event.traceId) ?? traceIdFromTraceparent(event.traceparent) ?? cleanOptionalString(event.traceId),

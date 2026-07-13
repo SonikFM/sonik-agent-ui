@@ -11,6 +11,7 @@
 // ponytail: no automatic edge/branch traversal here (that's Phase 3b's multi-approval-node work);
 // callers step through nodes explicitly via runWorkflowNode, in the order their graph implies.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { WorkflowDefinition, WorkflowNodeDefinition } from "./marketplace.js";
 import {
   applyWorkflowRunEvent,
@@ -19,6 +20,20 @@ import {
   type WorkflowRunState,
   type WorkflowRunTransitionResult,
 } from "./workflow-run-state.js";
+
+// AC-13 telemetry join-key (Phase 10, agent-creation-tool-plan-2026-07-13.md): node callbacks are
+// opaque to this controller (booking/campaign commit functions emit their own telemetry deep in
+// their own call stacks), so the run's runId can't be threaded through as an explicit parameter
+// without editing every callback along the way. AsyncLocalStorage instead makes the run ambient
+// for the duration of the callback (including everything it awaits), so any writeAgentTelemetry
+// call made anywhere under it can stamp workflowRunId without a signature change. Events emitted
+// outside a callback's scope see no active run and are unchanged.
+const activeWorkflowRunStorage = new AsyncLocalStorage<string>();
+
+/** The runId of the WorkflowRunState currently executing a node callback, or undefined outside one. */
+export function activeWorkflowRunId(): string | undefined {
+  return activeWorkflowRunStorage.getStore();
+}
 
 export type WorkflowControllerNodeResult =
   | { kind: "preview"; ok: true; preview: WorkflowRunCommandPreview }
@@ -81,7 +96,7 @@ export async function runWorkflowNode(
   if (node.type === "tool_preview") {
     const callback = callbacks[nodeId];
     if (!callback) return { ok: false, reason: "no_callback_registered", state: run };
-    const result = await callback(run, node);
+    const result = await activeWorkflowRunStorage.run(run.runId, () => callback(run, node));
     if (result.kind !== "preview") return { ok: false, reason: "callback_kind_mismatch", state: run };
     if (!result.ok) return applyWorkflowRunEvent(run, { type: "node_error", nodeId, error: result.error });
     return applyWorkflowRunEvent(run, { type: "preview_ready", nodeId, preview: result.preview });
@@ -99,7 +114,7 @@ export async function runWorkflowNode(
     if (!started.ok) return started;
     const callback = callbacks[nodeId];
     if (!callback) return { ok: false, reason: "no_callback_registered", state: started.state };
-    const result = await callback(started.state, node);
+    const result = await activeWorkflowRunStorage.run(run.runId, () => callback(started.state, node));
     if (result.kind !== "commit") return { ok: false, reason: "callback_kind_mismatch", state: started.state };
     return applyWorkflowRunEvent(started.state, {
       type: "commit_result",

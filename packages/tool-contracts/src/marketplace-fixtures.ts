@@ -126,6 +126,55 @@ export const bookingReservationWorkflowManifest = marketplaceManifestSchema.pars
   },
 });
 
+export const amplifyCampaignWorkflowManifest = marketplaceManifestSchema.parse({
+  marketplaceSchemaVersion: "1",
+  packageId: "sonik.amplify.campaign.workflow",
+  packageVersionId: "sonik.amplify.campaign.workflow@0.1.0",
+  packageSemver: "0.1.0",
+  kind: "workflow",
+  title: "Create an Amplify campaign",
+  summary: "Brief → generated campaign content preview → human approval → persisted campaign artifact. Phase 7 wow demo: the sole new live controller path (agent-creation-tool-plan-2026-07-13.md).",
+  publisher,
+  visibility: "marketplace",
+  runtimeMode: "workflow_graph",
+  runtimeEffects: ["host_command"],
+  proofTier: "mock-backed",
+  readiness: "EXISTS",
+  runtimeCapabilities: { jsonRenderCanonical: true, htmlEscapeHatch: false, sandboxRuntime: false, commandBackedComponents: false, requiresHostContext: true, requiresTrustedApproval: true },
+  manifestHash: "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  payload: {
+    workflow: {
+      workflowId: "amplify.campaign.create",
+      title: "Create an Amplify campaign",
+      triggerPhrases: ["create a campaign", "launch a campaign", "set up an amplify campaign"],
+      requiredSkills: ["amplify.campaign.create"],
+      requiredCommands: ["amplify.campaign.create"],
+      // Decision 2 (agent-creation-tool-plan-2026-07-13.md): linear graph, no branch/artifact
+      // node. The preview and commit nodes share commandId "amplify.campaign.create" (schema's
+      // mutating-node-requires-same-command-preview-node rule) -- same shape as the reservation
+      // fixture's compound node, generalized to a single write. An explicit approval node
+      // precedes tool_commit (unlike the legacy reservation fixture) so this graph also passes
+      // the drafting agent's validateDraftedWorkflow gate, proving a drafting-agent-producible
+      // workflow runs end to end through the controller.
+      version: "0.1.0",
+      nodes: [
+        { nodeId: "trigger", type: "trigger", title: "Start from a campaign request" },
+        { nodeId: "brief", type: "ask_user", title: "Collect the campaign brief" },
+        { nodeId: "preview", type: "tool_preview", title: "Generate campaign content preview", commandId: "amplify.campaign.create", effect: "none", approvalPolicy: "none" },
+        { nodeId: "confirm", type: "approval", title: "Approve the campaign" },
+        { nodeId: "commit", type: "tool_commit", title: "Publish the campaign artifact", commandId: "amplify.campaign.create", effect: "write", approvalPolicy: "preview_then_trusted_approval", requiredHostContext: ["organizationId", "principalId"] },
+      ],
+      edges: [
+        { edgeId: "e1", from: "trigger", to: "brief" },
+        { edgeId: "e2", from: "brief", to: "preview" },
+        { edgeId: "e3", from: "preview", to: "confirm" },
+        { edgeId: "e4", from: "confirm", to: "commit" },
+      ],
+      facadeToolIds: ["amplify.campaign.create"],
+    },
+  },
+});
+
 export const amplifyCampaignWizardManifest = marketplaceManifestSchema.parse({
   marketplaceSchemaVersion: "1",
   packageId: "sonik.amplify.campaign.wizard.bundle",
@@ -186,6 +235,7 @@ export const restaurantSetupBundleManifest = marketplaceManifestSchema.parse({
 export const marketplaceFixtureManifests = [
   restaurantSetupAppManifest,
   bookingReservationWorkflowManifest,
+  amplifyCampaignWorkflowManifest,
   restaurantSetupBundleManifest,
   amplifyCampaignWizardManifest,
 ] satisfies MarketplaceManifest[];

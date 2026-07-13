@@ -314,6 +314,18 @@
   let supportExportStatus = $state<string | null>(null);
   let supportExportBusy = $state(false);
 
+  // Embed read-side (Phase 10 / AC-9): read the unsigned publishedAgentId
+  // selector mountSonikAgentUI sets on the iframe URL. Read once, SSR-safe;
+  // absent outside embeds so every non-embed request is byte-identical.
+  let cachedEmbedPublishedAgentId: string | null | undefined;
+  function embedPublishedAgentId(): string | null {
+    if (cachedEmbedPublishedAgentId !== undefined) return cachedEmbedPublishedAgentId;
+    if (typeof window === "undefined") return null;
+    const value = new URLSearchParams(window.location.search).get("publishedAgentId");
+    cachedEmbedPublishedAgentId = value && value.trim() ? value.trim() : null;
+    return cachedEmbedPublishedAgentId;
+  }
+
   const conversation = new Chat({
     transport: new DefaultChatTransport({
       api: "/api/generate",
@@ -345,6 +357,11 @@
             analyticsHints: pendingAnalyticsHints ?? undefined,
             agentSettings: createAgentSettingsSnapshot(),
             skillIds: enabledAgentSkillIds,
+            // Embed read-side (Phase 10 / AC-9): mountSonikAgentUI passes an
+            // unsigned publishedAgentId selector via the iframe URL; the server
+            // resolves it against the published store — selection only, grants
+            // stay host-signed + registry-gated.
+            publishedAgentId: embedPublishedAgentId() ?? undefined,
           },
         };
       },
