@@ -118,9 +118,12 @@
     border-radius: 0.75rem;
   }
 
+  /* Narrow canvas keeps artifact-first stacking, but the chat area must stay a
+     usable conversation pane, not a composer-only sliver (2026-07-13 live
+     report: "when I switch to canvas I can't see my chat"). */
   .workspace-root[data-layout-mode="canvas"] .workspace-grid--artifact-open {
     grid-template-areas: "artifact" "chat";
-    grid-template-rows: minmax(0, 1fr) minmax(7rem, 12rem);
+    grid-template-rows: minmax(0, 1.4fr) minmax(14rem, 1fr);
   }
 
   .workspace-root[data-layout-mode="canvas"][data-rail-mode="hidden"]
@@ -151,8 +154,13 @@
       );
     }
 
+    /* Wide canvas: conversation rides beside the artifact instead of being
+       squeezed into a bottom strip — switching to canvas must never hide the
+       chat (2026-07-13 live report). Artifact keeps the majority share. */
     .workspace-root[data-layout-mode="canvas"] .workspace-grid--artifact-open {
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "chat artifact";
+      grid-template-rows: minmax(0, 1fr);
+      grid-template-columns: minmax(320px, 0.62fr) minmax(480px, 1.38fr);
     }
   }
 </style>

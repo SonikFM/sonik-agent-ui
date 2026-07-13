@@ -4027,7 +4027,7 @@
         <button
           type="button"
           onclick={openDocumentEditor}
-          class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           aria-label="Open or create a workspace document"
         >
           Workspace document
@@ -4096,6 +4096,7 @@
           language={documentFrameLanguage}
           content={documentFrameContent}
           preferredView={documentFramePreferredView}
+          requestHeaders={createWorkspaceRequestHeaders()}
           onDocumentEvent={handleDocumentEvent}
         />
       {/snippet}

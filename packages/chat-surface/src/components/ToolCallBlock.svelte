@@ -83,7 +83,9 @@
     {#if tool.toolCallId}
       <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
         <dt>Call id</dt>
-        <dd class="break-all font-mono">{tool.toolCallId}</dd>
+        <!-- Diagnostic token: truncate on one line instead of wrapping mid-token
+             across the narrow embedded sidecar (2026-07-13 live report). -->
+        <dd class="overflow-hidden text-ellipsis whitespace-nowrap font-mono">{tool.toolCallId}</dd>
       </div>
     {/if}
     {#if tool.errorText}
