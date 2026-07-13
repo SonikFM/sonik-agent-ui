@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 · Command-Backed Apps &amp; JSON-Render — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* page-specific composition only — all values from tokens.css */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .split > .panel { margin: 0; }
+  .split h3 { margin-top: 0; }
+  .can-list, .cannot-list { margin: 0; padding-left: 1.1em; }
+  .can-list > li, .cannot-list > li { margin: 0 0 8px; font-size: var(--text-sm); }
+  .can-list code, .cannot-list code { font-size: var(--text-xs); }
+  .trust-line {
+    color: var(--faint);
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    text-align: center;
+    letter-spacing: 0.04em;
+    margin: 2px 0 14px;
+  }
+  .nowrap { white-space: nowrap; }
+  td .chip { margin-right: 4px; }
+  @media (max-width: 760px) {
+    .split { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body data-doc="04-json-render-apps">
+<main class="page">
+  <header class="page-head">
+    <h1>Command-Backed Apps &amp; JSON-Render</h1>
+    <p class="lead">Stateful mini-apps without a new runtime engine: JSON-render is the canonical app definition, command bindings add preview/commit seams, and trusted host approval stays external to renderer state. The renderer is execution-inert by contract.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/04-command-backed-apps-json-render.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>Renderer action vocabulary</h2>
+    <p>A command-backed app is a <code>CommandBackedAppDefinition</code> (<span class="mono">packages/tool-contracts/src/marketplace.ts:158-203</span>): identity, a <code>jsonRender</code> block, a list of <code>actions</code>, a list of <code>commandBindings</code>, and required host context. Every control the app exposes is an <code>action</code> whose <code>kind</code> is drawn from a fixed enum. The enum lists six values; the schema's <code>superRefine</code> rejects one of them on any renderer action, so five are usable. The rule is deliberately asymmetric — the renderer may <em>reference</em> state, preview, approval, navigation, and event semantics, but it may never <em>become</em> a write executor.</p>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Action <code>kind</code> enum from <code>marketplaceAppActionSchema</code> (marketplace.ts:134-140), gated by the app-definition <code>superRefine</code> (marketplace.ts:181-200).</caption>
+      <thead>
+        <tr>
+          <th scope="col">action <code>kind</code></th>
+          <th scope="col">Status</th>
+          <th scope="col">What it may cause</th>
+          <th scope="col">Binding rule enforced by schema</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>state_update</code></td>
+          <td><span class="chip ok">ALLOWED</span></td>
+          <td>Patch local renderer state at the paths in <code>writesTo</code>. No backend contact.</td>
+          <td>None — pure client state.</td>
+        </tr>
+        <tr>
+          <td><code>command_preview_request</code></td>
+          <td><span class="chip ok">ALLOWED</span></td>
+          <td>Ask the host to compute a read-only preview for a bound command.</td>
+          <td>If <code>bindingId</code> set, it must resolve and its <code>mode</code> must be <code>preview</code> (marketplace.ts:185-191).</td>
+        </tr>
+        <tr>
+          <td><code>approval_request</code></td>
+          <td><span class="chip ok">ALLOWED</span></td>
+          <td>Surface the host approval affordance for a commit binding. It is a <em>request</em>, never a grant.</td>
+          <td>If <code>bindingId</code> set, it must resolve and its <code>mode</code> must be <code>commit</code> (marketplace.ts:193-199).</td>
+        </tr>
+        <tr>
+          <td><code>navigate</code></td>
+          <td><span class="chip ok">ALLOWED</span></td>
+          <td>Move within the app/workspace surface. No effect leaves the client.</td>
+          <td>None.</td>
+        </tr>
+        <tr>
+          <td><code>emit_event</code></td>
+          <td><span class="chip ok">ALLOWED</span></td>
+          <td>Emit a structured event onto the agent/host bus. Signal only — carries no write authority.</td>
+          <td>None.</td>
+        </tr>
+        <tr>
+          <td><code>command_binding_ref</code></td>
+          <td><span class="chip danger">SCHEMA-REJECTED</span></td>
+          <td>Would let a renderer action point straight at an executable binding — a write button.</td>
+          <td>Always rejected: <em>"Renderer actions must request preview/approval, not bind directly to executable command bindings"</em> (marketplace.ts:181-183).</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>The value stays in the enum so a definition that reaches for it fails validation with a specific message rather than being silently dropped. <span class="chip ok">SHIPPED</span> — the enum, the rejection, and the two binding-mode guards are committed contract code in <code>marketplace.ts</code> and covered by <span class="mono">tests/unit/marketplace-package-contracts.test.mjs:44-82</span>.</p>
+  </section>
+
+  <section>
+    <h2>Preview &rarr; trusted approval &rarr; commit</h2>
+    <p>Write effects reach the backend on exactly one path. A renderer <code>command_preview_request</code> asks the host to compute a preview; an <code>approval_request</code> surfaces the host approval card; the human approves in the host, which mints a host-signed grant; only then does the matching <code>commit</code> binding run. The two renderer steps are inert — the trust boundary sits between <code>approval_request</code> (renderer, inert) and the host-signed grant (external to renderer state).</p>
+
+    <figure class="viz-frame">
+      <div class="flow" role="img" aria-label="Preview to trusted-approval to commit pipeline: draft state, preview request, host preview, approval request, host-signed trusted approval, commit write. The trust boundary sits between the approval request and the host-signed grant.">
+        <div class="flow-node">
+          <b>Draft state</b>
+          <small><code>state_update</code> patches local <code>jsonRender.state</code>. Nothing left the client.</small>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+        <div class="flow-node gated">
+          <b>Preview request</b>
+          <small><code>command_preview_request</code> &rarr; <code>preview</code> binding. Host computes a read-only preview.</small>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+        <div class="flow-node gated">
+          <b>Approval request</b>
+          <small><code>approval_request</code> &rarr; <code>commit</code> binding. Surfaces the host card. A request, not a grant.</small>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+        <div class="flow-node trusted">
+          <b>Trusted approval</b>
+          <small>Human approves in the host. Host-signed grant. <code>model_supplied_approval_is_not_trusted</code>.</small>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+        <div class="flow-node trusted">
+          <b>Commit</b>
+          <small><code>commit</code> binding runs. <code>preview_then_trusted_approval</code> + <code>requiredHostContext</code>. Write effect.</small>
+        </div>
+      </div>
+      <p class="trust-line">trust boundary: renderer (inert) &nbsp;|&nbsp; host (signs, executes) — crossed between approval request and trusted approval</p>
+      <figcaption>The commit gate. A <code>commit</code> binding is invalid unless a same-<code>commandId</code> <code>preview</code> binding also exists (marketplace.ts:176-179): <em>"Commit bindings require a same-command preview binding."</em> Commit bindings must also carry <code>preview_then_trusted_approval</code> and a non-empty <code>requiredHostContext</code> (marketplace.ts:121-131).</figcaption>
+    </figure>
+
+    <div class="callout ok">
+      <div class="callout-title">Same-command-preview is now enforced twice <span class="chip ok">SHIPPED</span></div>
+      <p>The corpus enforced it only at the app-contract layer. Per the 2026-07-11 status, the workflow-run state machine and controller now enforce the same shape at runtime: the reservation fixture was revised to <strong>one compound commit node</strong>, and mutating effects are refused outside the commit gate at <em>both</em> the schema and controller layers (<span class="mono">workflow-run-state.ts</span>, <span class="mono">workflow-controller.ts</span>). Phase <code>committed</code> is only set on semantic-success receipts, and a model-supplied approval is structurally rejected (<code>model_supplied_approval_is_not_trusted</code>). The generic controller is not yet wired into the live request path — the Phase 3a-2 cutover is an open decision <span class="chip">PLANNED</span>.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Execution-inertness ledger</h2>
+    <p>The invariant is that a JSON-render app is inert: its state is not a backend write, and its approval requests are not grants. This ledger names, effect by effect, what an installed app copy can and cannot cause — and what stops it.</p>
+
+    <div class="split">
+      <div class="panel">
+        <h3>A JSON app CAN</h3>
+        <ul class="can-list">
+          <li>Mutate its own <code>jsonRender</code> state via <code>state_update</code> — draft edits, form fields, view toggles.</li>
+          <li>Request a <em>read-only</em> preview from the host through a <code>preview</code> binding.</li>
+          <li>Surface the host approval card via <code>approval_request</code>.</li>
+          <li>Navigate its own surface and <code>emit_event</code> signals to the agent/host bus.</li>
+          <li>Expose an HTML presentation escape hatch — iframe-sandboxed, over a canonical JSON state ref (<code>htmlPresentationEscapeHatchSchema</code>, marketplace.ts:143-156).</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>A JSON app CANNOT</h3>
+        <ul class="cannot-list">
+          <li>Execute a write or <code>commitCommand</code> from a button click — <code>command_binding_ref</code> actions are rejected outright.</li>
+          <li>Mint or forge trusted approval — grants are host-signed and external to renderer state.</li>
+          <li>Reach a <code>commit</code> binding without a same-command <code>preview</code> and a host-signed grant.</li>
+          <li>Store secrets or trusted-approval state inside artifact state.</li>
+          <li>Run write/destructive/external effects without <code>preview_then_trusted_approval</code> and a non-empty <code>requiredHostContext</code>.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Attempted effects against the shipped contract gates.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Attempted effect</th>
+          <th scope="col">Reaches backend write?</th>
+          <th scope="col">Stopped / gated by</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Button runs a write via <code>command_binding_ref</code></td>
+          <td><span class="chip danger">NO — rejected</span></td>
+          <td>App-definition <code>superRefine</code> (marketplace.ts:181-183)</td>
+        </tr>
+        <tr>
+          <td><code>state_update</code> writes a field</td>
+          <td><span class="chip">NO — local only</span></td>
+          <td>State patch never leaves the client</td>
+        </tr>
+        <tr>
+          <td><code>command_preview_request</code></td>
+          <td><span class="chip">NO — read-only</span></td>
+          <td>Target must be a <code>preview</code>-mode binding (marketplace.ts:189-191)</td>
+        </tr>
+        <tr>
+          <td>Commit binding with model-supplied approval</td>
+          <td><span class="chip danger">NO — rejected</span></td>
+          <td>Reducer requires host-signed grant: <code>model_supplied_approval_is_not_trusted</code></td>
+        </tr>
+        <tr>
+          <td>Commit binding, no matching preview</td>
+          <td><span class="chip danger">NO — invalid</span></td>
+          <td>Same-command-preview rule (marketplace.ts:176-179) + controller layer</td>
+        </tr>
+        <tr>
+          <td>Commit binding, preview + host-signed grant + host context</td>
+          <td><span class="chip ok">YES — the one legal path</span></td>
+          <td><code>preview_then_trusted_approval</code> satisfied; receipt on semantic success</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">Invariants (do not soften)</div>
+      <p>Renderer state updates are not backend writes. Approval requests are not trusted approval grants. Commit bindings require <code>preview_then_trusted_approval</code> and <code>requiredHostContext</code> for write effects. Chat is never approval; success copy is receipts-only.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Coverage — shipped vs deferred</h2>
+    <p>Reconciled against the 2026-07-11 status. The contract surface for command-backed apps is committed; the runtime and product surfaces around it are not.</p>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Command-backed app surface: implementation truth as of 2026-07-11.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Surface</th>
+          <th scope="col">Status</th>
+          <th scope="col">Evidence / note</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>CommandBackedAppDefinition</code> schema + action/binding gates</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+          <td><span class="mono">marketplace.ts:158-203</span>, tested at <span class="mono">marketplace-package-contracts.test.mjs:44-82</span></td>
+        </tr>
+        <tr>
+          <td>Restaurant-setup fixture (preview + commit for <code>booking.create.context</code>)</td>
+          <td><span class="chip accent">FIXTURE</span></td>
+          <td><span class="mono">marketplace-fixtures.ts:45-65</span></td>
+        </tr>
+        <tr>
+          <td>Runtime commit gate (reducer + controller, same-command preview)</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+          <td><span class="mono">workflow-run-state.ts</span>, <span class="mono">workflow-controller.ts</span>; not yet on live request path</td>
+        </tr>
+        <tr>
+          <td>HTML presentation escape hatch — <em>contract</em></td>
+          <td><span class="chip ok">SHIPPED</span></td>
+          <td>Schema exists (marketplace.ts:143-156); iframe + canonical JSON state required</td>
+        </tr>
+        <tr>
+          <td>HTML escape hatch — <em>runtime / sandbox</em></td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>Not the default path until a sandbox/runtime contract is approved</td>
+        </tr>
+        <tr>
+          <td>Live controller cutover (Phase 3a-2)</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>Open decision — generic interpreter not wired into live requests</td>
+        </tr>
+        <tr>
+          <td>Renderer component registry contract</td>
+          <td><span class="chip warn">OPEN</span></td>
+          <td>Needed beyond generic JSON-render elements; not yet specified</td>
+        </tr>
+        <tr>
+          <td>State persistence / update APIs for installed app copies</td>
+          <td><span class="chip danger">MISSING</span></td>
+          <td>No persistence/RLS tables built</td>
+        </tr>
+        <tr>
+          <td>UX for save draft, submit, request approval, approve &amp; run, receipts</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>Design work outstanding</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="callout danger">
+      <div class="callout-title">What developers must not do</div>
+      <p>Do not make artifact button clicks execute <code>commitCommand</code> directly. Do not store secrets or trusted-approval state in JSON-render artifact state. Do not use HTML as the default command-backed app runtime unless a sandbox/runtime contract is later approved.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

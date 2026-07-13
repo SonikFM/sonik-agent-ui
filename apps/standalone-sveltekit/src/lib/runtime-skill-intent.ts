@@ -52,6 +52,22 @@ export interface ImplicitWorkflowSkillSelection {
   continuitySkillIds: string[];
 }
 
+/**
+ * Phases the workflow-run-state reducer (packages/tool-contracts/src/workflow-run-state.ts)
+ * treats as "nothing actionable remains" -- outside this set, a WorkflowRunState is active.
+ */
+const INACTIVE_WORKFLOW_RUN_PHASES = new Set(["idle", "committed", "cancelled", "error"]);
+
+export interface ActiveWorkflowRunFacade {
+  phase: string;
+  /** The pinned skill selection for this run, reused as-is while the run stays active. */
+  skillIds: string[];
+}
+
+export function isActiveWorkflowRunPhase(phase: string | undefined | null): boolean {
+  return Boolean(phase) && !INACTIVE_WORKFLOW_RUN_PHASES.has(phase as string);
+}
+
 export function resolveImplicitWorkflowSkillSelection(input: {
   userMessage?: string | null;
   firstUserMessage?: string | null;
@@ -64,7 +80,20 @@ export function resolveImplicitWorkflowSkillSelection(input: {
    * (e.g. load failure) and preserves prior any-active-artifact behavior.
    */
   activeArtifactIsRegisteredIntake?: boolean;
+  /**
+   * Consensus plan Phase 3a, pre-mortem #3: while a controller-driven WorkflowRunState is active,
+   * re-deriving skill ids from this turn's keywords every message is the same toolset-churn bug
+   * Slice E fixed one layer down (command-family-mount-stability) -- just moved up to the workflow
+   * layer. When the caller has an active run, this short-circuits keyword derivation entirely and
+   * reuses the run's pinned facade, reporting it all as continuity (not fresh intent this turn) so
+   * resolveCommandFamilyMountDecision's stability rule keeps tools mounted regardless of drift.
+   */
+  activeWorkflowRun?: ActiveWorkflowRunFacade | null;
 }): ImplicitWorkflowSkillSelection {
+  if (input.activeWorkflowRun && isActiveWorkflowRunPhase(input.activeWorkflowRun.phase)) {
+    const pinned = [...new Set(input.activeWorkflowRun.skillIds)].slice(0, MAX_IMPLICIT_SKILLS);
+    return { skillIds: pinned, continuitySkillIds: pinned };
+  }
   const message = normalize(input.userMessage ?? input.firstUserMessage);
   if (!message) return { skillIds: [], continuitySkillIds: [] };
   if (isProductTourIntent(message)) return { skillIds: [], continuitySkillIds: [] };

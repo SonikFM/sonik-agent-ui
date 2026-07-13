@@ -132,6 +132,23 @@ export type AgentEmbedMountOptions = {
   theme?: AgentEmbedThemeProvider;
   smokeMockStream?: string | boolean | null;
   smokeRunId?: string | null;
+  /**
+   * Phase 10 (agent-creation-tool-plan-2026-07-13.md): selects which PUBLISHED
+   * agent definition the embedded chat runs (mirrors `body.publishedAgentId`
+   * on the generate route). This is a selector only -- it never grants
+   * capability; the embed-scoped grants themselves stay host-signed +
+   * registry-gated server-side via the signed host-context envelope.
+   */
+  publishedAgentId?: string | null;
+  /**
+   * P1 #10 (production-readiness ledger): restricts which iframe origins this
+   * mount will accept page-context-request / action-request messages from, on
+   * top of the existing exact-match check against the mounted agentUrl's
+   * origin. Absent/undefined = today's behavior (no extra restriction) so
+   * existing embeds are unaffected. Accepts the same comma-separated /
+   * wildcard-pattern shape as `parseAgentOriginAllowlist`.
+   */
+  allowedOrigins?: string | readonly string[];
   initialMode?: AgentEmbedMode | null;
   contextPostDelaysMs?: readonly number[];
   minChatWidth?: number;
@@ -151,7 +168,7 @@ export type AgentEmbedMountOptions = {
   document?: Document;
 };
 
-export type AgentEmbedUpdateOptions = Partial<Pick<AgentEmbedMountOptions, "getPageContext" | "theme" | "smokeMockStream" | "smokeRunId">>;
+export type AgentEmbedUpdateOptions = Partial<Pick<AgentEmbedMountOptions, "getPageContext" | "theme" | "smokeMockStream" | "smokeRunId" | "publishedAgentId">>;
 
 export type AgentEmbedController = {
   iframe: HTMLIFrameElement;
@@ -229,6 +246,7 @@ export function createAgentEmbedUrl(input: {
   theme?: string;
   smokeMockStream?: string | boolean | null;
   smokeRunId?: string | null;
+  publishedAgentId?: string | null;
 }): string {
   const url = new URL(String(input.agentUrl), input.hostOrigin ?? globalThis.location?.origin ?? "http://localhost");
   const intent = normalizeAgentEmbedIntent({ embedMode: input.mode });
@@ -240,6 +258,7 @@ export function createAgentEmbedUrl(input: {
     url.searchParams.set("smokeMockStream", input.smokeMockStream === true ? "1" : String(input.smokeMockStream));
   }
   if (input.smokeRunId) url.searchParams.set("smokeRunId", input.smokeRunId);
+  if (input.publishedAgentId) url.searchParams.set("publishedAgentId", input.publishedAgentId);
   return url.toString();
 }
 
@@ -502,6 +521,7 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   let theme = options.theme;
   let smokeMockStream = options.smokeMockStream;
   let smokeRunId = options.smokeRunId;
+  let publishedAgentId = options.publishedAgentId;
   let activeMode: AgentEmbedMode | null = null;
   let resizeFrame = 0;
   const disposers: Array<() => void> = [];
@@ -572,6 +592,7 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
       theme: resolveTheme(theme),
       smokeMockStream,
       smokeRunId,
+      publishedAgentId,
     });
   };
 
@@ -643,6 +664,7 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
     if ("theme" in next) theme = next.theme;
     if ("smokeMockStream" in next) smokeMockStream = next.smokeMockStream;
     if ("smokeRunId" in next) smokeRunId = next.smokeRunId;
+    if ("publishedAgentId" in next) publishedAgentId = next.publishedAgentId;
     if (activeMode) setFrameMode(activeMode);
   };
 
@@ -658,12 +680,14 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
     if (event.source !== iframe.contentWindow) return;
     if (!isAgentPageContextRequestMessage(event.data)) return;
     if (event.origin !== resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow)) return;
+    if (options.allowedOrigins !== undefined && !isAgentOriginAllowed(event.origin, options.allowedOrigins)) return;
     void postContext();
   };
   const onRequestHostAction = (event: MessageEvent) => {
     if (event.source !== iframe.contentWindow) return;
     const agentOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
     if (!agentOrigin || event.origin !== agentOrigin) return;
+    if (options.allowedOrigins !== undefined && !isAgentOriginAllowed(event.origin, options.allowedOrigins)) return;
     const parsed = hostActionRequestSchema.safeParse(event.data);
     if (!parsed.success) return;
     void handleEmbeddedHostAction({

@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03 · Package &amp; Bundle Contracts — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* page-specific styles ONLY, composed from tokens.css variables */
+  .matrix td:not(:first-child) { text-align: center; }
+  .matrix th:not(:first-child) { text-align: center; padding-right: 0; }
+  .matrix td:first-child code { font-size: var(--text-xs); }
+  .matrix .kind-note { display: block; color: var(--faint); font-size: var(--text-xs); margin-top: 2px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px 20px; margin: 8px 0 0; padding: 0; list-style: none; }
+  .legend li { font-size: var(--text-sm); color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .rule-msg { font-size: var(--text-xs); }
+  .enforce td:first-child { white-space: nowrap; }
+  .site { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); }
+  .lineage text { font-family: var(--font-mono); }
+  .lineage .box-title { font-family: var(--font-sans); font-weight: 600; }
+</style>
+</head>
+<body data-doc="03-package-contracts">
+<main class="page">
+  <header class="page-head">
+    <h1>Package &amp; Bundle Contracts</h1>
+    <p class="lead">The marketplace splits every installable thing into three records — a mutable index, an immutable version, and an installation — and lets Zod refuse anything that would blur them. The contracts are shipped and test-locked; the endpoints that will read them are not yet built.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/03-marketplace-package-bundle-contracts.md · Corpus 2026-07-07 · Status updated 2026-07-12</p>
+  </header>
+
+  <div class="callout ok">
+    <div class="callout-title">Reconciliation up front</div>
+    <p>The schemas below live in <code>packages/tool-contracts/src/marketplace.ts</code> and are exercised by <code>tests/unit/marketplace-package-contracts.test.mjs</code> — full chain green. <span class="chip ok">SHIPPED</span> covers the manifest, version, installation, bundle, permission, and command-binding shapes with their <code>superRefine</code> invariants. Everything that would <em>serve</em> these records — ORPC routes, the persistence/RLS tables, the install UI, publish/moderation — is <span class="chip">PLANNED</span>. No package has been persisted or installed by any live path yet.</p>
+  </div>
+
+  <section>
+    <h2>Three records, one immutable target</h2>
+    <p>A package is not one object. <code>MarketplacePackage</code> is a mutable summary/index row that carries a <code>currentVersionId</code> pointer. <code>MarketplacePackageVersion</code> is the immutable install target — its envelope re-checks package identity, semver, schema version, and manifest hash against the manifest it wraps, so a version can never drift from what it claims to be. <code>MarketplaceInstallation</code> records one org/workspace instance and always targets a <code>installedVersionId</code>, never a bare package id.</p>
+    <p>The invariant that makes the split load-bearing: <strong>installs pin to a version, provenance points back to a version.</strong> A <code>copied</code> or <code>forked</code> install must carry <code>sourcePackageVersionId</code>, and that source must sit in the same package lineage (<code>installedVersionId</code> and <code>sourcePackageVersionId</code> both start <code>packageId@</code>). Below, the pinned install tracks an immutable version directly; the forked install keeps a line back to the version it branched from.</p>
+
+    <figure class="viz-frame">
+      <svg class="lineage" role="img" viewBox="0 0 720 400" aria-labelledby="lineage-title lineage-desc" width="720">
+        <title id="lineage-title">Package version lineage and installation provenance</title>
+        <desc id="lineage-desc">A mutable package index points its currentVersionId at the newest immutable version. Immutable versions form a successor chain. A pinned installation targets a version directly; a forked installation keeps a sourcePackageVersionId edge back to the version it branched from.</desc>
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--line-strong)"></path>
+          </marker>
+        </defs>
+
+        <!-- immutable version chain -->
+        <g>
+          <rect x="30" y="160" width="140" height="48" rx="6" fill="var(--surface-2)" stroke="var(--accent)"></rect>
+          <text x="100" y="182" text-anchor="middle" font-size="13" fill="var(--ink)">helpdesk@1.0.0</text>
+          <text x="100" y="198" text-anchor="middle" font-size="12" fill="var(--muted)">immutable</text>
+
+          <rect x="290" y="160" width="140" height="48" rx="6" fill="var(--surface-2)" stroke="var(--accent)"></rect>
+          <text x="360" y="182" text-anchor="middle" font-size="13" fill="var(--ink)">helpdesk@1.1.0</text>
+          <text x="360" y="198" text-anchor="middle" font-size="12" fill="var(--muted)">immutable</text>
+
+          <rect x="550" y="160" width="140" height="48" rx="6" fill="var(--surface-2)" stroke="var(--accent)"></rect>
+          <text x="620" y="182" text-anchor="middle" font-size="13" fill="var(--ink)">helpdesk@1.2.0</text>
+          <text x="620" y="198" text-anchor="middle" font-size="12" fill="var(--muted)">immutable</text>
+
+          <line x1="170" y1="184" x2="286" y2="184" stroke="var(--line-strong)" marker-end="url(#arrow)"></line>
+          <line x1="430" y1="184" x2="546" y2="184" stroke="var(--line-strong)" marker-end="url(#arrow)"></line>
+          <text x="228" y="176" text-anchor="middle" font-size="12" fill="var(--faint)">succeeds</text>
+          <text x="488" y="176" text-anchor="middle" font-size="12" fill="var(--faint)">succeeds</text>
+        </g>
+
+        <!-- mutable package index -->
+        <g>
+          <rect x="545" y="34" width="150" height="54" rx="6" fill="var(--surface-3)" stroke="var(--viz-2)"></rect>
+          <text class="box-title" x="620" y="56" text-anchor="middle" font-size="13" fill="var(--ink)">MarketplacePackage</text>
+          <text x="620" y="74" text-anchor="middle" font-size="12" fill="var(--muted)">mutable index</text>
+          <line x1="620" y1="88" x2="620" y2="156" stroke="var(--line-strong)" marker-end="url(#arrow)"></line>
+          <text x="628" y="126" text-anchor="start" font-size="12" fill="var(--viz-2)">currentVersionId</text>
+        </g>
+
+        <!-- pinned installation -->
+        <g>
+          <rect x="545" y="300" width="150" height="58" rx="6" fill="var(--surface-2)" stroke="var(--viz-3)"></rect>
+          <text class="box-title" x="620" y="322" text-anchor="middle" font-size="13" fill="var(--ink)">Installation</text>
+          <text x="620" y="340" text-anchor="middle" font-size="12" fill="var(--muted)">pinned</text>
+          <line x1="620" y1="300" x2="620" y2="212" stroke="var(--line-strong)" marker-end="url(#arrow)"></line>
+          <text x="628" y="262" text-anchor="start" font-size="12" fill="var(--viz-3)">installedVersionId</text>
+        </g>
+
+        <!-- forked installation -->
+        <g>
+          <rect x="30" y="300" width="210" height="58" rx="6" fill="var(--surface-2)" stroke="var(--viz-3)"></rect>
+          <text class="box-title" x="135" y="322" text-anchor="middle" font-size="13" fill="var(--ink)">Installation</text>
+          <text x="135" y="340" text-anchor="middle" font-size="12" fill="var(--muted)">forked · editable local copy</text>
+          <line x1="200" y1="300" x2="332" y2="212" stroke="var(--line-strong)" marker-end="url(#arrow)"></line>
+          <text x="150" y="256" text-anchor="start" font-size="12" fill="var(--viz-3)">sourcePackageVersionId</text>
+        </g>
+      </svg>
+      <figcaption>Immutability enforced in <code>marketplacePackageVersionSchema.superRefine</code>: envelope <code>packageVersionId</code>, <code>packageId</code>, <code>packageSemver</code>, <code>marketplaceSchemaVersion</code>, and <code>manifestHash</code> must each equal the wrapped manifest's. <code>currentVersionId</code> must start <code>packageId@</code> (<code>marketplacePackageSchema</code>). Forked/copied provenance and same-lineage checks live in <code>marketplaceInstallationSchema.superRefine</code>.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Install modes × package kinds</h2>
+    <p>Decision <strong>D014</strong> fixes four install modes against the ten first-class kinds. <code>pinned</code> tracks a fixed immutable version; <code>copied</code> and <code>forked</code> are editable local copies that must preserve <code>sourcePackageVersionId</code> provenance; <code>subscribed</code> follows upstream but only for low-risk, read-only entries. The only hard, schema-enforced kind bans sit under <code>subscribed</code> (and <code>auto_patch</code>): a bundle may not compose a subscribed <code>command_tool_pack</code>, <code>provider_integration</code>, or <code>managed_internal</code> entry.</p>
+
+    <div class="table-scroll">
+    <table class="matrix">
+      <caption>D014 install-mode applicability by package kind. Banned cells are refused by Zod; caveats are enforced, not advisory.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Package kind</th>
+          <th scope="col">pinned</th>
+          <th scope="col">copied</th>
+          <th scope="col">forked</th>
+          <th scope="col">subscribed</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>bundle</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup2;</span></td></tr>
+        <tr><td><code>app</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup2;</span></td></tr>
+        <tr><td><code>workflow</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup2;</span></td></tr>
+        <tr><td><code>skill</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup2;</span></td></tr>
+        <tr><td><code>agent</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup2;</span></td></tr>
+        <tr><td><code>artifact_template</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup2;</span></td></tr>
+        <tr><td><code>mcp_addon</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup2;</span></td></tr>
+        <tr><td><code>command_tool_pack</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip danger">banned</span></td></tr>
+        <tr><td><code>provider_integration</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip danger">banned</span></td></tr>
+        <tr><td><code>managed_internal</code></td><td><span class="chip ok">allow</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip ok">allow &sup1;</span></td><td><span class="chip danger">banned</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <ul class="legend">
+      <li><span class="chip ok">allow</span> mode accepted for this kind</li>
+      <li>&sup1; requires <code>sourcePackageVersionId</code> in the same package lineage</li>
+      <li>&sup2; requires explicit read-only permissions (effect <code>read</code>/<code>none</code> only)</li>
+      <li><span class="chip danger">banned</span> refused by <code>bundleCompositionItemSchema.superRefine</code></li>
+    </ul>
+    <div class="callout warn">
+      <div class="callout-title">Where the ban actually bites</div>
+      <p>The three <code>subscribed</code> bans are enforced today on <em>bundle composition entries</em> (<code>bundleCompositionItemSchema</code>, message: <span class="rule-msg"><code>"Subscribed/auto-patch entries cannot target command packs, provider integrations, or managed internals in v0"</code></span>). The top-level <code>marketplaceInstallationSchema</code> enforces the read-only-permission requirement for any <code>subscribed</code>/<code>auto_patch</code> install (<span class="rule-msg"><code>"Subscribed/auto-patch installations require explicit read-only permissions"</code></span>) but does not itself re-ban those kinds — the read-only rule makes a subscribed write-capable pack structurally impossible regardless. Treat the matrix as the D014 policy; the executable guard is split across those two sites.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Manifest envelope anatomy</h2>
+    <p>Every version wraps one manifest. The field inventory below is the shipped <code>marketplaceManifestSchema</code> shape (defaults shown where the schema supplies one). It is <code>.strict()</code> — unknown keys are rejected outright.</p>
+
+    <dl class="ledger">
+      <dt><code>marketplaceSchemaVersion</code></dt><dd>Literal <code>"1"</code>. Version envelope and manifest must agree.</dd>
+      <dt><code>packageId</code></dt><dd>Stable id, regex-constrained. Must equal the prefix of <code>packageVersionId</code>.</dd>
+      <dt><code>packageVersionId</code></dt><dd><code>&lt;packageId&gt;@&lt;semver&gt;</code>. The immutable install target.</dd>
+      <dt><code>packageSemver</code></dt><dd>Semver-like. Must equal the semver tail of <code>packageVersionId</code>.</dd>
+      <dt><code>kind</code></dt><dd>One of the ten enum kinds. Selects the required typed payload key.</dd>
+      <dt><code>publisher</code></dt><dd><code>{ publisherId, displayName, type }</code>, type defaults <code>creator</code>.</dd>
+      <dt><code>visibility</code></dt><dd>Default <code>private</code>; one of private/organization/public/marketplace/managed_internal.</dd>
+      <dt><code>installScopes</code></dt><dd>Default <code>["organization"]</code>.</dd>
+      <dt><code>runtimeMode</code></dt><dd>Default <code>descriptor_only</code>. <code>managed_code</code> reserved for <code>managed_internal</code>.</dd>
+      <dt><code>runtimeEffects</code></dt><dd>Default <code>["none"]</code>. <code>record_write</code>/<code>external_call</code> force trusted gates.</dd>
+      <dt><code>proofTier</code></dt><dd>Default <code>docs-only</code>. Evidence maturity, not a runtime switch.</dd>
+      <dt><code>runtimeCapabilities</code></dt><dd><code>jsonRenderCanonical</code> etc. <code>sandboxRuntime</code> reserved for <code>managed_internal</code>.</dd>
+      <dt><code>manifestHash</code></dt><dd>Optional <code>sha256:&lt;64 hex&gt;</code>. When present, the version envelope must match it.</dd>
+      <dt><code>permissions</code></dt><dd>Grant array; write/destructive/external grants force approval + host context.</dd>
+      <dt><code>payload</code></dt><dd>Exactly the one typed sub-object the <code>kind</code> requires — no others.</dd>
+      <dt><code>bundle</code></dt><dd>Present iff <code>kind === "bundle"</code>. Composition manifest.</dd>
+    </dl>
+
+    <h3>The superRefine rules that enforce it</h3>
+    <p>Field shapes are the floor; the cross-field <code>superRefine</code> checks are what actually hold the envelope honest. These are the shipped messages, verbatim.</p>
+
+    <div class="table-scroll">
+    <table class="enforce">
+      <caption>Real <code>superRefine</code> invariants on the manifest, permission grant, and version envelope.</caption>
+      <thead>
+        <tr><th scope="col">Invariant</th><th scope="col">Refusal message (verbatim)</th><th scope="col">Site</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Version id carries package id</td>
+          <td><code class="rule-msg">"packageVersionId must start with packageId@"</code></td>
+          <td class="site">marketplaceManifestSchema</td>
+        </tr>
+        <tr>
+          <td>Semver agreement</td>
+          <td><code class="rule-msg">"packageSemver must match packageVersionId semver"</code></td>
+          <td class="site">marketplaceManifestSchema</td>
+        </tr>
+        <tr>
+          <td>Bundle presence is exact</td>
+          <td><code class="rule-msg">"Bundle packages require a bundle manifest"</code> / <code class="rule-msg">"Only kind=bundle packages may include bundle composition"</code></td>
+          <td class="site">marketplaceManifestSchema</td>
+        </tr>
+        <tr>
+          <td>Payload matches kind</td>
+          <td><code class="rule-msg">"&lt;kind&gt; packages require &lt;key&gt; payload"</code> / <code class="rule-msg">"&lt;kind&gt; packages cannot include &lt;key&gt; payload"</code></td>
+          <td class="site">marketplaceManifestSchema</td>
+        </tr>
+        <tr>
+          <td>App renders canonical JSON</td>
+          <td><code class="rule-msg">"App packages require canonical JSON-render state"</code></td>
+          <td class="site">marketplaceManifestSchema</td>
+        </tr>
+        <tr>
+          <td>Managed-only runtime privileges</td>
+          <td><code class="rule-msg">"managed_code runtime mode is reserved for managed_internal packages"</code> / <code class="rule-msg">"sandboxRuntime capability is reserved for managed_internal packages in v0"</code></td>
+          <td class="site">marketplaceManifestSchema</td>
+        </tr>
+        <tr>
+          <td>Runtime write/external needs trust</td>
+          <td><code class="rule-msg">"Runtime write/external effects require trusted approval"</code> / <code class="rule-msg">"…require trusted host context"</code></td>
+          <td class="site">marketplaceManifestSchema</td>
+        </tr>
+        <tr>
+          <td>No secrets, no code in the manifest</td>
+          <td><code class="rule-msg">"Marketplace manifests must not embed secrets or tokens"</code> / <code class="rule-msg">"…must not embed executable source code"</code></td>
+          <td class="site">marketplaceManifestSchema</td>
+        </tr>
+        <tr>
+          <td>Active write grant needs trusted approval</td>
+          <td><code class="rule-msg">"Write/destructive/external active grants require preview_then_trusted_approval"</code></td>
+          <td class="site">marketplacePermissionGrantSchema</td>
+        </tr>
+        <tr>
+          <td>Active write grant needs host context</td>
+          <td><code class="rule-msg">"Write/destructive/external active grants require trusted host context"</code></td>
+          <td class="site">marketplacePermissionGrantSchema</td>
+        </tr>
+        <tr>
+          <td>Copied/forked keep provenance</td>
+          <td><code class="rule-msg">"Copied/forked installs must preserve source provenance"</code> / <code class="rule-msg">"…must point to the same package lineage"</code></td>
+          <td class="site">marketplaceInstallationSchema</td>
+        </tr>
+        <tr>
+          <td>Bundle selectors mutually exclusive</td>
+          <td><code class="rule-msg">"Bundle composition item needs exactly one of packageVersionId, versionRange, or embeddedDefinitionId"</code></td>
+          <td class="site">bundleCompositionItemSchema</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">Two invariants not to soften</div>
+      <p>The manifest is <strong>data, never code</strong>: <code>findSecretLikePath</code> and <code>findExecutableCodePath</code> walk the whole object and reject secret-shaped keys/values (<code>sk_live_…</code>, bearer tokens, PEM blocks) and code-shaped strings (<code>function(</code>, <code>=&gt;</code>, <code>eval(</code>). And <strong>writes are never self-approved</strong>: any grant or binding with effect <code>write</code>/<code>destructive</code>/<code>external</code> is structurally forced onto <code>preview_then_trusted_approval</code> with a non-empty <code>requiredHostContext</code>. The renderer stays execution-inert; approval is a host act, never a chat act.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Shipped vs planned</h2>
+    <p>Reconciled against the implementation truth for branch <code>emdash/yellow-zebras-smell-txxjz</code> as of 2026-07-12. The contract layer is real and test-locked; nothing yet reads or writes it in production.</p>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Package-contract surface status. Contracts are code; the serving path is not.</caption>
+      <thead>
+        <tr><th scope="col">Surface</th><th scope="col">Status</th><th scope="col">Evidence / note</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Manifest / version / installation schemas</td><td><span class="chip ok">SHIPPED</span></td><td><code>packages/tool-contracts/src/marketplace.ts</code></td></tr>
+        <tr><td>Bundle composition + install-order rules</td><td><span class="chip ok">SHIPPED</span></td><td><code>bundleManifestSchema</code>, <code>bundleCompositionItemSchema</code></td></tr>
+        <tr><td>Permission-grant trust invariants</td><td><span class="chip ok">SHIPPED</span></td><td><code>marketplacePermissionGrantSchema.superRefine</code></td></tr>
+        <tr><td>Contract test suite</td><td><span class="chip ok">SHIPPED</span></td><td><code>tests/unit/marketplace-package-contracts.test.mjs</code> — green</td></tr>
+        <tr><td>Legacy-kind normalization aliases</td><td><span class="chip ok">SHIPPED</span></td><td><code>normalizeMarketplacePackageKind</code>, <code>normalizeLegacyManifestInput</code></td></tr>
+        <tr><td>Endpoint <em>definition</em> enum (readiness/execution)</td><td><span class="chip accent">FIXTURE</span></td><td><code>marketplaceEndpointDefinitionSchema</code> — a contract shape, not a mounted route</td></tr>
+        <tr><td>Marketplace ORPC routes</td><td><span class="chip">PLANNED</span></td><td>No handler mounts these schemas yet</td></tr>
+        <tr><td>Persistence / RLS tables (packages, versions, installs)</td><td><span class="chip danger">MISSING</span></td><td>No production DB schema for any of the three records</td></tr>
+        <tr><td>Install UI · publish · moderation</td><td><span class="chip">PLANNED</span></td><td>No install flow, creator publish flow, or review path</td></tr>
+        <tr><td>Migration policy beyond helper</td><td><span class="chip warn">OPEN</span></td><td><code>upgradeMarketplaceManifest</code> handles schema <code>"1"</code> only; real upgrade policy deferred</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+</main>
+</body>
+</html>

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
   SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
+  SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST,
   createAgentEmbedUrl,
   createAgentHostPageContextMessage,
   isAgentHostPageContextMessage,
@@ -250,6 +251,22 @@ const chatUrl = createAgentEmbedUrl({
   smokeRunId: "run-123",
 });
 assert.equal(chatUrl, "https://agent.sonik.local/workspace?agentUiHostOrigin=https%3A%2F%2Fbooking.sonik.local&theme=lemonade&embedMode=chat&rail=hidden&smokeMockStream=1&smokeRunId=run-123", "chat URL should encode host origin, mode, rail, theme, and smoke parameters deterministically");
+assert.equal(chatUrl.includes("publishedAgentId"), false, "config without publishedAgentId must stay byte-identical to today's embed URL");
+
+// Phase 10 (agent-creation-tool-plan-2026-07-13.md): publishedAgentId selects WHICH published
+// agent definition the embed runs -- a tiny additive query param, never a capability grant (those
+// stay host-signed + registry-gated server-side via the signed host-context envelope, untouched here).
+const publishedAgentUrl = createAgentEmbedUrl({
+  agentUrl: "https://agent.sonik.local/workspace",
+  hostOrigin: "https://booking.sonik.local",
+  mode: "chat",
+  publishedAgentId: "agent_campaign_landing_page",
+});
+assert.equal(
+  publishedAgentUrl,
+  "https://agent.sonik.local/workspace?agentUiHostOrigin=https%3A%2F%2Fbooking.sonik.local&embedMode=chat&rail=hidden&publishedAgentId=agent_campaign_landing_page",
+  "embed URL should carry publishedAgentId as a small selector query param",
+);
 
 assert.deepEqual(parseAgentOriginAllowlist("https://*.workers.dev, https://*.sonik.fm"), ["https://*.workers.dev", "https://*.sonik.fm"], "origin allowlist should parse comma-separated wildcard patterns");
 assert.equal(isAgentOriginAllowed("https://amplify-staging.liam-trampota.workers.dev", "https://*.workers.dev,https://*.sonik.fm"), true, "workers.dev staging hosts should match wildcard allowlist");
@@ -354,6 +371,7 @@ fakeIframe.dispatch("load");
 assert.equal(fakeIframe.contentWindow.messages.length, 0, "parked about:blank iframe must not receive host context before it is navigated to the agent origin");
 fakeWindow.__sonikAgentHost.openChat();
 assert.equal(controller.getMode(), "chat", "host controller should open and track chat mode");
+assert.equal(fakeIframe.src.includes("publishedAgentId"), false, "mount without publishedAgentId must not add the param to the iframe src");
 assert.equal(fakeBody.dataset.agentUiOpen, "chat", "controller should expose host body open mode");
 assert.equal(fakeSidecar.dataset.open, "true", "controller should open sidecar dataset state");
 assert.match(fakeIframe.src, /embedMode=chat/, "controller should set iframe src for chat mode");
@@ -414,6 +432,112 @@ assert.deepEqual(queuedTimers.map((timer) => timer.delay), [250, 900, 1800, 3200
 timerController.destroy();
 assert.deepEqual(clearedTimers, queuedTimers.map((timer) => timer.id), "destroy should clear queued context-post timers");
 assert.equal(timerController.getMode(), null, "destroy should close active mode");
+
+const publishedAgentIframe = new FakeIframe("published-agent-frame");
+const publishedAgentChatSlot = new FakeElement("published-agent-chat-slot");
+const publishedAgentDocument = {
+  body: new FakeElement("published-agent-body"),
+  documentElement: new FakeElement("published-agent-html"),
+  querySelector: (selector) => ({
+    "#published-agent-frame": publishedAgentIframe,
+    "#published-agent-chat-slot": publishedAgentChatSlot,
+  })[selector] ?? null,
+};
+const publishedAgentWindow = { ...fakeWindow, document: publishedAgentDocument };
+const publishedAgentController = mountSonikAgentUI({
+  agentUrl: "https://agent.sonik.local/",
+  hostOrigin: "https://booking.sonik.local",
+  publishedAgentId: "agent_campaign_landing_page",
+  getPageContext: () => ({ surface: "event-landing-page" }),
+  elements: { iframe: "#published-agent-frame", chatSlot: "#published-agent-chat-slot" },
+  window: publishedAgentWindow,
+  document: publishedAgentDocument,
+});
+publishedAgentController.open("chat");
+assert.match(publishedAgentIframe.src, /publishedAgentId=agent_campaign_landing_page/, "mount config carrying publishedAgentId should flow it through to the embedded iframe's request URL");
+publishedAgentController.destroy();
+
+// P1 #10 (production-readiness ledger): allowedOrigins narrows the existing
+// exact-agentOrigin postMessage check further. A window that actually
+// captures listeners is needed here (the shared fakeWindow above no-ops
+// addEventListener) so a "message" event can be dispatched through it.
+function createMessageCapableWindow(overrides = {}) {
+  const listeners = new Map();
+  return {
+    location: { origin: "https://booking.sonik.local" },
+    innerWidth: 1280,
+    setTimeout: (fn) => { fn(); return 1; },
+    clearTimeout: () => undefined,
+    requestAnimationFrame: (fn) => { fn(); return 1; },
+    cancelAnimationFrame: () => undefined,
+    getComputedStyle: () => ({ getPropertyValue: () => "520" }),
+    addEventListener: (type, handler) => {
+      const handlers = listeners.get(type) ?? [];
+      handlers.push(handler);
+      listeners.set(type, handlers);
+    },
+    removeEventListener: (type, handler) => {
+      listeners.set(type, (listeners.get(type) ?? []).filter((existing) => existing !== handler));
+    },
+    dispatchMessage: (event) => {
+      for (const handler of listeners.get("message") ?? []) handler(event);
+    },
+    ...overrides,
+  };
+}
+
+function mountForOriginTest(allowedOrigins) {
+  const iframe = new FakeIframe("origin-test-frame");
+  const chatSlot = new FakeElement("origin-test-chat-slot");
+  const document = {
+    body: new FakeElement("origin-test-body"),
+    documentElement: new FakeElement("origin-test-html"),
+    querySelector: (selector) => ({ "#origin-test-frame": iframe, "#origin-test-chat-slot": chatSlot })[selector] ?? null,
+  };
+  const window = createMessageCapableWindow({ document });
+  window.document = document;
+  const controller = mountSonikAgentUI({
+    agentUrl: "https://agent.sonik.local/",
+    hostOrigin: "https://booking.sonik.local",
+    ...(allowedOrigins !== undefined ? { allowedOrigins } : {}),
+    getPageContext: () => ({ surface: "origin-test" }),
+    elements: { iframe: "#origin-test-frame", chatSlot: "#origin-test-chat-slot" },
+    window,
+    document,
+  });
+  controller.open("chat"); // navigates iframe.src to the agent origin so resolveMountedAgentTargetOrigin resolves
+  const agentOrigin = new URL(iframe.src).origin;
+  return { controller, iframe, window, agentOrigin };
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+{
+  const { window, iframe, agentOrigin } = mountForOriginTest("https://trusted.example");
+  iframe.contentWindow.messages.length = 0; // clear postContext-on-open noise
+  window.dispatchMessage({ origin: agentOrigin, source: iframe.contentWindow, data: { source: "sonik-agent-ui", type: SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST } });
+  await flushMicrotasks();
+  assert.equal(iframe.contentWindow.messages.length, 0, "a message from the correct agentOrigin should still be rejected when allowedOrigins does not include that origin");
+}
+
+{
+  const { window, iframe, agentOrigin } = mountForOriginTest("https://trusted.example,https://agent.sonik.local");
+  iframe.contentWindow.messages.length = 0;
+  window.dispatchMessage({ origin: agentOrigin, source: iframe.contentWindow, data: { source: "sonik-agent-ui", type: SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST } });
+  await flushMicrotasks();
+  assert.equal(iframe.contentWindow.messages.length, 1, "a message from an origin included in allowedOrigins should be processed");
+}
+
+{
+  const { window, iframe, agentOrigin } = mountForOriginTest(undefined);
+  iframe.contentWindow.messages.length = 0;
+  window.dispatchMessage({ origin: agentOrigin, source: iframe.contentWindow, data: { source: "sonik-agent-ui", type: SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST } });
+  await flushMicrotasks();
+  assert.equal(iframe.contentWindow.messages.length, 1, "omitting allowedOrigins must preserve today's behavior: only the exact-agentOrigin check applies");
+}
 
 const localEmbedSmokeSource = await readFile("scripts/agent-ui-embed-smoke.mjs", "utf8");
 const bookingContextSmokeSource = await readFile("scripts/agent-ui-booking-context-pipeb-smoke.mjs", "utf8");

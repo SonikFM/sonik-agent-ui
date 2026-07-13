@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R1 · Stateful Runtimes Landscape (July 2026) — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .verdict-key { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0 0; font-size: var(--text-sm); color: var(--muted); }
+  .verdict-key span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 12px; height: 12px; border-radius: 2px; border: 1px solid var(--line-strong); display: inline-block; }
+  .swatch.accent { background: var(--accent); }
+  .swatch.muted  { background: var(--viz-5); }
+  .swatch.ok     { background: var(--ok); }
+  .findings { list-style: none; padding: 0; margin: 16px 0 0; }
+  .findings > li { border-top: 1px solid var(--line); padding: 14px 0; max-width: var(--prose-max); }
+  .findings > li:last-child { border-bottom: 1px solid var(--line); }
+  .findings .f-head { color: var(--ink); font-weight: 600; margin-bottom: 4px; }
+  td .chip { margin-right: 4px; }
+  .nowrap { white-space: nowrap; }
+</style>
+</head>
+<body data-doc="research-stateful">
+<main class="page">
+  <header class="page-head">
+    <h1>Stateful Runtimes Landscape (July 2026)</h1>
+    <p class="lead">Nothing shipping in July 2026 combines workflows-as-validated-JSON, one generic interpreter, and a typed host-signed approval boundary in a single package. The scan ratifies keeping our hand-rolled Decider reducer and names the substrate, the candidates, and the ruled-out field.</p>
+    <p class="doc-meta">Source: docs/research/stateful-runtimes-landscape-2026-07.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>Headline finding</h2>
+    <p>The lens is fixed: a TypeScript monorepo on Cloudflare Workers, a Zod-validated pure-reducer state machine (<code>workflow-run-state.ts</code>), workflows carried as JSON documents and executed by one generic controller, host-signed approval gates, and semantic receipts. Measured against that lens, the open-source ecosystem has close cousins but no match.</p>
+    <div class="callout">
+      <p class="callout-title">No engine ships all three of these together</p>
+      <p>(a) workflows as validated JSON documents, (b) one generic interpreter over them, (c) a typed, host-verified approval boundary. The nearest neighbours each hold exactly one: Netflix/Orkes Conductor is data-as-workflow but has no trust model and is Java; Pydantic AI has typed approval payloads but no durability and is Python; Restate has durable-promise approval gates but runs an external server.</p>
+    </div>
+    <p>Our reducer is not an ad-hoc wheel. <code>decide(command, state) → events</code> with rejection expressed as data and effects injected is the <strong>Decider pattern</strong> as formalized by Emmett and fmodel-ts — a named, recognized shape. The pattern is shipped and green:</p>
+    <p><span class="chip ok">SHIPPED</span> pure reducer, host-signed approval structurally required (<code>model_supplied_approval_is_not_trusted</code>), phase <code>committed</code> only on semantic-success receipts. The typed host-signed approval boundary remains uncommoditized across every project below — it is the moat.</p>
+  </section>
+
+  <section>
+    <h2>Durable-execution engines, ranked for our lens</h2>
+    <p>The source's full matrix, verbatim on facts. The <strong>Verdict</strong> column is our evaluation of each engine against the Workers-plus-approval lens, not the project's own status. Two Workers-native platforms and two embeddable libraries survive scrutiny; the rest are ruled out on edge story, weight, or license.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Durable-execution engines evaluated for a Cloudflare-Workers, host-signed-approval target.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Project</th>
+          <th scope="col">License</th>
+          <th scope="col">Shape</th>
+          <th scope="col">Workers story</th>
+          <th scope="col">HITL</th>
+          <th scope="col">Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Cloudflare Workflows / DO</strong> + Project Think Fibers</td>
+          <td>Platform</td>
+          <td>Platform primitive; SQLite-backed DO per instance</td>
+          <td>Native; limits raised 10x May 2026; Dynamic Workflows load per-tenant code</td>
+          <td>Generic waits only — approval semantics left to you</td>
+          <td><span class="chip ok">SUBSTRATE</span> our persistence base; the layer we build is the layer it omits</td>
+        </tr>
+        <tr>
+          <td><strong>DBOS Transact-TS</strong></td>
+          <td>MIT</td>
+          <td>Library — no server; checkpoints inside your Postgres transactions</td>
+          <td>Portable; needs true txn semantics (verify vs Hyperdrive)</td>
+          <td>Build-your-own</td>
+          <td><span class="chip accent">CANDIDATE</span> prototype; steal the atomicity rule</td>
+        </tr>
+        <tr>
+          <td><strong>Restate</strong></td>
+          <td>BSL 1.1 (prod-safe)</td>
+          <td>Platform (Rust server) + per-key journal</td>
+          <td>Shipped CF Workers SDK + deploy docs</td>
+          <td>Durable <code>awakeable()</code> promises — near-identical to our gate</td>
+          <td><span class="chip accent">BOOKMARK</span> for external durability</td>
+        </tr>
+        <tr>
+          <td><strong>Vercel Workflow DevKit</strong></td>
+          <td>Apache 2.0</td>
+          <td>Compiler-directive durability (<code>"use workflow"</code>), Worlds adapter</td>
+          <td>Community Cloudflare World in progress (unshipped)</td>
+          <td>Hooks</td>
+          <td><span class="chip">WATCH</span> revisit Q4 2026</td>
+        </tr>
+        <tr>
+          <td><strong>Resonate</strong></td>
+          <td>Apache 2.0</td>
+          <td>Library OR sidecar; durable promises as protocol</td>
+          <td>Embeddable mode</td>
+          <td>First-class HITL doc</td>
+          <td><span class="chip">IDEA</span> too small (~600 stars) to depend on</td>
+        </tr>
+        <tr>
+          <td><strong>Temporal</strong></td>
+          <td>MIT</td>
+          <td>Full platform (server + DB + workers)</td>
+          <td>None</td>
+          <td>Signals + timers, mature</td>
+          <td><span class="chip danger">RULED OUT</span> operational weight, no edge story</td>
+        </tr>
+        <tr>
+          <td><strong>Inngest</strong></td>
+          <td>SSPL → Apache</td>
+          <td>Platform, step memoization</td>
+          <td>None native</td>
+          <td>Wait-for-event steps</td>
+          <td><span class="chip danger">RULED OUT</span> for embedding</td>
+        </tr>
+        <tr>
+          <td><strong>Hatchet</strong></td>
+          <td>MIT</td>
+          <td>Platform, Postgres-backed</td>
+          <td>None</td>
+          <td>DAG-level</td>
+          <td><span class="chip danger">RULED OUT</span></td>
+        </tr>
+        <tr>
+          <td><strong>Trigger.dev</strong></td>
+          <td>Apache 2.0</td>
+          <td>Platform, checkpoint-resume, own workers</td>
+          <td>None</td>
+          <td>Wait points</td>
+          <td><span class="chip danger">RULED OUT</span></td>
+        </tr>
+        <tr>
+          <td><strong>Windmill</strong></td>
+          <td>AGPL core</td>
+          <td>In-house tooling platform</td>
+          <td>None</td>
+          <td>n/a</td>
+          <td><span class="chip danger">RULED OUT</span> license + shape</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="callout ok">
+      <p class="callout-title">The decisive filter is the edge</p>
+      <p>Only Cloudflare Workflows/DO and Restate have a real Workers story; DBOS and Resonate are library-shaped enough to embed. Every full platform (Temporal, Inngest, Hatchet, Trigger.dev, Windmill) fails on "None" for Workers before HITL maturity even enters the argument.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>GitHub stars: attention, not fitness</h2>
+    <p>Stars measure mindshare, not suitability for this lens. The four most-starred projects on this chart are all ruled out or the road not taken; the projects we actually carry forward sit at the bottom. Read the bar length as popularity and the colour as our verdict — they disagree on purpose.</p>
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 760 410" aria-labelledby="stars-title stars-desc">
+        <title id="stars-title">GitHub stars by project, 2026-07-10</title>
+        <desc id="stars-desc">Horizontal bars of GitHub star counts. Mastra 22k, Temporal 21.5k, Windmill 17.1k, Trigger.dev 15.6k, Hatchet 7.5k, Inngest 5.6k, Restate 4.1k, Vercel WDK 2.2k, DBOS 1.3k, Resonate 0.6k. Bars for projects under consideration are drawn in accent blue; ruled-out projects in muted grey.</desc>
+
+        <!-- gridlines -->
+        <g stroke="var(--line)" stroke-width="1">
+          <line x1="126" y1="18" x2="126" y2="350"></line>
+          <line x1="239.6" y1="18" x2="239.6" y2="350"></line>
+          <line x1="353.4" y1="18" x2="353.4" y2="350"></line>
+          <line x1="467.3" y1="18" x2="467.3" y2="350"></line>
+          <line x1="581.1" y1="18" x2="581.1" y2="350"></line>
+        </g>
+        <line x1="126" y1="350" x2="626" y2="350" stroke="var(--line-strong)" stroke-width="1"></line>
+
+        <!-- bars + labels -->
+        <g font-family="var(--font-sans)" font-size="12">
+          <!-- Mastra 22 -->
+          <text x="118" y="34" text-anchor="end" fill="var(--body)">Mastra</text>
+          <rect x="126" y="23" width="500" height="22" fill="var(--viz-5)"></rect>
+          <text x="632" y="34" text-anchor="start" fill="var(--muted)">22k</text>
+          <!-- Temporal 21.5 -->
+          <text x="118" y="68" text-anchor="end" fill="var(--body)">Temporal</text>
+          <rect x="126" y="57" width="488.6" height="22" fill="var(--viz-5)"></rect>
+          <text x="620.6" y="68" text-anchor="start" fill="var(--muted)">21.5k</text>
+          <!-- Windmill 17.1 -->
+          <text x="118" y="102" text-anchor="end" fill="var(--body)">Windmill</text>
+          <rect x="126" y="91" width="388.6" height="22" fill="var(--viz-5)"></rect>
+          <text x="520.6" y="102" text-anchor="start" fill="var(--muted)">17.1k</text>
+          <!-- Trigger.dev 15.6 -->
+          <text x="118" y="136" text-anchor="end" fill="var(--body)">Trigger.dev</text>
+          <rect x="126" y="125" width="354.5" height="22" fill="var(--viz-5)"></rect>
+          <text x="486.5" y="136" text-anchor="start" fill="var(--muted)">15.6k</text>
+          <!-- Hatchet 7.5 -->
+          <text x="118" y="170" text-anchor="end" fill="var(--body)">Hatchet</text>
+          <rect x="126" y="159" width="170.5" height="22" fill="var(--viz-5)"></rect>
+          <text x="302.5" y="170" text-anchor="start" fill="var(--muted)">7.5k</text>
+          <!-- Inngest 5.6 -->
+          <text x="118" y="204" text-anchor="end" fill="var(--body)">Inngest</text>
+          <rect x="126" y="193" width="127.3" height="22" fill="var(--viz-5)"></rect>
+          <text x="259.3" y="204" text-anchor="start" fill="var(--muted)">5.6k</text>
+          <!-- Restate 4.1 -->
+          <text x="118" y="238" text-anchor="end" fill="var(--body)">Restate</text>
+          <rect x="126" y="227" width="93.2" height="22" fill="var(--accent)"></rect>
+          <text x="225.2" y="238" text-anchor="start" fill="var(--muted)">4.1k</text>
+          <!-- Vercel WDK 2.2 -->
+          <text x="118" y="272" text-anchor="end" fill="var(--body)">Vercel WDK</text>
+          <rect x="126" y="261" width="50" height="22" fill="var(--accent)"></rect>
+          <text x="182" y="272" text-anchor="start" fill="var(--muted)">2.2k</text>
+          <!-- DBOS 1.3 -->
+          <text x="118" y="306" text-anchor="end" fill="var(--body)">DBOS</text>
+          <rect x="126" y="295" width="29.5" height="22" fill="var(--accent)"></rect>
+          <text x="161.5" y="306" text-anchor="start" fill="var(--muted)">1.3k</text>
+          <!-- Resonate 0.6 -->
+          <text x="118" y="340" text-anchor="end" fill="var(--body)">Resonate</text>
+          <rect x="126" y="329" width="13.6" height="22" fill="var(--accent)"></rect>
+          <text x="145.6" y="340" text-anchor="start" fill="var(--muted)">0.6k</text>
+        </g>
+
+        <!-- axis scale -->
+        <g font-family="var(--font-sans)" font-size="12" fill="var(--muted)" text-anchor="middle">
+          <text x="126" y="368">0</text>
+          <text x="239.6" y="368">5k</text>
+          <text x="353.4" y="368">10k</text>
+          <text x="467.3" y="368">15k</text>
+          <text x="581.1" y="368">20k</text>
+        </g>
+        <text x="376" y="392" font-family="var(--font-sans)" font-size="12" fill="var(--faint)" text-anchor="middle">GitHub stars, 2026-07-10</text>
+      </svg>
+      <figcaption>Star counts as of 2026-07-10. Blue = under consideration for our lens (Restate, Vercel WDK, DBOS, Resonate); grey = ruled out or the road not taken. Cloudflare Workflows/DO, our actual substrate, is a platform primitive with no comparable repo count and is omitted from the popularity axis.</figcaption>
+    </figure>
+    <div class="verdict-key">
+      <span><span class="swatch accent"></span> Under consideration</span>
+      <span><span class="swatch muted"></span> Ruled out / not adopted</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Library vs platform, Workers vs not</h2>
+    <p>The two axes that actually decide fit: whether a project embeds as a library or demands an external platform, and whether it has a native Cloudflare Workers story. The top-left quadrant — embeddable and Workers-native — is where our reducer wants a peer, and it is nearly empty. Restate and Cloudflare sit top-right (platform, Workers-native); the ruled-out crowd clusters bottom-right.</p>
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 760 470" aria-labelledby="quad-title quad-desc">
+        <title id="quad-title">Library-vs-platform against Workers-native scatter</title>
+        <desc id="quad-desc">A scatter plot. X axis runs from embeddable library on the left to external platform on the right. Y axis runs from no Workers story at the bottom to Workers-native at the top. Cloudflare Workflows and Restate sit top-right; DBOS, Resonate and Vercel WDK sit on the library side at partial Workers height; Temporal, Trigger.dev, Hatchet, Inngest and Windmill cluster bottom-right as platforms with no Workers story.</desc>
+
+        <!-- frame -->
+        <rect x="150" y="60" width="500" height="340" fill="none" stroke="var(--line-strong)" stroke-width="1"></rect>
+        <!-- quadrant dividers -->
+        <line x1="400" y1="60" x2="400" y2="400" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"></line>
+        <line x1="150" y1="230" x2="650" y2="230" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"></line>
+
+        <!-- quadrant captions -->
+        <g font-family="var(--font-sans)" font-size="12" fill="var(--faint)">
+          <text x="158" y="76" text-anchor="start">embeddable + Workers-native (sparse)</text>
+          <text x="642" y="76" text-anchor="end">platform + Workers-native</text>
+          <text x="158" y="392" text-anchor="start">embeddable, no edge</text>
+          <text x="642" y="392" text-anchor="end">platform, no edge — ruled out</text>
+        </g>
+
+        <!-- points -->
+        <g font-family="var(--font-sans)" font-size="12">
+          <!-- Cloudflare — substrate -->
+          <circle cx="600" cy="84" r="6" fill="var(--ok)"></circle>
+          <text x="590" y="88" text-anchor="end" fill="var(--ink)">Cloudflare Workflows / DO</text>
+          <!-- Restate — bookmark -->
+          <circle cx="520" cy="121" r="6" fill="var(--accent)"></circle>
+          <text x="510" y="125" text-anchor="end" fill="var(--ink)">Restate</text>
+          <!-- Resonate — idea -->
+          <circle cx="270" cy="213" r="6" fill="var(--accent)"></circle>
+          <text x="282" y="217" text-anchor="start" fill="var(--ink)">Resonate</text>
+          <!-- DBOS — candidate -->
+          <circle cx="225" cy="247" r="6" fill="var(--accent)"></circle>
+          <text x="237" y="251" text-anchor="start" fill="var(--ink)">DBOS</text>
+          <!-- Vercel WDK — watch -->
+          <circle cx="365" cy="305" r="6" fill="var(--accent)"></circle>
+          <text x="377" y="309" text-anchor="start" fill="var(--ink)">Vercel WDK</text>
+          <!-- Windmill -->
+          <circle cx="480" cy="278" r="6" fill="var(--viz-5)"></circle>
+          <text x="470" y="282" text-anchor="end" fill="var(--muted)">Windmill</text>
+          <!-- Trigger.dev -->
+          <circle cx="580" cy="312" r="6" fill="var(--viz-5)"></circle>
+          <text x="570" y="316" text-anchor="end" fill="var(--muted)">Trigger.dev</text>
+          <!-- Hatchet -->
+          <circle cx="550" cy="332" r="6" fill="var(--viz-5)"></circle>
+          <text x="540" y="336" text-anchor="end" fill="var(--muted)">Hatchet</text>
+          <!-- Inngest -->
+          <circle cx="500" cy="352" r="6" fill="var(--viz-5)"></circle>
+          <text x="490" y="356" text-anchor="end" fill="var(--muted)">Inngest</text>
+          <!-- Temporal -->
+          <circle cx="605" cy="356" r="6" fill="var(--viz-5)"></circle>
+          <text x="595" y="360" text-anchor="end" fill="var(--muted)">Temporal</text>
+        </g>
+
+        <!-- axes labels -->
+        <g font-family="var(--font-sans)" font-size="12" fill="var(--muted)">
+          <text x="150" y="424" text-anchor="start">embeddable library</text>
+          <text x="650" y="424" text-anchor="end">external platform</text>
+          <text x="400" y="442" text-anchor="middle" fill="var(--faint)">shape</text>
+          <text transform="rotate(-90 30 230)" x="30" y="230" text-anchor="middle">no Workers story &#8594; Workers-native</text>
+        </g>
+      </svg>
+      <figcaption>Placement follows the source's facts on shape and edge support. Green = our substrate; blue = under consideration; grey = ruled out. The empty top-left is the point: no popular OSS engine is both embeddable and Workers-native with an approval model, which is why the reducer stays hand-rolled on the DO substrate.</figcaption>
+    </figure>
+    <div class="verdict-key">
+      <span><span class="swatch ok"></span> Substrate (adopted)</span>
+      <span><span class="swatch accent"></span> Under consideration</span>
+      <span><span class="swatch muted"></span> Ruled out</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Mastra: the road not taken</h2>
+    <p>Mastra (TS, 1.0 in Jan 2026, $22M Series A in Apr 2026, ~300k weekly downloads) is the agent framework this project would most plausibly have adopted. Its <code>stateSchema</code> is structurally close to our reducer state. Three findings cut against it, and a fourth — churn — is disqualifying on its own.</p>
+    <ul class="findings">
+      <li>
+        <div class="f-head">No workflow-as-data</div>
+        Code-first <code>.then()</code> / <code>.branch()</code> only. The vNext direction is stronger code-first typing, not documents. Our entire model is workflows as validated JSON executed by one interpreter; Mastra structurally cannot host that.
+      </li>
+      <li>
+        <div class="f-head">No approval authority model</div>
+        <code>resume()</code> trusts any shape-valid payload — no identity, no signing, no audit primitive. This is precisely the boundary we treat as the moat, and Mastra has none of it.
+      </li>
+      <li>
+        <div class="f-head">Snapshot format explicitly internal and unversioned</div>
+        An unsafe interop target. We cannot persist or exchange state through a format the vendor reserves the right to change silently.
+      </li>
+    </ul>
+    <div class="callout warn">
+      <p class="callout-title">Four breaking renames of core primitives in one month, no semver guarantee on the stable channel</p>
+      <p>Run, session, and HITL primitives were renamed four times between 12 Jun and 6 Jul 2026. Two of the renames landed within two days of each other. A dependency this central cannot churn its vocabulary at this rate.</p>
+    </div>
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 760 170" aria-labelledby="mastra-title mastra-desc">
+        <title id="mastra-title">Mastra breaking-change timeline, June to July 2026</title>
+        <desc id="mastra-desc">A timeline of four breaking renames. v1.42 on 12 June unified tool-suspension. v1.46 on 24 June introduced Harness. v1.47 on 26 June renamed it to AgentController. v1.50 on 6 July renamed heartbeats to schedules. The v1.46 and v1.47 changes are two days apart.</desc>
+        <line x1="60" y1="90" x2="700" y2="90" stroke="var(--line-strong)" stroke-width="1"></line>
+        <g font-family="var(--font-sans)" font-size="12">
+          <!-- v1.42 Jun 12 -->
+          <circle cx="60" cy="90" r="5" fill="var(--accent)"></circle>
+          <text x="60" y="66" text-anchor="middle" fill="var(--ink)">v1.42</text>
+          <text x="60" y="116" text-anchor="middle" fill="var(--muted)">Jun 12</text>
+          <text x="60" y="134" text-anchor="middle" fill="var(--faint)">tool-suspension unified</text>
+          <!-- v1.46 Jun 24 -->
+          <circle cx="380" cy="90" r="5" fill="var(--accent)"></circle>
+          <text x="380" y="66" text-anchor="middle" fill="var(--ink)">v1.46</text>
+          <text x="380" y="116" text-anchor="middle" fill="var(--muted)">Jun 24</text>
+          <text x="380" y="134" text-anchor="middle" fill="var(--faint)">Harness</text>
+          <!-- v1.47 Jun 26 -->
+          <circle cx="433" cy="90" r="5" fill="var(--accent)"></circle>
+          <text x="433" y="46" text-anchor="middle" fill="var(--ink)">v1.47</text>
+          <text x="433" y="150" text-anchor="middle" fill="var(--muted)">Jun 26 &#183; AgentController</text>
+          <!-- v1.50 Jul 6 -->
+          <circle cx="700" cy="90" r="5" fill="var(--accent)"></circle>
+          <text x="700" y="66" text-anchor="end" fill="var(--ink)">v1.50</text>
+          <text x="700" y="116" text-anchor="end" fill="var(--muted)">Jul 6</text>
+          <text x="700" y="134" text-anchor="end" fill="var(--faint)">heartbeats &#8594; schedules</text>
+        </g>
+      </svg>
+      <figcaption>Spacing is proportional to calendar days. v1.46 (Harness) and v1.47 (AgentController) are 48 hours apart — the second rename undid the first before adopters could migrate.</figcaption>
+    </figure>
+    <p>Mastra's Cloudflare deployer is real (D1/KV/DO adapters), but the docs steer to DO for consistency because KV is an eventually-consistent footgun and D1 has a hard 10GB cap — a reminder that even the shipped edge path carries caveats.</p>
+  </section>
+
+  <section>
+    <h2>Patterns to steal, mapped to plan phases</h2>
+    <p>The scan is worth mining regardless of adoption. Each pattern below is a contract-layer improvement, not a dependency. None is built yet — all land after the current Phase 4, consistent with the status addendum's "still not built" list.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Patterns extracted from the field, mapped to consensus-plan phases and current status.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Pattern</th>
+          <th scope="col">Source</th>
+          <th scope="col">Where it lands</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Atomic receipt writes</strong> — receipt row commits in the same DB transaction as the effect's own write</td>
+          <td>DBOS</td>
+          <td>Phase 5/6 — kills "committed but not marked done"</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Durable promise as approval gate</strong> — create-once, persist, resolve via signed callback</td>
+          <td>Restate / Resonate</td>
+          <td>Phase 5/6 — cleaner framing for <code>request_approval</code> &#8594; <code>approve</code></td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Event log as source of truth, state as projection</strong> — formalize run state as a projection of an append-only event list</td>
+          <td>All mature engines</td>
+          <td>Phase 5/6 — receipts array is halfway there; free replay/audit</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Journal-per-step</strong> — name and journal every side effect individually rather than replaying whole functions</td>
+          <td>Restate</td>
+          <td>Backlog — durability hardening</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Backend adapter seam</strong> — a ~20-line append/read interface decoupling durability from storage (DO today, D1/PG later)</td>
+          <td>Vercel Worlds</td>
+          <td>Backlog — cheap insurance; distinct from the shipped D011 approval-affordance seam</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <p>For context on what <em>is</em> shipped: the read-side convergence seam (Phase 2) already feeds intake and reservation flows from one shared approval-affordance builder, proven byte-identical <span class="chip ok">SHIPPED</span>. The storage-adapter seam above is a different, unbuilt boundary.</p>
+  </section>
+
+  <section>
+    <h2>Reducer-hardening checklist</h2>
+    <p>Seven contract-layer hardening items surfaced from the statechart research. All are cheap, none is a hardening pass yet — every item is <span class="chip warn">OPEN</span>. These are properties of <code>workflow-run-state.ts</code>, which itself is shipped; hardening tightens it, it does not replace it.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Reducer-hardening items from statechart research — all open as of 2026-07-11.</caption>
+      <thead>
+        <tr>
+          <th scope="col" class="nowrap">#</th>
+          <th scope="col">Item</th>
+          <th scope="col">Why</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>Idempotent replay</td>
+          <td>Retried <code>commit_result</code> currently double-applies; add dedupe via receipt identity or event id</td>
+          <td><span class="chip warn">OPEN</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>Approval expiry as data</td>
+          <td><code>expiresAt</code> checked on the next event, never a timer</td>
+          <td><span class="chip warn">OPEN</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>Parallel-dimension snapshot integrity</td>
+          <td><code>approvalState</code> and <code>nodeStates</code> are independent axes; an event on one must never clobber the other</td>
+          <td><span class="chip warn">OPEN</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>Rejected events return state unchanged</td>
+          <td>Already asserted today — the open item is to keep asserting it as the reducer grows</td>
+          <td><span class="chip warn">OPEN</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>Snapshot round-trip</td>
+          <td>JSON serialize &#8594; rehydrate &#8594; next event must equal the live object</td>
+          <td><span class="chip warn">OPEN</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>Illegal-transition totality</td>
+          <td>Every event type has explicit behaviour in every phase (TS <code>never</code> exhaustiveness)</td>
+          <td><span class="chip warn">OPEN</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>Re-entry semantics</td>
+          <td>Self-transition entry/exit behaviour decided explicitly, not by accident</td>
+          <td><span class="chip warn">OPEN</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ratified direction</h2>
+    <div class="callout ok">
+      <p class="callout-title">Keep the Decider-pattern reducer as the core</p>
+      <p>Persist through Durable Objects when durability lands. Steal patterns 1–3 in Phase 5/6. Track quarterly: Mastra, Cloudflare Project Think, the Vercel WDK Cloudflare World, and <code>@effect/workflow</code> 1.0. The typed host-signed approval boundary remains uncommoditized across the entire field — it stays the moat.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

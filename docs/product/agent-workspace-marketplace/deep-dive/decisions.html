@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DR · Ratified Decisions D001–D017 — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* decisions.html — page-specific composition over tokens.css variables only */
+  .reg-id { font-family: var(--font-mono); color: var(--accent-ink); white-space: nowrap; font-size: var(--text-sm); }
+  .reg-table td:first-child, .reg-table th:first-child { padding-left: 0; }
+  .status-cell { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .xref-pages { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--body); }
+  .legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px 20px; margin-top: 12px; }
+  .legend-grid > div { font-size: var(--text-sm); color: var(--body); }
+  .amend { color: var(--muted); font-size: var(--text-xs); }
+  figure svg text { font-family: var(--font-sans); }
+  .svg-mono { font-family: var(--font-mono); }
+</style>
+</head>
+<body data-doc="decisions">
+<main class="page">
+  <header class="page-head">
+    <h1>Ratified Decisions D001–D017</h1>
+    <p class="lead">The seventeen decisions that fix the marketplace's direction — one envelope, an execution-inert renderer, a trusted-approval write gate, and a registered capability namespace — reconciled against what has actually shipped in code.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/DECISIONS.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>How this page reads</h2>
+    <p>This is the reference page: the register is the source of truth for <em>direction</em>, the traceability matrix is the source of truth for <em>current implementation</em>. Where the 2026-07-07 corpus called something "planned" and it has since shipped, the matrix wins and the chip says so. Status vocabulary is fixed:</p>
+    <div class="callout">
+      <div class="legend-grid">
+        <div><span class="chip ok">SHIPPED</span> enforced in committed code + tests today</div>
+        <div><span class="chip accent">FIXTURE</span> proven only against a fixture, not the live path</div>
+        <div><span class="chip">PLANNED</span> direction ratified, no code surface yet</div>
+        <div><span class="chip warn">BLOCKED / OPEN</span> started, held on an unresolved decision</div>
+        <div><span class="chip danger">MISSING</span> required but absent</div>
+      </div>
+    </div>
+    <p>Two invariants are not negotiable and appear verbatim across the suite: the JSON renderer is <strong>execution-inert</strong> (renderer-origin actions never commit trusted writes, <code>D005</code>), and <strong>chat is never approval</strong> — a write commits only on a host-signed approval carried by trusted host context, with receipts-only success (<code>D006</code>). A model-supplied approval is structurally rejected (<code>model_supplied_approval_is_not_trusted</code>).</p>
+  </section>
+
+  <section>
+    <h2>Decision timeline</h2>
+    <p>Three real dates carry the whole history. The contract baseline (<code>D001</code>–<code>D007</code>) was authored against the 2026-07-06 workspace-creation handoff; the research wave (<code>D008</code>–<code>D017</code>, plus the <code>D001</code> install-semantics amendment) was ratified 2026-07-07; the first implementation landed 2026-07-11. The line is cumulative ratified decisions.</p>
+    <figure class="viz-frame">
+      <svg viewBox="0 0 860 300" role="img" aria-labelledby="tl-title tl-desc" width="860">
+        <title id="tl-title">Cumulative ratified decisions over time</title>
+        <desc id="tl-desc">Zero decisions before 2026-07-06; seven contract-baseline decisions ratified 2026-07-06; ten research-wave decisions ratified 2026-07-07 bringing the total to seventeen; first implementation shipped 2026-07-11 with the total unchanged.</desc>
+
+        <!-- y gridlines + labels: 0,5,10,15 -->
+        <line x1="60" y1="240" x2="820" y2="240" stroke="var(--line-strong)"/>
+        <line x1="60" y1="181.7" x2="820" y2="181.7" stroke="var(--line)"/>
+        <line x1="60" y1="123.3" x2="820" y2="123.3" stroke="var(--line)"/>
+        <line x1="60" y1="65" x2="820" y2="65" stroke="var(--line)"/>
+        <text x="52" y="244" text-anchor="end" font-size="12" fill="var(--muted)">0</text>
+        <text x="52" y="185.7" text-anchor="end" font-size="12" fill="var(--muted)">5</text>
+        <text x="52" y="127.3" text-anchor="end" font-size="12" fill="var(--muted)">10</text>
+        <text x="52" y="69" text-anchor="end" font-size="12" fill="var(--muted)">15</text>
+        <text x="18" y="140" font-size="12" fill="var(--muted)" transform="rotate(-90 18 140)" text-anchor="middle">decisions ratified</text>
+
+        <!-- ratification marker at 2026-07-07 -->
+        <line x1="186.7" y1="30" x2="186.7" y2="240" stroke="var(--accent)" stroke-dasharray="4 4"/>
+        <text x="192" y="44" font-size="12" fill="var(--accent-ink)">ratification 2026-07-07</text>
+
+        <!-- cumulative step line -->
+        <path d="M60,240 V158.3 H186.7 V41.7 H693.3" fill="none" stroke="var(--accent)" stroke-width="2"/>
+
+        <!-- data points -->
+        <circle cx="60" cy="158.3" r="4" fill="var(--accent)"/>
+        <text x="66" y="150" font-size="12" fill="var(--ink)">7 · D001–D007</text>
+        <circle cx="186.7" cy="41.7" r="4" fill="var(--accent)"/>
+        <text x="192" y="36" font-size="12" fill="var(--ink)">17 · +D008–D017</text>
+        <circle cx="693.3" cy="41.7" r="4.5" fill="var(--viz-3)"/>
+        <text x="687" y="60" font-size="12" fill="var(--ok)" text-anchor="end">implementation shipped</text>
+
+        <!-- x ticks -->
+        <text x="60" y="262" font-size="12" fill="var(--muted)" text-anchor="middle" class="svg-mono">07-06</text>
+        <text x="186.7" y="262" font-size="12" fill="var(--muted)" text-anchor="middle" class="svg-mono">07-07</text>
+        <text x="693.3" y="262" font-size="12" fill="var(--muted)" text-anchor="middle" class="svg-mono">07-11</text>
+        <text x="440" y="286" font-size="12" fill="var(--faint)" text-anchor="middle">contract baseline → research ratification → first code</text>
+      </svg>
+      <figcaption>Cumulative count of ratified decisions. The 2026-07-06 baseline fixed the package/version/install envelope and the trust boundary; the 2026-07-07 wave added trust-tier, capability-namespace, kill-switch, publishing, and monetization posture. No decisions were added or reversed when implementation began on 2026-07-11.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Decision register</h2>
+    <p>All seventeen, dense. Each row is the decision in one line and the reason it was made in one line. Contract-baseline rows carry the 2026-07-06 handoff date; research-wave rows carry the 2026-07-07 ratification date.</p>
+    <div class="table-scroll">
+    <table class="reg-table">
+      <caption>D001–D017 — decision and rationale, one line each</caption>
+      <thead>
+        <tr><th scope="col">ID</th><th scope="col">Decision</th><th scope="col">Rationale</th><th scope="col">Ratified</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="reg-id">D001</span></td>
+          <td><strong>One package envelope, first-class kinds.</strong> A single package/version/install envelope keeps <code>bundle</code>, <code>app</code>, <code>workflow</code>, <code>skill</code>, <code>command_tool_pack</code>, <code>agent</code>, <code>artifact_template</code>, <code>mcp_addon</code>, <code>provider_integration</code>, <code>managed_internal</code> as first-class kinds. <span class="amend">Amended 2026-07-07: install semantics vary by kind (D014).</span></td>
+          <td>A bundle installs a whole solution while every component stays independently installable, updatable, and permission-reviewable.</td>
+          <td class="svg-mono">2026-07-06</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D002</span></td>
+          <td><strong>Install versions, not mutable ids.</strong> Installs target an immutable <code>packageVersionId</code>; the mutable package record is a discovery/update pointer only.</td>
+          <td>Enables safe updates, provenance, audit, and copied/forked installs.</td>
+          <td class="svg-mono">2026-07-06</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D003</span></td>
+          <td><strong>Bundle is default composition, not the only object.</strong> <code>bundle</code> is the default composite kind but never replaces first-class app/workflow/skill/tool-pack installs.</td>
+          <td>One-click usefulness must not erase component-level update, fork, permission, or publish flows.</td>
+          <td class="svg-mono">2026-07-06</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D004</span></td>
+          <td><strong>JSON-render is canonical; HTML is an escape hatch.</strong> Deterministic apps author and run as JSON-render manifests; HTML exists only for document/artifact escape hatches, never as the runtime model for command-backed apps.</td>
+          <td>Keeps agent and human state inspectable, patchable, testable, and command-bindable with no sandbox runtime.</td>
+          <td class="svg-mono">2026-07-06</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D005</span></td>
+          <td><strong>Renderer-origin actions cannot commit trusted writes.</strong> Renderer actions may request state updates, previews, approval requests, navigation, and events — never a command commit or trusted approval.</td>
+          <td>Interactive artifacts stay useful behind a hard trust boundary between UI interaction and backend mutation.</td>
+          <td class="svg-mono">2026-07-06</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D006</span></td>
+          <td><strong>Preview → trusted approval → receipt is mandatory for writes.</strong> Write/destructive/external commands and workflow nodes require <code>preview_then_trusted_approval</code>, trusted host context, and receipts.</td>
+          <td>Workflows must act, but writes stay auditable, host-authorized, and reversible by policy.</td>
+          <td class="svg-mono">2026-07-06</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D007</span></td>
+          <td><strong>The endpoint map is planned, not production API.</strong> Marketplace/search/install/workflow endpoint names are planning contracts until implemented as typed ORPC routes.</td>
+          <td>Docs must not imply production support before backend routes, persistence, auth, and tests exist.</td>
+          <td class="svg-mono">2026-07-06</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D008</span></td>
+          <td><strong>Three "marketplaces" are distinct.</strong> Name which is meant: (a) the agent/package marketplace (this corpus), (b) the deferred two-sided commerce marketplace, (c) Meta/WhatsApp message templates (a false friend).</td>
+          <td>The overloaded term produced a phantom "missing PRD" and incompatible data-model assumptions.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D009</span></td>
+          <td><strong>Resume amp.pkg v3 trust machinery.</strong> Adopt the §11 promotion-tier ladder as the trust-tier system, Mockup #5 as the install screen, and <code>command-registry.csv</code> capability_ids as the namespace — do not invent parallel concepts.</td>
+          <td>A designed, partially-built internal substrate beats parallel invention and preserves shared vocabulary.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D010</span></td>
+          <td><strong>Trust-tier is first-class and discovery-visible, with published revocation criteria.</strong> Every package shows a named tier (first-party / verified-partner / community) at discovery, independent of kind and of runtime grants; demotion criteria are published and falsifiable.</td>
+          <td>Provenance and permission answer different questions; conflating them weakened every surveyed competitor.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D011</span></td>
+          <td><strong>Fused Intent-Preview + Trust screen is the canonical install/commit UX.</strong> One screen renders the concrete effect preview from the same execution plan that will run, beside the requested permissions/tier — verbose first use, lighter on repeat. No cosmetic previews, no separate trust modal.</td>
+          <td>The trust gate is the wow moment; same-plan rendering is what makes the preview honest.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D012</span></td>
+          <td><strong>Per-install kill-switch and activity view are first-class.</strong> Every install gets a user/org kill-switch (stop trusting forward; no purge guarantee) and a per-install activity view. Install-time approval is never permanent trust.</td>
+          <td>The dominant real-world exploit is post-install; revocation must be as easy as installation.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D013</span></td>
+          <td><strong>Registered, versioned capability-ID namespace before scale.</strong> <code>requiredCapabilities</code> and grant targets reference registered capability ids, not free strings. Per-call gating with write-implies-read implication makes namespace and kill-switch one mechanism.</td>
+          <td>Every later control — tiers, grants, audits — keys off capability identity; free strings rot.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D014</span></td>
+          <td><strong>Install semantics vary by kind under one envelope.</strong> <code>workflow</code>/<code>artifact_template</code> are fork-and-own snapshots with an immutable <code>packageVersionId</code>; <code>provider_integration</code>/<code>mcp_addon</code> "enable a live connection" with runtime credential resolution and no forked copy.</td>
+          <td>Shareable templates and live provider connections are different problems; one install verb miscasts one of them.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D015</span></td>
+          <td><strong>Curated review + publisher MFA gate third-party publishing; scanning assists, never decides.</strong> Human review before listing, mandatory publisher MFA, Zod validation at install and update, re-review on update, async post-listing audit. Scanners (incl. GitNexus cypher gates) pre-screen only.</td>
+          <td>Prompt-injection detection is unsolved industry-wide; the defensible gates are structural, procedural, and credential-hardening.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D016</span></td>
+          <td><strong>§4 posture: JSON-first descriptors-only.</strong> Packages declare descriptors mapped to approved design-system components and never ship arbitrary UI code. "JSON first; explore future HTML/custom UI only if the needs require it."</td>
+          <td>The strict posture keeps the execution-inert safety claim absolute and the threat model small, with the door explicitly open rather than ambiguous.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D017</span></td>
+          <td><strong>Freemium before take-rate.</strong> A free tier with paid premium capability precedes any take-rate; usage-metric boundaries are the preferred freemium mechanism. Take-rate defers to commerce-marketplace scoping; the cited "Dify 50%" figure is an affiliate rate — do not plan against it.</td>
+          <td>Monetization is unsettled market-wide; reputation-first matches both the research and the May vision.</td>
+          <td class="svg-mono">2026-07-07</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Implementation coverage</h2>
+    <p>Reconciling all seventeen against the 2026-07-11 status addendum: seven are enforced in committed code and tests, six have a shipped seam with the discovery/UI surface still planned, and four remain direction-only (either doctrine with no code surface, or a subject deliberately deferred).</p>
+    <figure class="viz-frame">
+      <svg viewBox="0 0 720 260" role="img" aria-labelledby="cov-title cov-desc" width="720">
+        <title id="cov-title">Decisions by implementation status</title>
+        <desc id="cov-desc">Seven decisions shipped and enforced; six partially realized as a shipped seam with a planned surface; four planned or doctrine-only. Seventeen total.</desc>
+
+        <!-- x gridlines 0..8 -->
+        <line x1="200" y1="30" x2="200" y2="210" stroke="var(--line-strong)"/>
+        <line x1="270" y1="30" x2="270" y2="210" stroke="var(--line)"/>
+        <line x1="340" y1="30" x2="340" y2="210" stroke="var(--line)"/>
+        <line x1="410" y1="30" x2="410" y2="210" stroke="var(--line)"/>
+        <line x1="480" y1="30" x2="480" y2="210" stroke="var(--line)"/>
+        <line x1="550" y1="30" x2="550" y2="210" stroke="var(--line)"/>
+        <text x="200" y="228" font-size="12" fill="var(--muted)" text-anchor="middle">0</text>
+        <text x="340" y="228" font-size="12" fill="var(--muted)" text-anchor="middle">4</text>
+        <text x="480" y="228" font-size="12" fill="var(--muted)" text-anchor="middle">8</text>
+        <text x="360" y="250" font-size="12" fill="var(--faint)" text-anchor="middle">decisions (of 17)</text>
+
+        <!-- SHIPPED: 7 -->
+        <text x="192" y="60" font-size="13" fill="var(--ink)" text-anchor="end">Shipped &amp; enforced</text>
+        <rect x="200" y="46" width="245" height="26" fill="var(--viz-3)"/>
+        <text x="453" y="63" font-size="12" fill="var(--ink)">7</text>
+        <!-- PARTIAL: 6 -->
+        <text x="192" y="118" font-size="13" fill="var(--ink)" text-anchor="end">Seam shipped · surface planned</text>
+        <rect x="200" y="104" width="210" height="26" fill="var(--accent)"/>
+        <text x="418" y="121" font-size="12" fill="var(--ink)">6</text>
+        <!-- PLANNED: 4 -->
+        <text x="192" y="176" font-size="13" fill="var(--ink)" text-anchor="end">Planned / doctrine</text>
+        <rect x="200" y="162" width="140" height="26" fill="var(--surface-3)" stroke="var(--line-strong)"/>
+        <text x="348" y="179" font-size="12" fill="var(--ink)">4</text>
+      </svg>
+      <figcaption>Status buckets: <strong>shipped</strong> D001, D003, D004, D005, D006, D013, D016; <strong>seam shipped / surface planned</strong> D002, D009, D011, D012, D014, D015; <strong>planned or doctrine</strong> D007, D008, D010, D017. D013 additionally carries an open registry-coverage gate (see matrix).</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Decision → implementation traceability</h2>
+    <p>What code and tests realize each decision <em>today</em>. Paths are load-bearing; chips are reconciled against the 2026-07-11 addendum, not the 2026-07-07 corpus.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Each decision, its shipped realization, and its status</caption>
+      <thead>
+        <tr><th scope="col">ID</th><th scope="col">Realized by (today)</th><th scope="col">Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="reg-id">D001</span></td>
+          <td>Package-kind + envelope schema in <code>packages/tool-contracts/src/marketplace.ts</code>; contract tests in <code>tests/unit/marketplace-package-contracts.test.mjs</code>.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> schema</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D002</span></td>
+          <td>Version/install invariants validated in <code>marketplace.ts</code> (packageVersionId, semver, manifest-envelope consistency) + tests. Persistence/RLS install tables not built.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> schema <span class="chip">PLANNED</span> persistence</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D003</span></td>
+          <td>Bundle composition selectors + install order validated in <code>marketplace.ts</code>; tests assert bundles compose app and command-tool-pack entries.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> schema</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D004</span></td>
+          <td>Command-backed-app invariants in contracts; generic interpreter <code>workflow-controller.ts</code> runs one JSON <code>workflowDefinitionSchema</code>, no per-app runtime.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> contracts + interpreter</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D005</span></td>
+          <td>Renderer actions in <code>marketplace.ts</code> reject command-binding refs; tests assert write bindings require trusted approval + host context. Execution-inert renderer holds at schema and controller layers.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> enforced</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D006</span></td>
+          <td><code>workflow-run-state.ts</code>: Zod-validated state, pure reducer (Decider), host-signed approval structurally required (<code>model_supplied_approval_is_not_trusted</code>), phase <code>committed</code> only on semantic-success receipts. Per-node approval (Phase 3b): approving node A never approves node B.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> enforced</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D007</span></td>
+          <td>By design unbuilt: marketplace ORPC routes remain planning contracts. The A2 <code>/api/reservation/commit</code> path is merged and live, but the general marketplace endpoint map is not.</td>
+          <td class="status-cell"><span class="chip">PLANNED</span> endpoints</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D008</span></td>
+          <td>Disambiguation carried in docs (<code>agent-marketplace-recon-supplement-2026-07.md</code>); no code surface — a naming discipline, not a component.</td>
+          <td class="status-cell"><span class="chip">PLANNED</span> doctrine, no code</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D009</span></td>
+          <td>Capability namespace seeded from command-registry lives in <code>capability-registry.ts</code>. The §11 promotion-tier ladder and Mockup #5 install screen are not yet built.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> namespace <span class="chip">PLANNED</span> tier ladder</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D010</span></td>
+          <td>No trust-tier field yet; discovery surface and published revocation criteria not built.</td>
+          <td class="status-cell"><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D011</span></td>
+          <td>One shared approval-affordance builder (Phase 2) feeds intake and reservation flows, proven byte-identical — the same-plan seam. The fused install/commit Review surface itself is not built.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> shared seam <span class="chip">PLANNED</span> Review surface</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D012</span></td>
+          <td>Forward kill-switch exists at the capability layer via <code>revokedCapabilityIds</code> in <code>capability-registry.ts</code>. Per-install activity view and revocation UI not built.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> capability kill-switch <span class="chip">PLANNED</span> per-install UI</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D013</span></td>
+          <td><code>capability-registry.ts</code>: registered/versioned ids, per-call <code>evaluateCapabilityAccess</code>, write-implies-read implication (direct grants take precedence; implication never narrows), kill-switch. Live pinning held: 8 registered capabilities vs 72 live catalog commands.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> registry <span class="chip warn">OPEN</span> catalog coverage</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D014</span></td>
+          <td>Install modes present in the envelope schema (fork-and-own vs enable-connection). Runtime credential resolution for live connections not built.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> schema <span class="chip">PLANNED</span> runtime</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D015</span></td>
+          <td>Zod manifest validation runs at install and update in the contracts. Human review, publisher MFA, re-review, and the async audit pipeline are not built (publishing is not open).</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> Zod validation <span class="chip">PLANNED</span> review/MFA/audit</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D016</span></td>
+          <td>Descriptors-only posture enforced by the execution-inert renderer contracts (D005); no arbitrary-UI-code path exists to admit.</td>
+          <td class="status-cell"><span class="chip ok">SHIPPED</span> posture enforced</td>
+        </tr>
+        <tr>
+          <td><span class="reg-id">D017</span></td>
+          <td>No monetization code; freemium/usage-metric boundaries are a deferred direction pending commerce-marketplace scoping.</td>
+          <td class="status-cell"><span class="chip">PLANNED</span> deferred</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="callout warn">
+      <div class="callout-title">One open gate worth naming</div>
+      <p>The workflow controller (<code>workflow-controller.ts</code>) is proven but <strong>not yet wired into the live request path</strong> — the Phase 3a-2 cutover is an open decision. Separately, grant synthesis reproduces the live policy exactly through the registry, but live pinning is <strong>blocked</strong> until the registry covers the full 72-command catalog (D013).</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Cross-reference ledger</h2>
+    <p>Where each decision is elaborated across the deep-dive suite. Numbers are page ids from the suite nav; open any via the document jump above.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Decision → elaborating deep-dive pages</caption>
+      <thead>
+        <tr><th scope="col">ID</th><th scope="col">Elaborated in</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="reg-id">D001</span></td><td><span class="xref-pages">03 Package &amp; Bundle Contracts</span></td></tr>
+        <tr><td><span class="reg-id">D002</span></td><td><span class="xref-pages">03 Package &amp; Bundle Contracts · 06 Endpoint Map &amp; Data Model</span></td></tr>
+        <tr><td><span class="reg-id">D003</span></td><td><span class="xref-pages">03 Package &amp; Bundle Contracts</span></td></tr>
+        <tr><td><span class="reg-id">D004</span></td><td><span class="xref-pages">04 Command-Backed Apps &amp; JSON-Render · 05 Workflows, Agents, Skills &amp; Tool Packs</span></td></tr>
+        <tr><td><span class="reg-id">D005</span></td><td><span class="xref-pages">04 Command-Backed Apps &amp; JSON-Render · 02 System Map &amp; Boundaries · 07 Permissions, Approval &amp; Trust Boundary</span></td></tr>
+        <tr><td><span class="reg-id">D006</span></td><td><span class="xref-pages">05 Workflows, Agents, Skills &amp; Tool Packs · 07 Permissions, Approval &amp; Trust Boundary · R1 Stateful Runtimes Landscape</span></td></tr>
+        <tr><td><span class="reg-id">D007</span></td><td><span class="xref-pages">06 Endpoint Map &amp; Data Model · 08 Telemetry, Proof &amp; Readiness Gates · 10 Roadmap, Risks &amp; Open Questions</span></td></tr>
+        <tr><td><span class="reg-id">D008</span></td><td><span class="xref-pages">00 Product Strategy &amp; PRD · 02 System Map &amp; Boundaries</span></td></tr>
+        <tr><td><span class="reg-id">D009</span></td><td><span class="xref-pages">07 Permissions, Approval &amp; Trust Boundary</span></td></tr>
+        <tr><td><span class="reg-id">D010</span></td><td><span class="xref-pages">07 Permissions, Approval &amp; Trust Boundary · 10 Roadmap, Risks &amp; Open Questions</span></td></tr>
+        <tr><td><span class="reg-id">D011</span></td><td><span class="xref-pages">07 Permissions, Approval &amp; Trust Boundary · 09 Design Handoff &amp; Component Map</span></td></tr>
+        <tr><td><span class="reg-id">D012</span></td><td><span class="xref-pages">07 Permissions, Approval &amp; Trust Boundary · 11 Operations Runbook</span></td></tr>
+        <tr><td><span class="reg-id">D013</span></td><td><span class="xref-pages">07 Permissions, Approval &amp; Trust Boundary · 06 Endpoint Map &amp; Data Model</span></td></tr>
+        <tr><td><span class="reg-id">D014</span></td><td><span class="xref-pages">03 Package &amp; Bundle Contracts</span></td></tr>
+        <tr><td><span class="reg-id">D015</span></td><td><span class="xref-pages">07 Permissions, Approval &amp; Trust Boundary · 08 Telemetry, Proof &amp; Readiness Gates</span></td></tr>
+        <tr><td><span class="reg-id">D016</span></td><td><span class="xref-pages">00 Product Strategy &amp; PRD · 04 Command-Backed Apps &amp; JSON-Render</span></td></tr>
+        <tr><td><span class="reg-id">D017</span></td><td><span class="xref-pages">00 Product Strategy &amp; PRD · 10 Roadmap, Risks &amp; Open Questions</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+</main>
+</body>
+</html>

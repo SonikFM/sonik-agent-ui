@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SG · Stop-Gate Package — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .gate-strip { margin: 24px 0 8px; }
+  .tier-head { display: flex; align-items: baseline; gap: 12px; margin-top: 2em; }
+  .tier-head h3 { margin: 0; }
+  .tier-head .chip { flex: none; }
+  .provide-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 18px 0; }
+  .decision-panel { display: grid; grid-template-columns: minmax(280px, 1.4fr) 1fr; gap: 20px; align-items: stretch; margin: 20px 0; }
+  .decision-verdict {
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+    background: var(--accent-surface); border-radius: var(--radius); padding: 20px 22px;
+  }
+  .decision-verdict .verdict-word { font-size: var(--text-2xl); color: var(--accent-ink); font-weight: 700; letter-spacing: -0.02em; }
+  @media (max-width: 860px) { .decision-panel { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-doc="stopgate">
+<main class="page">
+  <header class="page-head">
+    <h1>Stop-Gate Package</h1>
+    <p class="lead">Fifteen agents, ten codebases, four retrofit pre-runners, one framework decision — compiled and holding for review. Nothing below runs until gate one is cleared together.</p>
+    <p class="doc-meta">Source: docs/research/stopgate-package-2026-07-12.md + per-donor pre-runners · Compiled 2026-07-12 · All license and confidence claims cite source files in the underlying docs</p>
+  </header>
+
+  <section aria-labelledby="process-h">
+    <h2 id="process-h">The process from here</h2>
+    <div class="flow gate-strip" role="list">
+      <div class="flow-node gated" role="listitem"><b>Gate 1 · Evaluate</b><small>Review this page's retrofit candidates together; ratify or trim before any workflow runs.</small></div>
+      <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+      <div class="flow-node gated" role="listitem"><b>Gate 2 · Bring-ups</b><small>One tool at a time, Dan's clock, never simultaneous. Runbooks below.</small></div>
+      <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+      <div class="flow-node gated" role="listitem"><b>Gate 3 · Walkthroughs</b><small>Chrome side-by-side, scorecard verdicts per screen, OTel watching backends.</small></div>
+      <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+      <div class="flow-node" role="listitem"><b>Findings</b><small>Final findings list compiled from scorecard + captures.</small></div>
+      <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+      <div class="flow-node trusted" role="listitem"><b>Deep interview</b><small>State parked; topology at seven components.</small></div>
+      <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+      <div class="flow-node trusted" role="listitem"><b>Ralph plan</b><small>Interview spec becomes the execution plan.</small></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="retrofit-h">
+    <h2 id="retrofit-h">Copy-retrofit candidates, ranked</h2>
+    <p>Every item traced to file level with license verified in the donor repo. The split that matters: what we may copy, what we must re-derive, and what we may only learn from. Full targeting in <code>docs/research/copy-retrofit-prerunners/</code>.</p>
+
+    <div class="tier-head"><h3>Tier A — port near-verbatim</h3><span class="chip ok">LICENSE-CLEAN</span><span class="chip">85 LOC total</span></div>
+    <div class="table-scroll"><table>
+      <caption>Small, dependency-light, MIT-licensed; land directly in tool-contracts.</caption>
+      <thead><tr><th>Item</th><th>Donor</th><th>Size</th><th>Lands in</th><th>Caveat</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Waitpoint contract</strong> — one pause primitive, unique (runId, stepName), pre-completed race check</td><td>activepieces <span class="chip ok">MIT</span></td><td>24 LOC</td><td>HITL pause under <code>workflow-run-state</code></td><td>Reimplement their 936-LOC service layer, port only the contract</td></tr>
+        <tr><td><strong><code>audience</code> + <code>idempotent</code></strong> capability fields</td><td>activepieces <span class="chip ok">MIT</span></td><td>19 LOC</td><td><code>capability-registry</code> descriptor</td><td>Donor never enforces <code>idempotent</code> — wire into retry logic or don't ship it</td></tr>
+        <tr><td><strong>Host-compat gate</strong> — <code>min/maxSupportedRelease</code>, fail-open</td><td>activepieces <span class="chip ok">MIT</span></td><td>12 LOC</td><td>manifest schema</td><td>Pick one host-release anchor first</td></tr>
+        <tr><td><strong>Version resolution util</strong> — date-stamp + <code>latest</code></td><td>Composio <span class="chip ok">MIT</span></td><td>~30 LOC</td><td>registry versioning</td><td>Invert their default: pinned by default, <code>latest</code> opt-in</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="tier-head"><h3>Tier B — reimplement from spec</h3><span class="chip warn">PATTERN PORTS</span></div>
+    <div class="table-scroll"><table>
+      <caption>Vendoring blocked by license or pointless due to entanglement; the extracted specs are implementation-ready.</caption>
+      <thead><tr><th>Item</th><th>Donor</th><th>Why not vendor</th><th>Lands in</th></tr></thead>
+      <tbody>
+        <tr><td><strong>EngineRequest/Response chokepoint</strong> — agent loops ask the engine to run tools; every call audited</td><td>n8n</td><td><span class="chip danger">SUSTAINABLE USE</span> bars commercial vendoring</td><td>Controller cutover; capability-gate placement</td></tr>
+        <tr><td><strong>VersionedNodeType registry</strong> — <code>{version: impl}</code> resolution</td><td>n8n</td><td><span class="chip danger">SUL</span>; 30-line spec anyway</td><td>Capability version axis</td></tr>
+        <tr><td><strong>Type-derived Zod</strong> (<code>z.ZodType&lt;T&gt;</code>)</td><td>n8n</td><td><span class="chip danger">SUL</span>; trivial convention</td><td>tool-contracts hygiene</td></tr>
+        <tr><td><strong>Join-barrier scheduler</strong> — fan-in convergence</td><td>Flowise <span class="chip ok">Apache 2.0</span></td><td>Entangled with their React-Flow node model</td><td>Controller Phase 3b/6</td></tr>
+        <tr><td><strong>Content-addressed package identity</strong> — <code>identity@sha256</code>, idempotent installs</td><td>dify-plugin-daemon <span class="chip ok">Apache 2.0</span></td><td>Go → TS pattern port</td><td><code>packageVersionId</code> + hash enforcement</td></tr>
+        <tr><td><strong>Per-call RPC permission dispatch table</strong> (their upload-file always-allow logged as anti-pattern)</td><td>dify-plugin-daemon <span class="chip ok">Apache 2.0</span></td><td>Go → TS pattern port</td><td>Where <code>evaluateCapabilityAccess</code> wires at execution</td></tr>
+        <tr><td><strong>Offline RSA package signing</strong> — invert their off-by-default enforcement</td><td>dify-plugin-daemon <span class="chip ok">Apache 2.0</span></td><td>Go → TS pattern port</td><td>Package signing (R6)</td></tr>
+        <tr><td><strong>Meta-tool discovery wire contract</strong> — search &#8594; plan &#8594; multi-execute</td><td>Composio <span class="chip ok">MIT</span></td><td>Server side is closed; only client schemas exist</td><td><code>search_capabilities</code> + <code>multi_execute</code> over the 113-command registry</td></tr>
+        <tr><td><strong>Confirm-then-POST resume</strong> — scanner-prefetch defense</td><td>activepieces <span class="chip ok">MIT</span></td><td>Route is theirs; pattern is portable</td><td>Only when email/Slack approvals ship</td></tr>
+        <tr><td><strong>Session re-entrancy</strong> (<code>ctx.execute</code>)</td><td>Composio <span class="chip ok">MIT</span></td><td>Donor version has NO approval gate — ours must route through the host-signed gate</td><td>Custom nodes, post-cutover</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="tier-head"><h3>Tier C — read for technique only</h3><span class="chip danger">NO CODE MOVEMENT</span></div>
+    <dl class="ledger">
+      <dt>odysseus <span class="chip danger">AGPL</span></dt><dd>Skill-extractor pipeline (agent runs &#8594; SKILL.md candidates — feeds marketplace package authoring); plan-mode read-only gating by inversion; fresh-context verifier subagent. Reimplement concepts only.</dd>
+      <dt>openhuman</dt><dd><code>MemoryTaint</code> provenance-as-tool-gate (fail-closed to external) and the untrusted-source prompt wrapper at the memory&#8594;prompt boundary — both map onto our host-context trust story. Verify license before anything moves.</dd>
+      <dt>OpenAgent (Go)</dt><dd>Working skill-marketplace source adapters + lazy <code>load_skill</code> (thin catalog, full content on demand) — the closest shipped implementation of our R3 discovery surface. Verify license.</dd>
+      <dt>Onyx</dt><dd>Connector registry shape (capability mixins + lazy import map); <code>DynamicBottomSpacer</code> and <code>MinimalMarkdown</code> as small chat-surface ports (proven donor); admin nav as a category checklist.</dd>
+    </dl>
+
+    <div class="callout">
+      <div class="callout-title">Contract fixes to do regardless of the walkthroughs</div>
+      <p>1 · <code>mcpAddonDefinitionSchema</code> needs <code>transport: stdio|sse|http</code> + <code>authMode</code> (open-design finding — most real MCP servers aren't stdio). 2 · Capability registration generated from booking-service's <code>bookingOperationManifest</code> — 113 commands, 15 families, drift-verified, never hand-written. 3 · Sonik agent definition: <code>agentDefinitionSchema</code> + a runtime loader, Mastra-adjacent field names for cheap future interop.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="framework-h">
+    <h2 id="framework-h">Framework decision — awaiting ratification</h2>
+    <div class="decision-panel">
+      <div class="decision-verdict">
+        <span class="verdict-word">STAY</span>
+        <p>Vercel AI SDK + Sonik contracts. Do not adopt Mastra as the agent framework; steal its memory-config shape as a contract of our own. Low lock-in — the hybrid option stays open.</p>
+      </div>
+      <dl class="ledger">
+        <dt>Fact 1</dt><dd>Mastra has no approval authority: resume payload is untyped, and <code>approveToolCallGenerate</code> requires only a runId + toolCallId — anyone holding them can approve. Our host-signed reducer refuses to even represent that.</dd>
+        <dt>Fact 2</dt><dd>Four breaking renames of run/session/HITL primitives in one month on the stable channel; the Mastra npm package appears in the Mar–Jun 2026 supply-chain compromise wave. Wrong risk under a trust product.</dd>
+        <dt>Fact 3</dt><dd>A switch rewrites what we already ship: capability registry, pinning, reducer/controller, and a live host-signed commit path — all Workers-deployed today with zero framework-adapter risk.</dd>
+      </dl>
+    </div>
+    <p class="doc-meta">Full analysis: docs/research/mastra-vs-ai-sdk-decision-2026-07.md · Source pass correction folded in: their suspend/resume HITL is real; the missing category is verifiable, non-repudiable authorization — which nobody in the surveyed field has.</p>
+  </section>
+
+  <section aria-labelledby="bringup-h">
+    <h2 id="bringup-h">Bring-up readiness — ten tools, one at a time</h2>
+
+    <figure>
+      <div class="viz-frame">
+      <svg viewBox="0 0 760 320" role="img" aria-label="First-try bring-up confidence per tool, from the runbooks">
+        <title>First-try bring-up confidence per tool (runbook estimates; bars show ranges where given)</title>
+        <g font-family="ui-monospace, Menlo, monospace" font-size="12">
+          <line x1="180" y1="10" x2="180" y2="290" stroke="var(--line-strong)"/>
+          <line x1="470" y1="10" x2="470" y2="290" stroke="var(--line)" stroke-dasharray="3 4"/>
+          <text x="470" y="308" fill="var(--faint)" text-anchor="middle">50%</text>
+          <line x1="760" y1="10" x2="760" y2="290" stroke="var(--line)" stroke-dasharray="3 4"/>
+          <text x="742" y="308" fill="var(--faint)" text-anchor="middle">100%</text>
+
+          <text x="170" y="32" fill="var(--ink)" text-anchor="end">n8n</text>
+          <rect x="180" y="20" width="551" height="16" rx="3" fill="var(--accent)"/>
+          <text x="738" y="32" fill="var(--ink)" text-anchor="end">~95</text>
+
+          <text x="170" y="60" fill="var(--ink)" text-anchor="end">open-design</text>
+          <rect x="180" y="48" width="551" height="16" rx="3" fill="var(--accent)"/>
+          <text x="738" y="60" fill="var(--ink)" text-anchor="end">~95</text>
+
+          <text x="170" y="88" fill="var(--ink)" text-anchor="end">OpenAgent</text>
+          <rect x="180" y="76" width="522" height="16" rx="3" fill="var(--accent)"/>
+          <text x="709" y="88" fill="var(--ink)" text-anchor="end">~90</text>
+
+          <text x="170" y="116" fill="var(--ink)" text-anchor="end">Onyx (Lite)</text>
+          <rect x="180" y="104" width="522" height="16" rx="3" fill="var(--accent)"/>
+          <text x="709" y="116" fill="var(--ink)" text-anchor="end">~90</text>
+
+          <text x="170" y="144" fill="var(--ink)" text-anchor="end">odysseus</text>
+          <rect x="180" y="132" width="522" height="16" rx="3" fill="var(--accent)"/>
+          <text x="709" y="144" fill="var(--ink)" text-anchor="end">~90</text>
+
+          <text x="170" y="172" fill="var(--ink)" text-anchor="end">Langflow</text>
+          <rect x="180" y="160" width="493" height="16" rx="3" fill="var(--accent)"/>
+          <rect x="673" y="160" width="29" height="16" rx="3" fill="var(--accent-surface)" stroke="var(--accent)"/>
+          <text x="709" y="172" fill="var(--ink)" text-anchor="end">85&#8211;90</text>
+
+          <text x="170" y="200" fill="var(--ink)" text-anchor="end">Flowise</text>
+          <rect x="180" y="188" width="493" height="16" rx="3" fill="var(--accent)"/>
+          <text x="680" y="200" fill="var(--ink)" text-anchor="end">~85</text>
+
+          <text x="170" y="228" fill="var(--ink)" text-anchor="end">Dify (fork)</text>
+          <rect x="180" y="216" width="464" height="16" rx="3" fill="var(--accent)"/>
+          <rect x="644" y="216" width="29" height="16" rx="3" fill="var(--accent-surface)" stroke="var(--accent)"/>
+          <text x="680" y="228" fill="var(--ink)" text-anchor="end">80&#8211;85</text>
+
+          <text x="170" y="256" fill="var(--ink)" text-anchor="end">activepieces</text>
+          <rect x="180" y="244" width="464" height="16" rx="3" fill="var(--accent)"/>
+          <text x="651" y="256" fill="var(--ink)" text-anchor="end">~80</text>
+
+          <text x="170" y="284" fill="var(--ink)" text-anchor="end">openhuman</text>
+          <rect x="180" y="272" width="377" height="16" rx="3" fill="var(--viz-5)"/>
+          <text x="564" y="284" fill="var(--ink)" text-anchor="end">medium*</text>
+        </g>
+      </svg>
+      </div>
+      <figcaption>First-try clean bring-up confidence from each runbook's own estimate. *openhuman's headless core is a five-minute compose; the full UI depends on their hosted backend, hence medium.</figcaption>
+    </figure>
+
+    <div class="table-scroll"><table>
+      <caption>Path, cost, and what Dan must provide. Suggested order: top to bottom. Two port collisions (Onyx/Flowise on 3000; odysseus/Langflow on 7860) are moot one-at-a-time.</caption>
+      <thead><tr><th>Tool</th><th>Fastest path</th><th>RAM</th><th>Dan provides</th><th>Watch-out</th></tr></thead>
+      <tbody>
+        <tr><td><strong>n8n</strong></td><td><code>npx n8n</code> &#8594; :5678</td><td>light</td><td>LLM key only for AI nodes</td><td>OTel is one env flip</td></tr>
+        <tr><td><strong>Flowise</strong></td><td><code>npx flowise start</code> &#8594; :3000</td><td>~2GB floor</td><td>signup email/pw; LLM key; <span class="chip warn">EE LICENSE</span> for Workspace/Roles</td><td>Workspace/Roles EE-gated, no local bypass</td></tr>
+        <tr><td><strong>Langflow</strong></td><td><code>uv pip install langflow</code> &#8594; :7860</td><td>0.3&#8211;0.6GB run; 1.5&#8211;3GB venv</td><td>LLM key; <code>DO_NOT_TRACK</code> call</td><td>Multi-minute torch install</td></tr>
+        <tr><td><strong>activepieces</strong></td><td>source dev (PGLITE, no containers)</td><td>1.5&#8211;3GB</td><td>nothing (Node 22 PATH fix documented)</td><td><span class="chip danger">TODOS INBOX ABSENT FROM OSS</span> — capture approval links + forms instead</td></tr>
+        <tr><td><strong>Dify (fork)</strong></td><td>runbook, 11 containers</td><td>heaviest</td><td>LLM key post-boot</td><td>Three hard deps must start or api never boots; Docker Desktop first</td></tr>
+        <tr><td><strong>OpenAgent</strong></td><td><code>go run main.go</code> + web dev &#8594; :13001</td><td>light</td><td>LLM key in-app</td><td>Marketplace UI is the capture target</td></tr>
+        <tr><td><strong>Onyx</strong></td><td>Lite compose overlay &#8594; :3000</td><td>&lt;1GB claimed</td><td>LLM key via admin UI</td><td>Lite drops indexing/RAG — fine for admin capture</td></tr>
+        <tr><td><strong>odysseus</strong></td><td><code>./start-macos.sh</code> &#8594; :7860</td><td>&lt;1GB app</td><td>Ollama or provider key</td><td>Native, not Docker (Metal access)</td></tr>
+        <tr><td><strong>openhuman</strong></td><td>headless compose :7788; UI needs Tauri + hosted backend</td><td>light headless</td><td>tinyhumans.ai account for full UI</td><td>Memory vault inspectable without UI</td></tr>
+        <tr><td><strong>open-design</strong></td><td>already local; <code>pnpm tools-dev</code> &#8594; :7456</td><td>light</td><td>nothing</td><td>Daemon currently down; inspect-not-boot</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="otel-h">
+    <h2 id="otel-h">Telemetry taps for the walkthroughs</h2>
+    <p>Shared stack: OTel Collector + Jaeger all-in-one, ~300&#8211;650MB, ports 4317/4318/16686 verified free against every tool's compose files. Where OTel traces don't exist, the honest alternative tap is listed — no pretending.</p>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Tool</th><th>Native OTel</th><th>The tap</th></tr></thead>
+      <tbody>
+        <tr><td>n8n</td><td><span class="chip ok">TRACES</span></td><td><code>N8N_OTEL_ENABLED=true</code> + endpoint — spans per node/workflow automatically</td></tr>
+        <tr><td>Dify</td><td><span class="chip ok">TRACES + METRICS</span></td><td><code>ENABLE_OTEL=true</code> + <code>OTLP_BASE_ENDPOINT</code> — zero per-app clicks</td></tr>
+        <tr><td>Flowise</td><td><span class="chip warn">METRICS ONLY</span></td><td>Traces via a per-chatflow Phoenix credential (local Phoenix container, no signup)</td></tr>
+        <tr><td>Langflow</td><td><span class="chip danger">NONE GLOBAL</span></td><td>Langfuse env vars &#8594; local Langfuse; LangWatch is the raw-OTLP alternative</td></tr>
+        <tr><td>activepieces</td><td><span class="chip warn">LOGS ONLY</span></td><td><code>AP_LOG_FILE=true</code> &#8594; NDJSON wide-events, <code>tail | jq</code> — simpler than OTLP</td></tr>
+        <tr><td>Onyx</td><td><span class="chip danger">NONE</span></td><td>Langfuse-native (same local Langfuse container serves Langflow + Onyx)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section aria-labelledby="unknowns-h">
+    <h2 id="unknowns-h">What the walkthroughs and interview must settle</h2>
+    <div class="table-scroll"><table>
+      <caption>The eight known unknowns, each mapped to where it gets answered.</caption>
+      <thead><tr><th>#</th><th>Question</th><th>Settled by</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Live-cutover sequencing (Phase 3a-2) + deliberate source-pinned test updates</td><td>Interview + ralplan amendment</td></tr>
+        <tr><td>2</td><td>Registry generation from the 113-command manifest</td><td>Now cheap — ratify at gate 1</td></tr>
+        <tr><td>3</td><td>Review surface design (D011) — no OSS approvals-queue precedent exists anywhere</td><td>Walkthroughs (Dify human-input form is the only benchmark) + design signoff</td></tr>
+        <tr><td>4</td><td>Standing/recurring agent grants (approve-once-repeat-many; WS6 agent calendar is consumer #1)</td><td>Interview — nobody in the field has this either</td></tr>
+        <tr><td>5</td><td>Isolation posture for third-party packages: review-only trust (Dify's actual shipped posture) vs a real sandbox</td><td>Interview — explicit accepted-trade-off decision</td></tr>
+        <tr><td>6</td><td>SDK-on-any-website embed safety envelope</td><td>Interview (new topology component)</td></tr>
+        <tr><td>7</td><td>Admin console tiering — Flowise EE-gating leaves Tier-2 multi-tenant without a free benchmark; Onyx admin nav is the category checklist</td><td>Walkthroughs + interview</td></tr>
+        <tr><td>8</td><td>Framework decision ratification (STAY recommendation above)</td><td>Gate 1</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout ok">
+      <div class="callout-title">The finding underneath all of it</div>
+      <p>Ten codebases in: the field converged on workflow-as-data and one interpreter — and not one of them makes approval verifiable or issues receipts. Every open question above is about how fast and how visibly we ship the category nobody else has.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

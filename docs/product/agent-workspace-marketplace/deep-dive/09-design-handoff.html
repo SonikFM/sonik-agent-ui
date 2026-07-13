@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>09 · Design Handoff & Component Map — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* Page-specific styles only, composed from tokens.css variables. */
+  .zone-diagram text { font-family: var(--font-sans); }
+  .zone-diagram .zone-label { font-size: 14px; font-weight: 600; fill: var(--ink); }
+  .zone-diagram .zone-item { font-size: 12px; fill: var(--muted); }
+  .zone-diagram .zone-note { font-size: 12px; fill: var(--accent-ink); }
+  .zone-diagram .bar-label { font-size: 12px; fill: var(--body); }
+  .matrix td:first-child { color: var(--ink); font-weight: 600; }
+  .states { color: var(--muted); font-size: var(--text-xs); font-family: var(--font-mono); }
+  .chip + .chip { margin-left: 4px; }
+  .constraint-recursion { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body data-doc="09-design-handoff">
+<main class="page">
+  <header class="page-head">
+    <h1>Design Handoff &amp; Component Map</h1>
+    <p class="lead">What design must draw, which contract boundaries must stay visible on screen, and — reconciled against shipped code — which of those surfaces already exist versus which are still paper.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/09-design-handoff-component-map.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>Three-zone workspace model</h2>
+    <p>The design north star is one durable workspace split into three zones: a <strong>chat / steps</strong> rail on the left, the <strong>canvas artifact</strong> in the center, and a collapsible <strong>inspector</strong> on the right, under a header that carries subject chips, mode, share, and logs. The zones are not cosmetic panels — each one owns a distinct half of the trust boundary. The chat rail collects intent and answers but <strong>never</strong> approves. The canvas renders the live artifact but is an <strong>execution-inert renderer</strong>: it draws state, it does not mutate it. The inspector is where provenance, receipts, and version history stay first-class rather than buried.</p>
+
+    <figure class="viz-frame">
+      <svg class="zone-diagram" viewBox="0 0 1000 470" role="img" aria-labelledby="zone-title zone-desc" width="1000" height="470">
+        <title id="zone-title">Three-zone workspace layout</title>
+        <desc id="zone-desc">A header bar spanning the top, with three columns below: chat and steps on the left, canvas artifact in the center, and inspector on the right.</desc>
+
+        <!-- Header bar -->
+        <rect x="1" y="1" width="998" height="58" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+        <text class="zone-label" x="20" y="26">Workspace header</text>
+        <text class="bar-label" x="20" y="46">title  ·  subject chips  ·  mode  ·  share  ·  logs</text>
+
+        <!-- Chat / Steps column -->
+        <rect x="1" y="74" width="270" height="394" rx="8" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+        <text class="zone-label" x="20" y="102">Chat / Steps</text>
+        <text class="zone-item" x="20" y="130">agent notes</text>
+        <text class="zone-item" x="20" y="152">questions (typed input only)</text>
+        <text class="zone-item" x="20" y="174">approval requests</text>
+        <text class="zone-item" x="20" y="196">friendly activity labels</text>
+        <text class="zone-item" x="20" y="218">expandable Pipe-B / tool log</text>
+        <line x1="20" y1="240" x2="251" y2="240" stroke="var(--line)"/>
+        <text class="zone-note" x="20" y="264">Invariant: chat is</text>
+        <text class="zone-note" x="20" y="282">never approval.</text>
+
+        <!-- Canvas column -->
+        <rect x="287" y="74" width="430" height="394" rx="8" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+        <text class="zone-label" x="307" y="102">Canvas artifact</text>
+        <text class="zone-item" x="307" y="130">live mini app — not a screenshot</text>
+        <text class="zone-item" x="307" y="152">editable fields, dropdowns, tables</text>
+        <text class="zone-item" x="307" y="174">charts / forms, progressive render</text>
+        <text class="zone-item" x="307" y="196">comment pins, selectable components</text>
+        <text class="zone-item" x="307" y="218">survives stream interrupt + reload</text>
+        <line x1="307" y1="240" x2="697" y2="240" stroke="var(--line)"/>
+        <text class="zone-note" x="307" y="264">Invariant: execution-inert renderer —</text>
+        <text class="zone-note" x="307" y="282">draws state, does not mutate it.</text>
+        <text class="zone-item" x="307" y="322">empty states: &#8220;Ask the agent to</text>
+        <text class="zone-item" x="307" y="344">create a workspace&#8221; · &#8220;Import a brief&#8221;</text>
+
+        <!-- Inspector column -->
+        <rect x="733" y="74" width="266" height="394" rx="8" fill="var(--surface-1)" stroke="var(--line-strong)"/>
+        <text class="zone-label" x="753" y="102">Inspector</text>
+        <text class="zone-item" x="753" y="130">1 · State</text>
+        <text class="zone-item" x="753" y="152">2 · Schema</text>
+        <text class="zone-item" x="753" y="174">3 · Commands</text>
+        <text class="zone-item" x="753" y="196">4 · Evidence</text>
+        <text class="zone-item" x="753" y="218">5 · Versions</text>
+        <line x1="753" y1="240" x2="979" y2="240" stroke="var(--line)"/>
+        <text class="zone-note" x="753" y="264">Invariant: receipts &amp;</text>
+        <text class="zone-note" x="753" y="282">provenance stay visible.</text>
+        <text class="zone-item" x="753" y="322">collapsible — must not</text>
+        <text class="zone-item" x="753" y="344">dominate the default view.</text>
+      </svg>
+      <figcaption>Layout per the workspace design brief (<code>WORKSPACE-CREATION-DESIGN-BRIEF.md:88-131</code>). Each zone maps to one contract boundary; the three notes are the invariants design cannot soften.</figcaption>
+    </figure>
+
+    <p>The mutation path threads through all three zones in a fixed order — answers are collected in chat, the manifest is validated and previewed on the canvas, and only an explicit approval hands off to the trusted host, which returns a receipt to the inspector. The renderer never shortcuts a step.</p>
+
+    <figure>
+      <figcaption>Draft-to-receipt lifecycle — the only route from a proposed change to a committed one.</figcaption>
+      <div class="flow" role="img" aria-label="Lifecycle: collect answers, validate manifest, render command preview, explicit approval, trusted host executes, receipt as evidence, optional rollback.">
+        <div class="flow-node"><b>1 · Answers</b><small>QuestionCard collects typed input. Not approval.</small></div>
+        <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+        <div class="flow-node"><b>2 · Validate</b><small>Manifest checked against contract schema.</small></div>
+        <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+        <div class="flow-node gated"><b>3 · Preview</b><small>Command preview rendered from the plan that will run.</small></div>
+        <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+        <div class="flow-node gated"><b>4 · Approve</b><small>Explicit approval card &#8594; host-signed session approval.</small></div>
+        <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+        <div class="flow-node trusted"><b>5 · Execute</b><small>Trusted host runs the command. Renderer cannot.</small></div>
+        <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+        <div class="flow-node trusted"><b>6 · Receipt</b><small>Correlation id + evidence chip. Rollback via Versions.</small></div>
+      </div>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Component coverage matrix</h2>
+    <p>The inventory enumerates seven surfaces. The corpus called nearly all of them &#8220;to design.&#8221; The addendum tells a narrower truth: exactly one seam has been built and proven. The status column reconciles each component against shipped code, not against the corpus wishlist. States are the state set the component must cover in design.</p>
+
+    <div class="table-scroll">
+    <table class="matrix">
+      <caption>Component × state coverage × build status. Chips reconciled against the 2026-07-11 status addendum.</caption>
+      <thead>
+        <tr><th>Surface / component</th><th>States to cover</th><th>Status</th><th>Reconciliation</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Approval affordance builder</td>
+          <td class="states">request · approve · cancel · run result</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+          <td>Phase 2 read-side convergence: <strong>one</strong> shared builder feeds both intake and reservation flows, proven byte-identical. The D011 seam in code.</td>
+        </tr>
+        <tr>
+          <td>CommandPreviewCard</td>
+          <td class="states">valid · invalid_schema · blocked</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+          <td>A2 preview tool is live — the preview renders from the same plan the commit runs.</td>
+        </tr>
+        <tr>
+          <td>Reservation commit (Approve &amp; run &#8594; receipt)</td>
+          <td class="states">preview · approval_required · approved · committed · receipt</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+          <td>A2 path merged and live: preview tool + approval card + <code>/api/reservation/commit</code>. The 2026-07-08 &#8220;A2 UI half open&#8221; note is stale.</td>
+        </tr>
+        <tr>
+          <td>EvidenceChip / receipt panel</td>
+          <td class="states">source · receipt · warning · error</td>
+          <td><span class="chip ok">SHIPPED</span> <span class="chip">PLANNED</span></td>
+          <td>Reservation-commit receipts land as evidence today; the general provenance/snapshot panel across all artifact kinds is not built.</td>
+        </tr>
+        <tr>
+          <td>Capability-ID substrate (PermissionMatrix backing)</td>
+          <td class="states">no_access · ask · allow</td>
+          <td><span class="chip ok">SHIPPED</span> <span class="chip warn">OPEN</span></td>
+          <td>D013 registry shipped (<code>capability-registry.ts</code>): per-call gating, write-implies-read, kill-switch via <code>revokedCapabilityIds</code>. Live pinning <strong>blocked</strong> — 8 registered capabilities vs 72 live catalog commands.</td>
+        </tr>
+        <tr>
+          <td>WorkflowNode set (Trigger / AskUser / Skill / Artifact / Preview / Approval / Commit / Remote)</td>
+          <td class="states">unconfigured · pending · valid · invalid · running · completed · failed</td>
+          <td><span class="chip accent">FIXTURE</span> <span class="chip">PLANNED</span></td>
+          <td>Controller + Zod state machine proven (<code>workflow-run-state.ts</code>, <code>workflow-controller.ts</code>); reservation fixture is ONE compound commit node. Not wired to the live request path — Phase 3a-2 cutover is an open decision.</td>
+        </tr>
+        <tr>
+          <td>WorkflowCanvas / NodePalette / edge labels</td>
+          <td class="states">empty · editing · dirty · validating · saved</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>Donor Svelte canvas copied from Amplify (parity island); no Agent-UI editor built on it yet.</td>
+        </tr>
+        <tr>
+          <td>Install / Permission Review (PermissionMatrix, ToolPolicySelector, InstallApprovalCard, Host/Secret requirement lists)</td>
+          <td class="states">no_access · ask · allow · gated</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>Install UI is Phase 5. No marketplace ORPC routes, no persistence/RLS tables behind it.</td>
+        </tr>
+        <tr>
+          <td>MarketplaceListingCard / DependencyList / VersionHistory</td>
+          <td class="states">private · org · public · deprecated · update_available</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>No marketplace routes or catalog storage exist. Cards render nothing yet.</td>
+        </tr>
+        <tr>
+          <td>VersionTimeline (rollback)</td>
+          <td class="states">current · restored · archived</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>No versioned draft persistence in the workspace runtime.</td>
+        </tr>
+        <tr>
+          <td>Publish Review (metadata form, dependency scan, capability-label review, checklist)</td>
+          <td class="states">draft · submitted · approved · published · deprecated</td>
+          <td><span class="chip">PLANNED</span></td>
+          <td>Publishing/moderation (D015) not started; third-party publishing not open.</td>
+        </tr>
+        <tr>
+          <td>Per-install kill-switch &amp; activity view (D012)</td>
+          <td class="states">trusted · revoked · activity</td>
+          <td><span class="chip danger">MISSING</span></td>
+          <td>Registry-level <code>revokedCapabilityIds</code> exists in code, but the trust-tier field and revocation UI do not.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p class="callout"><span class="callout-title">Reading the matrix</span>The only design work backed by running code today is the fused approval/preview/commit seam. Everything from the install screen rightward is a specification pending Phase 5 routes and persistence. Design may draw the planned surfaces — but must not imply they are wired.</p>
+  </section>
+
+  <section>
+    <h2>Design-constraints ledger</h2>
+    <p>Two ledgers gate every screen. The first is Dan's binding taste rules — hard <code>no</code>s that reject a design regardless of merit. The second is the set of engineering invariants the UI cannot render away, drawn from the handoff's non-negotiables.</p>
+
+    <h3>Taste rules (binding)</h3>
+    <dl class="ledger">
+      <dt>Gradients</dt><dd>Banned everywhere, including gradient text and backgrounds. Flat surfaces from the token ramp only.</dd>
+      <dt>Emoji</dt><dd>No emoji as UI structure or iconography unless brand-approved.</dd>
+      <dt>Left/right stripe cards</dt><dd>No rounded card with a colored side-stripe accent. Callouts use a full border and tinted surface.</dd>
+      <dt>Inter / Roboto</dt><dd>Banned. Type comes from the token stack (<code>--font-sans</code>, <code>--font-mono</code>) only.</dd>
+      <dt>Ethos</dt><dd>&#8220;One thousand no&#8217;s for every yes.&#8221; Decoration is a cost, not a default.</dd>
+    </dl>
+    <p class="constraint-recursion">These four bans govern the product being designed and this deep-dive suite that documents it — the ledger describes the page it is printed on.</p>
+
+    <h3>Engineering invariants (cannot be designed away)</h3>
+    <dl class="ledger">
+      <dt>Version visibility</dt><dd>Design cannot remove <code>packageVersionId</code> / version from install and update detail views.</dd>
+      <dt>Permission semantics</dt><dd>Controls must expose <code>off</code> / <code>ask</code> / <code>allow</code> wherever applicable.</dd>
+      <dt>Answer &#8800; approval</dt><dd>QuestionCard surfaces collect typed input only; they must not execute tools or mutate Booking/Amplify.</dd>
+      <dt>Approval boundary</dt><dd>The approval card must map to a trusted host session approval; a model-supplied approval is not trusted.</dd>
+      <dt>Renderer is inert</dt><dd>JSON-render / ask-user surfaces are presentation and input collectors; execution stays in trusted host/controller tools.</dd>
+      <dt>Receipts on mutation</dt><dd>Every mutation returns a receipt / correlation id. Success copy is receipts-only.</dd>
+      <dt>Machine-readable context</dt><dd>Page context via <code>window.__sonikAgentUI</code>; host embed via <code>window.__sonikAgentHost</code>, not coordinate clicks.</dd>
+      <dt>Provenance first-class</dt><dd>Provider, <code>fetched_at</code>, license class, receipt, and source confidence stay visible; do not bury them behind decorative cards.</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>D011 — fused Intent-Preview+Trust screen</h2>
+    <p>D011 is the ratified decision that install and commit approvals use <strong>one</strong> fused screen: the concrete command/effect preview rendered from the same execution plan that will run, shown alongside the requested permissions and trust tier. Verbose on first use per category, lighter on repeat. No cosmetic previews; no separate blocking trust modal. The shared approval-affordance builder (Phase 2, shipped) is this decision expressed in code.</p>
+
+    <div class="table-scroll">
+    <table>
+      <caption>D011 screen requirements. Source: DECISIONS.md D011; addendum Phase 2.</caption>
+      <thead>
+        <tr><th>Requirement</th><th>What it means on screen</th><th>Why (invariant)</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Same-plan preview</td>
+          <td>The effect list is rendered from the identical execution plan the commit will run — not a hand-written summary.</td>
+          <td>Same-plan rendering is what makes the preview honest; a cosmetic preview can lie about the mutation.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td>Fused trust + preview</td>
+          <td>Requested permissions / trust tier sit on the same screen as the effect preview. No separate blocking trust modal.</td>
+          <td>The trust gate is the wow moment; splitting it into a modal breaks the single decision.</td>
+          <td><span class="chip ok">SHIPPED</span> <span class="chip warn">OPEN</span></td>
+        </tr>
+        <tr>
+          <td>One shared builder</td>
+          <td>Intake and reservation approvals are produced by the same affordance builder, byte-identical output.</td>
+          <td>Two builders drift; a divergent trust surface is a security regression.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td>Progressive verbosity</td>
+          <td>Verbose on first use per capability category; condensed on repeat approvals of the same category.</td>
+          <td>Trust fatigue makes users rubber-stamp; first-use verbosity is where comprehension happens.</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td>Trust tier displayed</td>
+          <td>The requested tier is named on the screen next to the permission list.</td>
+          <td>Tier is the unit every later control (grants, audits, revocation) keys off.</td>
+          <td><span class="chip danger">MISSING</span></td>
+        </tr>
+        <tr>
+          <td>Approval &#8594; host signature</td>
+          <td>Approving emits a host-signed session approval, structurally required before commit.</td>
+          <td><code>model_supplied_approval_is_not_trusted</code>; phase reaches <code>committed</code> only on a semantic-success receipt.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p class="callout warn"><span class="callout-title">Where D011 is still open</span>The seam is real and byte-identical across intake and reservation, but it runs on the A2 reservation path, not a live workflow controller (Phase 3a-2 cutover pending). Progressive verbosity and the trust-tier field are unbuilt — design should spec them, engineering has not wired them.</p>
+  </section>
+</main>
+</body>
+</html>

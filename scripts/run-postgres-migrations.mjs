@@ -61,6 +61,41 @@ const migrations = [
 				)::text
 			`,
 	},
+	{
+		version: "0005",
+		name: "agent_definitions",
+		file: "packages/workspace-session/migrations/postgres/0005_agent_definitions.sql",
+		baselineCheck: `
+				select (
+					to_regclass('sonik_agent_ui.agent_definition_drafts') is not null
+					and to_regclass('sonik_agent_ui.agent_definition_published_versions') is not null
+				)::text
+			`,
+	},
+	{
+		version: "0006",
+		name: "agent_knowledge",
+		file: "packages/workspace-session/migrations/postgres/0006_agent_knowledge.sql",
+		baselineCheck: `
+				select (
+					to_regclass('sonik_agent_ui.agent_knowledge_stores') is not null
+					and to_regclass('sonik_agent_ui.agent_knowledge_files') is not null
+				)::text
+			`,
+	},
+	{
+		version: "0007",
+		name: "agent_workflow_runs",
+		file: "packages/workspace-session/migrations/postgres/0007_agent_workflow_runs.sql",
+		baselineCheck: `
+				select (
+					to_regclass('sonik_agent_ui.agent_workflow_runs') is not null
+				)::text
+			`,
+	},
+	// NOTE for the next lane appending here: this is the ONE shared migrations
+	// manifest (per prod-slice-plan.md) -- add new entries after 0007, don't
+	// reorder/renumber existing ones.
 ];
 
 if (!databaseUrl) {

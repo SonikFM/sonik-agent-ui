@@ -30,7 +30,11 @@ import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncReques
 import { resolveEffectiveContextDocument } from "$lib/server/run-context-document";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
-import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings } from "$lib/agent-settings";
+import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings, type AgentRuntimeSettings } from "$lib/agent-settings";
+import { definitionToRuntimeSettings } from "$lib/agent-runtime-adapter";
+import { resolveAgentDefinitionStore } from "$lib/server/agent-definition-store";
+import { resolveKnowledgeContext, formatKnowledgeContextSections } from "$lib/knowledge/resolve-knowledge-context";
+import { defaultKnowledgeRoot } from "$lib/knowledge/knowledge-store";
 import { isProductTourIntent, resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
 import { createCurrentPageContextSummary } from "$lib/page-context-summary";
 import { resolveWorkspaceDocumentIntent } from "$lib/document-intent";
@@ -494,7 +498,37 @@ export const POST: RequestHandler = async (event) => {
   const productTourIntent = isProductTourIntent(latestUserMessage);
   const implicitSkillSelection = resolveImplicitWorkflowSkillSelection({ userMessage: latestUserMessage, pageContext, activeArtifactIsRegisteredIntake });
   const implicitSkillIds = productTourIntent ? [] : implicitSkillSelection.skillIds;
-  const agentRuntimeSettings = sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
+  // Phase 4 (agent-creation-tool-plan-2026-07-13.md): resolve a PUBLISHED agent
+  // definition via the Task-A adapter when the request names one -- edit ->
+  // publish -> next conversation uses it, zero code deploy. Optional and
+  // fallback-safe: absent `publishedAgentId` (every request today), this is a
+  // no-op and behavior is byte-identical to before this change. Session tweaks
+  // are the RAW client-submitted settings, not pre-sanitized -- sanitizeAgentRuntimeSettings
+  // always fully materializes every family with a default, so sanitizing first
+  // would mask every grant the published definition sets (definitionToRuntimeSettings
+  // sanitizes once, at the end, after merging the definition's defaults with
+  // whatever sparse overrides the client actually sent).
+  // P0 #1 (production-readiness ledger): Neon-backed when a DB env is
+  // configured, in-memory fallback otherwise -- see agent-definition-store.ts.
+  const requestAgentDefinitionStore = resolveAgentDefinitionStore(event.platform?.env as Record<string, unknown> | undefined);
+  const publishedAgentId = typeof body?.publishedAgentId === "string" ? body.publishedAgentId : null;
+  const publishedAgentDefinition = publishedAgentId ? await requestAgentDefinitionStore.resolvePublished(publishedAgentId) : null;
+  // Phase 5 workflow-builder Debug & Preview: a narrow mirror of the
+  // publishedAgentId path above, resolving an unpublished DRAFT definition by
+  // id so the builder can test edits before publish. Same fallback-safe null
+  // handling; absent `draftAgentId` (every non-builder request), this is a
+  // no-op. publishedAgentId takes precedence if a request somehow sent both.
+  const draftAgentId = typeof body?.draftAgentId === "string" ? body.draftAgentId : null;
+  const draftAgentDefinition = !publishedAgentDefinition && draftAgentId ? (await requestAgentDefinitionStore.getDraft(draftAgentId))?.definition ?? null : null;
+  const resolvedAgentDefinition = publishedAgentDefinition ?? draftAgentDefinition;
+  const resolvedRuntimeSettings = resolvedAgentDefinition
+    ? definitionToRuntimeSettings(resolvedAgentDefinition, (body?.agentSettings ?? body?.workspace?.agentSettings) as Partial<AgentRuntimeSettings> | undefined)
+    : sanitizeAgentRuntimeSettings(body?.agentSettings ?? body?.workspace?.agentSettings);
+  // Phase 6 gate, server-set only (sanitize drops any client-sent copy): the
+  // draftWorkflow tool mounts only for builder Debug & Preview DRAFT requests.
+  const agentRuntimeSettings: AgentRuntimeSettings = draftAgentDefinition
+    ? { ...resolvedRuntimeSettings, workflowBuilderMode: true }
+    : resolvedRuntimeSettings;
   const skillIds = productTourIntent
     ? []
     : resolveRequestSkillIds({
@@ -558,7 +592,13 @@ export const POST: RequestHandler = async (event) => {
   const startupIndexContext = includeStartupIndexes
     ? [`CONTEXT-RELEVANT SKILL STARTUP INDEX:\n${skillIndexSummary}`, `CONTRACT-DERIVED COMMAND STARTUP INDEX:\n${commandIndexSummary}`]
     : [];
-  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
+  // Knowledge v1 read-side (AC-10, verify-wave fix): a resolved definition's
+  // knowledgeRefs are read from the file store and folded into system context
+  // so the live agent actually answers from attached info.
+  const knowledgeContext = resolvedAgentDefinition?.knowledgeRefs?.length
+    ? formatKnowledgeContextSections(await resolveKnowledgeContext(resolvedAgentDefinition.knowledgeRefs, { rootDir: defaultKnowledgeRoot(), env: event.platform?.env as Record<string, unknown> | undefined }))
+    : "";
+  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, knowledgeContext, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
     : modelMessages;

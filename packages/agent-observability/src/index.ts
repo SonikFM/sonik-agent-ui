@@ -177,6 +177,10 @@ export interface AgentUiPageControl {
   getTargetRegistry: () => AgentUiTargetRegistrySnapshot | null;
   getActiveWorkflowState: () => AgentUiWorkflowSnapshot;
   getApprovalState: () => AgentUiApprovalStateSnapshot;
+  /** Phase 5 (agent-creation-tool-plan-2026-07-13.md): optional snapshot of
+   *  the workflow-builder mode's working state, when that mode is mounted.
+   *  Additive/optional so hosts that predate the builder mode see no change. */
+  getBuilderState?: () => Record<string, unknown> | null;
   actions: {
     createSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     submitPrompt: (input: { prompt?: string; sessionId?: string | null }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
@@ -205,6 +209,14 @@ export interface AgentUiPageControl {
     highlightTarget?: (input: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
     focusTarget?: (input: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
     requestApprovalPreview?: (input?: { targetId?: string; targetInstanceId?: string; entityRef?: unknown }) => AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions> | Promise<AgentUiSemanticActionResult<{ hostActionResult?: unknown } & AgentUiPageAssertions>>;
+    /** Phase 5: switches the top-level app between the chat/canvas workspace
+     *  and the workflow-builder mode. Optional/additive -- absent on hosts
+     *  that predate the builder mode. */
+    setWorkspaceMode?: (input: { mode: "workspace" | "workflow-builder" }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    /** Phase 5: validates and saves the workflow-builder's current working
+     *  AgentDefinition as a draft. Fails closed with a disabledReason if the
+     *  builder mode is not mounted. */
+    saveAgentDefinitionDraft?: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
   };
 }
 
@@ -218,6 +230,11 @@ export interface AgentTelemetryEvent<TPayload = Record<string, unknown>> {
   schemaVersion?: typeof AGENT_UI_TELEMETRY_SCHEMA_VERSION;
   eventId?: string;
   runId?: string;
+  /** Phase 10 (agent-creation-tool-plan-2026-07-13.md): join key stamping every event
+   *  emitted while a workflow-controller WorkflowRunState is active, distinct from the
+   *  per-turn `runId` (agent-ui generation run) already above. Additive/optional --
+   *  events emitted outside an active workflow run are unchanged. */
+  workflowRunId?: string;
   source: AgentTelemetrySource;
   event: string;
   phase?: string;
@@ -327,6 +344,7 @@ export function sanitizeTelemetryEvent<TPayload = Record<string, unknown>>(event
     source: event.source,
     event: redactTelemetryString(event.event),
     runId: cleanOptionalString(event.runId),
+    workflowRunId: cleanOptionalString(event.workflowRunId),
     phase: cleanOptionalString(event.phase),
     requestId: cleanOptionalString(event.requestId),
     traceId: trustedTraceId(event.traceId) ?? traceIdFromTraceparent(event.traceparent) ?? cleanOptionalString(event.traceId),

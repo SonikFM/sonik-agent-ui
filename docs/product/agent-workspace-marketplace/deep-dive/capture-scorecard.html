@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walkthrough Capture Scorecard — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .product-block { margin: 32px 0; }
+  .screen-row {
+    display: grid;
+    grid-template-columns: minmax(200px, 1.2fr) minmax(160px, 1fr) 220px minmax(200px, 1.4fr);
+    gap: 14px; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+    font-size: var(--text-sm);
+  }
+  .screen-row .screen-name { color: var(--ink); font-weight: 600; }
+  .screen-row .screen-name code { font-size: var(--text-xs); }
+  .screen-row .maps-to { color: var(--muted); }
+  .verdict-group { display: flex; gap: 6px; }
+  .verdict-btn {
+    border: 1px solid var(--line-strong); background: var(--surface-2);
+    color: var(--muted); font: inherit; font-size: var(--text-xs);
+    padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  }
+  .verdict-btn:hover { color: var(--ink); }
+  .verdict-btn[data-active="steal"] { color: var(--ok); background: var(--ok-surface); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .verdict-btn[data-active="fine"]  { color: var(--accent-ink); background: var(--accent-surface); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .verdict-btn[data-active="avoid"] { color: var(--danger); background: var(--danger-surface); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+  .note-input {
+    width: 100%; background: var(--surface-1); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); color: var(--body); font: inherit;
+    font-size: var(--text-xs); padding: 5px 8px;
+  }
+  .toolbar { display: flex; gap: 12px; align-items: center; margin: 20px 0; flex-wrap: wrap; }
+  .toolbar button {
+    border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--body);
+    font: inherit; font-size: var(--text-sm); padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .toolbar button:hover { color: var(--ink); background: var(--surface-3); }
+  #export-out { width: 100%; min-height: 120px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius); color: var(--body); font-family: var(--font-mono); font-size: var(--text-xs); padding: 12px; display: none; }
+  .progress-note { color: var(--muted); font-size: var(--text-sm); }
+  @media (max-width: 900px) { .screen-row { grid-template-columns: 1fr; gap: 6px; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="page-head">
+    <h1>Walkthrough Capture Scorecard</h1>
+    <p class="lead">One row per screen worth seeing, seeded from the source analyses. During each local session: click a verdict, drop a note. Everything persists in this browser (localStorage) and exports as JSON for the final findings list.</p>
+    <p class="doc-meta">Verdicts: STEAL (adopt the pattern) · FINE (noted, no action) · AVOID (anti-pattern for us) · Maps-to codes reference the admin-console plan (A1–C3) and decision IDs</p>
+  </header>
+
+  <div class="toolbar">
+    <button id="export-btn" type="button">Export JSON</button>
+    <button id="clear-btn" type="button">Clear all verdicts</button>
+    <span class="progress-note" id="progress"></span>
+  </div>
+  <textarea id="export-out" readonly aria-label="Exported JSON"></textarea>
+
+  <div id="scorecard"></div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const KEY = "deepdive-capture-scorecard-v1";
+
+  const PRODUCTS = [
+    { id: "dify", name: "Dify (Dan's fork)", note: "Runbook: dify-local-bringup-runbook. 11 containers.", screens: [
+      ["Studio home /apps", "Console IA baseline", "B2"],
+      ["Workflow canvas /app/:id/workflow", "Canvas builder benchmark", "B2"],
+      ["Run logs /app/:id/logs + trace panel", "Run timeline benchmark", "A3"],
+      ["Agent monitoring /agents/:id/monitoring (fork)", "Agent fleet view", "B1"],
+      ["Deployments releases (fork)", "Publish flow", "C3"],
+      ["API tokens /deployments/:id/api-tokens (fork)", "Key management", "B5"],
+      ["Marketplace /marketplace + install modal", "Install flow (NO permission disclosure — verify live)", "C2/D011"],
+      ["Installed plugins /plugins", "Package management", "C2"],
+      ["Human-input form /form/:token", "Pause surface (their best HITL)", "B4"],
+      ["Members/roles modal", "Multi-tenant admin", "C1"],
+      ["Model providers modal", "Provider config", "A1"],
+      ["Dataset hit-testing", "Eval-ish surface", "A4"],
+    ]},
+    { id: "flowise", name: "Flowise", note: "Runbook incoming. Watch for EE-gated screens.", screens: [
+      ["Agentflows v2 list + canvas", "Builder + the 3-lists-for-one-concept smell", "B2"],
+      ["agentexecutions run history + trace", "Closest OSS analog to our Runs screen", "A3"],
+      ["HumanInput node pause/resume in chat", "HITL-as-condition pattern live", "B4"],
+      ["Marketplace templates gallery", "Static-file marketplace UX", "C2"],
+      ["Workspace / roles / organization", "Best OSS Tier-2 multi-tenant benchmark", "C1"],
+      ["Evaluators + evaluations", "Eval suites", "A4"],
+      ["Schedules", "Deferred/recurring actions — Dan's agent-allowable idea", "policy"],
+      ["Custom tools editor", "Raw-JS-in-DB anti-pattern — see it to avoid it", "avoid"],
+    ]},
+    { id: "n8n", name: "n8n", note: "npx n8n — instant. No runbook needed.", screens: [
+      ["Wait node approval (confirm page + resume)", "Approval UX operators know", "B4/D011"],
+      ["sendAndWait (Slack/email form)", "Channel-delivered approvals", "B4"],
+      ["Workflow version history", "Version history UI", "B2"],
+      ["Community node install + verification prompt", "Package install trust UX", "C2"],
+      ["Executions list + run detail", "Run timeline", "A3"],
+    ]},
+    { id: "activepieces", name: "activepieces", note: "Runbook incoming. Todos UI availability being verified.", screens: [
+      ["Todos / manual-task approval UI", "Their current-gen HITL — settles the open code question", "B4"],
+      ["Flow DRAFT edit → publish → LOCKED", "Draft/published versioning UX", "B2"],
+      ["Builder canvas (tree-shaped flows)", "Contrast with graph canvases", "B2"],
+      ["Runs / issues views", "Run history", "A3"],
+      ["Pieces catalog + connections", "Integration catalog UX", "A2"],
+    ]},
+    { id: "langflow", name: "Langflow", note: "Skim-level session. Thin admin.", screens: [
+      ["Canvas + node inspector + trace panel", "Builder + inspection", "B2"],
+      ["Playground (separate from canvas)", "Build-vs-run separation pattern", "A4"],
+      ["Component store browse", "Social-trust marketplace — contrast case", "C2"],
+    ]},
+    { id: "onyx", name: "Onyx", note: "Scan incoming — proven donor (chat scroll).", screens: [
+      ["Admin console overview", "Enumerate their admin IA", "A1"],
+      ["Connector management + scheduling", "Integration registry UX", "A2"],
+      ["Assistants management", "Agent-profile analog", "B1"],
+    ]},
+    { id: "openhuman", name: "openhuman", note: "Memory-infrastructure scan incoming.", screens: [
+      ["Memory surfaces (whatever the scan finds)", "Memory infra — Dan's flag", "B1/memory"],
+    ]},
+    { id: "openagent", name: "openagent", note: "Identity being established by scan.", screens: [
+      ["TBD from scan", "TBD", "?"],
+    ]},
+    { id: "odysseus", name: "odysseus", note: "Scan incoming.", screens: [
+      ["TBD from scan", "TBD", "?"],
+    ]},
+  ];
+
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { state = {}; }
+  function save() { localStorage.setItem(KEY, JSON.stringify(state)); updateProgress(); }
+  function rowKey(productId, screenName) { return productId + "::" + screenName; }
+
+  const root = document.getElementById("scorecard");
+  for (const product of PRODUCTS) {
+    const section = document.createElement("section");
+    section.className = "product-block";
+    const heading = document.createElement("h2");
+    heading.textContent = product.name;
+    const noteP = document.createElement("p");
+    noteP.className = "progress-note";
+    noteP.textContent = product.note;
+    section.append(heading, noteP);
+    for (const [screen, why, maps] of product.screens) {
+      const key = rowKey(product.id, screen);
+      const row = document.createElement("div");
+      row.className = "screen-row";
+      const name = document.createElement("span"); name.className = "screen-name"; name.textContent = screen;
+      const whySpan = document.createElement("span"); whySpan.className = "maps-to"; whySpan.textContent = why + " → " + maps;
+      const group = document.createElement("div"); group.className = "verdict-group";
+      for (const verdict of ["steal", "fine", "avoid"]) {
+        const btn = document.createElement("button");
+        btn.type = "button"; btn.className = "verdict-btn"; btn.textContent = verdict.toUpperCase();
+        if ((state[key] || {}).verdict === verdict) btn.setAttribute("data-active", verdict);
+        btn.addEventListener("click", () => {
+          const current = state[key] || {};
+          current.verdict = current.verdict === verdict ? null : verdict;
+          state[key] = current; save();
+          group.querySelectorAll(".verdict-btn").forEach((other) => other.removeAttribute("data-active"));
+          if (current.verdict) btn.setAttribute("data-active", verdict);
+        });
+        group.appendChild(btn);
+      }
+      const note = document.createElement("input");
+      note.className = "note-input"; note.type = "text"; note.placeholder = "note…";
+      note.value = (state[key] || {}).note || "";
+      note.setAttribute("aria-label", "Note for " + screen);
+      note.addEventListener("change", () => { const current = state[key] || {}; current.note = note.value; state[key] = current; save(); });
+      row.append(name, whySpan, group, note);
+      section.appendChild(row);
+    }
+    root.appendChild(section);
+  }
+
+  function updateProgress() {
+    const total = PRODUCTS.reduce((sum, product) => sum + product.screens.length, 0);
+    const done = Object.values(state).filter((entry) => entry && entry.verdict).length;
+    document.getElementById("progress").textContent = done + " / " + total + " screens scored";
+  }
+  updateProgress();
+
+  document.getElementById("export-btn").addEventListener("click", () => {
+    const out = document.getElementById("export-out");
+    const exportPayload = { exportedAt: new Date().toISOString(), verdicts: state };
+    out.value = JSON.stringify(exportPayload, null, 2);
+    out.style.display = "block";
+    out.select();
+  });
+  document.getElementById("clear-btn").addEventListener("click", () => {
+    if (!confirm("Clear all verdicts and notes?")) return;
+    state = {}; save();
+    window.location.reload();
+  });
+})();
+</script>
+</body>
+</html>

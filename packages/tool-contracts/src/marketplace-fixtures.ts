@@ -99,22 +99,78 @@ export const bookingReservationWorkflowManifest = marketplaceManifestSchema.pars
       triggerPhrases: ["create a reservation", "book a table", "book a tee time"],
       requiredSkills: ["booking.reservation.create"],
       requiredCommands: ["booking.get.availability", "booking.create.guest", "booking.create.booking"],
+      // Phase 3a (consensus plan, 2026-07-10): ONE tool_preview node (previewBookingReservationCommand's
+      // existing guest+booking preview semantics, unchanged) followed by ONE compound tool_commit node
+      // wrapping the existing two-write commitBookingReservationCommand. The prior four-node split
+      // (guest_preview/guest/booking_preview/booking) demanded two independent Approve interactions a
+      // literal per-node walker would enforce -- but the shipped path runs both writes behind ONE human
+      // Approve click. This shape matches that shipped behavior instead of regressing it.
       version: "0.1.0",
       nodes: [
         { nodeId: "trigger", type: "trigger", title: "Start from current booking context" },
         { nodeId: "availability", type: "tool_preview", title: "Check availability", commandId: "booking.get.availability", effect: "read", approvalPolicy: "none" },
-        { nodeId: "guest_preview", type: "tool_preview", title: "Preview guest creation", commandId: "booking.create.guest", effect: "none", approvalPolicy: "none" },
-        { nodeId: "guest", type: "tool_commit", title: "Create guest", commandId: "booking.create.guest", effect: "write", approvalPolicy: "preview_then_trusted_approval", requiredHostContext: ["organizationId", "principalId"] },
-        { nodeId: "booking_preview", type: "tool_preview", title: "Preview booking creation", commandId: "booking.create.booking", effect: "none", approvalPolicy: "none" },
-        { nodeId: "booking", type: "tool_commit", title: "Create booking", commandId: "booking.create.booking", effect: "write", approvalPolicy: "preview_then_trusted_approval", requiredHostContext: ["organizationId", "principalId"] },
+        { nodeId: "reservation_preview", type: "tool_preview", title: "Preview reservation (guest + booking)", commandId: "booking.create.booking", effect: "none", approvalPolicy: "none" },
+        { nodeId: "reservation_commit", type: "tool_commit", title: "Create guest and booking", commandId: "booking.create.booking", effect: "write", approvalPolicy: "preview_then_trusted_approval", requiredHostContext: ["organizationId", "principalId"] },
       ],
       edges: [
         { edgeId: "e1", from: "trigger", to: "availability" },
-        { edgeId: "e2", from: "availability", to: "guest_preview", condition: "capacity_available" },
-        { edgeId: "e3", from: "guest_preview", to: "guest" },
-        { edgeId: "e4", from: "guest", to: "booking_preview" },
-        { edgeId: "e5", from: "booking_preview", to: "booking" },
+        { edgeId: "e2", from: "availability", to: "reservation_preview", condition: "capacity_available" },
+        { edgeId: "e3", from: "reservation_preview", to: "reservation_commit" },
       ],
+      // Model-facing facade (audit P0: pinned, <=5 tools, no toolset churn). Both tool_preview node
+      // commandIds must be listed per the schema's facade superRefine. Approval/cancel stay host-side
+      // click handlers, never model-callable tools (Open Question 1's default; command-catalog.ts's
+      // draft-only invariant already enforces this at the tool layer).
+      facadeToolIds: ["booking.get.availability", "booking.create.booking"],
+    },
+  },
+});
+
+export const amplifyCampaignWorkflowManifest = marketplaceManifestSchema.parse({
+  marketplaceSchemaVersion: "1",
+  packageId: "sonik.amplify.campaign.workflow",
+  packageVersionId: "sonik.amplify.campaign.workflow@0.1.0",
+  packageSemver: "0.1.0",
+  kind: "workflow",
+  title: "Create an Amplify campaign",
+  summary: "Brief → generated campaign content preview → human approval → persisted campaign artifact. Phase 7 wow demo: the sole new live controller path (agent-creation-tool-plan-2026-07-13.md).",
+  publisher,
+  visibility: "marketplace",
+  runtimeMode: "workflow_graph",
+  runtimeEffects: ["host_command"],
+  proofTier: "mock-backed",
+  readiness: "EXISTS",
+  runtimeCapabilities: { jsonRenderCanonical: true, htmlEscapeHatch: false, sandboxRuntime: false, commandBackedComponents: false, requiresHostContext: true, requiresTrustedApproval: true },
+  manifestHash: "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  payload: {
+    workflow: {
+      workflowId: "amplify.campaign.create",
+      title: "Create an Amplify campaign",
+      triggerPhrases: ["create a campaign", "launch a campaign", "set up an amplify campaign"],
+      requiredSkills: ["amplify.campaign.create"],
+      requiredCommands: ["amplify.campaign.create"],
+      // Decision 2 (agent-creation-tool-plan-2026-07-13.md): linear graph, no branch/artifact
+      // node. The preview and commit nodes share commandId "amplify.campaign.create" (schema's
+      // mutating-node-requires-same-command-preview-node rule) -- same shape as the reservation
+      // fixture's compound node, generalized to a single write. An explicit approval node
+      // precedes tool_commit (unlike the legacy reservation fixture) so this graph also passes
+      // the drafting agent's validateDraftedWorkflow gate, proving a drafting-agent-producible
+      // workflow runs end to end through the controller.
+      version: "0.1.0",
+      nodes: [
+        { nodeId: "trigger", type: "trigger", title: "Start from a campaign request" },
+        { nodeId: "brief", type: "ask_user", title: "Collect the campaign brief" },
+        { nodeId: "preview", type: "tool_preview", title: "Generate campaign content preview", commandId: "amplify.campaign.create", effect: "none", approvalPolicy: "none" },
+        { nodeId: "confirm", type: "approval", title: "Approve the campaign" },
+        { nodeId: "commit", type: "tool_commit", title: "Publish the campaign artifact", commandId: "amplify.campaign.create", effect: "write", approvalPolicy: "preview_then_trusted_approval", requiredHostContext: ["organizationId", "principalId"] },
+      ],
+      edges: [
+        { edgeId: "e1", from: "trigger", to: "brief" },
+        { edgeId: "e2", from: "brief", to: "preview" },
+        { edgeId: "e3", from: "preview", to: "confirm" },
+        { edgeId: "e4", from: "confirm", to: "commit" },
+      ],
+      facadeToolIds: ["amplify.campaign.create"],
     },
   },
 });
@@ -179,6 +235,7 @@ export const restaurantSetupBundleManifest = marketplaceManifestSchema.parse({
 export const marketplaceFixtureManifests = [
   restaurantSetupAppManifest,
   bookingReservationWorkflowManifest,
+  amplifyCampaignWorkflowManifest,
   restaurantSetupBundleManifest,
   amplifyCampaignWizardManifest,
 ] satisfies MarketplaceManifest[];

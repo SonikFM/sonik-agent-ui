@@ -18,6 +18,38 @@
     "./target-registry": {
       "types": "./dist/target-registry.d.ts",
       "default": "./dist/target-registry.js"
+    },
+    "./capability-registry": {
+      "types": "./dist/capability-registry.d.ts",
+      "default": "./dist/capability-registry.js"
+    },
+    "./workflow-run-state": {
+      "types": "./dist/workflow-run-state.d.ts",
+      "default": "./dist/workflow-run-state.js"
+    },
+    "./workflow-projection": {
+      "types": "./dist/workflow-projection.d.ts",
+      "default": "./dist/workflow-projection.js"
+    },
+    "./capability-pinning": {
+      "types": "./dist/capability-pinning.d.ts",
+      "default": "./dist/capability-pinning.js"
+    },
+    "./grant-synthesis": {
+      "types": "./dist/grant-synthesis.d.ts",
+      "default": "./dist/grant-synthesis.js"
+    },
+    "./workflow-controller": {
+      "types": "./dist/workflow-controller.d.ts",
+      "default": "./dist/workflow-controller.js"
+    },
+    "./marketplace": {
+      "types": "./dist/marketplace.d.ts",
+      "default": "./dist/marketplace.js"
+    },
+    "./marketplace-fixtures": {
+      "types": "./dist/marketplace-fixtures.d.ts",
+      "default": "./dist/marketplace-fixtures.js"
     }
   },
   "files": ["dist"],
@@ -26,10 +58,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@sonik-agent-ui/agent-observability": "workspace:*",
     "zod": "4.3.6"
   },
   "devDependencies": {
     "@internal/typescript-config": "workspace:*",
+    "@types/node": "^25.9.3",
     "typescript": "^5.4.5"
   }
 }

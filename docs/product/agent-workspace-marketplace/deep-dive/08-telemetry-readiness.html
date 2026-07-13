@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>08 · Telemetry, Proof & Readiness Gates — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .ladder-svg text { font-family: var(--font-sans); }
+  .ladder-svg .rung-title { font-size: 14px; font-weight: 600; }
+  .ladder-svg .rung-sub { font-size: 12px; }
+  .ladder-svg .rung-status { font-family: var(--font-mono); font-size: 12px; }
+  .ladder-svg .rail-label { font-size: 12px; font-family: var(--font-mono); }
+
+  .pipe { margin: 20px 0 8px; }
+  .pipe .flow-node code { font-size: var(--text-xs); }
+  .pipe-note { color: var(--muted); font-size: var(--text-sm); margin-top: 4px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+  .join-key { font-family: var(--font-mono); }
+</style>
+</head>
+<body data-doc="08-telemetry-readiness">
+<main class="page">
+  <header class="page-head">
+    <h1>Telemetry, Proof &amp; Readiness Gates</h1>
+    <p class="lead">What must be proven before Agent Workspace + Marketplace ships — and the ledger of which proofs already hold. Unit coverage is real and green; live endpoint telemetry is still a gap.</p>
+    <p class="doc-meta">Source: docs/.../08-telemetry-proof-accessibility-readiness.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>The readiness-gate ladder</h2>
+    <p>Readiness is not one test suite; it is four gates a change must clear in order. The bottom two rungs are backed by shipped, full-chain-green contracts. The top two — anything that needs a live request path or a running browser — are not yet built. Live coverage stops where the reducer stops.</p>
+
+    <figure class="viz-frame">
+      <svg class="ladder-svg" role="img" viewBox="0 0 720 360" width="720" aria-labelledby="ladder-title ladder-desc">
+        <title id="ladder-title">Four-gate readiness ladder</title>
+        <desc id="ladder-desc">Bottom to top: contract gate shipped, workflow-safety gate shipped, embedded-browser gate missing, post-deploy telemetry gate missing. Live coverage reaches the top of the workflow-safety gate.</desc>
+
+        <!-- progress rail -->
+        <line x1="40" y1="40" x2="40" y2="320" stroke="var(--line-strong)" stroke-width="2"/>
+        <line x1="40" y1="200" x2="40" y2="320" stroke="var(--ok)" stroke-width="4"/>
+        <circle cx="40" cy="200" r="5" fill="var(--ok)"/>
+        <text class="rail-label" x="52" y="192" fill="var(--muted)">live coverage reaches here</text>
+
+        <!-- Rung 4 (top) — Post-deploy telemetry — MISSING -->
+        <rect x="70" y="40" width="620" height="56" rx="8" fill="var(--danger-surface)" stroke="var(--danger)" stroke-width="1.5"/>
+        <text class="rung-title" x="88" y="66" fill="var(--ink)">Gate 4 — Post-deploy telemetry</text>
+        <text class="rung-sub" x="88" y="84" fill="var(--muted)">Live install/run/update emits immutable ids + receipts; Pipe-B joins the chain.</text>
+        <text class="rung-status" x="672" y="72" fill="var(--danger)" text-anchor="end">MISSING</text>
+
+        <!-- Rung 3 — Embedded browser / smoke — MISSING -->
+        <rect x="70" y="112" width="620" height="56" rx="8" fill="var(--danger-surface)" stroke="var(--danger)" stroke-width="1.5"/>
+        <text class="rung-title" x="88" y="138" fill="var(--ink)">Gate 3 — Embedded browser &amp; visual/a11y smoke</text>
+        <text class="rung-sub" x="88" y="156" fill="var(--muted)">Install screens keyboard/focus/SR-testable in a real browser; no marketplace Pipe-B smoke yet.</text>
+        <text class="rung-status" x="672" y="144" fill="var(--danger)" text-anchor="end">MISSING</text>
+
+        <!-- Rung 2 — Workflow safety — SHIPPED (controller not wired) -->
+        <rect x="70" y="184" width="620" height="56" rx="8" fill="var(--ok-surface)" stroke="var(--ok)" stroke-width="1.5"/>
+        <text class="rung-title" x="88" y="210" fill="var(--ink)">Gate 2 — Workflow safety &amp; approval</text>
+        <text class="rung-sub" x="88" y="228" fill="var(--muted)">Reducer distinguishes preview / approval / commit; host-signed approval structurally required.</text>
+        <text class="rung-status" x="672" y="216" fill="var(--ok)" text-anchor="end">SHIPPED</text>
+
+        <!-- Rung 1 (bottom) — Contract validity — SHIPPED -->
+        <rect x="70" y="256" width="620" height="56" rx="8" fill="var(--ok-surface)" stroke="var(--ok)" stroke-width="1.5"/>
+        <text class="rung-title" x="88" y="282" fill="var(--ink)">Gate 1 — Contract validity</text>
+        <text class="rung-sub" x="88" y="300" fill="var(--muted)">Marketplace/workflow schemas &amp; fixtures parse and reject unsafe variants.</text>
+        <text class="rung-status" x="672" y="288" fill="var(--ok)" text-anchor="end">SHIPPED</text>
+      </svg>
+      <figcaption>Gates in ascending order. A change clears the bottom before the top counts. Gate 2 ships the pure reducer (<code>workflow-run-state.ts</code>); its generic controller (<code>workflow-controller.ts</code>) exists but is <span class="chip">PLANNED</span> for the live request path (Phase 3a-2 cutover). Gates 3–4 need a running browser and live endpoints that do not exist yet.</figcaption>
+    </figure>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Gate-by-gate proof status, reconciled against the 2026-07-11 addendum.</caption>
+      <thead>
+        <tr><th>Gate</th><th>Required proof</th><th>Backing artifact</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Contract validity</strong></td>
+          <td>Schemas/fixtures parse and reject unsafe variants.</td>
+          <td class="mono">tests/unit/marketplace-package-contracts.test.mjs</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Workflow safety</strong></td>
+          <td>Preview / approval / commit are distinct; commit needs host-signed approval; <code>committed</code> only on a success receipt.</td>
+          <td class="mono">workflow-run-state.ts · marketplace-workflow-templates.test.mjs</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Command approval</strong></td>
+          <td>Approval-gated commands cannot commit without approval; <code>model_supplied_approval_is_not_trusted</code>.</td>
+          <td class="mono">tests/unit/tool-contracts.test.mjs:745-755</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Live controller cutover</strong></td>
+          <td>The generic interpreter drives the real request path, not just fixtures.</td>
+          <td class="mono">workflow-controller.ts (Phase 3a-2, undecided)</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Embedded browser / a11y</strong></td>
+          <td>Install screens keyboard/focus/screen-reader testable in a real browser.</td>
+          <td class="mono">no marketplace Pipe-B smoke yet</td>
+          <td><span class="chip danger">MISSING</span></td>
+        </tr>
+        <tr>
+          <td><strong>Post-deploy telemetry</strong></td>
+          <td>Install/run/update/approval emit immutable ids and receipts.</td>
+          <td class="mono">endpoint implementation pending</td>
+          <td><span class="chip danger">MISSING</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>The evidence pipeline</h2>
+    <p>A release claim is only as good as the artifact behind it. The invariant is one-directional: user-facing success copy derives from a <em>semantic-success receipt</em>, never from transport status or a chat transcript. The reducer already enforces the last hop; the middle hops (live event → Pipe-B → receipt) are the telemetry gap.</p>
+
+    <div class="pipe">
+      <div class="flow">
+        <div class="flow-node gated">
+          <b>Telemetry event</b>
+          <small>install / run / update / approval fires with <code>packageVersionId</code>, <code>installationId</code>, <code>previewId</code>, <code>approvalId</code>.</small>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+        <div class="flow-node gated">
+          <b>Pipe-B</b>
+          <small>traceable event sink; joins the chain on <code class="join-key">workflowRunId</code>. No marketplace stream yet.</small>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+        <div class="flow-node trusted">
+          <b>Receipt</b>
+          <small><code>semanticStatus: "success" | "failure"</code> with <code>receiptRef</code>. Phase <code>committed</code> only on success.</small>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+        <div class="flow-node trusted">
+          <b>User copy</b>
+          <small>"Done" is rendered from the receipt, never from HTTP 200.</small>
+        </div>
+      </div>
+    </div>
+    <p class="pipe-note">Green nodes are enforced in shipped code; amber nodes are planned wiring.</p>
+
+    <div class="two-col">
+      <div class="callout ok">
+        <p class="callout-title">Receipts-only success copy <span class="chip ok">SHIPPED</span></p>
+        <p>The reducer refuses to enter <code>committed</code> without a semantic-success receipt for every commit node — "success copy derives from receipts, never transport status" (<span class="mono">workflow-run-state.ts:12-13, 290</span>). A friendly label can never outrun the receipt behind it.</p>
+      </div>
+      <div class="callout warn">
+        <p class="callout-title">Live join key <span class="chip">PLANNED</span></p>
+        <p><code class="join-key">workflowRunId</code> (the reducer's <code>runId</code>) is the intended join key across event, Pipe-B, and receipt. It exists in the shipped state machine but is not yet emitted on a live telemetry stream.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Telemetry event vocabulary</h2>
+    <p>The planned event surface for marketplace actions. Every event carries immutable ids so a run can be reconstructed after the fact; <code class="join-key">workflowRunId</code> is the join key that stitches a preview to its approval to its receipt. None of these emit on a live stream yet — the contracts that define the ids are shipped; the endpoints that fire the events are not.</p>
+
+    <div class="table-scroll">
+    <table>
+      <caption>Event names, firing point, and the ids that identify and join each event.</caption>
+      <thead>
+        <tr><th>Event</th><th>Fires when</th><th>Identifying id</th><th>Join key</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>marketplace.install</code></td>
+          <td>A package version is installed into an org/workspace.</td>
+          <td><code>installationId</code>, <code>packageVersionId</code></td>
+          <td class="join-key">workflowRunId</td>
+          <td><span class="chip danger">MISSING</span></td>
+        </tr>
+        <tr>
+          <td><code>marketplace.update</code></td>
+          <td>An installation moves to a new pinned version.</td>
+          <td><code>installationId</code>, <code>packageVersionId</code></td>
+          <td class="join-key">workflowRunId</td>
+          <td><span class="chip danger">MISSING</span></td>
+        </tr>
+        <tr>
+          <td><code>workflow.previewRun</code></td>
+          <td>A workflow/app produces a non-committing preview.</td>
+          <td><code>previewId</code></td>
+          <td class="join-key">workflowRunId</td>
+          <td><span class="chip accent">FIXTURE</span></td>
+        </tr>
+        <tr>
+          <td><code>workflow.requestApproval</code></td>
+          <td>A commit node requests host-signed approval.</td>
+          <td><code>approvalId</code></td>
+          <td class="join-key">workflowRunId</td>
+          <td><span class="chip accent">FIXTURE</span></td>
+        </tr>
+        <tr>
+          <td><code>workflow.runApproved</code> (commit result)</td>
+          <td>An approved commit node returns a semantic receipt.</td>
+          <td><code>receiptId</code> (<code>receiptRef</code>)</td>
+          <td class="join-key">workflowRunId</td>
+          <td><span class="chip accent">FIXTURE</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <p><span class="chip accent">FIXTURE</span> marks event shapes the shipped reducer and its templates already model in tests; <span class="chip danger">MISSING</span> marks events with no producer at all. The A2 reservation commit path (<code>/api/reservation/commit</code>) is the one live commit surface today and is <span class="chip ok">SHIPPED</span>, but it does not yet emit these named marketplace events.</p>
+  </section>
+
+  <section>
+    <h2>Accessibility requirements ledger</h2>
+    <p>Accessibility and agent-readability are both first-class readiness gates — a custom approval widget that a keyboard or screen reader cannot drive is not shippable, and neither is one an agent cannot read. These requirements are product law today; the component-level tests that prove them wait on the UI itself.</p>
+
+    <dl class="ledger">
+      <dt>Keyboard operability</dt>
+      <dd>Every approval button, package card, and command-backed form control is reachable and operable by keyboard alone. <span class="chip danger">MISSING</span> — needs component tests post-UI.</dd>
+
+      <dt>Focus management</dt>
+      <dd>Focus is visible (token <code>:focus-visible</code> outline) and moves predictably through preview → approval → receipt. <span class="chip danger">MISSING</span></dd>
+
+      <dt>Screen-reader labels</dt>
+      <dd>Buttons, cards, and flows carry readable labels; no icon-only unlabeled controls on approval paths. <span class="chip danger">MISSING</span></dd>
+
+      <dt>No inaccessible custom widgets</dt>
+      <dd>Custom widgets for approvals or command-backed app forms must not ship if inaccessible. <span class="chip warn">OPEN</span> — binding rule; enforcement pending UI.</dd>
+
+      <dt>Agent-readable state</dt>
+      <dd>Install pages expose machine-readable <code>getPageContext()</code> with package/version/install ids; semantic actions include disabled reasons. <span class="chip">PLANNED</span></dd>
+
+      <dt>Receipts stay visible</dt>
+      <dd>Friendly UX labels must not remove technical receipts or host-context requirements. <span class="chip ok">SHIPPED</span> — enforced at the reducer.</dd>
+    </dl>
+
+    <div class="callout danger">
+      <p class="callout-title">What developers must not do</p>
+      <p>Do not mark marketplace workflows production-ready from unit tests alone; do not hide receipts or host-context requirements for simpler UX; do not ship inaccessible custom widgets for approvals or command-backed forms. Passing <code>pnpm test</code> proves broad current unit coverage — it does not prove live endpoint telemetry.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Non-negotiable invariants</h2>
+    <div class="panel">
+      <ul>
+        <li>Release claims require evidence, not chat-transcript confidence — chat is never approval.</li>
+        <li>Success copy derives from receipts, never transport status. The renderer is execution-inert.</li>
+        <li>Friendly UX labels must not remove technical receipts.</li>
+        <li>Accessibility and agent-readability are both first-class readiness gates, not follow-on polish.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+</body>
+</html>

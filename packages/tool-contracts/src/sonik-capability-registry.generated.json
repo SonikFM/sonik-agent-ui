@@ -1,0 +1,1051 @@
+{
+  "schemaVersion": "sonik-agent-ui.capability-registry.v1",
+  "capabilities": [
+    {
+      "capabilityId": "amplify.campaign.create",
+      "version": 1,
+      "title": "Create an Amplify campaign",
+      "effect": "write",
+      "status": "active",
+      "implies": [
+        "amplify.campaign.preview"
+      ],
+      "description": "Persist a reviewed campaign artifact to the Knowledge v1 store, host-signed and receipted. [source: hand-authored]"
+    },
+    {
+      "capabilityId": "amplify.campaign.preview",
+      "version": 1,
+      "title": "Preview an Amplify campaign",
+      "effect": "none",
+      "status": "active",
+      "implies": [],
+      "description": "Generate a preview of campaign content and audience segments for human review before commit. [source: hand-authored]"
+    },
+    {
+      "capabilityId": "booking.accept.dispute",
+      "version": 1,
+      "title": "Accept the dispute and forfeit",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "DESTRUCTIVE and terminal: requires the literal acknowledgeIrreversible:true plus a written rationale; rejects without both. The concession lands as a receipt-derived record entry attributed to the acting operator."
+    },
+    {
+      "capabilityId": "booking.activate.loyalty.challenge",
+      "version": 1,
+      "title": "Activate a loyalty challenge",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Activates a draft loyalty challenge. Activating a challenge that is already active or archived is an illegal status transition (409)."
+    },
+    {
+      "capabilityId": "booking.activate.loyalty.policy",
+      "version": 1,
+      "title": "Activate a drafted loyalty policy",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Activates a drafted loyalty policy manifest as a new append-only version. Structurally unreachable without a prior simulation: the request must present the simulateToken minted by simulate, and a stale or already-consumed token is rejected."
+    },
+    {
+      "capabilityId": "booking.add.house.account.entry",
+      "version": 1,
+      "title": "Post a charge, payment, or adjustment",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Operator op. Records one ledger entry on a member's tab: a charge (positive — they owe more, e.g. a tee time or dinner), a payment (negative — they paid the tab down), or an adjustment (either sign — a comp or correction). amount_cents must be nonzero. Optionally links the entry to the booking that produced it. Ledger-only: this records money, it does not capture or settle any payment (no payment rails are integrated). Intended as the future Layer-1 monetary-signal emission point (capture-only). Responds with the created entry. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.add.loyalty.member.note",
+      "version": 1,
+      "title": "Add a staff note to a loyalty member",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Appends a staff note to a member's profile. Notes are append-only, organization-scoped, and never surfaced to the member (see BookingLoyaltyMembersContractCompatibility.staffNotesPrivate). Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.add.party.member",
+      "version": 1,
+      "title": "Add a party member to a booking",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Adds a generic party member to a booking. Provide a customerId for a known guest, or omit it for a walk-in/guest — a guest without a customer record is identified by displayName alone and is never written as CRM/customer profile data. Supplying clientRequestId makes retried adds return the existing party row instead of duplicating the roster. Returns the booking's current active party roster."
+    },
+    {
+      "capabilityId": "booking.assign.resource",
+      "version": 1,
+      "title": "Assign a resource to a booking",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Assigns an active resource unit or resource combination to a booking. The service checks booking lifecycle, resource status, resource blocks, and overlapping active assignments before writing booking_resource. Returns the booking's active resource assignments."
+    },
+    {
+      "capabilityId": "booking.cancel.booking",
+      "version": 1,
+      "title": "Cancel a booking",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Cancels a booking, moving it to 'cancelled'. Cancelling an already-cancelled booking is a conflict (409) — the transition is illegal. Emits a v4 attribution signal carrying the source channel at capture time."
+    },
+    {
+      "capabilityId": "booking.claim.waitlist.offer",
+      "version": 1,
+      "title": "Claim a waitlist offer",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Future lifecycle transition claiming an offer. 410 documents expired offers; no payment capture occurs."
+    },
+    {
+      "capabilityId": "booking.commit.hold",
+      "version": 1,
+      "title": "Commit a booking hold",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Atomically converts an active unexpired hold into a durable booking, copies the constrained resource target into booking_resource, marks the hold converted, and writes booking lifecycle audit evidence. 409 covers lifecycle/conflict failures, including expired holds at the oRPC boundary; REST keeps a 410 expired-hold response. No payment settlement is performed."
+    },
+    {
+      "capabilityId": "booking.confirm.booking",
+      "version": 1,
+      "title": "Confirm a booking",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Confirms a booking, moving it from 'booked' to 'confirmed'. Confirming a booking that is not in 'booked' status is a conflict (409)."
+    },
+    {
+      "capabilityId": "booking.create.booking",
+      "version": 1,
+      "title": "Create a booking",
+      "effect": "write",
+      "status": "active",
+      "implies": [
+        "booking.get.availability"
+      ],
+      "description": "Creates a booking against a bookable context for a customer over a time window. The same shape backs a tee time, a dinner reservation, or any other booking — the context decides what it means. Supply a clientRequestId to make the create idempotent: retrying with the same key returns the existing booking with 200 rather than creating a duplicate (the Worker-retry defense). The organization is taken from your session. Emits a v4 attribution signal carrying the source channel at capture time."
+    },
+    {
+      "capabilityId": "booking.create.context",
+      "version": 1,
+      "title": "Create a bookable context",
+      "effect": "write",
+      "status": "active",
+      "implies": [
+        "booking.list.contexts"
+      ],
+      "description": "Creates a bookable context — the managed bookable thing (an event, a venue_schedule like a tee sheet or restaurant service, or a resource like a simulator bay). Provide its kind, display name, and timezone (required); config defaults to empty and slug is optional. The owning organization is taken from your session — never send it in the body. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.create.guest",
+      "version": 1,
+      "title": "Create or return a guest/user",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a persistent auth/user record for a reservation holder, or returns the existing user for the submitted email, then claims that user into the current organization. This writes booking identity, not customer CRM context."
+    },
+    {
+      "capabilityId": "booking.create.hold",
+      "version": 1,
+      "title": "Create a booking hold",
+      "effect": "write",
+      "status": "active",
+      "implies": [
+        "booking.get.hold",
+        "booking.get.availability"
+      ],
+      "description": "Creates a temporary hold against a bookable context and required constrained resource target. Mounted runtime checks resource blocks, active bookings/assignments, and active unexpired holds before writing. No payment/deposit behavior is performed."
+    },
+    {
+      "capabilityId": "booking.create.loyalty.adjustment",
+      "version": 1,
+      "title": "Create a loyalty point adjustment",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Requests a manual point adjustment for a member with a mandatory reason. Within the program's standing cap (+/-500 points) it posts immediately as a new ledger entry; outside the cap it is queued for a second operator's approval instead, and ledgerEntry is null until decided. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.create.loyalty.challenge",
+      "version": 1,
+      "title": "Create a loyalty challenge",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a loyalty challenge in draft status. Drafts are visible but inert until activated."
+    },
+    {
+      "capabilityId": "booking.create.loyalty.claim",
+      "version": 1,
+      "title": "File a loyalty claim",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Files a claim that a member should have earned points for a given order or check-in but didn't. The claim opens in status open and is resolved exclusively by ledger replay (see BookingLoyaltyClaimsContractCompatibility.replayOnly). Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.create.policy",
+      "version": 1,
+      "title": "Create a booking policy",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a mounted-narrow booking policy for the caller organization. Catalog/binding truth is persisted; active booking-window and party policies are enforced by hold/create-booking/reschedule/assignment service gates, while money-bearing settlement remains a later slice."
+    },
+    {
+      "capabilityId": "booking.create.quote",
+      "version": 1,
+      "title": "Create a booking quote",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a future shadow quote from a context, requested window, demand, and optional customer. This is contract truth only: no adapter, DB table, payment capture, or settlement behavior is mounted."
+    },
+    {
+      "capabilityId": "booking.create.rate.plan",
+      "version": 1,
+      "title": "Create a rate plan",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a mounted static/rule-based rate plan; money is catalog/quote truth only, not payment settlement."
+    },
+    {
+      "capabilityId": "booking.create.resource.block",
+      "version": 1,
+      "title": "Create a resource block",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a persisted operational block over a context, resource type, or resource unit. Blocks are inventory facts for later availability/hold conflict checks; this slice persists them but does not implement the hold conflict engine."
+    },
+    {
+      "capabilityId": "booking.create.resource.combination",
+      "version": 1,
+      "title": "Create a resource combination",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a persisted combination of resource units, such as adjacent simulator bays, tee-plus-cart bundles, or joined tables. Combination members stay operational inventory, not CRM data."
+    },
+    {
+      "capabilityId": "booking.create.resource.type",
+      "version": 1,
+      "title": "Create a resource type",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a persisted operational resource type in the booking schema. Resource types are inventory categories such as tee, cart, simulator bay, table, room, or instructor; they are scoped to the caller organization and optionally to a bookable context."
+    },
+    {
+      "capabilityId": "booking.create.resource.unit",
+      "version": 1,
+      "title": "Create a resource unit",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a persisted resource unit under a resource type. Units are individual bookable inventory items such as Tee 1, Cart 42, Bay A, or Table 12."
+    },
+    {
+      "capabilityId": "booking.create.schedule.rule",
+      "version": 1,
+      "title": "Create a schedule rule",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Adds a schedule rule to a context. A rule is an open config envelope expressing an effective-date range, a priority, and pacing/window/turn-time settings (e.g. opens/closes, slotMinutes, capacity); higher-priority rules win where effective windows overlap. Rules are how availability is defined — availability itself is always computed from them, never stored. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.create.waitlist.entry",
+      "version": 1,
+      "title": "Create a waitlist entry",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a future shadow waitlist entry for a requested booking window."
+    },
+    {
+      "capabilityId": "booking.decide.loyalty.approval",
+      "version": 1,
+      "title": "Decide a queued loyalty adjustment",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Approves or denies a queued loyalty-adjustment request. Approving posts exactly one new ledger entry; denying posts none. Deciding an already-decided approval is a status-transition conflict. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.delete.media.asset",
+      "version": 1,
+      "title": "Delete booking media asset",
+      "effect": "destructive",
+      "status": "active",
+      "implies": [],
+      "description": "Deletes a private R2-backed media asset after verifying the asset id belongs to the caller organization prefix."
+    },
+    {
+      "capabilityId": "booking.delete.schedule.rule",
+      "version": 1,
+      "title": "Delete a schedule rule",
+      "effect": "destructive",
+      "status": "active",
+      "implies": [],
+      "description": "Removes a schedule rule from a context. Future availability computations stop applying it immediately. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.delete.waitlist.entry",
+      "version": 1,
+      "title": "Delete a waitlist entry",
+      "effect": "destructive",
+      "status": "active",
+      "implies": [],
+      "description": "Future lifecycle transition removing a waitlist entry from active consideration."
+    },
+    {
+      "capabilityId": "booking.draft.loyalty.policy",
+      "version": 1,
+      "title": "Draft a loyalty policy manifest",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Creates a draft loyalty policy manifest. A draft has no runtime effect until it is simulated and then activated."
+    },
+    {
+      "capabilityId": "booking.dry.run.organizer.template",
+      "version": 1,
+      "title": "Dry-run organizer template install",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a deterministic install report for the template and organization slug. This endpoint is read-only: executedMutations is false, venueProductionReady is false, and install mutations remain guarded/deferred."
+    },
+    {
+      "capabilityId": "booking.expire.waitlist.entry",
+      "version": 1,
+      "title": "Expire a waitlist entry",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Future lifecycle transition expiring a waitlist entry."
+    },
+    {
+      "capabilityId": "booking.export.loyalty.segment.to.amplify",
+      "version": 1,
+      "title": "Export a loyalty segment reference to Amplify",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Hands Amplify a segment reference plus a consent-filtered member-set handle. Loyalty is the source of behavior; Amplify is the send engine — no send tooling exists on this surface, and the boundary is deliberate and typed."
+    },
+    {
+      "capabilityId": "booking.extend.hold",
+      "version": 1,
+      "title": "Extend a booking hold",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Extends an active unexpired hold expiry while keeping the same conflict footprint. 409 covers illegal transitions; expired holds are returned as expired truth by the service."
+    },
+    {
+      "capabilityId": "booking.get.availability",
+      "version": 1,
+      "title": "Get computed availability for a context",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns the computed availability slots for a context over a date range (from/to). This is THE law of the booking framework: availability is computed from the context's schedule rules every time it is requested — it is never stored as slots. Each returned slot carries its start, end, and remaining capacity after existing bookings. Optional partySize/source/resource filters let the read hide slots that active booking-window or party policies would reject; the response remains a bare slot array without pricing or reason-code expansion. This read is NOT tracked as an attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.get.booking",
+      "version": 1,
+      "title": "Get a booking",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a single booking by id, scoped to your organization. A booking in another organization is indistinguishable from one that does not exist — both return 404."
+    },
+    {
+      "capabilityId": "booking.get.context",
+      "version": 1,
+      "title": "Get a bookable context",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns one bookable context by id. Only contexts in your organization are visible — a context owned by another org is indistinguishable from a missing one (both 404). Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.get.current.loyalty.policy",
+      "version": 1,
+      "title": "Get the current loyalty policy",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns the currently active loyalty policy version. Contract truth only: no DB table or runtime adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.get.customer",
+      "version": 1,
+      "title": "Get one customer by id",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a single org-scoped customer by id. 404 if the customer does not exist within your organization (org scope is session-derived; cross-org ids resolve as not-found, never as a leak). Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.get.customer.insights",
+      "version": 1,
+      "title": "Get customer insights",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns future shadow booking insights projected from booking activity for an existing customer."
+    },
+    {
+      "capabilityId": "booking.get.customer.profile",
+      "version": 1,
+      "title": "Get a customer profile",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns the future shadow CRM/profile projection for an existing booking customer. Booking does not own this persistence; a mounted implementation must proxy/project Amplify-owned CRM truth or remain read-only."
+    },
+    {
+      "capabilityId": "booking.get.dispute",
+      "version": 1,
+      "title": "Get a dispute case file",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns one dispute within the caller organization. Cross-org and unknown ids are both 404 under org-scoped invisibility."
+    },
+    {
+      "capabilityId": "booking.get.dispute.auto.file.policy",
+      "version": 1,
+      "title": "Get the auto-file policy",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Org-scoped auto-file posture: enabled default with a buffer before dueBy. The deadline guard is enforced regardless of this setting."
+    },
+    {
+      "capabilityId": "booking.get.dispute.evidence",
+      "version": 1,
+      "title": "Get the evidence packet",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns the staged/submitted evidence packet with per-field provenance (Sonik prefill vs operator input). Absent data is an honest empty, never an invention."
+    },
+    {
+      "capabilityId": "booking.get.hold",
+      "version": 1,
+      "title": "Get a booking hold",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a hold in the caller organization, or 404 for unknown/cross-org holds."
+    },
+    {
+      "capabilityId": "booking.get.house.account",
+      "version": 1,
+      "title": "Get a house account with its balance",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Operator op. Returns a member's house account plus its running balance. The balance is computed live as the sum of all ledger entries — it is never stored — so it is always consistent with the tab. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.get.house.account.statement",
+      "version": 1,
+      "title": "Read a member's statement / F&B-minimum progress",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Operator op. Returns a computed statement for a member's tab over an optional occurred-at period: the net balance, per-kind subtotals (charges, payments, adjustments), and an entry count. The charge subtotal over a billing period is the food-and-beverage-minimum progress number — how much the member has spent toward their minimum. Every figure is a read-time aggregate over the ledger; nothing here is stored. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.get.loyalty.balance",
+      "version": 1,
+      "title": "Get a member's computed loyalty balance",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a loyalty member's point balance, computed by summing their ledger entries at read time. The balance is never stored — it is always consistent with the ledger by construction. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.get.loyalty.cohort.compare",
+      "version": 1,
+      "title": "Compare member vs. non-member cohorts",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Compares matched member and non-member cohorts across spend-per-visit, visits-per-quarter, and repeat-attendance. delta is computed, never copywritten."
+    },
+    {
+      "capabilityId": "booking.get.loyalty.kpis",
+      "version": 1,
+      "title": "Get top-line loyalty KPIs",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns exactly four top-line loyalty KPIs (member count/enrollment rate, active-member rate, redemption rate, outstanding liability). Every figure maps to a ledger or member query; no KPI wallpaper."
+    },
+    {
+      "capabilityId": "booking.get.loyalty.liability",
+      "version": 1,
+      "title": "Get outstanding loyalty liability",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns outstanding point liability reconciled to the ledger, upcoming expiry cohorts, and a modeled breakage estimate that renders only with an explicit modeled label until a real cohort expires."
+    },
+    {
+      "capabilityId": "booking.get.loyalty.member",
+      "version": 1,
+      "title": "Get a loyalty member",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns one loyalty member profile, including a derived tier and balance. Both tier and balance are recomputed from the ledger on every read — neither is stored as authority. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.get.loyalty.promo.performance",
+      "version": 1,
+      "title": "Get loyalty promo performance",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists attributed sales and honest redemption cost per earn multiplier promo."
+    },
+    {
+      "capabilityId": "booking.get.media.asset",
+      "version": 1,
+      "title": "Read booking media asset",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Streams a private media asset for the caller organization. Passing metadata=true returns the same JSON asset summary used by list/upload, which keeps Scalar and SDK verification JSON-safe while the default route streams bytes."
+    },
+    {
+      "capabilityId": "booking.get.media.asset.variant",
+      "version": 1,
+      "title": "Read booking media image variant",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Streams an authenticated, org-scoped Cloudflare Images variant for an image asset stored privately in BOOKING_MEDIA_BUCKET. The catalog row and session are checked before the Worker reads R2 bytes or returns a cached variant."
+    },
+    {
+      "capabilityId": "booking.get.organizer.template",
+      "version": 1,
+      "title": "Inspect an organizer template manifest",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns the full organizer template manifest for a public starter. The manifest describes capability bundles, bookable-context kinds, proof surfaces, and non-live unsupported seams without claiming production install readiness."
+    },
+    {
+      "capabilityId": "booking.get.organizer.template.browser.handoff",
+      "version": 1,
+      "title": "Get organizer template browser handoff",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns the browser/manual-proof handoff generated from the same template dry-run report used by the CLI. Unsupported seams remain non-live and durable template-install tables remain deferred."
+    },
+    {
+      "capabilityId": "booking.get.quote",
+      "version": 1,
+      "title": "Get a booking quote",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns one future shadow quote within the caller organization. Cross-org and unknown quotes are both 404 under future org-scoped invisibility semantics."
+    },
+    {
+      "capabilityId": "booking.get.waitlist.entry",
+      "version": 1,
+      "title": "Get a waitlist entry",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns one future shadow waitlist entry. Cross-org entries are 404."
+    },
+    {
+      "capabilityId": "booking.issue.loyalty.pass.link",
+      "version": 1,
+      "title": "Dispatch a wallet-pass link to a loyalty member",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Dispatches a wallet-pass link to a member over SMS or email. The pass is an identity/benefit instrument only and carries no payment function (ruling R-1). Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.list.bookings",
+      "version": 1,
+      "title": "List bookings",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists bookings in your organization, optionally filtered by context, customer, status, and a start-time date range. Org scoping is implicit — you only ever see your own organization's bookings."
+    },
+    {
+      "capabilityId": "booking.list.contexts",
+      "version": 1,
+      "title": "List bookable contexts",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists the bookable contexts in your organization, optionally filtered by kind (event, venue_schedule, or resource). Availability reads are not tracked, but this list is a plain read. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.list.dispute.timeline",
+      "version": 1,
+      "title": "List the derived dispute timeline",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "READ-ONLY BY DESIGN: every entry derives from provider_webhook_normalized_events + provider_command_receipts; zero synthetic entries; gaps render as gaps; the verdict is a state summary from receipts, never a fabricated event. No write endpoint exists for this family — a structural absence, not a deferred feature."
+    },
+    {
+      "capabilityId": "booking.list.disputes",
+      "version": 1,
+      "title": "List disputes",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists org-scoped disputes, urgency-sorted: open disputes by dueBy ascending (derived, never stored), terminal states after. source=terminal rows render Sonik evidence context for charges processed outside Sonik. Contract truth only — no adapter or table is mounted."
+    },
+    {
+      "capabilityId": "booking.list.early.fraud.warnings",
+      "version": 1,
+      "title": "List early fraud warnings",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Read-only EFW rows normalized from the webhook spine; informational in MVP (badges on the dispute list). Acting on connected-account/Terminal EFWs waits on the G-lane (G1/G2)."
+    },
+    {
+      "capabilityId": "booking.list.house.account.entries",
+      "version": 1,
+      "title": "List a house account's ledger entries",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Operator op. Returns a paginated page of a member's ledger entries, newest first, filterable by kind (charge / payment / adjustment), occurred-at window, and linked booking. A tee time and a dinner both appear here as charges against the one tab. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.list.loyalty.approvals",
+      "version": 1,
+      "title": "List loyalty adjustment approval requests",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a paginated page of queued loyalty-adjustment approval requests, optionally filtered by status. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.list.loyalty.challenges",
+      "version": 1,
+      "title": "List loyalty challenges",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists loyalty challenges with an optional status filter. Draft challenges are visible but inert; completion is evaluated from ledger events and emits its own earn entry (kind challenge_bonus)."
+    },
+    {
+      "capabilityId": "booking.list.loyalty.claims",
+      "version": 1,
+      "title": "List loyalty claims",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a paginated page of loyalty claims, optionally filtered by status. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.list.loyalty.ledger.by.member",
+      "version": 1,
+      "title": "List a member's loyalty ledger entries",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a paginated page of a loyalty member's append-only ledger entries, the only source of truth for their point balance. Read-only: no direct write endpoint exists on this surface (see BookingLoyaltyLedgerContractCompatibility.readOnlyByDesign). Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.list.loyalty.policy.versions",
+      "version": 1,
+      "title": "List loyalty policy versions",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists the append-only loyalty policy version history, newest first. History is never rewritten; a rollback restores a prior manifest as a new version."
+    },
+    {
+      "capabilityId": "booking.list.loyalty.segments",
+      "version": 1,
+      "title": "List loyalty segments",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists loyalty segments as ledger predicates evaluated on read, with a consent-filtered size. No segment membership list is ever materialized here."
+    },
+    {
+      "capabilityId": "booking.list.loyalty.top.members",
+      "version": 1,
+      "title": "List top loyalty members",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists the top loyalty members by balance with tier progress projected from the current tier policy."
+    },
+    {
+      "capabilityId": "booking.list.media.assets",
+      "version": 1,
+      "title": "List booking media assets",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists private R2-backed media assets for the caller organization, optionally scoped to one bookable context. Assets remain served through authenticated Worker routes, not a public CDN."
+    },
+    {
+      "capabilityId": "booking.list.organizer.templates",
+      "version": 1,
+      "title": "List organizer templates",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists public capability-first organizer starter templates. Templates are bundle/config descriptors only; they do not create vertical runtime types and do not execute install mutations."
+    },
+    {
+      "capabilityId": "booking.list.party.members",
+      "version": 1,
+      "title": "List party members for a booking",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns the booking's current active party roster. Removed members remain tombstoned for audit/retry safety but are excluded from this current-roster response."
+    },
+    {
+      "capabilityId": "booking.list.policies",
+      "version": 1,
+      "title": "List booking policies",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists mounted booking policies for the caller organization with optional active/kind/binding filters."
+    },
+    {
+      "capabilityId": "booking.list.rate.plans",
+      "version": 1,
+      "title": "List rate plans",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists mounted rate plans for the caller organization with optional active/binding filters."
+    },
+    {
+      "capabilityId": "booking.list.resource.assignments",
+      "version": 1,
+      "title": "List resource assignments for a booking",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns the booking's current active resource assignments. This is the read-side companion to assign/unassign so the app can render mounted resource truth instead of inferred slot labels."
+    },
+    {
+      "capabilityId": "booking.list.resource.blocks",
+      "version": 1,
+      "title": "List resource blocks",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists persisted resource blocks for the caller organization."
+    },
+    {
+      "capabilityId": "booking.list.resource.combinations",
+      "version": 1,
+      "title": "List resource combinations",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists persisted resource combinations for the caller organization, optionally filtered by bookable context."
+    },
+    {
+      "capabilityId": "booking.list.resource.types",
+      "version": 1,
+      "title": "List resource types",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists persisted resource types for the caller organization, optionally filtered by bookable context."
+    },
+    {
+      "capabilityId": "booking.list.resource.units",
+      "version": 1,
+      "title": "List resource units",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists persisted resource units for the caller organization, optionally filtered by type, context, status, or legacy active flag."
+    },
+    {
+      "capabilityId": "booking.list.schedule.rules",
+      "version": 1,
+      "title": "List a context's schedule rules",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists every schedule rule attached to a context, in the order they were created. Only your organization's contexts are visible. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.list.waitlist.entries",
+      "version": 1,
+      "title": "List waitlist entries",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Lists future shadow waitlist entries in the caller organization."
+    },
+    {
+      "capabilityId": "booking.offer.waitlist.entry",
+      "version": 1,
+      "title": "Offer a waitlist entry",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Future lifecycle transition that offers a matching window to the waitlist customer."
+    },
+    {
+      "capabilityId": "booking.open.house.account",
+      "version": 1,
+      "title": "Open (or fetch) a member's house account",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Operator op. Opens a house account — a member's 'tab' — for a customer, or returns the existing one. Idempotent by the one-account-per-(org, customer) rule: calling it twice for the same member returns the same account with 200, never a conflict. Responds with the account and its computed balance. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.ping",
+      "version": 1,
+      "title": "Booking service health probe",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Liveness probe for the greenfield booking service. Returns service identity, ok flag, session source, explicit demo-auth posture, demoCustomerId for local/demo harness proof, venueProductionReady=false, and timestamp. No authentication required — anonymous callers receive authenticated: false. Mounted runtime: served by sonik-booking-service router.ts."
+    },
+    {
+      "capabilityId": "booking.project.event.context",
+      "version": 1,
+      "title": "Project a legacy event context",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Projects a real Sonik event into booking as bookable_context.kind=event using externalEventRef as a soft shadow key. This operation is idempotent per organization + externalEventRef, refreshes mutable display/config fields on replay, and does not make booking authoritative for legacy event ticketing, approvals, analytics, or commerce. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.record.loyalty.redemption",
+      "version": 1,
+      "title": "Record a staff-mediated reward redemption",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Records a door-side reward redemption for a member, staff-mediated (ruling O-2). Posts a ledger entry and returns the policy gate outcome. Checkout-time redemption never uses this endpoint — it rides the generic loyalty-adjustment seam instead (see BookingLoyaltyMembersContractCompatibility.redemptionRuling). Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.release.hold",
+      "version": 1,
+      "title": "Release a booking hold",
+      "effect": "write",
+      "status": "active",
+      "implies": [
+        "booking.get.hold"
+      ],
+      "description": "Releases an active hold so it no longer blocks inventory. 409 covers illegal transitions; expired holds are returned as expired truth by the service."
+    },
+    {
+      "capabilityId": "booking.remove.party.member",
+      "version": 1,
+      "title": "Remove a party member from a booking",
+      "effect": "destructive",
+      "status": "active",
+      "implies": [],
+      "description": "Removes a generic party member from a booking by party-member id by tombstoning the booking_party row. Repeating the same remove for an already-removed party row is idempotent and returns the current active roster without emitting a duplicate lifecycle event. This mutates booking operational roster truth only; it does not delete or update CRM/customer profile data."
+    },
+    {
+      "capabilityId": "booking.reschedule.booking",
+      "version": 1,
+      "title": "Reschedule a booking",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Moves a booking to a new time window on the same booking — a first-class operation, not a cancel-and-rebook. The booking keeps its id, party, and resource assignments. The new ends must be strictly after the new starts. Emits a v4 attribution signal carrying the source channel at capture time."
+    },
+    {
+      "capabilityId": "booking.resolve.loyalty.claim",
+      "version": 1,
+      "title": "Resolve a loyalty claim by ledger replay",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Runs ledger replay against a claim's source-event candidate. If the replay checks out, the earn posts itself as a new ledger entry carrying a reference back to the claim and the claim closes resolved_posted; otherwise it closes resolved_no_earn with no entry posted. Never accepts a manual point amount. Resolving an already-resolved claim is a status-transition conflict. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.rollback.loyalty.policy",
+      "version": 1,
+      "title": "Roll back to a prior loyalty policy version",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Restores a prior loyalty policy version as a new append-only version (never a history rewrite). A single, confirmed action."
+    },
+    {
+      "capabilityId": "booking.search.guests",
+      "version": 1,
+      "title": "Search guests/users for a reservation",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Searches persistent auth/user records already claimed into the current organization by name/email for reservation creation. This is the booking holder identity lookup; it does not search or create org-scoped customer marketing rows."
+    },
+    {
+      "capabilityId": "booking.search.loyalty.members",
+      "version": 1,
+      "title": "Search loyalty members",
+      "effect": "read",
+      "status": "active",
+      "implies": [],
+      "description": "Returns a paginated page of loyalty members, supporting a phone-first staff lookup query. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.set.dispute.auto.file.policy",
+      "version": 1,
+      "title": "Set the auto-file policy",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Updates the org auto-file posture. Every auto-filed submission lands as an attributed receipt entry (actor = policy), indistinguishable in rigor from a manual one; the scheduler itself is Wave 2.5."
+    },
+    {
+      "capabilityId": "booking.set.dispute.evidence.review",
+      "version": 1,
+      "title": "Render the review set and issue the review token",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Computes the exact outgoing field set (empties omitted — what the network will see), stores a consume-once review token bound to the packet version and field-set hash (TTL 15 minutes), and returns the token with the rendered field count. The §6 guardrail, server-side."
+    },
+    {
+      "capabilityId": "booking.set.loyalty.member.tags",
+      "version": 1,
+      "title": "Replace a loyalty member's tags",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Replaces the full tag set on a loyalty member profile. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.simulate.loyalty.policy",
+      "version": 1,
+      "title": "Simulate a drafted loyalty policy",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Replays the last N days of the real ledger under the drafted rates to project added points, added liability, members reached, and projected redemption cost, plus a budget-cap verdict. Mints a consume-once simulateToken that activate requires; any further edit to the draft invalidates it."
+    },
+    {
+      "capabilityId": "booking.stage.dispute.evidence",
+      "version": 1,
+      "title": "Stage evidence fields",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Stages evidence (provider update_evidence submit:false semantics via the payments-owned SDK request plan — ruling R1; gated on the dispute integration manifest). Staging bumps the packet and invalidates any outstanding review token (staleness beats replay). CE 3.0 enhanced-evidence staging stays engine-gated."
+    },
+    {
+      "capabilityId": "booking.submit.dispute.evidence",
+      "version": 1,
+      "title": "Submit the reviewed evidence packet",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Consumes the review token atomically (zero-rows-updated → typed 409: REVIEW_STALE | REVIEW_CONSUMED | REVIEW_EXPIRED) then submits via the provider update_evidence submit:true request plan. The token proves the review render; the idempotencyKey dedupes the provider submission — orthogonal mechanisms. Submitting bumps submissionCount."
+    },
+    {
+      "capabilityId": "booking.unassign.resource",
+      "version": 1,
+      "title": "Unassign a resource from a booking",
+      "effect": "destructive",
+      "status": "active",
+      "implies": [],
+      "description": "Releases an active booking_resource assignment by assignment id. The row is retained with status=released for audit-ready assignment truth. Returns the booking's remaining active resource assignments."
+    },
+    {
+      "capabilityId": "booking.update.context",
+      "version": 1,
+      "title": "Update a bookable context",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Updates a context's mutable fields — name, config, and/or slug. The context's kind cannot be changed: a kind determines how its schedule rules are interpreted, so changing it would orphan the rule semantics. Send only the fields you want to change. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.update.customer",
+      "version": 1,
+      "title": "Update a customer's contact fields",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Updates the contact fields (name, phone, email) on one of your customers. Send only the fields you want to change. phone, if supplied, must stay non-empty — the spine column is NOT NULL and cannot be cleared; email may be set to null to clear it. This edits the CUSTOMER row only — it never mutates a user (organizers edit customers, never users). 404 if the customer is not in your organization. Shadow contract: no adapter is mounted yet."
+    },
+    {
+      "capabilityId": "booking.update.customer.profile",
+      "version": 1,
+      "title": "Update a customer profile",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Shadow-only boundary for future profile preference updates. Booking must not persist CRM-owned profile data here unless a later RAL plan delegates the write to Amplify or reframes the payload as booking operational participant metadata; it never mutates an auth user."
+    },
+    {
+      "capabilityId": "booking.update.policy",
+      "version": 1,
+      "title": "Update a booking policy",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Updates a mounted booking policy. 404 is used for unknown or cross-org policies."
+    },
+    {
+      "capabilityId": "booking.update.rate.plan",
+      "version": 1,
+      "title": "Update a rate plan",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Updates a mounted rate plan. Dynamic pricing/yield remains out of scope."
+    },
+    {
+      "capabilityId": "booking.update.schedule.rule",
+      "version": 1,
+      "title": "Update a schedule rule",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Replaces a schedule rule's config envelope. Emits an operational attribution signal. Mounted runtime: served by sonik-booking-service booking context handlers."
+    },
+    {
+      "capabilityId": "booking.upload.media.asset",
+      "version": 1,
+      "title": "Upload booking media asset",
+      "effect": "write",
+      "status": "active",
+      "implies": [],
+      "description": "Uploads a private context-scoped media asset into BOOKING_MEDIA_BUCKET. The mounted endpoint accepts multipart/form-data with contextId, role, and file; it also supports application/octet-stream with contextId/fileName/role query params for SDK and CLI proof."
+    }
+  ]
+}

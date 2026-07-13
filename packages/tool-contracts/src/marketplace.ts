@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { knowledgeRefSchema } from "./knowledge-ref.js";
 
 export const marketplaceSchemaVersionSchema = z.literal("1");
 export type MarketplaceSchemaVersion = z.infer<typeof marketplaceSchemaVersionSchema>;
@@ -71,7 +72,7 @@ export const marketplaceProofTierSchema = z.enum([
 const semverLikeSchema = z.string().regex(/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/, "Expected semver-like version");
 const sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/i, "Expected sha256:<64 hex chars> manifest hash");
 const packageIdSchema = z.string().regex(/^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$/i, "Expected stable package id");
-const packageVersionIdSchema = z.string().regex(/^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*@\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/i, "Expected <packageId>@<semver>");
+export const packageVersionIdSchema = z.string().regex(/^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*@\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/i, "Expected <packageId>@<semver>");
 
 export const marketplacePublisherSchema = z.object({
   publisherId: z.string().min(1),
@@ -202,9 +203,12 @@ export const commandBackedAppDefinitionSchema = z.object({
 });
 export type CommandBackedAppDefinition = z.infer<typeof commandBackedAppDefinitionSchema>;
 
+export const workflowNodeTypeSchema = z.enum(["trigger", "ask_user", "skill", "artifact", "tool_preview", "approval", "tool_commit", "remote_execution", "evidence", "branch"]);
+export type WorkflowNodeType = z.infer<typeof workflowNodeTypeSchema>;
+
 export const workflowNodeDefinitionSchema = z.object({
   nodeId: z.string().min(1),
-  type: z.enum(["trigger", "ask_user", "skill", "artifact", "tool_preview", "approval", "tool_commit", "remote_execution", "evidence", "branch"]),
+  type: workflowNodeTypeSchema,
   title: z.string().min(1),
   commandId: z.string().optional(),
   skillId: z.string().optional(),
@@ -214,6 +218,11 @@ export const workflowNodeDefinitionSchema = z.object({
 }).strict().superRefine((node, ctx) => {
   if (node.type === "tool_commit" && node.approvalPolicy !== "preview_then_trusted_approval") {
     ctx.addIssue({ code: "custom", path: ["approvalPolicy"], message: "Tool commit workflow nodes require trusted approval policy" });
+  }
+  // A preview node is execution-inert by definition — a mutating effect under
+  // tool_preview would let the controller run a write without the commit gate.
+  if (node.type === "tool_preview" && (node.effect === "write" || node.effect === "destructive" || node.effect === "external")) {
+    ctx.addIssue({ code: "custom", path: ["effect"], message: "tool_preview nodes must be effect none or read; mutating work belongs on a tool_commit node" });
   }
   if ((node.effect === "write" || node.effect === "destructive" || node.effect === "external") && node.approvalPolicy !== "preview_then_trusted_approval") {
     ctx.addIssue({ code: "custom", path: ["approvalPolicy"], message: "Write/destructive/external workflow nodes require preview_then_trusted_approval" });
@@ -240,6 +249,10 @@ export const workflowDefinitionSchema = z.object({
   edges: z.array(workflowEdgeDefinitionSchema).default([]),
   requiredSkills: z.array(z.string()).default([]),
   requiredCommands: z.array(z.string()).default([]),
+  /** Model-facing facade pinned for the run's lifetime (audit P0: <=5 tools,
+   *  no toolset churn mid-workflow). Empty means the facade is host-derived —
+   *  existing definitions parse unchanged. */
+  facadeToolIds: z.array(z.string()).max(5).default([]),
   version: semverLikeSchema,
 }).strict().superRefine((workflow, ctx) => {
   const previewCommandIds = new Set(workflow.nodes.filter((node) => node.type === "tool_preview" && node.commandId).map((node) => node.commandId as string));
@@ -263,6 +276,17 @@ export const workflowDefinitionSchema = z.object({
     }
     if (!nodeIds.has(edge.to)) {
       ctx.addIssue({ code: "custom", path: ["edges", index, "to"], message: "Workflow edge to must reference an existing nodeId" });
+    }
+  }
+  // With a declared facade, every model-driven node (tool_preview is the only
+  // model-callable node type; approval/commit stay host-side) must map to a
+  // facade tool — otherwise the pinned toolset can't actually run the graph.
+  if (workflow.facadeToolIds.length > 0) {
+    const facade = new Set(workflow.facadeToolIds);
+    for (const [index, node] of workflow.nodes.entries()) {
+      if (node.type === "tool_preview" && node.commandId && !facade.has(node.commandId)) {
+        ctx.addIssue({ code: "custom", path: ["nodes", index, "commandId"], message: "tool_preview node commandId must be one of facadeToolIds when a facade is declared" });
+      }
     }
   }
 });
@@ -294,6 +318,25 @@ export const commandToolPackDefinitionSchema = z.object({
 });
 export type CommandToolPackDefinition = z.infer<typeof commandToolPackDefinitionSchema>;
 
+/** Ordered prompt-module refs plus an inline override map, mirroring
+ *  `promptModuleOverrides`/`skillPromptOverrides` (`agent-settings.ts`):
+ *  keyed by module id, an empty string suppresses that module, a missing key
+ *  uses the module's default body. `moduleIds` orders which modules compose
+ *  for this agent; an empty array preserves today's host-derived composition. */
+export const agentPromptModulesSchema = z.object({
+  moduleIds: z.array(z.string().min(1)).default([]),
+  overrides: z.record(z.string(), z.string()).default({}),
+}).strict();
+export type AgentPromptModules = z.infer<typeof agentPromptModulesSchema>;
+
+/** Optional inline model policy, an alternative to `modelPolicyRef` for
+ *  definitions that pin a model without a separately published policy. */
+export const agentModelPolicySchema = z.object({
+  modelId: z.string().min(1),
+  requireZdr: z.boolean().default(false),
+}).strict();
+export type AgentModelPolicy = z.infer<typeof agentModelPolicySchema>;
+
 export const agentDefinitionSchema = z.object({
   agentId: z.string().min(1),
   title: z.string().min(1),
@@ -302,6 +345,9 @@ export const agentDefinitionSchema = z.object({
   requiredSkills: z.array(z.string()).default([]),
   requiredToolPacks: z.array(z.string()).default([]),
   toolPolicy: z.record(z.string(), marketplacePermissionModeSchema).default({}),
+  promptModules: agentPromptModulesSchema.default({ moduleIds: [], overrides: {} }),
+  knowledgeRefs: z.array(knowledgeRefSchema).default([]),
+  modelPolicy: agentModelPolicySchema.optional(),
 }).strict();
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 

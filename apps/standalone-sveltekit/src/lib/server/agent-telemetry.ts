@@ -7,12 +7,16 @@ import {
   type AgentTelemetryEvent,
   type AgentTelemetrySource,
 } from "@sonik-agent-ui/agent-observability";
+import { activeWorkflowRunId } from "@sonik-agent-ui/tool-contracts/workflow-controller";
 import { recordWorkspaceTelemetryEvent } from "./workspace-store.ts";
 
 export type { AgentTelemetryEvent, AgentTelemetrySource } from "@sonik-agent-ui/agent-observability";
 
 export async function writeAgentTelemetry(event: AgentTelemetryEvent): Promise<void> {
-  const payload = sanitizeAgentTelemetry(event);
+  // AC-13 join-key: stamp the active workflow-controller run's runId as workflowRunId, unless the
+  // caller already set one explicitly. A no-op outside any controller-driven run (activeWorkflowRunId
+  // is undefined there), so every call site that predates this is unchanged.
+  const payload = sanitizeAgentTelemetry({ workflowRunId: activeWorkflowRunId(), ...event });
   emitTelemetryToWorkerLogs(payload);
   const logPath = resolveTelemetryLogPath();
   await appendTelemetryJsonl(logPath, payload);

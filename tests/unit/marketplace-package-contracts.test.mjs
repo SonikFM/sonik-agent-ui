@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  agentDefinitionSchema,
   commandBackedAppDefinitionSchema,
   isUpdateAvailable,
   marketplaceInstallationSchema,
@@ -23,6 +24,11 @@ import {
 
 assert.equal(normalizeMarketplacePackageKind("tool_pack"), "command_tool_pack", "legacy tool_pack normalizes to command_tool_pack");
 assert.equal(normalizeMarketplacePackageKind("workflow_template"), "workflow", "legacy workflow_template normalizes to workflow");
+
+// Phase 1 (agent-creation-tool-plan-2026-07-13.md): agentDefinitionSchema's
+// additive extensions (promptModules, knowledgeRefs, modelPolicy) must not
+// break a pre-existing minimal agent definition — every new field defaults.
+assert.equal(agentDefinitionSchema.safeParse({ agentId: "sonik.agent.legacy", title: "Legacy Agent" }).success, true, "pre-existing minimal agent definitions still parse after the additive extension");
 
 for (const manifest of marketplaceFixtureManifests) {
   assert.equal(marketplaceManifestSchema.safeParse(manifest).success, true, `${manifest.packageId} validates`);

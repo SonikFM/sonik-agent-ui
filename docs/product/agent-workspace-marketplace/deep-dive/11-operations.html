@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>11 · Operations Runbook — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  /* page-specific styles ONLY, composed from tokens.css variables */
+  .flow-stack { display: flex; flex-direction: column; gap: 6px; margin: 18px 0 28px; }
+  .flow-label { color: var(--muted); font-size: var(--text-sm); font-family: var(--font-mono); }
+  .flow-node.terminal { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .step-num { font-family: var(--font-mono); color: var(--accent-ink); font-size: var(--text-xs); white-space: nowrap; width: 1%; }
+  td.nowrap { white-space: nowrap; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; }
+  figure svg text { font-family: var(--font-sans); }
+</style>
+</head>
+<body data-doc="11-operations">
+<main class="page">
+  <header class="page-head">
+    <h1>Operations Runbook</h1>
+    <p class="lead">How the marketplace corpus and its shipped runtime primitives are kept honest: the verification gate every change runs, the incident paths for a suspect package, a stuck workflow, or a pulled capability, and the invariants that are not negotiable under pressure.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/11-operations-runbook.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>Operating posture</h2>
+    <p>This runbook governs a corpus whose contracts have partly shipped and whose product surface has not. The capability registry, workflow-run state machine, and the reservation commit path are live at the contract layer; the marketplace routes, persistence, and every operator UI (install, moderation, revocation) are still on paper. The operational discipline follows from that split: <strong>prove the contract, do not assume the product.</strong></p>
+    <div class="callout warn">
+      <div class="callout-title">Do not work from memory</div>
+      <p>The corpus is a contract, not a chat summary. Stale docs are blockers for implementation PRs touching the same contract area, and unknown implementation status is called out as a gap — never implied as done. Verify cited source lines still exist before you edit.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The verification gate</h2>
+    <p>Every change to a cited contract runs the standard sequence before it is claimed done. Each step is a process that exits non-zero on failure; a non-zero exit is the gate, not a log line to skim. The sequence is the runbook's <code>Prove it</code> block verbatim.</p>
+    <pre><code>pnpm --filter @sonik-agent-ui/tool-contracts build
+node tests/unit/marketplace-package-contracts.test.mjs
+node --experimental-strip-types tests/unit/marketplace-workflow-templates.test.mjs
+node --experimental-strip-types tests/unit/tool-contracts.test.mjs
+python3 scripts/check-markdown-trailing-whitespace.py docs/product/agent-workspace-marketplace</code></pre>
+    <p>Broader release confidence adds <code>pnpm test</code>, <code>pnpm check-types</code>, and <code>pnpm build</code>. Passing proves the docs and contract tests are checkpoint-clean; it does not prove the product exists.</p>
+    <div class="flow-stack">
+      <span class="flow-label">Gate as a pipeline — any red halts the merge</span>
+      <div class="flow">
+        <div class="flow-node"><b>build</b><small>tool-contracts package compiles</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node"><b>package contracts</b><small>marketplace-package-contracts.test.mjs</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node"><b>workflow fixtures</b><small>marketplace-workflow-templates.test.mjs</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node"><b>tool contracts</b><small>tool-contracts.test.mjs</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node gated"><b>whitespace</b><small>check-markdown-trailing-whitespace.py</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node terminal"><b>merge eligible</b><small>all five exit 0; docs reconciled</small></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Incident decision paths</h2>
+    <p>Three recurring incidents, each expressed as the actual mechanics that exist today. A gated node is a decision point; the terminal node is the resolution. None of these paths depends on an operator UI — they run through the contract layer and the verification gate.</p>
+
+    <h3>Suspect package</h3>
+    <p>A change lands on <code>marketplace.ts</code> or <code>marketplace-fixtures.ts</code>, or a package's shape looks wrong. Treat the docs that cite it as potentially stale before anything merges.</p>
+    <div class="flow-stack">
+      <span class="flow-label">Signal &#8594; verify &#8594; gate &#8594; resolve</span>
+      <div class="flow">
+        <div class="flow-node"><b>Signal</b><small>cited contract file changed or package suspect</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node"><b>Freeze the claim</b><small>stale docs block the implementation PR until reconciled</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node"><b>Run the gate</b><small>build + three contract tests + whitespace check</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node gated"><b>Exit code?</b><small>any non-zero &#8594; blocker; all zero &#8594; proceed</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node terminal"><b>Resolve</b><small>update the citing docs per the doc-update rule, then re-run the gate; if a capability is implicated, revoke it</small></div>
+      </div>
+    </div>
+
+    <h3>Failing workflow run</h3>
+    <p>A workflow run will not advance to <code>committed</code>. In the shipped state machine this is usually correct behavior, not a fault: the phase commits only on a semantic-success receipt, and approval must be host-signed.</p>
+    <div class="flow-stack">
+      <span class="flow-label">Signal &#8594; inspect receipt &#8594; gate &#8594; resolve</span>
+      <div class="flow">
+        <div class="flow-node"><b>Signal</b><small>run stuck; phase not reaching <code>committed</code></small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node"><b>Inspect receipt</b><small>phase <code>committed</code> only on a semantic-success receipt</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node gated"><b>Approval signed?</b><small>host-signed required; model-supplied approval rejected</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node"><b>Reproduce</b><small>run marketplace-workflow-templates.test.mjs against the fixture</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node terminal"><b>Resolve</b><small>no semantic success or unsigned approval is the reducer working as designed (<code>model_supplied_approval_is_not_trusted</code>), not a bug to patch around</small></div>
+      </div>
+    </div>
+
+    <h3>Revocation event</h3>
+    <p>A capability must be pulled — a compromised grant or a policy reversal. The kill-switch is live at the contract layer; there is no operator UI yet, so revocation is a contract/config edit today.</p>
+    <div class="flow-stack">
+      <span class="flow-label">Signal &#8594; add id &#8594; enforce &#8594; caveat</span>
+      <div class="flow">
+        <div class="flow-node"><b>Signal</b><small>capability compromised or policy reversed</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node"><b>Add to <code>revokedCapabilityIds</code></b><small>the id enters the revocation set</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node gated"><b>Enforced on next call</b><small><code>evaluateCapabilityAccess</code> denies — no in-flight interrupt</small></div>
+        <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+        <div class="flow-node terminal"><b>Caveat</b><small>only registered ids are gated (8 of 72 catalog commands); unregistered commands are not yet covered</small></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Kill-switch procedure</h2>
+    <p>The revocation mechanism ships at the contract layer through the capability-ID registry; the operator surface does not. Enforcement is deny-on-next-call — it does not interrupt a call already in flight, and it only covers capabilities that are registered.</p>
+    <div class="chip-row">
+      <span class="chip ok">SHIPPED · contract layer</span>
+      <span class="chip">PLANNED · revocation UI</span>
+      <span class="chip warn">OPEN · registry coverage 8 / 72</span>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <caption>Kill-switch step ledger — mechanism per the shipped capability registry (<code>packages/tool-contracts/src/capability-registry.ts</code>)</caption>
+        <thead>
+          <tr><th class="step-num">Step</th><th>Action</th><th>Mechanism</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="step-num">1</td>
+            <td>Identify the capability id to pull</td>
+            <td>Registered, versioned id in the capability registry</td>
+            <td class="nowrap"><span class="chip ok">SHIPPED</span></td>
+          </tr>
+          <tr>
+            <td class="step-num">2</td>
+            <td>Add the id to <code>revokedCapabilityIds</code></td>
+            <td>Revocation set consumed by <code>evaluateCapabilityAccess</code></td>
+            <td class="nowrap"><span class="chip ok">SHIPPED</span></td>
+          </tr>
+          <tr>
+            <td class="step-num">3</td>
+            <td>Enforcement takes effect on the next call</td>
+            <td>Per-call gating; access denied on the following <code>evaluateCapabilityAccess</code>. No in-flight interrupt.</td>
+            <td class="nowrap"><span class="chip ok">SHIPPED</span></td>
+          </tr>
+          <tr>
+            <td class="step-num">4</td>
+            <td>Confirm write-implied reads are also cut</td>
+            <td>Write-implies-read never narrows; a direct grant takes precedence, so revoke the granted id, not only the implied one</td>
+            <td class="nowrap"><span class="chip ok">SHIPPED</span></td>
+          </tr>
+          <tr>
+            <td class="step-num">5</td>
+            <td>Verify the revoked id was actually registered</td>
+            <td>Unregistered catalog commands are not gated — 8 of 72 live commands are covered</td>
+            <td class="nowrap"><span class="chip warn">OPEN</span></td>
+          </tr>
+          <tr>
+            <td class="step-num">6</td>
+            <td>Trigger revocation from an operator surface</td>
+            <td>No revocation UI; today the switch is a contract/config edit and redeploy</td>
+            <td class="nowrap"><span class="chip">PLANNED</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure class="viz-frame">
+      <svg viewBox="0 0 640 150" role="img" aria-labelledby="cov-title cov-desc">
+        <title id="cov-title">Kill-switch coverage: 8 of 72 live catalog commands are registered</title>
+        <desc id="cov-desc">A segmented bar showing 8 registered, revocable commands against 64 unregistered commands not yet gated by the kill-switch.</desc>
+        <!-- axis baseline -->
+        <line x1="24" y1="96" x2="616" y2="96" stroke="var(--line-strong)" stroke-width="1"></line>
+        <!-- registered segment: 8/72 of 592px track = ~66px -->
+        <rect x="24" y="56" width="66" height="32" fill="var(--accent)"></rect>
+        <!-- unregistered segment: 64/72 = ~526px -->
+        <rect x="90" y="56" width="526" height="32" fill="var(--surface-3)" stroke="var(--line)" stroke-width="1"></rect>
+        <!-- segment labels -->
+        <text x="24" y="46" fill="var(--accent-ink)" font-size="13">8 registered · revocable</text>
+        <text x="612" y="46" fill="var(--muted)" font-size="13" text-anchor="end">64 unregistered · not gated</text>
+        <text x="24" y="120" fill="var(--muted)" font-size="12">0</text>
+        <text x="612" y="120" fill="var(--muted)" font-size="12" text-anchor="end">72 live catalog commands</text>
+      </svg>
+      <figcaption>The kill-switch only reaches capabilities the registry knows. Live pinning of the full policy is blocked on closing this gap (grant synthesis, Phase 4). Until then, a revocation is only as complete as the registry's coverage.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Operational invariants</h2>
+    <p>These hold under deadline and disagreement. They are not style preferences; violating one is the incident.</p>
+    <div class="table-scroll">
+      <table>
+        <caption>Non-negotiable invariants and where they are enforced</caption>
+        <thead>
+          <tr><th>Invariant</th><th>What it means operationally</th><th>Enforcement</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>No deploy without an explicit request</strong></td>
+            <td>Never deploy a service — booking-service included — off a stale branch or on inference. A green build is not a deploy authorization.</td>
+            <td>Human decision; deploy is out of the automated gate</td>
+            <td class="nowrap"><span class="chip ok">ENFORCED</span></td>
+          </tr>
+          <tr>
+            <td><strong>Sentinel-exit-code gating</strong></td>
+            <td>Each proof step exits non-zero on failure; the merge is gated on exit codes, not on reading output. A skipped step is a failed gate.</td>
+            <td>Standard verification sequence (five steps)</td>
+            <td class="nowrap"><span class="chip ok">SHIPPED</span></td>
+          </tr>
+          <tr>
+            <td><strong>Evidence, not assertion</strong></td>
+            <td>A built/planned claim is backed by a passing proof and reconciled docs. Endpoint implementation is never claimed from an endpoint planning doc.</td>
+            <td>Doc-update rule + <code>Prove it</code> block</td>
+            <td class="nowrap"><span class="chip ok">ENFORCED</span></td>
+          </tr>
+          <tr>
+            <td><strong>Docs are a contract</strong></td>
+            <td>Any PR changing a cited surface updates this corpus or states why it stays valid. Stale docs block PRs in the same area.</td>
+            <td>Review gate; CI wiring for prove-it commands not yet built</td>
+            <td class="nowrap"><span class="chip warn">OPEN · CI</span></td>
+          </tr>
+          <tr>
+            <td><strong>Chat is never approval</strong></td>
+            <td>Commit phase requires a host-signed approval and a semantic-success receipt; a model-supplied approval is structurally rejected.</td>
+            <td>Workflow-run state machine reducer</td>
+            <td class="nowrap"><span class="chip ok">SHIPPED</span></td>
+          </tr>
+          <tr>
+            <td><strong>Keep the code graph current</strong></td>
+            <td>Re-run <code>npx gitnexus analyze</code> after large code movement before trusting impact queries.</td>
+            <td>Manual step in the runbook; not gated</td>
+            <td class="nowrap"><span class="chip">MANUAL</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ownership and escalation</h2>
+    <p>The runbook names three roles — agents, reviewers, and release owners — and a handoff sequence between them. The matrix below is that handoff made explicit: who owns each surface and where a stuck step escalates.</p>
+    <div class="table-scroll">
+      <table>
+        <caption>Role matrix derived from the runbook's audience and agent-handoff sequence</caption>
+        <thead>
+          <tr><th>Surface</th><th>Owner</th><th>Responsibility</th><th>Escalates to</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Reading INDEX / DECISIONS, verifying cited lines, making the change</td>
+            <td>Agent</td>
+            <td>Steps 1&#8211;4 of the handoff; run the doc's <code>Prove it</code> block; update docs if implementation diverged</td>
+            <td>Reviewer</td>
+          </tr>
+          <tr>
+            <td>Contract correctness, doc-currency, stale-doc blocks</td>
+            <td>Reviewer</td>
+            <td>Confirm the gate passed and docs are reconciled before approval; hold PRs that touch stale contract areas</td>
+            <td>Release owner</td>
+          </tr>
+          <tr>
+            <td>Release confidence, deploy authorization, revocation calls</td>
+            <td>Release owner</td>
+            <td>Owns the broader <code>pnpm test</code> / <code>check-types</code> / <code>build</code> pass and the explicit deploy decision; authorizes a kill-switch</td>
+            <td>&#8212;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <div class="callout-title">Doc-update rule — the surfaces that force a corpus update</div>
+      <p>A PR touching any of these updates the corpus or states why it remains valid: <code>marketplace.ts</code>, <code>marketplace-fixtures.ts</code>, <code>marketplace-package-contracts.test.mjs</code>, <code>marketplace-workflow-templates.test.mjs</code>, <code>tool-contracts.test.mjs</code>, <code>docs/contracts/marketplace-package-contracts-v0.md</code>, and the workspace-creation handoff set.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Known operational gaps</h2>
+    <p>Carried forward so no one rediscovers them as an incident.</p>
+    <dl class="ledger">
+      <dt>CI for prove-it</dt>
+      <dd>The verification sequence is run by hand. Wiring it into CI is not built — until then the gate depends on discipline. <span class="chip warn">OPEN</span></dd>
+      <dt>Revocation UI</dt>
+      <dd>Kill-switch is a contract/config edit today; no operator surface. <span class="chip">PLANNED</span></dd>
+      <dt>Registry coverage</dt>
+      <dd>8 registered capabilities against 72 live catalog commands; live pinning is blocked on closing the gap. <span class="chip warn">OPEN</span></dd>
+      <dt>Live controller cutover</dt>
+      <dd>The generic workflow controller is proven but not yet wired into the live request path (Phase 3a-2, open decision). <span class="chip">PLANNED</span></dd>
+      <dt>Docs-canon skill</dt>
+      <dd>If this corpus becomes long-lived like booking payments, it needs a dedicated docs-canon skill. <span class="chip">PLANNED</span></dd>
+    </dl>
+  </section>
+</main>
+</body>
+</html>

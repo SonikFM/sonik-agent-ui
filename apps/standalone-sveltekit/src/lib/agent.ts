@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs } from "ai";
+import { ToolLoopAgent, isStepCount } from "ai";
 import { getWeather } from "./tools/weather";
 // Demo starter tools from the upstream svelte-chat harness (github/crypto/HN)
 // are unmounted for the booking surface: with them mounted, "what can you do"
@@ -19,6 +19,7 @@ import { createCommandCatalogTools } from "./tools/command-catalog";
 import { createArtifactStateTools } from "./tools/artifact-state";
 import { createSkillCatalogTools } from "./tools/skill-catalog";
 import { createMarketplaceWorkflowTools } from "./tools/marketplace-workflows";
+import { draftWorkflow } from "./tools/drafting-agent";
 import { shouldMountJsonArtifactTool, type WorkspaceDocumentIntent } from "./document-intent";
 import { gateway, resolveGatewayModelId } from "./ai-gateway";
 import type { AgentRuntimeSettings } from "./agent-settings";
@@ -26,6 +27,7 @@ import type { SystemModelMessage } from "ai";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
+import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
 import type { Spec } from "@json-render/core";
 import {
   hasBookingContextCreateSkill,
@@ -39,7 +41,8 @@ import {
 export { hasBookingContextIntakeSkill, resolveCommandFamilyMountDecision } from "./command-family-mount";
 export type { CommandFamilyMountDecision } from "./command-family-mount";
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean };
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean;
+};
 
 /**
  * Composes the per-turn system prompt for a run: the always-on core plus the
@@ -113,8 +116,12 @@ export function createAgent(context: AgentRuntimeContext = {}) {
       ...skillCatalogTools,
       ...marketplaceWorkflowTools,
       ...commandCatalogTools,
+      ...(context.agentSettings?.workflowBuilderMode ? { draftWorkflow } : {}),
     },
-    stopWhen: stepCountIs(12),
+    stopWhen: isStepCount(12),
+    // AI SDK 7 wall-clock bounds (we previously had only the step cap): a stalled
+    // provider stream or a hung tool now aborts instead of holding the request open.
+    timeout: { totalMs: 120_000, stepMs: 60_000, toolMs: 30_000 },
     temperature: 0.35,
   });
 }

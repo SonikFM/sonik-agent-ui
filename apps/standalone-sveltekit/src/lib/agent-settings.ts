@@ -49,6 +49,11 @@ export interface AgentRuntimeSettings {
   customSkills: AgentCustomSkill[];
   additionalSystemPrompt: string;
   requireZdr: boolean;
+  /** Server-set only: the generate route sets this for workflow-builder Debug &
+   *  Preview DRAFT requests to mount the drafting tool (Phase 6).
+   *  `sanitizeAgentRuntimeSettings` never reads it from client input, so a
+   *  client-sent copy is always dropped at the boundary. */
+  workflowBuilderMode?: boolean;
   toolPermissionModes: Record<string, AgentToolPermissionMode>;
   /** Operator overrides for `composeAgentSystemPrompt` prompt modules, keyed by
    *  module id (the five seedable module ids plus `"core"` for AGENT_PROMPT_CORE).

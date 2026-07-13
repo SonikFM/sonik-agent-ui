@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>10 · Roadmap, Risks & Open Questions — Agent Marketplace Deep Dive</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<script src="assets/nav.js" defer></script>
+<style>
+  .chip-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 4px 0 18px; font-size: var(--text-sm); color: var(--muted); }
+  .chip-legend .chip { margin-right: 4px; }
+  .sev { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ink); white-space: nowrap; }
+  .sev.high { color: var(--danger); }
+  .sev.med  { color: var(--warn); }
+  td .chip + .chip { margin-top: 4px; }
+  .stack .chip { display: block; width: max-content; }
+  .done-means { font-size: var(--text-sm); }
+  .done-means td:first-child { font-family: var(--font-mono); color: var(--ink); white-space: nowrap; }
+  .viz-note { color: var(--faint); font-size: var(--text-xs); font-family: var(--font-mono); }
+</style>
+</head>
+<body data-doc="10-roadmap-risks">
+<main class="page">
+  <header class="page-head">
+    <h1>Roadmap, Risks &amp; Open Questions</h1>
+    <p class="lead">The corpus was drafted before this week's runtime work landed. Two of its high-severity risks are now materially mitigated by shipped contract code; the roadmap has not moved past contracts, and two decisions still block the live path.</p>
+    <p class="doc-meta">Source: docs/product/agent-workspace-marketplace/10-roadmap-risks-open-questions.md · Corpus 2026-07-07 · Status updated 2026-07-11</p>
+  </header>
+
+  <section>
+    <h2>Where the ground truth moved</h2>
+    <p>The source doc verified against <code>c9011e4</code> plus uncommitted drafts on 2026-07-06. Since then the state-machine, controller, and capability-registry work shipped full-chain green, and the A2 reservation commit path merged live. The direction is unchanged; the implementation truth is not. Every claim below is reconciled against the 2026-07-11 status addendum.</p>
+    <div class="chip-legend">
+      <span><span class="chip ok">SHIPPED</span> merged, full-chain green</span>
+      <span><span class="chip accent">FIXTURE</span> contract/interpreter exists, not live-wired</span>
+      <span><span class="chip">PLANNED</span> named, not started</span>
+      <span><span class="chip warn">OPEN</span> decision or coverage gap blocking</span>
+      <span><span class="chip danger">MISSING</span> no artifact</span>
+    </div>
+    <div class="table-scroll">
+    <table>
+      <caption>Current state vs target — reconciled against the addendum</caption>
+      <thead>
+        <tr><th scope="col">Aspect</th><th scope="col">State as of 2026-07-11</th><th scope="col">Target</th><th scope="col">Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Contract base</strong></td>
+          <td>Marketplace contracts and fixtures merged and reviewed. <code>packages/tool-contracts/src/marketplace.ts</code>, <code>marketplace-fixtures.ts</code>.</td>
+          <td>Contracts consumed by live endpoints and UI.</td>
+          <td><span class="chip ok">SHIPPED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Runtime state</strong></td>
+          <td>Zod-validated <code>WorkflowRunState</code>, Decider reducer, generic <code>workflow-controller.ts</code> interpreter — all green, none on the live request path.</td>
+          <td>One interpreter serving live workflow and reservation flows.</td>
+          <td><span class="chip accent">FIXTURE</span></td>
+        </tr>
+        <tr>
+          <td><strong>Capability gating</strong></td>
+          <td>Capability-ID registry (D013) with per-call <code>evaluateCapabilityAccess</code>, write-implies-read, kill-switch <code>revokedCapabilityIds</code>.</td>
+          <td>Registry covers the full live catalog and pins live grants.</td>
+          <td><span class="chip ok">SHIPPED</span> <span class="chip warn">OPEN</span></td>
+        </tr>
+        <tr>
+          <td><strong>Endpoint implementation</strong></td>
+          <td>Marketplace ORPC routes, persistence/RLS tables — no artifact.</td>
+          <td>RLS/org-scoped ORPC endpoints with tests.</td>
+          <td><span class="chip">PLANNED</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Risk register</h2>
+    <p>Sorted by severity, then by whether the corpus flagged it act-now. The mitigation column states what actually exists today, not the corpus's intended mitigation. The two high-severity risks the corpus called act-now are the two the shipped work most changed.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Risk register — severity-sorted, mitigation reconciled to 2026-07-11</caption>
+      <thead>
+        <tr>
+          <th scope="col">Risk</th>
+          <th scope="col">Severity</th>
+          <th scope="col">Mitigation status</th>
+          <th scope="col">What exists / what is missing</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Agents cannot read workflow/app state and must infer it from UI text.</td>
+          <td><span class="sev high">High</span><br><span class="viz-note">act now</span></td>
+          <td class="stack"><span class="chip ok">SHIPPED</span></td>
+          <td>Materially mitigated. <code>workflow-run-state.ts</code> gives a Zod-validated machine-readable projection; read-side convergence (Phase 2) feeds intake and reservation from one approval-affordance builder, proven byte-identical. Agents no longer infer state from rendered text.</td>
+        </tr>
+        <tr>
+          <td>Marketplace packages over-grant permissions.</td>
+          <td><span class="sev high">High</span><br><span class="viz-note">act now</span></td>
+          <td class="stack"><span class="chip ok">SHIPPED</span><span class="chip warn">OPEN</span></td>
+          <td>Gating mechanism shipped: per-call <code>evaluateCapabilityAccess</code>, write-implies-read implication (direct grants win; implication never narrows), kill-switch <code>revokedCapabilityIds</code>. Live pinning is <strong>blocked on coverage</strong> — 8 registered capabilities against 72 live catalog commands. See below.</td>
+        </tr>
+        <tr>
+          <td>Bundle model becomes an opaque mega-object.</td>
+          <td><span class="sev med">Medium</span><br><span class="viz-note">act now</span></td>
+          <td class="stack"><span class="chip accent">FIXTURE</span></td>
+          <td>Bundle selector validation prevents a wide nullable shape at the contract layer (<code>marketplace.ts:347-398</code>). Guard exists in fixtures; no live endpoint exercises it yet.</td>
+        </tr>
+        <tr>
+          <td>HTML escape hatch becomes the default app runtime.</td>
+          <td><span class="sev med">Medium</span><br><span class="viz-note">track / guard</span></td>
+          <td class="stack"><span class="chip accent">FIXTURE</span></td>
+          <td>Held by doctrine: JSON-render is the canonical invariant in <code>DECISIONS.md</code>; no sandbox runtime approved; renderer is execution-inert. No app runtime is built, so nothing yet enforces it in code.</td>
+        </tr>
+        <tr>
+          <td>Endpoint names drift from docs.</td>
+          <td><span class="sev med">Medium</span><br><span class="viz-note">track</span></td>
+          <td class="stack"><span class="chip">PLANNED</span></td>
+          <td>Cannot drift yet — no routes exist. Becomes live when route implementation lands and must update doc 06 plus tests in the same slice.</td>
+        </tr>
+        <tr>
+          <td>UX remains too dev-speak heavy.</td>
+          <td><span class="sev med">Medium</span><br><span class="viz-note">act now in design</span></td>
+          <td class="stack"><span class="chip">PLANNED</span></td>
+          <td>Doc 09 requires friendly labels plus receipts/inspector. No install/app UI shipped, so unmitigated in product; design guidance exists.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 880 128" width="880" aria-labelledby="cov-title cov-desc">
+        <title id="cov-title">Capability-registry coverage of the live command catalog</title>
+        <desc id="cov-desc">Eight of seventy-two live catalog commands are registered; the remaining sixty-four are uncovered, which blocks live grant pinning.</desc>
+        <!-- track -->
+        <rect x="16" y="34" width="848" height="30" fill="none" stroke="var(--line-strong)"></rect>
+        <!-- registered 8/72 -> 848 * 8/72 = 94.2 -->
+        <rect x="16" y="34" width="94" height="30" fill="var(--ok-surface)" stroke="var(--ok)"></rect>
+        <!-- uncovered 64/72 -->
+        <rect x="110" y="34" width="754" height="30" fill="var(--warn-surface)" stroke="var(--warn)"></rect>
+        <text x="16" y="24" font-size="12" fill="var(--muted)">Live catalog: 72 agent commands</text>
+        <text x="20" y="86" font-size="12" fill="var(--ok)">8 registered</text>
+        <text x="120" y="86" font-size="12" fill="var(--warn)">64 uncovered — live grant pinning blocked (open decision)</text>
+        <text x="864" y="24" font-size="12" fill="var(--faint)" text-anchor="end">D013</text>
+      </svg>
+      <figcaption>Registry coverage gap behind the over-grant risk. The gating mechanism is proven, but until the registry covers the catalog, live grants cannot be pinned through it. Source: status addendum 2026-07-11.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Release-slice progress</h2>
+    <p>An honest read of the nine recommended slices, grouped into release slices R0–R6. Contract and agent-state work shipped; the runtime interpreter exists as a fixture but is not wired to the live request path; everything from persistence outward is unstarted. No percentages are claimed — segment widths mark the furthest stage each slice has reached, not a completion fraction.</p>
+    <figure class="viz-frame">
+      <svg role="img" viewBox="0 0 880 296" width="880" aria-labelledby="slice-title slice-desc">
+        <title id="slice-title">Release-slice progress R0 through R6</title>
+        <desc id="slice-desc">R0 contracts and R1 agent-readable state are shipped. R2 runtime is shipped as a fixture with live cutover open. R3 through R6 are not started.</desc>
+        <!-- column axis -->
+        <text x="8" y="20" font-size="12" fill="var(--muted)">Slice</text>
+        <text x="132" y="20" font-size="12" fill="var(--muted)">Furthest stage reached</text>
+
+        <!-- R0 -->
+        <text x="8" y="52" font-size="12" fill="var(--ink)">R0</text>
+        <rect x="132" y="40" width="732" height="20" fill="var(--ok-surface)" stroke="var(--ok)"></rect>
+        <text x="140" y="54" font-size="12" fill="var(--ink)">Contracts &amp; docs corpus merged</text>
+        <!-- R1 -->
+        <text x="8" y="86" font-size="12" fill="var(--ink)">R1</text>
+        <rect x="132" y="74" width="732" height="20" fill="var(--ok-surface)" stroke="var(--ok)"></rect>
+        <text x="140" y="88" font-size="12" fill="var(--ink)">Agent-readable workflow/app state shipped</text>
+        <!-- R2 split: fixture + open -->
+        <text x="8" y="120" font-size="12" fill="var(--ink)">R2</text>
+        <rect x="132" y="108" width="430" height="20" fill="var(--ok-surface)" stroke="var(--ok)"></rect>
+        <text x="140" y="122" font-size="12" fill="var(--ink)">State machine + controller (fixture)</text>
+        <rect x="562" y="108" width="302" height="20" fill="var(--warn-surface)" stroke="var(--warn)" stroke-dasharray="4 3"></rect>
+        <text x="570" y="122" font-size="12" fill="var(--warn)">Live cutover open</text>
+        <!-- R3 -->
+        <text x="8" y="154" font-size="12" fill="var(--ink)">R3</text>
+        <rect x="132" y="142" width="732" height="20" fill="none" stroke="var(--line)" stroke-dasharray="4 3"></rect>
+        <text x="140" y="156" font-size="12" fill="var(--muted)">Not started — persistence/RLS + read-only endpoints</text>
+        <!-- R4 -->
+        <text x="8" y="188" font-size="12" fill="var(--ink)">R4</text>
+        <rect x="132" y="176" width="732" height="20" fill="none" stroke="var(--line)" stroke-dasharray="4 3"></rect>
+        <text x="140" y="190" font-size="12" fill="var(--muted)">Not started — install preview + trusted-write endpoints</text>
+        <!-- R5 -->
+        <text x="8" y="222" font-size="12" fill="var(--ink)">R5</text>
+        <rect x="132" y="210" width="732" height="20" fill="none" stroke="var(--line)" stroke-dasharray="4 3"></rect>
+        <text x="140" y="224" font-size="12" fill="var(--muted)">Not started — app-state patch/approval endpoints + UI</text>
+        <!-- R6 -->
+        <text x="8" y="256" font-size="12" fill="var(--ink)">R6</text>
+        <rect x="132" y="244" width="732" height="20" fill="none" stroke="var(--line)" stroke-dasharray="4 3"></rect>
+        <text x="140" y="258" font-size="12" fill="var(--muted)">Not started — Pipe-B marketplace smoke + release gate</text>
+
+        <!-- legend -->
+        <rect x="132" y="278" width="14" height="12" fill="var(--ok-surface)" stroke="var(--ok)"></rect>
+        <text x="152" y="288" font-size="12" fill="var(--muted)">shipped</text>
+        <rect x="228" y="278" width="14" height="12" fill="var(--warn-surface)" stroke="var(--warn)" stroke-dasharray="4 3"></rect>
+        <text x="248" y="288" font-size="12" fill="var(--muted)">open / blocked</text>
+        <rect x="356" y="278" width="14" height="12" fill="none" stroke="var(--line)" stroke-dasharray="4 3"></rect>
+        <text x="376" y="288" font-size="12" fill="var(--muted)">not started</text>
+      </svg>
+      <figcaption>Release-slice progress. "Done" means something different per slice — the table below states each definition so a filled bar is not read as more than it is.</figcaption>
+    </figure>
+    <div class="table-scroll">
+    <table class="done-means">
+      <caption>What "done" means per slice</caption>
+      <thead>
+        <tr><th scope="col">Slice</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">"Done" means</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>R0</td><td>Contract &amp; docs corpus</td><td><span class="chip ok">SHIPPED</span></td><td>Contracts + fixtures reviewed and merged; consumed by nothing live yet.</td></tr>
+        <tr><td>R1</td><td>Agent-readable workflow/app state</td><td><span class="chip ok">SHIPPED</span></td><td>Machine-readable state projection exists; one shared approval-affordance builder, byte-identical across flows.</td></tr>
+        <tr><td>R2</td><td>Runtime state machine + generic controller</td><td><span class="chip accent">FIXTURE</span> <span class="chip warn">OPEN</span></td><td>Decider reducer + one interpreter over <code>workflowDefinitionSchema</code> + per-node approval, all green. Not wired to the live request path (Phase 3a-2 cutover).</td></tr>
+        <tr><td>R3</td><td>Persistence + read-only ORPC endpoints</td><td><span class="chip">PLANNED</span></td><td>RLS tables + <code>marketplace.searchPackages</code>/<code>getPackage</code>/<code>getPackageVersion</code>/<code>validateManifest</code> with tests.</td></tr>
+        <tr><td>R4</td><td>Install preview + trusted-write endpoints</td><td><span class="chip">PLANNED</span></td><td>Install preview (permissions/deps/update policy) + install/copy/fork trusted-write.</td></tr>
+        <tr><td>R5</td><td>App-state patch + approval endpoints + UI</td><td><span class="chip">PLANNED</span></td><td><code>app.applyStatePatch</code> + preview/approval request endpoints + design-approved install/app/approval UI.</td></tr>
+        <tr><td>R6</td><td>Pipe-B smoke + release gate</td><td><span class="chip">PLANNED</span></td><td>Marketplace Pipe-B smoke test green and wired into the release gate.</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Open questions</h2>
+    <p>Two of the corpus's seven questions are now resolved by shipped work. The approval-tools question is answered: the preview-only facade is ratified — the renderer is execution-inert, chat is never approval, and only host-signed approval commits. Two new sequencing questions surfaced with the runtime work; both are owned by Dan.</p>
+    <div class="table-scroll">
+    <table>
+      <caption>Open questions with resolution status</caption>
+      <thead>
+        <tr><th scope="col">#</th><th scope="col">Question</th><th scope="col">Status</th><th scope="col">Resolution / owner</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Q7</td>
+          <td>What approval card UX should be standardized across booking, Amplify, and marketplace apps?</td>
+          <td><span class="chip ok">ANSWERED</span></td>
+          <td>Preview-only facade ratified. Approval is host-signed only (<code>model_supplied_approval_is_not_trusted</code>); renderer execution-inert; A2 reservation commit path merged live as the reference (preview tool + approval card + <code>/api/reservation/commit</code>).</td>
+        </tr>
+        <tr>
+          <td>Q5</td>
+          <td>Where should app/workflow active state appear in <code>getPageContext()</code> or equivalent agent-readable context?</td>
+          <td><span class="chip ok">ANSWERED</span></td>
+          <td>Resolved by the shipped projection — <code>workflow-run-state.ts</code> is the machine-readable state surface; agents read it rather than inferring from UI text.</td>
+        </tr>
+        <tr>
+          <td>—</td>
+          <td>When is the workflow controller cut over into the live request path (Phase 3a-2)?</td>
+          <td><span class="chip warn">OPEN</span></td>
+          <td>Surfaced 2026-07-11. The interpreter is green as a fixture; cutover sequencing undecided. Owner: <strong>Dan</strong>.</td>
+        </tr>
+        <tr>
+          <td>—</td>
+          <td>How is revocation UI sequenced relative to registry coverage and the controller cutover?</td>
+          <td><span class="chip warn">OPEN</span></td>
+          <td>Surfaced 2026-07-11. Kill-switch exists in contract (<code>revokedCapabilityIds</code>); no revocation UI, and coverage (8/72) gates live pinning. Owner: <strong>Dan</strong>.</td>
+        </tr>
+        <tr>
+          <td>Q1</td>
+          <td>What database/RLS table set owns packages, versions, installations, events, approvals, and receipts?</td>
+          <td><span class="chip warn">OPEN</span></td>
+          <td>Blocks R3. No persistence PRD/migration yet.</td>
+        </tr>
+        <tr>
+          <td>Q2</td>
+          <td>Should package publish be internal-only for v0.2, or support external creator drafts?</td>
+          <td><span class="chip warn">OPEN</span></td>
+          <td>Publishing/moderation not built.</td>
+        </tr>
+        <tr>
+          <td>Q3</td>
+          <td>Which package kinds may use <code>subscribed</code> update mode initially?</td>
+          <td><span class="chip warn">OPEN</span></td>
+          <td>Scoping decision; ties to update-policy in R4 install preview.</td>
+        </tr>
+        <tr>
+          <td>Q4</td>
+          <td>How much app state is copied into an installation vs referenced from <code>packageVersionId</code>?</td>
+          <td><span class="chip warn">OPEN</span></td>
+          <td>Copy-vs-reference decision; feeds R5 app-state model.</td>
+        </tr>
+        <tr>
+          <td>Q6</td>
+          <td>Should the workflow builder use a flow-canvas in v0.2 or remain template/manifest-first?</td>
+          <td><span class="chip warn">OPEN</span></td>
+          <td>Design decision. Corpus invariant: visual builder must not be the first slice.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>The two things holding the live path</h2>
+    <p>Everything from persistence outward waits on decisions, but only two items block the work that is otherwise ready to run:</p>
+    <div class="callout warn">
+      <div class="callout-title">Registry coverage — 8 of 72 commands</div>
+      <p>Live policy is reproduced exactly through the registry, but live grant pinning is blocked until the registry covers the catalog. Until then the over-grant risk is mitigated in mechanism, not in production.</p>
+    </div>
+    <div class="callout warn">
+      <div class="callout-title">Controller cutover — Phase 3a-2</div>
+      <p>The generic interpreter is green over <code>workflowDefinitionSchema</code>, with mutating effects refused outside the commit gate at schema and controller layers. It is not yet the live request path; the cutover is an open, owner-Dan decision.</p>
+    </div>
+    <div class="callout">
+      <p class="callout-title">Invariants that do not move</p>
+      <p>Roadmap stays outcome- and proof-driven, not a feature list. Every runtime slice ships source-cited doc updates and tests. No live writes before the approval-state and RLS model are resolved. No marketplace UI without install-preview permission display. The visual builder is never the first slice.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>
