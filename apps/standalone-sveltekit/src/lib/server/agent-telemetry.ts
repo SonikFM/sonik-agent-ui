@@ -9,6 +9,7 @@ import {
 } from "@sonik-agent-ui/agent-observability";
 import { activeWorkflowRunId } from "@sonik-agent-ui/tool-contracts/workflow-controller";
 import { recordWorkspaceTelemetryEvent } from "./workspace-store.ts";
+import { sanitizeFailureRecord } from "./run-error-safety.ts";
 
 export type { AgentTelemetryEvent, AgentTelemetrySource } from "@sonik-agent-ui/agent-observability";
 
@@ -62,7 +63,7 @@ async function appendTelemetryJsonl(logPath: string, payload: AgentTelemetryEven
 }
 
 export function sanitizeAgentTelemetry(event: AgentTelemetryEvent): AgentTelemetryEvent {
-  return sanitizeTelemetryEvent(createTelemetryEvent(normalizeLegacyTelemetrySource(event)));
+  return sanitizeTelemetryEvent(createTelemetryEvent(sanitizeFailureRecord(normalizeLegacyTelemetrySource(event))));
 }
 
 function normalizeLegacyTelemetrySource(event: AgentTelemetryEvent | (Omit<AgentTelemetryEvent, "source"> & { source: AgentTelemetrySource | string })): AgentTelemetryEvent {

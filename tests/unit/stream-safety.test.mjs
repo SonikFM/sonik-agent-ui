@@ -60,8 +60,43 @@ async function transformValues(values, options = {}) {
   const textDeltas = values.filter((value) => value.type === "text-delta");
   const deltas = textDeltas.map((value) => value.delta);
   assert.deepEqual(deltas, ["abcdefghij", "klmnopqrst", "uvwxyz"]);
-  assert.ok(textDeltas.every((value) => value.providerMetadata?.fixture?.preserved === true), "text-delta metadata should be preserved");
+  assert.ok(textDeltas.every((value) => !("providerMetadata" in value)), "provider metadata must not reach the browser");
   assert.ok(textDeltas.every((value) => value.customField === "keep-me"), "text-delta extension fields should be preserved");
+}
+
+{
+  const rawProviderError = "Google provider files/raw-ref at https://example.invalid/private said arbitrary model text";
+  const values = await transformValues([
+    { type: "text-start", id: "t1", providerMetadata: { google: { raw: "files/raw-ref" } } },
+    { type: "text-delta", id: "t1", delta: "Safe partial text", providerMetadata: { google: { model: "arbitrary model text" } } },
+    { type: "text-end", id: "t1" },
+    { type: "tool-output-error", toolCallId: "tool-1", errorText: rawProviderError, providerMetadata: { google: { url: "https://example.invalid/private" } } },
+    { type: "error", errorText: rawProviderError, providerData: { nested: rawProviderError } },
+  ]);
+  const serialized = JSON.stringify(values);
+  assert.equal(serialized.includes("files/raw-ref"), false);
+  assert.equal(serialized.includes("example.invalid"), false);
+  assert.equal(serialized.includes("arbitrary model text"), false);
+  assert.equal(serialized.includes("providerMetadata"), false);
+  assert.equal(serialized.includes("providerData"), false);
+  assert.deepEqual(values.filter((value) => value.type === "error" || value.type === "tool-output-error").map((value) => value.errorText), ["Run interrupted", "Run interrupted"]);
+  assert.equal(values.filter((value) => value.type === "text-delta").map((value) => value.delta).join(""), "Safe partial text");
+}
+
+{
+  const values = await transformValues([
+    { type: "tool-input-available", toolCallId: "tool-safe", toolName: "lookup", input: { query: "safe query" }, providerMetadata: { private: true } },
+    { type: "tool-output-available", toolCallId: "tool-safe", output: { result: "safe result" }, providerMetadata: { private: true } },
+    { type: "data-spec", data: { op: "add", path: "/root", value: "main" }, providerMetadata: { private: true } },
+    { type: "finish", finishReason: "stop", providerMetadata: { private: true } },
+    { type: "tool-output-available", toolCallId: "tool-normalized", output: { nested: { provider_reference: "files/opaque-secret-ref", "provider-metadata": { request_url: "https://provider.invalid/private", access_token: "secret-token" }, model_id: "private-model-id", providerPreference: "direct", providerLabel: "Google" } } },
+  ]);
+  assert.deepEqual(values.map((value) => value.type), ["tool-input-available", "tool-output-available", "data-spec", "finish", "tool-output-available"]);
+  assert.equal(values[0].input.query, "safe query");
+  assert.equal(values[1].output.result, "safe result");
+  assert.equal(values[2].data.value, "main");
+  assert.ok(values.every((value) => !("providerMetadata" in value)));
+  assert.deepEqual(values[4].output.nested, { providerPreference: "direct", providerLabel: "Google" });
 }
 
 {

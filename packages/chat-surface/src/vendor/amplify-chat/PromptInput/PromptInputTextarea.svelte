@@ -5,8 +5,10 @@
 </script>
 <script lang="ts">
 	import { cn } from "../utils.js";
-	let { value = $bindable(""), class: className, placeholder = "What would you like to know?", rows = 1, ...rest }: PromptInputTextareaProps = $props();
+	let { value = $bindable(""), class: className, placeholder = "What would you like to know?", rows = 1, onkeydown, ...rest }: PromptInputTextareaProps = $props();
 	function handleKeydown(event: KeyboardEvent) {
+		onkeydown?.(event as Parameters<NonNullable<typeof onkeydown>>[0]);
+		if (event.defaultPrevented) return;
 		if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
 		event.preventDefault();
 		const form = (event.currentTarget as HTMLTextAreaElement).form;

@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
+const reattachRunStateSource = pageSource.match(/function reattachRunState[\s\S]*?\n  }/)?.[0] ?? "";
+assert.match(reattachRunStateSource, /!persistedMessageIds\.has\(rebuilt\.id\)/, "reattach dedup uses the exact assistant message id");
+assert.doesNotMatch(reattachRunStateSource, /runCount|localAssistantCount|localAssistantTurnExists/, "assistant counts cannot suppress exact-id reattach");
 const hostAuthorityModule = await import("../../apps/standalone-sveltekit/src/lib/host-context-authority.ts");
 const pageLoadSource = await readFile("apps/standalone-sveltekit/src/routes/+page.ts", "utf8");
 const rootSource = await readFile("packages/workspace-core/src/components/WorkspaceRoot.svelte", "utf8");
@@ -144,7 +147,8 @@ assert.equal(sessionDetailRoute.includes("export const PATCH"), true, "session d
 assert.equal(sessionDetailRoute.includes("patchRequestWorkspaceSession(event, session.id, { name })"), true, "session rename route should patch only the validated session name");
 assert.equal(sessionDetailRoute.includes("ensureRequestWorkspaceSession(event, event.params.id)"), true, "session rename should upsert missing ephemeral sessions across stateless Worker isolates");
 assert.equal(sessionDetailRoute.includes("export const DELETE"), true, "session detail route should support deleting local chats");
-assert.equal(sessionDetailRoute.includes("deleteRequestWorkspaceSession(event, session.id)"), true, "session delete route should use the persistence seam");
+assert.equal(sessionDetailRoute.includes("const persistence = getRequestWorkspacePersistence(event)"), true, "session delete route should use the request-scoped persistence seam");
+assert.equal(sessionDetailRoute.includes("await persistence.deleteSession(session.id)"), true, "session delete route should delete through the same scoped adapter after file draining");
 assert.equal(sessionDetailRoute.includes('persistence: "cloud-or-memory-v1"'), true, "session detail route should expose the active cloud-or-memory artifact persistence posture");
 assert.equal(sessionDetailRoute.includes("getRequestWorkspaceArtifact(event, session.active_artifact_id)"), true, "session detail route should hydrate the active artifact through the workspace adapter");
 assert.equal(sessionDetailRoute.includes("listRequestWorkspaceArtifactVersions(event, activeArtifact.id)"), true, "session detail route should hydrate active artifact versions through the workspace adapter");
@@ -153,17 +157,48 @@ assert.equal(sessionDetailRoute.includes("listWorkspaceToolCalls"), false, "sess
 
 assert.equal(sessionMessagesRoute.includes("appendRequestWorkspaceMessage"), true, "message route should persist chat messages through workspace adapter");
 assert.equal(sessionMessagesRoute.includes("listRequestWorkspaceMessages(event, session.id)"), true, "message route should read chat messages through workspace adapter");
+assert.equal(sessionMessagesRoute.includes("sanitizeSessionMessages(await listRequestWorkspaceMessages(event, session.id))"), true, "message GET should apply the shared fail-closed public projection before JSON serialization");
+assert.equal(sessionMessagesRoute.includes("sanitizeSessionMessages([record])[0]"), true, "message POST should apply the same public projection before echoing persisted parts");
 assert.equal(sessionMessagesRoute.includes("WORKSPACE_CONTENT_MAX_CHARS"), true, "message persistence should apply route limits to content");
 assert.equal(sessionMessagesRoute.includes("Invalid JSON message payload"), true, "message route should reject malformed JSON instead of appending blank messages");
 assert.equal(sessionMessagesRoute.includes("role must be system, user, assistant, or tool"), true, "message route should reject invalid roles instead of defaulting to assistant");
 
 assert.equal(generateRoute.includes("workspace.sessionId"), true, "generate route should validate workspace session id");
-assert.equal(generateRoute.includes("activeDocument?.session_id ?? workspaceSessionId"), true, "generate telemetry should prefer active document session and fall back to shell session");
+assert.equal(generateRoute.includes("hasSelectedWorkspaceContext ? workspaceSessionId : activeDocument?.session_id ?? workspaceSessionId"), true, "selected file/document turns should use the authoritative workspace session throughout");
 assert.equal(generateRoute.includes("includeHostRuntime: true"), true, "generate route should opt into host-composed command indexes without changing the neutral default helper");
 assert.equal(generateRoute.includes("hostSession: hostSession ?? undefined"), true, "generate route should pass signed host session context into command runtime when available");
 assert.equal(generateRoute.includes('hostSessionMode: hostSession ? undefined : "standalone-demo"'), true, "generate route should fall back to explicit standalone fixture auth only without a trusted host session");
 assert.equal(generateRoute.includes("createBookingRuntimeAuthContextFromTrustedHostHeader"), true, "generate route should prefer the signed embedded host context for booking runtime auth");
 assert.equal(generateRoute.includes("fallback: createBookingRuntimeAuthContextFromEnv(env)"), true, "generate route should fall back to server env runtime auth when no signed host context is donated");
+assert.equal(generateRoute.includes("event.getClientAddress()"), true, "generate rate limits should use the trusted platform client address");
+assert.equal(generateRoute.includes('request.headers.get("x-forwarded-for")'), false, "generate rate limits must not trust caller-controlled forwarding headers");
+const parsedBodyIndex = generateRoute.indexOf("const body = await request.json()");
+const invalidDocumentGuardIndex = generateRoute.indexOf("hasInvalidExplicitDocumentContext(rawRunContextSelection)", parsedBodyIndex);
+const invalidDocumentReturnIndex = generateRoute.indexOf('error: "Invalid document context selection"', invalidDocumentGuardIndex);
+const rateLimitIndex = generateRoute.indexOf("minuteRateLimit.limit(ip)", parsedBodyIndex);
+const activeDocumentIndex = generateRoute.indexOf("resolveActiveDocumentForRequest(event");
+const effectiveDocumentIndex = generateRoute.indexOf("resolveEffectiveContextDocument({", activeDocumentIndex);
+assert.ok(parsedBodyIndex >= 0 && generateRoute.indexOf("Array.isArray(body)", parsedBodyIndex) < activeDocumentIndex, "generate validates a JSON object before context persistence or file work");
+assert.ok(generateRoute.indexOf("uiMessages.length === 0", parsedBodyIndex) < activeDocumentIndex, "generate validates non-empty messages before context persistence or file work");
+assert.ok(invalidDocumentGuardIndex >= 0, "generate rejects a supplied document item that cannot normalize");
+assert.ok(invalidDocumentGuardIndex < invalidDocumentReturnIndex && invalidDocumentReturnIndex < rateLimitIndex, "invalid explicit document context terminates the route before downstream effects");
+assert.ok(invalidDocumentGuardIndex < rateLimitIndex, "invalid explicit document context terminates before rate-limit side effects");
+assert.ok(invalidDocumentGuardIndex < generateRoute.indexOf("resolveAgentUiWorkspaceSession(event", parsedBodyIndex), "invalid explicit document context terminates before workspace access");
+assert.ok(invalidDocumentGuardIndex < generateRoute.indexOf("const pageContext =", parsedBodyIndex), "invalid explicit document context terminates before page-context creation");
+assert.ok(invalidDocumentGuardIndex < generateRoute.indexOf("persistInitiatingUserMessage", parsedBodyIndex), "invalid explicit document context terminates before message persistence");
+assert.ok(invalidDocumentGuardIndex < generateRoute.indexOf("startRunRecorder", parsedBodyIndex), "invalid explicit document context terminates before run creation");
+assert.ok(invalidDocumentGuardIndex < generateRoute.indexOf("createGoogle(", parsedBodyIndex), "invalid explicit document context terminates before provider selection");
+assert.ok(invalidDocumentGuardIndex < generateRoute.indexOf("createAgent({", parsedBodyIndex), "invalid explicit document context terminates before model construction");
+assert.ok(generateRoute.indexOf("resolveAgentContextSelection", parsedBodyIndex) < activeDocumentIndex, "generate resolves selected context before active-document persistence");
+assert.ok(activeDocumentIndex < generateRoute.indexOf("persistInitiatingUserMessage", parsedBodyIndex), "selected-context ownership fails closed before message/run persistence");
+assert.ok(activeDocumentIndex < generateRoute.indexOf("agent.stream", parsedBodyIndex), "selected-context ownership fails closed before model execution");
+assert.ok(effectiveDocumentIndex >= 0, "generate verifies the explicitly selected document");
+assert.ok(effectiveDocumentIndex < generateRoute.indexOf("const pageContext =", effectiveDocumentIndex), "explicit selected-document verification completes before page-context construction");
+assert.ok(effectiveDocumentIndex < generateRoute.indexOf("persistInitiatingUserMessage", effectiveDocumentIndex), "explicit selected-document verification completes before user-message persistence");
+assert.ok(effectiveDocumentIndex < generateRoute.indexOf("startRunRecorder", effectiveDocumentIndex), "explicit selected-document verification completes before run persistence");
+assert.ok(effectiveDocumentIndex < generateRoute.indexOf("createAgent({", effectiveDocumentIndex), "explicit selected-document verification completes before provider/model construction");
+assert.equal(sessionDetailRoute.includes("listRequestWorkspaceRuns(event, session.id).catch(() => [])"), false, "session GET must surface durable run read failures");
+assert.equal(sessionDetailRoute.includes("listRequestWorkspaceRunEvents<PersistedRunEvent>(event, latestRun.id).catch(() => [])"), false, "session GET must surface durable run-event read failures");
 // Draft-only invariant (Slice A, 2026-07-08): approvedCommandIdsFromHostSession
 // moved to host-command-runtime.ts so /api/generate and the deterministic
 // /api/intake/commit endpoint resolve the exact same trusted grant.
@@ -171,12 +206,12 @@ assert.equal(hostCommandRuntimeSource.includes("const APPROVED_COMMAND_IDS_MAX_I
 assert.equal(hostCommandRuntimeSource.includes(".slice(0, APPROVED_COMMAND_IDS_MAX_ITEMS)"), true, "shared host-session helper should still bound trusted approved command ids with a named guardrail");
 assert.equal(generateRoute.includes("approvedCommandIdsFromHostSession"), true, "generate route should reuse the shared host-session helper instead of a local copy");
 assert.equal(generateRoute.includes("bookingRuntimeCredentialed"), true, "generate telemetry should expose credential posture without logging credentials");
-assert.equal(generateRoute.includes("createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent })"), true, "agent tools should receive the selection-gated active document, active workspace session id, page context, trusted host session, approval grants, configured booking runtime base URL, server-side auth mode, injectable runtime fetcher, the per-turn composed skill ids, sanitized Agent Settings, the active intake artifact's current spec for the patch-first refinement contract, continuity-carried skill ids, workspace-document intent, and product-tour suppression flag so createAgent's command-family and document/artifact mount decisions match the route's (Slice E toolset stability)");
+assert.equal(generateRoute.includes("createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent"), true, "agent tools should receive the selection-gated active document, active workspace session id, page context, trusted host session, approval grants, configured booking runtime base URL, server-side auth mode, injectable runtime fetcher, the per-turn composed skill ids, sanitized Agent Settings, the active intake artifact's current spec for the patch-first refinement contract, continuity-carried skill ids, workspace-document intent, and product-tour suppression flag so createAgent's command-family and document/artifact mount decisions match the route's (Slice E toolset stability)");
 assert.equal(generateRoute.includes("forceDocumentArtifactIntent"), false, "generate route should pass the single resolved workspaceDocumentIntent instead of duplicate prompt/force routing inputs");
 assert.equal(generateRoute.includes("sanitizeAgentRuntimeSettings"), true, "generate route should sanitize Agent Settings at the server boundary before model/tool use");
 assert.equal(generateRoute.includes("resolveAgentContextSelection(runContextSelection)"), true, "generate route should resolve the explicit composer context selection");
-assert.equal(generateRoute.includes("includeActiveDocument: selectionResolution.includeActiveDocument"), true, "generate route should gate the effective document on the composer selection (authoritative removal at the server boundary when the chip is deselected)");
-assert.equal(generateRoute.includes("selectedDocumentId: selectionResolution.documentIds[0]"), true, "generate route should feed the chip-selected document rather than always the request's active document");
+assert.equal(generateRoute.includes("includeActiveDocument: authorizedSelectionResolution.includeActiveDocument"), true, "generate route should gate the effective document on the composer selection (authoritative removal at the server boundary when the chip is deselected)");
+assert.equal(generateRoute.includes("selectedDocumentId: authorizedSelectionResolution.documentIds[0]"), true, "generate route should feed the chip-selected document rather than always the request's active document");
 assert.equal(generateRoute.includes("contextSelection: runContextSelection ?? null"), true, "generate route should persist the composer selection on the run record");
 assert.equal(generateRoute.includes("const trustedOrganizationDisplay = resolveSignedTrustedOrganizationDisplayFromRequest(event)"), true, "generate route should resolve organization display only through the signed HMAC host-context helper");
 assert.equal(generateRoute.includes("createCurrentPageContextSummary({ context: pageContext, trustedOrganizationDisplay, productTourIntent })"), true, "generate route should inject preverified host page context as first-class model context through the pure summary helper");
@@ -308,6 +343,8 @@ const telemetryRouteSource = await readFile("apps/standalone-sveltekit/src/route
 const pageContextRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/dev/page-context/+server.ts", "utf8");
 const artifactRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/artifact/+server.ts", "utf8");
 const sessionRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/session/+server.ts", "utf8");
+const sessionDetailRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/session/[id]/+server.ts", "utf8");
+const workspaceFetchSource = pageSource.slice(pageSource.indexOf("async function workspaceFetch"), pageSource.indexOf("function recordWorkspaceRuntimeDiagnostics"));
 const sessionsRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/sessions/+server.ts", "utf8");
 const observabilityPackageSource = await readFile("packages/agent-observability/src/index.ts", "utf8");
 const evidenceServerSource = await readFile("scripts/agent-ui-dev-evidence-server.mjs", "utf8");
@@ -347,6 +384,13 @@ assert.equal(pageSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "
 assert.equal(pageSource.includes("sessionBootstrapPromise"), true, "embedded session bootstrap should guard repeated host page-context messages while initialization is in flight");
 assert.equal(pageSource.includes("if (!authenticated || !organizationId || !userId || !hostSession) return {}"), true, "workspace authority headers should require an authenticated donated hostSession, not display-only page context");
 assert.equal(pageSource.includes("signature: context?.signature ?? null"), true, "workspace authority headers should forward signed host-context proof into cloud API requests");
+assert.equal(pageSource.includes('"x-sonik-agent-ui-workspace-session-context": workspaceSessionContext'), true, "workspaceFetch should replay the server-signed active workspace context for direct file operations");
+assert.equal(workspaceFetchSource.includes('const refreshedWorkspaceSessionContext = response.headers.get("x-sonik-agent-ui-workspace-session-context")'), true, "workspaceFetch should inspect every response for a refreshed workspace token");
+assert.equal(workspaceFetchSource.includes("response.ok && refreshedWorkspaceSessionContext && requestSessionSelectionRevision === sessionSelectionRevision"), true, "successful session-detail fetches should centrally adopt their newly minted workspace token without letting superseded requests overwrite it");
+assert.equal(sessionDetailRouteSource.includes("createSignedWorkspaceSessionContextHeader(event, session.id)"), true, "session GET should mint the active workspace context after host-scoped lookup");
+assert.equal(sessionDetailRouteSource.includes('"cache-control": "private, no-store"'), true, "session GET responses carrying workspace tokens must not be cached");
+assert.equal(sessionDetailRouteSource.includes('pragma: "no-cache"'), true, "session GET responses carrying workspace tokens must disable legacy caches");
+assert.equal(sessionDetailRouteSource.includes('expires: "0"'), true, "session GET responses carrying workspace tokens must be immediately expired");
 assert.equal(pageSource.includes("lastSignedHostPageContext"), true, "embedded workspace requests should cache the last valid signed host context until it expires");
 assert.equal(pageSource.includes("selectSignedWorkspaceHostContext({ current: hostPageContext, cached: lastSignedHostPageContext })"), true, "embedded workspace requests should delegate signed-context selection to the fail-closed authority helper");
 assert.equal(pageSource.includes("lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext })"), true, "host-context updates must refresh or clear the signed-context cache through the authority helper");

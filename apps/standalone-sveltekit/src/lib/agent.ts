@@ -23,7 +23,7 @@ import { draftWorkflow } from "./tools/drafting-agent";
 import { shouldMountJsonArtifactTool, type WorkspaceDocumentIntent } from "./document-intent";
 import { gateway, resolveGatewayModelId } from "./ai-gateway";
 import type { AgentRuntimeSettings } from "./agent-settings";
-import type { SystemModelMessage } from "ai";
+import type { LanguageModel, SystemModelMessage } from "ai";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import type { BookingRuntimeAuthContext } from "$lib/server/host-command-runtime";
@@ -41,7 +41,7 @@ import {
 export { hasBookingContextIntakeSkill, resolveCommandFamilyMountDecision } from "./command-family-mount";
 export type { CommandFamilyMountDecision } from "./command-family-mount";
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean;
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean; model?: LanguageModel;
 };
 
 /**
@@ -95,7 +95,7 @@ export function createAgent(context: AgentRuntimeContext = {}) {
   const skillCatalogTools = createSkillCatalogTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   const marketplaceWorkflowTools = createMarketplaceWorkflowTools({ sessionId: context.sessionId, pageContext: context.pageContext, hostSession: context.hostSession });
   return new ToolLoopAgent({
-    model: gateway(resolveGatewayModelId(context.agentSettings?.modelId)),
+    model: context.model ?? gateway(resolveGatewayModelId(context.agentSettings?.modelId)),
     instructions: createAgentInstructions(context),
     tools: {
       getWeather,

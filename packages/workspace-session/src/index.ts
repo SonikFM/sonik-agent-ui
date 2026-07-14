@@ -173,6 +173,42 @@ export interface WorkspaceArtifactVersionRecord<TContent = unknown> {
   created_at: string;
 }
 
+export type WorkspaceFileStatus = "pending" | "ready" | "failed" | "deleted";
+export type WorkspaceFileProviderReferences = Record<string, string>;
+
+export interface WorkspaceFileRecord {
+  id: string;
+  session_id: string;
+  storage_key: string;
+  original_filename: string;
+  media_type: string;
+  byte_size: number;
+  checksum: string | null;
+  status: WorkspaceFileStatus;
+  provider_references: WorkspaceFileProviderReferences | null;
+  provider_references_expires_at: string | null;
+  ready_at: string | null;
+  failed_at: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceFileCreateInput {
+  id?: string;
+  session_id?: string | null;
+  storage_key: string;
+  original_filename: string;
+  media_type: string;
+  byte_size: number;
+  checksum?: string | null;
+  status?: WorkspaceFileStatus;
+  provider_references?: WorkspaceFileProviderReferences | null;
+  provider_references_expires_at?: string | null;
+}
+
+export type WorkspaceFileUpdateInput = Partial<Pick<WorkspaceFileRecord, "original_filename" | "media_type" | "byte_size" | "checksum" | "status" | "provider_references" | "provider_references_expires_at">>;
+
 export interface WorkspaceMessageRecord<TParts = unknown> {
   id: string;
   session_id: string;
@@ -249,6 +285,7 @@ export interface WorkspaceRunContextSelection {
 export interface WorkspaceRunRecord {
   id: string;
   session_id: string;
+  user_message_id: string | null;
   message_id: string | null;
   status: WorkspaceRunStatus;
   resumable: boolean;
@@ -304,6 +341,7 @@ export interface WorkspaceSessionDocumentStore {
   listSessions(input?: { archived?: boolean }): WorkspaceSessionRecord[];
   patchSession(id: string, input: Partial<Pick<WorkspaceSessionRecord, "name" | "mode" | "folder" | "active_document_id" | "active_artifact_id" | "is_important">>): WorkspaceSessionRecord | null;
   archiveSession(id: string, archived?: boolean): WorkspaceSessionRecord | null;
+  beginSessionDeletion(id: string): boolean;
   deleteSession(id: string): boolean;
   createDocument(input: { session_id?: string | null; title?: string | null; content?: string | null; language?: string | null; source?: WorkspaceDocumentVersionSource; summary?: string | null }): WorkspaceDocumentRecord;
   getDocument(id: string): WorkspaceDocumentRecord | null;
@@ -326,6 +364,14 @@ export interface WorkspaceArtifactStore {
   listArtifactVersions<TContent = unknown>(artifactId: string): WorkspaceArtifactVersionRecord<TContent>[];
 }
 
+export interface WorkspaceFileStore {
+  createFile(input: WorkspaceFileCreateInput): WorkspaceFileRecord;
+  getFile(id: string): WorkspaceFileRecord | null;
+  listFiles(sessionId: string): WorkspaceFileRecord[];
+  updateFile(id: string, input: WorkspaceFileUpdateInput): WorkspaceFileRecord | null;
+  deleteFile(id: string): boolean;
+}
+
 export interface WorkspaceActivityStore {
   appendMessage<TParts = unknown>(input: { session_id?: string | null; id?: string; role: WorkspaceMessageRecord<TParts>["role"]; content?: string | null; parts?: TParts | null }): WorkspaceMessageRecord<TParts>;
   listMessages<TParts = unknown>(sessionId: string): WorkspaceMessageRecord<TParts>[];
@@ -341,7 +387,7 @@ export interface WorkspaceTelemetryStore {
 }
 
 export interface WorkspaceRunStore {
-  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord;
+  createRun(input: { id?: string; session_id?: string | null; user_message_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord;
   getRun(id: string): WorkspaceRunRecord | null;
   listRuns(sessionId: string): WorkspaceRunRecord[];
   updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null; ended_at?: string | null }): WorkspaceRunRecord | null;
@@ -349,7 +395,7 @@ export interface WorkspaceRunStore {
   listRunEvents<TEvent = unknown>(runId: string): WorkspaceRunEventRecord<TEvent>[];
 }
 
-export type WorkspacePersistenceAdapter = WorkspaceSessionDocumentStore & WorkspaceArtifactStore & WorkspaceActivityStore & WorkspaceTelemetryStore & WorkspaceRunStore;
+export type WorkspacePersistenceAdapter = WorkspaceSessionDocumentStore & WorkspaceArtifactStore & WorkspaceFileStore & WorkspaceActivityStore & WorkspaceTelemetryStore & WorkspaceRunStore;
 
 export interface WorkspaceServices {
   persistence: WorkspacePersistenceAdapter;
@@ -389,6 +435,7 @@ export interface AsyncWorkspaceSessionDocumentStore {
   listSessions(input?: { archived?: boolean }): Promise<WorkspaceSessionRecord[]>;
   patchSession(id: string, input: Partial<Pick<WorkspaceSessionRecord, "name" | "mode" | "folder" | "active_document_id" | "active_artifact_id" | "is_important">>): Promise<WorkspaceSessionRecord | null>;
   archiveSession(id: string, archived?: boolean): Promise<WorkspaceSessionRecord | null>;
+  beginSessionDeletion(id: string): Promise<boolean>;
   deleteSession(id: string): Promise<boolean>;
   createDocument(input: { session_id?: string | null; title?: string | null; content?: string | null; language?: string | null; source?: WorkspaceDocumentVersionSource; summary?: string | null }): Promise<WorkspaceDocumentRecord>;
   getDocument(id: string): Promise<WorkspaceDocumentRecord | null>;
@@ -411,6 +458,14 @@ export interface AsyncWorkspaceArtifactStore {
   listArtifactVersions<TContent = unknown>(artifactId: string): Promise<WorkspaceArtifactVersionRecord<TContent>[]>;
 }
 
+export interface AsyncWorkspaceFileStore {
+  createFile(input: WorkspaceFileCreateInput): Promise<WorkspaceFileRecord>;
+  getFile(id: string): Promise<WorkspaceFileRecord | null>;
+  listFiles(sessionId: string): Promise<WorkspaceFileRecord[]>;
+  updateFile(id: string, input: WorkspaceFileUpdateInput): Promise<WorkspaceFileRecord | null>;
+  deleteFile(id: string): Promise<boolean>;
+}
+
 export interface AsyncWorkspaceActivityStore {
   appendMessage<TParts = unknown>(input: { session_id?: string | null; id?: string; role: WorkspaceMessageRecord<TParts>["role"]; content?: string | null; parts?: TParts | null }): Promise<WorkspaceMessageRecord<TParts>>;
   listMessages<TParts = unknown>(sessionId: string): Promise<WorkspaceMessageRecord<TParts>[]>;
@@ -426,7 +481,7 @@ export interface AsyncWorkspaceTelemetryStore {
 }
 
 export interface AsyncWorkspaceRunStore {
-  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): Promise<WorkspaceRunRecord>;
+  createRun(input: { id?: string; session_id?: string | null; user_message_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): Promise<WorkspaceRunRecord>;
   getRun(id: string): Promise<WorkspaceRunRecord | null>;
   listRuns(sessionId: string): Promise<WorkspaceRunRecord[]>;
   updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null; ended_at?: string | null }): Promise<WorkspaceRunRecord | null>;
@@ -434,7 +489,7 @@ export interface AsyncWorkspaceRunStore {
   listRunEvents<TEvent = unknown>(runId: string): Promise<WorkspaceRunEventRecord<TEvent>[]>;
 }
 
-export type AsyncWorkspacePersistenceAdapter = AsyncWorkspaceSessionDocumentStore & AsyncWorkspaceArtifactStore & AsyncWorkspaceActivityStore & AsyncWorkspaceTelemetryStore & AsyncWorkspaceRunStore;
+export type AsyncWorkspacePersistenceAdapter = AsyncWorkspaceSessionDocumentStore & AsyncWorkspaceArtifactStore & AsyncWorkspaceFileStore & AsyncWorkspaceActivityStore & AsyncWorkspaceTelemetryStore & AsyncWorkspaceRunStore;
 
 export type WorkspacePersistencePolicy = "memory" | "cloud" | "auto";
 
@@ -502,6 +557,7 @@ export function createAsyncWorkspacePersistenceAdapter(adapter: WorkspacePersist
     listSessions: async (input) => adapter.listSessions(input),
     patchSession: async (id, input) => adapter.patchSession(id, input),
     archiveSession: async (id, archived) => adapter.archiveSession(id, archived),
+    beginSessionDeletion: async (id) => adapter.beginSessionDeletion(id),
     deleteSession: async (id) => adapter.deleteSession(id),
     createDocument: async (input) => adapter.createDocument(input),
     getDocument: async (id) => adapter.getDocument(id),
@@ -519,6 +575,11 @@ export function createAsyncWorkspacePersistenceAdapter(adapter: WorkspacePersist
     getArtifact: async <TContent = unknown>(id: string) => adapter.getArtifact<TContent>(id),
     updateArtifact: async <TContent = unknown>(id: string, input: { title?: string; content?: TContent; source?: WorkspaceDocumentVersionSource; summary?: string | null }) => adapter.updateArtifact<TContent>(id, input),
     listArtifactVersions: async <TContent = unknown>(artifactId: string) => adapter.listArtifactVersions<TContent>(artifactId),
+    createFile: async (input) => adapter.createFile(input),
+    getFile: async (id) => adapter.getFile(id),
+    listFiles: async (sessionId) => adapter.listFiles(sessionId),
+    updateFile: async (id, input) => adapter.updateFile(id, input),
+    deleteFile: async (id) => adapter.deleteFile(id),
     appendMessage: async <TParts = unknown>(input: { session_id?: string | null; id?: string; role: WorkspaceMessageRecord<TParts>["role"]; content?: string | null; parts?: TParts | null }) => adapter.appendMessage<TParts>(input),
     listMessages: async <TParts = unknown>(sessionId: string) => adapter.listMessages<TParts>(sessionId),
     recordToolCall: async <TInput = unknown, TOutput = unknown>(input: Omit<WorkspaceToolCallRecord<TInput, TOutput>, "id" | "created_at" | "completed_at"> & { id?: string; created_at?: string; completed_at?: string | null }) => adapter.recordToolCall<TInput, TOutput>(input),
@@ -649,6 +710,16 @@ type CloudWorkspaceArtifactVersionRow<TContent = unknown> = {
   created_at: string | Date;
 };
 
+type CloudWorkspaceFileRow = Omit<WorkspaceFileRecord, "byte_size" | "provider_references_expires_at" | "ready_at" | "failed_at" | "deleted_at" | "created_at" | "updated_at"> & {
+  byte_size: number | string;
+  provider_references_expires_at: string | Date | null;
+  ready_at: string | Date | null;
+  failed_at: string | Date | null;
+  deleted_at: string | Date | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+};
+
 type CloudWorkspaceLayoutSnapshotRow<TLayout = unknown> = {
   id: string;
   session_id: string;
@@ -662,6 +733,7 @@ type CloudWorkspaceLayoutSnapshotRow<TLayout = unknown> = {
 type CloudWorkspaceRunRow = {
   id: string;
   session_id: string;
+  user_message_id: string | null;
   message_id: string | null;
   status: WorkspaceRunStatus;
   resumable: boolean;
@@ -733,9 +805,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       const { rows } = await tx.query<CloudWorkspaceSessionRow>(
         `select id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at
          from sonik_agent_ui.agent_workspace_sessions
-         where organization_id = $1 and user_id = $2 and archived = $3
+         where organization_id = $1 and user_id = $2 and host_session_id is not distinct from $3 and archived = $4
          order by last_accessed desc`,
-        [this.#authorized.organizationId, this.#authorized.userId, archived],
+        [this.#authorized.organizationId, this.#authorized.userId, this.#authorized.hostSession.sessionId ?? null, archived],
       );
       return rows.map(mapCloudSessionRow);
     });
@@ -745,6 +817,14 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     return this.#withContext(async (tx) => {
       const existing = await this.#selectSession(tx, id);
       if (!existing) return null;
+      if (input.active_document_id) {
+        const document = await this.#selectDocument(tx, input.active_document_id);
+        if (document?.session_id !== id) return null;
+      }
+      if (input.active_artifact_id) {
+        const artifact = await this.#selectArtifact(tx, input.active_artifact_id);
+        if (artifact?.session_id !== id) return null;
+      }
       const next = { ...existing, ...input };
       const { rows } = await tx.query<CloudWorkspaceSessionRow>(
         `update sonik_agent_ui.agent_workspace_sessions
@@ -759,6 +839,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   archiveSession(id: string, archived = true): Promise<WorkspaceSessionRecord | null> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectSession(tx, id)) return null;
       const { rows } = await tx.query<CloudWorkspaceSessionRow>(
         `update sonik_agent_ui.agent_workspace_sessions
          set archived = $4, updated_at = now(), last_accessed = now()
@@ -772,8 +853,23 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   deleteSession(id: string): Promise<boolean> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectSession(tx, id)) return false;
       const { rows } = await tx.query<{ id: string }>(
         `delete from sonik_agent_ui.agent_workspace_sessions
+         where organization_id = $1 and user_id = $2 and id = $3
+         returning id`,
+        [this.#authorized.organizationId, this.#authorized.userId, id],
+      );
+      return rows.length > 0;
+    });
+  }
+
+  beginSessionDeletion(id: string): Promise<boolean> {
+    return this.#withContext(async (tx) => {
+      if (!await this.#selectSession(tx, id)) return false;
+      const { rows } = await tx.query<{ id: string }>(
+        `update sonik_agent_ui.agent_workspace_sessions
+         set deleting_at = coalesce(deleting_at, now())
          where organization_id = $1 and user_id = $2 and id = $3
          returning id`,
         [this.#authorized.organizationId, this.#authorized.userId, id],
@@ -790,6 +886,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
         `insert into sonik_agent_ui.agent_workspace_messages
           (organization_id, user_id, id, session_id, role, content, parts)
          values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+         on conflict (organization_id, user_id, id) do nothing
          returning id, session_id, role, content, parts, created_at`,
         [
           this.#authorized.organizationId,
@@ -801,8 +898,19 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
           input.parts === undefined || input.parts === null ? null : JSON.stringify(input.parts),
         ],
       );
-      const row = rows[0];
-      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud message insert returned no row.");
+      let row = rows[0];
+      if (!row) {
+        const existing = await tx.query<CloudWorkspaceMessageRow<TParts>>(
+          `select id, session_id, role, content, parts, created_at
+           from sonik_agent_ui.agent_workspace_messages
+           where organization_id = $1 and user_id = $2 and id = $3`,
+          [this.#authorized.organizationId, this.#authorized.userId, id],
+        );
+        row = existing.rows[0];
+        if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud message insert returned no row.");
+        assertSameWorkspaceMessage(row, session.id, input);
+        return mapCloudMessageRow(row);
+      }
       await tx.query(
         `update sonik_agent_ui.agent_workspace_sessions
          set message_count = message_count + 1, last_message_at = $4, updated_at = now(), last_accessed = now()
@@ -815,6 +923,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   listMessages<TParts = unknown>(sessionId: string): Promise<WorkspaceMessageRecord<TParts>[]> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectSession(tx, sessionId)) return [];
       const { rows } = await tx.query<CloudWorkspaceMessageRow<TParts>>(
         `select id, session_id, role, content, parts, created_at
          from sonik_agent_ui.agent_workspace_messages
@@ -849,6 +958,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   listDocuments(sessionId: string): Promise<WorkspaceDocumentRecord[]> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectSession(tx, sessionId)) return [];
       const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
         `select id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at
          from sonik_agent_ui.agent_workspace_documents
@@ -870,8 +980,11 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       const orderBy = resolveDocumentLibraryOrderBy(input.sort);
       const filterSql = `documents.organization_id = $1 and documents.user_id = $2 and documents.is_active = true and documents.archived = $3
          and ($4::text is null or lower(documents.language) = $4)
-         and ($5::text is null or documents.title ilike '%' || $5 || '%' or documents.current_content ilike '%' || $5 || '%')`;
-      const filterParams = [this.#authorized.organizationId, this.#authorized.userId, archived, language, search];
+         and ($5::text is null or documents.title ilike '%' || $5 || '%' or documents.current_content ilike '%' || $5 || '%')
+         and exists (select 1 from sonik_agent_ui.agent_workspace_sessions authorized_sessions
+           where authorized_sessions.organization_id = documents.organization_id and authorized_sessions.user_id = documents.user_id
+             and authorized_sessions.id = documents.session_id and authorized_sessions.host_session_id is not distinct from $6)`;
+      const filterParams = [this.#authorized.organizationId, this.#authorized.userId, archived, language, search, this.#authorized.hostSession.sessionId ?? null];
       const { rows } = await tx.query<CloudWorkspaceDocumentLibraryRow>(
         `select documents.id, documents.session_id, documents.title, documents.language, left(documents.current_content, 500) as current_content, documents.version_count, documents.is_active, documents.archived, documents.created_at, documents.updated_at, sessions.name as session_name, left(documents.current_content, 500) as preview
          from sonik_agent_ui.agent_workspace_documents documents
@@ -879,7 +992,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
            on sessions.organization_id = documents.organization_id and sessions.user_id = documents.user_id and sessions.id = documents.session_id
          where ${filterSql}
          order by ${orderBy}
-         limit $6 offset $7`,
+         limit $7 offset $8`,
         [...filterParams, limit, offset],
       );
       const [{ total = 0 } = { total: 0 }] = (await tx.query<{ total: number }>(
@@ -947,6 +1060,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     return this.#withContext(async (tx) => {
       const existing = await this.#selectDocumentForUpdate(tx, id);
       if (!existing) {
+        if (await this.#documentIdExists(tx, id)) return null;
         const session = await this.#ensureSession(tx, input.session_id);
         const content = input.content ?? "";
         const document = await this.#insertDocument(tx, {
@@ -964,7 +1078,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       const contentChanged = input.content !== undefined && input.content !== existing.current_content;
       const titleChanged = input.title !== undefined && input.title !== existing.title;
       const languageChanged = input.language !== undefined && input.language !== existing.language;
-      const nextSessionId = input.session_id === "" ? null : input.session_id;
+      const nextSessionId = input.session_id === "" ? existing.session_id : input.session_id;
       const sessionChanged = nextSessionId !== undefined && nextSessionId !== existing.session_id;
       if (nextSessionId) await this.#ensureSession(tx, nextSessionId);
       const shouldVersion = contentChanged || titleChanged || languageChanged || sessionChanged;
@@ -995,6 +1109,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   archiveDocument(id: string, archived = true): Promise<WorkspaceDocumentRecord | null> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectDocument(tx, id)) return null;
       const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
         `update sonik_agent_ui.agent_workspace_documents
          set archived = $4, updated_at = now()
@@ -1008,6 +1123,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   deleteDocument(id: string): Promise<boolean> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectDocument(tx, id)) return false;
       const { rows } = await tx.query<{ id: string }>(
         `delete from sonik_agent_ui.agent_workspace_documents
          where organization_id = $1 and user_id = $2 and id = $3
@@ -1020,6 +1136,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   listDocumentVersions(documentId: string): Promise<WorkspaceDocumentVersionRecord[]> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectDocument(tx, documentId)) return [];
       const { rows } = await tx.query<CloudWorkspaceDocumentVersionRow>(
         `select id, document_id, version_number, content, summary, source, created_at
          from sonik_agent_ui.agent_workspace_document_versions
@@ -1033,6 +1150,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   getDocumentVersion(documentId: string, versionNumber: number): Promise<WorkspaceDocumentVersionRecord | null> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectDocument(tx, documentId)) return null;
       const { rows } = await tx.query<CloudWorkspaceDocumentVersionRow>(
         `select id, document_id, version_number, content, summary, source, created_at
          from sonik_agent_ui.agent_workspace_document_versions
@@ -1068,6 +1186,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     return this.#withContext(async (tx) => {
       const existing = await this.#selectDocumentForUpdate(tx, snapshot.id);
       if (!existing) {
+        if (await this.#documentIdExists(tx, snapshot.id)) {
+          throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud document is outside the authorized host session.");
+        }
         const session = await this.#ensureSession(tx, snapshot.session_id);
         const document = await this.#insertDocument(tx, {
           id: snapshot.id,
@@ -1151,6 +1272,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   listArtifactVersions<TContent = unknown>(artifactId: string): Promise<WorkspaceArtifactVersionRecord<TContent>[]> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectArtifact(tx, artifactId)) return [];
       const { rows } = await tx.query<CloudWorkspaceArtifactVersionRow<TContent>>(
         `select id, artifact_id, version_number, content, summary, source, created_at
          from sonik_agent_ui.agent_workspace_artifact_versions
@@ -1161,16 +1283,105 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       return rows.map(mapCloudArtifactVersionRow<TContent>);
     });
   }
-  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): Promise<WorkspaceRunRecord> {
+
+  createFile(input: WorkspaceFileCreateInput): Promise<WorkspaceFileRecord> {
+    assertValidWorkspaceFileMetadata(input, true);
+    return this.#withContext(async (tx) => {
+      const { rows: sessions } = await tx.query<{ id: string }>(
+        `select id
+         from sonik_agent_ui.agent_workspace_sessions
+         where organization_id = $1 and user_id = $2 and id = $3 and host_session_id is not distinct from $4 and deleting_at is null
+         for no key update`,
+        [this.#authorized.organizationId, this.#authorized.userId, input.session_id, this.#authorized.hostSession.sessionId ?? null],
+      );
+      const session = sessions[0];
+      if (!session) throw new Error("Session not found");
+      const id = input.id?.trim() || this.#nextId("workspace-file");
+      const status = input.status ?? "pending";
+      const { rows } = await tx.query<CloudWorkspaceFileRow>(
+        `insert into sonik_agent_ui.agent_workspace_files
+          (organization_id, user_id, id, session_id, storage_key, original_filename, media_type, byte_size, checksum, status, provider_references, provider_references_expires_at, ready_at, failed_at, deleted_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, case when $10 = 'ready' then now() end, case when $10 = 'failed' then now() end, case when $10 = 'deleted' then now() end)
+         returning id, session_id, storage_key, original_filename, media_type, byte_size, checksum, status, provider_references, provider_references_expires_at, ready_at, failed_at, deleted_at, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, session.id, input.storage_key, input.original_filename, input.media_type, input.byte_size, input.checksum ?? null, status, input.provider_references ? JSON.stringify(input.provider_references) : null, input.provider_references_expires_at ?? null],
+      );
+      const row = rows[0];
+      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud file insert returned no row.");
+      return mapCloudFileRow(row);
+    });
+  }
+
+  getFile(id: string): Promise<WorkspaceFileRecord | null> {
+    return this.#withContext((tx) => this.#selectFile(tx, id));
+  }
+
+  listFiles(sessionId: string): Promise<WorkspaceFileRecord[]> {
+    return this.#withContext(async (tx) => {
+      if (!await this.#selectSession(tx, sessionId)) return [];
+      const { rows } = await tx.query<CloudWorkspaceFileRow>(
+        `select id, session_id, storage_key, original_filename, media_type, byte_size, checksum, status, provider_references, provider_references_expires_at, ready_at, failed_at, deleted_at, created_at, updated_at
+         from sonik_agent_ui.agent_workspace_files
+         where organization_id = $1 and user_id = $2 and session_id = $3 and status <> 'deleted'
+         order by created_at desc`,
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId],
+      );
+      return rows.map(mapCloudFileRow);
+    });
+  }
+
+  updateFile(id: string, input: WorkspaceFileUpdateInput): Promise<WorkspaceFileRecord | null> {
+    assertValidWorkspaceFileMetadata(input, false);
+    return this.#withContext(async (tx) => {
+      const existing = await this.#selectFile(tx, id);
+      if (!existing) return null;
+      const { rows } = await tx.query<CloudWorkspaceFileRow>(
+        `update sonik_agent_ui.agent_workspace_files
+         set original_filename = coalesce($4, original_filename), media_type = coalesce($5, media_type), byte_size = coalesce($6, byte_size), checksum = case when $7 then $8 else checksum end, status = coalesce($9, status), provider_references = case when $10 then $11::jsonb else provider_references end, provider_references_expires_at = case when $12 then $13 else provider_references_expires_at end, ready_at = case when $9 = 'ready' then coalesce(ready_at, now()) else ready_at end, failed_at = case when $9 = 'failed' then coalesce(failed_at, now()) else failed_at end, deleted_at = case when $9 = 'deleted' then coalesce(deleted_at, now()) else deleted_at end
+         where organization_id = $1 and user_id = $2 and id = $3 and status <> 'deleted'
+           and ($9 is distinct from 'ready' or exists (
+             select 1 from sonik_agent_ui.agent_workspace_sessions
+             where organization_id = $1 and user_id = $2 and id = agent_workspace_files.session_id and deleting_at is null
+           ))
+         returning id, session_id, storage_key, original_filename, media_type, byte_size, checksum, status, provider_references, provider_references_expires_at, ready_at, failed_at, deleted_at, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, input.original_filename ?? null, input.media_type ?? null, input.byte_size ?? null, input.checksum !== undefined, input.checksum ?? null, input.status ?? null, input.provider_references !== undefined, input.provider_references ? JSON.stringify(input.provider_references) : null, input.provider_references_expires_at !== undefined, input.provider_references_expires_at ?? null],
+      );
+      return rows[0] ? mapCloudFileRow(rows[0]) : null;
+    });
+  }
+
+  deleteFile(id: string): Promise<boolean> {
+    return this.#withContext(async (tx) => {
+      const existing = await this.#selectFile(tx, id);
+      if (!existing) return false;
+      const { rows } = await tx.query<{ id: string }>(
+        `update sonik_agent_ui.agent_workspace_files
+         set status = 'deleted', deleted_at = coalesce(deleted_at, now())
+         where organization_id = $1 and user_id = $2 and id = $3 and status <> 'deleted'
+         returning id`,
+        [this.#authorized.organizationId, this.#authorized.userId, id],
+      );
+      return rows.length > 0;
+    });
+  }
+
+  createRun(input: { id?: string; session_id?: string | null; user_message_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): Promise<WorkspaceRunRecord> {
     return this.#withContext(async (tx) => {
       const session = await this.#ensureSession(tx, input.session_id);
+      if (input.user_message_id != null) {
+        const { rows } = await tx.query<{ id: string }>(
+          `select id from sonik_agent_ui.agent_workspace_messages
+           where organization_id = $1 and user_id = $2 and id = $3 and session_id = $4 and role = 'user'`,
+          [this.#authorized.organizationId, this.#authorized.userId, input.user_message_id, session.id],
+        );
+        if (!rows[0]) throw new Error("Run user_message_id must reference a user message in the same session.");
+      }
       const id = input.id?.trim() || this.#nextId("workspace-run");
       const { rows } = await tx.query<CloudWorkspaceRunRow>(
         `insert into sonik_agent_ui.agent_workspace_runs
-          (organization_id, user_id, id, session_id, message_id, status, resumable, request_id, trace_id, traceparent, context_selection)
-         values ($1, $2, $3, $4, $5, 'running', false, $6, $7, $8, $9::jsonb)
-         returning id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
-        [this.#authorized.organizationId, this.#authorized.userId, id, session.id, input.message_id ?? null, input.request_id ?? null, input.trace_id ?? null, input.traceparent ?? null, input.context_selection != null ? JSON.stringify(input.context_selection) : null],
+          (organization_id, user_id, id, session_id, user_message_id, message_id, status, resumable, request_id, trace_id, traceparent, context_selection)
+         values ($1, $2, $3, $4, $5, $6, 'running', false, $7, $8, $9, $10::jsonb)
+         returning id, session_id, user_message_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, session.id, input.user_message_id ?? null, input.message_id ?? null, input.request_id ?? null, input.trace_id ?? null, input.traceparent ?? null, input.context_selection != null ? JSON.stringify(input.context_selection) : null],
       );
       const row = rows[0];
       if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run insert returned no row.");
@@ -1185,11 +1396,16 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   listRuns(sessionId: string): Promise<WorkspaceRunRecord[]> {
     return this.#withContext(async (tx) => {
       const { rows } = await tx.query<CloudWorkspaceRunRow>(
-        `select id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at
+        `select id, session_id, user_message_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at
          from sonik_agent_ui.agent_workspace_runs
          where organization_id = $1 and user_id = $2 and session_id = $3
+           and exists (
+             select 1 from sonik_agent_ui.agent_workspace_sessions
+             where organization_id = $1 and user_id = $2 and id = agent_workspace_runs.session_id
+               and agent_workspace_sessions.host_session_id is not distinct from $4
+           )
          order by created_at asc`,
-        [this.#authorized.organizationId, this.#authorized.userId, sessionId],
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId, this.#authorized.hostSession.sessionId ?? null],
       );
       return rows.map(mapCloudRunRow);
     });
@@ -1217,8 +1433,13 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
         `update sonik_agent_ui.agent_workspace_runs
          set status = $4, resumable = $5, error = $6, error_code = $7, message_id = $8, ended_at = $9, updated_at = now()
          where organization_id = $1 and user_id = $2 and id = $3
-         returning id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
-        [this.#authorized.organizationId, this.#authorized.userId, id, next.status, next.resumable, next.error, next.error_code, next.message_id, next.ended_at],
+           and exists (
+             select 1 from sonik_agent_ui.agent_workspace_sessions
+             where organization_id = $1 and user_id = $2 and id = agent_workspace_runs.session_id
+               and agent_workspace_sessions.host_session_id is not distinct from $10
+           )
+         returning id, session_id, user_message_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, id, next.status, next.resumable, next.error, next.error_code, next.message_id, next.ended_at, this.#authorized.hostSession.sessionId ?? null],
       );
       return rows[0] ? mapCloudRunRow(rows[0]) : null;
     });
@@ -1226,13 +1447,22 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   appendRunEvent<TEvent = unknown>(input: { run_id: string; session_id?: string | null; seq?: number; kind: string; event: TEvent }): Promise<WorkspaceRunEventRecord<TEvent>> {
     return this.#withContext(async (tx) => {
+      const run = await this.#selectRun(tx, input.run_id);
+      if (!run) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run not found for the authorized host session.");
+      if (input.session_id != null && input.session_id !== run.session_id) throw new Error("Run event session_id must match the parent run session_id.");
       const seq = input.seq ?? (await this.#nextRunEventSeq(tx, input.run_id));
       const { rows } = await tx.query<CloudWorkspaceRunEventRow<TEvent>>(
         `insert into sonik_agent_ui.agent_workspace_run_events
           (organization_id, user_id, id, run_id, session_id, seq, kind, event)
-         values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+         select $1, $2, $3, runs.id, $5::text, $6, $7, $8::jsonb
+         from sonik_agent_ui.agent_workspace_runs as runs
+         join sonik_agent_ui.agent_workspace_sessions
+           on agent_workspace_sessions.organization_id = runs.organization_id and agent_workspace_sessions.user_id = runs.user_id and agent_workspace_sessions.id = runs.session_id
+         where runs.organization_id = $1 and runs.user_id = $2 and runs.id = $4
+           and agent_workspace_sessions.host_session_id is not distinct from $9
+           and ($5::text is null or $5 = runs.session_id)
          returning id, run_id, session_id, seq, kind, event, created_at`,
-        [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-run-event"), input.run_id, input.session_id ?? null, seq, input.kind, JSON.stringify(input.event)],
+        [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-run-event"), input.run_id, input.session_id ?? null, seq, input.kind, JSON.stringify(input.event), this.#authorized.hostSession.sessionId ?? null],
       );
       const row = rows[0];
       if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run event insert returned no row.");
@@ -1243,11 +1473,16 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   listRunEvents<TEvent = unknown>(runId: string): Promise<WorkspaceRunEventRecord<TEvent>[]> {
     return this.#withContext(async (tx) => {
       const { rows } = await tx.query<CloudWorkspaceRunEventRow<TEvent>>(
-        `select id, run_id, session_id, seq, kind, event, created_at
-         from sonik_agent_ui.agent_workspace_run_events
-         where organization_id = $1 and user_id = $2 and run_id = $3
-         order by seq asc`,
-        [this.#authorized.organizationId, this.#authorized.userId, runId],
+        `select run_events.id, run_events.run_id, run_events.session_id, run_events.seq, run_events.kind, run_events.event, run_events.created_at
+         from sonik_agent_ui.agent_workspace_run_events as run_events
+         join sonik_agent_ui.agent_workspace_runs as runs
+           on runs.organization_id = run_events.organization_id and runs.user_id = run_events.user_id and runs.id = run_events.run_id
+         join sonik_agent_ui.agent_workspace_sessions
+           on agent_workspace_sessions.organization_id = runs.organization_id and agent_workspace_sessions.user_id = runs.user_id and agent_workspace_sessions.id = runs.session_id
+         where run_events.organization_id = $1 and run_events.user_id = $2 and run_events.run_id = $3
+           and agent_workspace_sessions.host_session_id is not distinct from $4
+         order by run_events.seq asc`,
+        [this.#authorized.organizationId, this.#authorized.userId, runId, this.#authorized.hostSession.sessionId ?? null],
       );
       return rows.map(mapCloudRunEventRow<TEvent>);
     });
@@ -1255,22 +1490,34 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
 
   async #selectRun(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceRunRecord | null> {
     const { rows } = await tx.query<CloudWorkspaceRunRow>(
-      `select id, session_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at
+      `select id, session_id, user_message_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at
        from sonik_agent_ui.agent_workspace_runs
-       where organization_id = $1 and user_id = $2 and id = $3`,
-      [this.#authorized.organizationId, this.#authorized.userId, id],
+       where organization_id = $1 and user_id = $2 and id = $3
+         and exists (
+           select 1 from sonik_agent_ui.agent_workspace_sessions
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_runs.session_id
+             and agent_workspace_sessions.host_session_id is not distinct from $4
+         )`,
+      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
     );
     return rows[0] ? mapCloudRunRow(rows[0]) : null;
   }
 
   async #nextRunEventSeq(tx: WorkspaceSqlTransaction, runId: string): Promise<number> {
     const { rows } = await tx.query<{ next_seq: number }>(
-      `select coalesce(max(seq), -1) + 1 as next_seq
-       from sonik_agent_ui.agent_workspace_run_events
-       where organization_id = $1 and user_id = $2 and run_id = $3`,
-      [this.#authorized.organizationId, this.#authorized.userId, runId],
+      `select coalesce(max(run_events.seq), -1) + 1 as next_seq
+       from sonik_agent_ui.agent_workspace_runs as runs
+       join sonik_agent_ui.agent_workspace_sessions
+         on agent_workspace_sessions.organization_id = runs.organization_id and agent_workspace_sessions.user_id = runs.user_id and agent_workspace_sessions.id = runs.session_id
+       left join sonik_agent_ui.agent_workspace_run_events as run_events
+         on run_events.organization_id = runs.organization_id and run_events.user_id = runs.user_id and run_events.run_id = runs.id
+       where runs.organization_id = $1 and runs.user_id = $2 and runs.id = $3
+         and agent_workspace_sessions.host_session_id is not distinct from $4
+       group by runs.id`,
+      [this.#authorized.organizationId, this.#authorized.userId, runId, this.#authorized.hostSession.sessionId ?? null],
     );
-    return Number(rows[0]?.next_seq ?? 0);
+    if (!rows[0]) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run not found for the authorized host session.");
+    return Number(rows[0].next_seq);
   }
 
   recordToolCall<TInput = unknown, TOutput = unknown>(): Promise<WorkspaceToolCallRecord<TInput, TOutput>> {
@@ -1284,7 +1531,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       const session = await this.#ensureSession(tx, input.session_id);
       if (input.active_artifact_id) {
         const artifact = await this.#selectArtifact(tx, input.active_artifact_id);
-        if (!artifact) throw new CloudWorkspacePersistenceError("missing-request-context", `Cannot record layout snapshot for missing artifact ${input.active_artifact_id}.`);
+        if (!artifact || artifact.session_id !== session.id) throw new CloudWorkspacePersistenceError("missing-request-context", `Cannot record layout snapshot for missing artifact ${input.active_artifact_id}.`);
       }
       const { rows } = await tx.query<CloudWorkspaceLayoutSnapshotRow<TLayout>>(
         `insert into sonik_agent_ui.agent_workspace_layout_snapshots
@@ -1301,6 +1548,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   }
   listLayoutSnapshots<TLayout = unknown>(sessionId: string): Promise<WorkspaceLayoutSnapshotRecord<TLayout>[]> {
     return this.#withContext(async (tx) => {
+      if (!await this.#selectSession(tx, sessionId)) return [];
       const { rows } = await tx.query<CloudWorkspaceLayoutSnapshotRow<TLayout>>(
         `select id, session_id, active_pane_id, active_artifact_id, layout, source, created_at
          from sonik_agent_ui.agent_workspace_layout_snapshots
@@ -1333,6 +1581,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     if (sessionId) {
       const existing = await this.#selectSession(tx, sessionId);
       if (existing) return existing;
+      if (await this.#sessionIdExists(tx, sessionId)) {
+        throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud session is outside the authorized host session.");
+      }
       return this.#insertSession(tx, { id: sessionId, name: "workspace document session", mode: "document" });
     }
     return this.#insertSession(tx, { id: this.#nextId("workspace-session"), name: DEFAULT_WORKSPACE_SESSION_NAME, mode: "chat" });
@@ -1363,17 +1614,26 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     const { rows } = await tx.query<CloudWorkspaceSessionRow>(
       `select id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at
        from sonik_agent_ui.agent_workspace_sessions
+       where organization_id = $1 and user_id = $2 and id = $3 and host_session_id is not distinct from $4`,
+      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+    );
+    return rows[0] ? mapCloudSessionRow(rows[0]) : null;
+  }
+
+  async #sessionIdExists(tx: WorkspaceSqlTransaction, id: string): Promise<boolean> {
+    const { rows } = await tx.query<{ id: string }>(
+      `select id from sonik_agent_ui.agent_workspace_sessions
        where organization_id = $1 and user_id = $2 and id = $3`,
       [this.#authorized.organizationId, this.#authorized.userId, id],
     );
-    return rows[0] ? mapCloudSessionRow(rows[0]) : null;
+    return rows.length > 0;
   }
 
   async #updateSessionActivePointers(tx: WorkspaceSqlTransaction, sessionId: string, input: { activeDocumentId?: string | null; activeArtifactId?: string | null; mode?: WorkspaceMode }): Promise<void> {
     await tx.query(
       `update sonik_agent_ui.agent_workspace_sessions
        set active_document_id = case when $4 then $5 else active_document_id end, active_artifact_id = case when $6 then $7 else active_artifact_id end, mode = coalesce($8, mode), updated_at = now(), last_accessed = now()
-       where organization_id = $1 and user_id = $2 and id = $3`,
+       where organization_id = $1 and user_id = $2 and id = $3 and host_session_id is not distinct from $9`,
       [
         this.#authorized.organizationId,
         this.#authorized.userId,
@@ -1383,6 +1643,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
         input.activeArtifactId !== undefined,
         input.activeArtifactId ?? null,
         input.mode ?? null,
+        this.#authorized.hostSession.sessionId ?? null,
       ],
     );
   }
@@ -1391,8 +1652,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     await tx.query(
       `update sonik_agent_ui.agent_workspace_sessions
        set active_document_id = null, updated_at = now(), last_accessed = now()
-       where organization_id = $1 and user_id = $2 and id = $3 and active_document_id = $4`,
-      [this.#authorized.organizationId, this.#authorized.userId, sessionId, documentId],
+       where organization_id = $1 and user_id = $2 and id = $3 and active_document_id = $4 and host_session_id is not distinct from $5`,
+      [this.#authorized.organizationId, this.#authorized.userId, sessionId, documentId, this.#authorized.hostSession.sessionId ?? null],
     );
   }
 
@@ -1413,10 +1674,13 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     const { rows } = await tx.query<CloudWorkspaceDocumentRow>(
       `select id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at
        from sonik_agent_ui.agent_workspace_documents
-       where organization_id = $1 and user_id = $2 and id = $3`,
-      [this.#authorized.organizationId, this.#authorized.userId, id],
+       where organization_id = $1 and user_id = $2 and id = $3
+         and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_documents.session_id and host_session_id is not distinct from $4)`,
+      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
     );
-    return rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+    const document = rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+    return document?.session_id && await this.#selectSession(tx, document.session_id) ? document : null;
   }
 
   async #selectDocumentForUpdate(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceDocumentRecord | null> {
@@ -1424,10 +1688,22 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       `select id, session_id, title, language, current_content, version_count, is_active, archived, created_at, updated_at
        from sonik_agent_ui.agent_workspace_documents
        where organization_id = $1 and user_id = $2 and id = $3
+         and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_documents.session_id and host_session_id is not distinct from $4)
        for update`,
+      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+    );
+    const document = rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+    return document?.session_id && await this.#selectSession(tx, document.session_id) ? document : null;
+  }
+
+  async #documentIdExists(tx: WorkspaceSqlTransaction, id: string): Promise<boolean> {
+    const { rows } = await tx.query<{ id: string }>(
+      `select id from sonik_agent_ui.agent_workspace_documents
+       where organization_id = $1 and user_id = $2 and id = $3`,
       [this.#authorized.organizationId, this.#authorized.userId, id],
     );
-    return rows[0] ? mapCloudDocumentRow(rows[0]) : null;
+    return rows.length > 0;
   }
 
   async #insertDocumentVersion(tx: WorkspaceSqlTransaction, document: WorkspaceDocumentRecord, source: WorkspaceDocumentVersionSource, summary: string | null): Promise<WorkspaceDocumentVersionRecord> {
@@ -1444,6 +1720,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   }
 
   async #selectDocumentVersion(tx: WorkspaceSqlTransaction, documentId: string, versionNumber: number): Promise<WorkspaceDocumentVersionRecord | null> {
+    if (!await this.#selectDocument(tx, documentId)) return null;
     const { rows } = await tx.query<CloudWorkspaceDocumentVersionRow>(
       `select id, document_id, version_number, content, summary, source, created_at
        from sonik_agent_ui.agent_workspace_document_versions
@@ -1457,10 +1734,13 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     const { rows } = await tx.query<CloudWorkspaceArtifactRow<TContent>>(
       `select id, session_id, kind, title, content, version, created_at, updated_at
        from sonik_agent_ui.agent_workspace_artifacts
-       where organization_id = $1 and user_id = $2 and id = $3`,
-      [this.#authorized.organizationId, this.#authorized.userId, id],
+       where organization_id = $1 and user_id = $2 and id = $3
+         and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_artifacts.session_id and host_session_id is not distinct from $4)`,
+      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
     );
-    return rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
+    const artifact = rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
+    return artifact?.session_id && await this.#selectSession(tx, artifact.session_id) ? artifact : null;
   }
 
   async #selectArtifactForUpdate<TContent = unknown>(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceArtifactRecord<TContent> | null> {
@@ -1468,10 +1748,26 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       `select id, session_id, kind, title, content, version, created_at, updated_at
        from sonik_agent_ui.agent_workspace_artifacts
        where organization_id = $1 and user_id = $2 and id = $3
+         and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_artifacts.session_id and host_session_id is not distinct from $4)
        for update`,
-      [this.#authorized.organizationId, this.#authorized.userId, id],
+      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
     );
-    return rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
+    const artifact = rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
+    return artifact?.session_id && await this.#selectSession(tx, artifact.session_id) ? artifact : null;
+  }
+
+  async #selectFile(tx: WorkspaceSqlTransaction, id: string): Promise<WorkspaceFileRecord | null> {
+    const { rows } = await tx.query<CloudWorkspaceFileRow>(
+      `select id, session_id, storage_key, original_filename, media_type, byte_size, checksum, status, provider_references, provider_references_expires_at, ready_at, failed_at, deleted_at, created_at, updated_at
+       from sonik_agent_ui.agent_workspace_files
+       where organization_id = $1 and user_id = $2 and id = $3 and status <> 'deleted'
+         and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_files.session_id and host_session_id is not distinct from $4)`,
+      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+    );
+    const file = rows[0] ? mapCloudFileRow(rows[0]) : null;
+    return file && await this.#selectSession(tx, file.session_id) ? file : null;
   }
 
   async #insertArtifactVersion<TContent>(tx: WorkspaceSqlTransaction, artifact: WorkspaceArtifactRecord<TContent>, source: WorkspaceDocumentVersionSource, summary: string | null): Promise<WorkspaceArtifactVersionRecord<TContent>> {
@@ -1597,6 +1893,20 @@ function mapCloudArtifactVersionRow<TContent = unknown>(row: CloudWorkspaceArtif
   };
 }
 
+function mapCloudFileRow(row: CloudWorkspaceFileRow): WorkspaceFileRecord {
+  return {
+    ...row,
+    byte_size: Number(row.byte_size),
+    provider_references: row.provider_references ? clone(row.provider_references) : null,
+    provider_references_expires_at: row.provider_references_expires_at ? toIsoTimestamp(row.provider_references_expires_at) : null,
+    ready_at: row.ready_at ? toIsoTimestamp(row.ready_at) : null,
+    failed_at: row.failed_at ? toIsoTimestamp(row.failed_at) : null,
+    deleted_at: row.deleted_at ? toIsoTimestamp(row.deleted_at) : null,
+    created_at: toIsoTimestamp(row.created_at),
+    updated_at: toIsoTimestamp(row.updated_at),
+  };
+}
+
 function mapCloudLayoutSnapshotRow<TLayout = unknown>(row: CloudWorkspaceLayoutSnapshotRow<TLayout>): WorkspaceLayoutSnapshotRecord<TLayout> {
   return {
     id: row.id,
@@ -1613,6 +1923,7 @@ function mapCloudRunRow(row: CloudWorkspaceRunRow): WorkspaceRunRecord {
   return {
     id: row.id,
     session_id: row.session_id,
+    user_message_id: row.user_message_id ?? null,
     message_id: row.message_id ?? null,
     status: row.status,
     resumable: Boolean(row.resumable),
@@ -1669,12 +1980,14 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
   #documentVersions = new Map<string, WorkspaceDocumentVersionRecord[]>();
   #artifacts = new Map<string, WorkspaceArtifactRecord>();
   #artifactVersions = new Map<string, WorkspaceArtifactVersionRecord[]>();
+  #files = new Map<string, WorkspaceFileRecord>();
   #messages = new Map<string, WorkspaceMessageRecord[]>();
   #toolCalls = new Map<string, WorkspaceToolCallRecord>();
   #layoutSnapshots = new Map<string, WorkspaceLayoutSnapshotRecord[]>();
   #telemetryEvents: WorkspaceTelemetryEventRecord[] = [];
   #runs = new Map<string, WorkspaceRunRecord>();
   #runEvents = new Map<string, WorkspaceRunEventRecord[]>();
+  #deletingSessionIds = new Set<string>();
   #sequence = 0;
 
   constructor(options: InMemoryWorkspacePersistenceOptions = {}) {
@@ -1703,6 +2016,7 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
       last_message_at: null,
     };
     this.#sessions.set(id, session);
+    this.#deletingSessionIds.delete(id);
     return clone(session);
   }
 
@@ -1746,8 +2060,7 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
   }
 
   deleteSession(id: string): boolean {
-    const existing = this.#sessions.get(id);
-    if (!existing) return false;
+    if (!this.#sessions.has(id)) return false;
 
     for (const document of [...this.#documents.values()]) {
       if (document.session_id === id) this.deleteDocument(document.id);
@@ -1758,6 +2071,10 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
         this.#artifactVersions.delete(artifact.id);
         this.#artifacts.delete(artifact.id);
       }
+    }
+
+    for (const [fileId, file] of this.#files) {
+      if (file.session_id === id) this.#files.delete(fileId);
     }
 
     this.#messages.delete(id);
@@ -1772,7 +2089,14 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
       }
     }
     this.#telemetryEvents = this.#telemetryEvents.filter((event) => event.session_id !== id);
+    this.#deletingSessionIds.delete(id);
     return this.#sessions.delete(id);
+  }
+
+  beginSessionDeletion(id: string): boolean {
+    if (!this.#sessions.has(id)) return false;
+    this.#deletingSessionIds.add(id);
+    return true;
   }
 
   createDocument(input: { session_id?: string | null; title?: string | null; content?: string | null; language?: string | null; source?: WorkspaceDocumentVersionSource; summary?: string | null }): WorkspaceDocumentRecord {
@@ -2018,12 +2342,80 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
       .map((version) => clone(version as WorkspaceArtifactVersionRecord<TContent>));
   }
 
+  createFile(input: WorkspaceFileCreateInput): WorkspaceFileRecord {
+    assertValidWorkspaceFileMetadata(input, true);
+    const sessionId = input.session_id;
+    if (!sessionId) throw new Error("Session not found");
+    const session = this.#sessions.get(sessionId);
+    if (!session || this.#deletingSessionIds.has(sessionId)) throw new Error("Session not found");
+    const timestamp = this.#now();
+    const status = input.status ?? "pending";
+    const file: WorkspaceFileRecord = {
+      id: input.id?.trim() || this.#nextId("workspace-file"),
+      session_id: session.id,
+      storage_key: input.storage_key,
+      original_filename: input.original_filename,
+      media_type: input.media_type,
+      byte_size: input.byte_size,
+      checksum: input.checksum ?? null,
+      status,
+      provider_references: input.provider_references ? clone(input.provider_references) : null,
+      provider_references_expires_at: input.provider_references_expires_at ?? null,
+      ready_at: status === "ready" ? timestamp : null,
+      failed_at: status === "failed" ? timestamp : null,
+      deleted_at: status === "deleted" ? timestamp : null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    this.#files.set(file.id, file);
+    return clone(file);
+  }
+
+  getFile(id: string): WorkspaceFileRecord | null {
+    const file = this.#files.get(id);
+    return file && file.status !== "deleted" ? clone(file) : null;
+  }
+
+  listFiles(sessionId: string): WorkspaceFileRecord[] {
+    return [...this.#files.values()]
+      .filter((file) => file.session_id === sessionId && file.status !== "deleted")
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map(clone);
+  }
+
+  updateFile(id: string, input: WorkspaceFileUpdateInput): WorkspaceFileRecord | null {
+    assertValidWorkspaceFileMetadata(input, false);
+    const existing = this.#files.get(id);
+    if (!existing || existing.status === "deleted") return null;
+    if (input.status === "ready" && this.#deletingSessionIds.has(existing.session_id)) return null;
+    const timestamp = this.#now();
+    const status = input.status ?? existing.status;
+    const updated: WorkspaceFileRecord = {
+      ...existing,
+      ...input,
+      status,
+      ready_at: status === "ready" ? (existing.ready_at ?? timestamp) : existing.ready_at,
+      failed_at: status === "failed" ? (existing.failed_at ?? timestamp) : existing.failed_at,
+      deleted_at: status === "deleted" ? (existing.deleted_at ?? timestamp) : existing.deleted_at,
+      updated_at: timestamp,
+    };
+    this.#files.set(id, updated);
+    return clone(updated);
+  }
+
+  deleteFile(id: string): boolean {
+    return this.updateFile(id, { status: "deleted" }) !== null;
+  }
+
   appendMessage<TParts = unknown>(input: { session_id?: string | null; id?: string; role: WorkspaceMessageRecord<TParts>["role"]; content?: string | null; parts?: TParts | null }): WorkspaceMessageRecord<TParts> {
     const session = this.ensureSession(input.session_id);
     const messages = this.#messages.get(session.id) ?? [];
     const id = input.id?.trim() || this.#nextId("workspace-message");
-    const existing = messages.find((message) => message.id === id);
-    if (existing) return clone(existing as WorkspaceMessageRecord<TParts>);
+    const existing = [...this.#messages.values()].flat().find((message) => message.id === id);
+    if (existing) {
+      assertSameWorkspaceMessage(existing, session.id, input);
+      return clone(existing as WorkspaceMessageRecord<TParts>);
+    }
 
     const message: WorkspaceMessageRecord<TParts> = {
       id,
@@ -2062,12 +2454,17 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
       .map(clone);
   }
 
-  createRun(input: { id?: string; session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord {
+  createRun(input: { id?: string; session_id?: string | null; user_message_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord {
     const session = this.ensureSession(input.session_id);
+    if (input.user_message_id != null) {
+      const message = (this.#messages.get(session.id) ?? []).find(({ id }) => id === input.user_message_id);
+      if (!message || message.role !== "user") throw new Error("Run user_message_id must reference a user message in the same session.");
+    }
     const timestamp = this.#now();
     const run: WorkspaceRunRecord = {
       id: input.id?.trim() || this.#nextId("workspace-run"),
       session_id: session.id,
+      user_message_id: input.user_message_id ?? null,
       message_id: input.message_id ?? null,
       status: "running",
       resumable: false,
@@ -2246,9 +2643,40 @@ function normalizeLanguage(language?: string | null, content = ""): string {
   return "markdown";
 }
 
+function assertValidWorkspaceFileMetadata(input: WorkspaceFileCreateInput | WorkspaceFileUpdateInput, create: boolean): void {
+  if (create) {
+    const candidate = input as WorkspaceFileCreateInput;
+    if (!candidate.storage_key?.trim()) throw new TypeError("Workspace file storage_key is required.");
+    if (!candidate.original_filename?.trim()) throw new TypeError("Workspace file original_filename is required.");
+    if (!candidate.media_type?.trim()) throw new TypeError("Workspace file media_type is required.");
+  }
+  if (input.byte_size !== undefined && (!Number.isSafeInteger(input.byte_size) || input.byte_size < 0)) {
+    throw new RangeError("Workspace file byte_size must be a non-negative safe integer.");
+  }
+  if (input.provider_references_expires_at && Number.isNaN(Date.parse(input.provider_references_expires_at))) {
+    throw new TypeError("Workspace file provider_references_expires_at must be an ISO timestamp.");
+  }
+  if (input.provider_references && Object.entries(input.provider_references).some(([provider, reference]) => !provider.trim() || !reference.trim())) {
+    throw new TypeError("Workspace file provider_references must contain non-empty provider/reference strings.");
+  }
+}
+
 function clone<T>(value: T): T {
   if (value === undefined || value === null) return value;
   return structuredClone(value);
+}
+
+function assertSameWorkspaceMessage<TParts>(existing: Pick<WorkspaceMessageRecord<TParts>, "id" | "session_id" | "role" | "content" | "parts">, sessionId: string, input: { role: WorkspaceMessageRecord<TParts>["role"]; content?: string | null; parts?: TParts | null }): void {
+  const parts = input.parts ?? null;
+  if (existing.session_id !== sessionId || existing.role !== input.role || existing.content !== (input.content ?? "") || stableJson(existing.parts) !== stableJson(parts)) {
+    throw new Error(`Workspace message id "${existing.id}" already exists with a different payload.`);
+  }
+}
+
+function stableJson(value: unknown): string | undefined {
+  return JSON.stringify(value, (_key, child) => child && typeof child === "object" && !Array.isArray(child)
+    ? Object.fromEntries(Object.entries(child).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0))
+    : child);
 }
 
 function safeStringify(value: unknown): string {

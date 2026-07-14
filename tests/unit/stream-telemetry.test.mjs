@@ -70,7 +70,7 @@ async function readAll(stream) {
   const events = [];
   const stream = new ReadableStream({
     start(controller) {
-      controller.error(new Error("upstream exploded"));
+      controller.error(new Error("Google provider failed for files/raw-ref at https://example.invalid/private: arbitrary model text"));
     },
   });
 
@@ -78,13 +78,15 @@ async function readAll(stream) {
     readAll(instrumentGenerateStream(stream, { requestId: "req-fail", startedAt: Date.now() }, async (event) => {
       events.push(event);
     })),
-    /upstream exploded/,
+    /Run interrupted/,
   );
 
   assert.equal(events.length, 1);
   assert.equal(events[0].event, "api.generate.stream_failed");
   assert.equal(events[0].ok, false);
-  assert.equal(events[0].error, "upstream exploded");
+  assert.equal(events[0].error, "Run interrupted");
+  assert.equal(JSON.stringify(events).includes("files/raw-ref"), false);
+  assert.equal(JSON.stringify(events).includes("arbitrary model text"), false);
 }
 
 {

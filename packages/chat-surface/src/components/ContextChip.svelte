@@ -3,6 +3,8 @@
 
   export interface ContextChipProps {
     item: AgentContextItem;
+    /** Opens/details the referenced context without removing it. */
+    onOpen?: (item: AgentContextItem) => void;
     /** Read-only chips (message provenance) omit the remove button. */
     onRemove?: (id: string) => void;
     /** Test id forwarded to the chip element. */
@@ -13,7 +15,7 @@
 <script lang="ts">
   import { agentContextKindLabel, agentContextDetailLine } from "@sonik-agent-ui/tool-contracts/run-context";
 
-  let { item, onRemove, testId }: ContextChipProps = $props();
+  let { item, onOpen, onRemove, testId }: ContextChipProps = $props();
 
   // Hover/focus reveals a minimal card: kind label + primary locator. Mirrors
   // Open Design's ContextChipHoverCard — intentionally lightweight (type + one
@@ -36,8 +38,15 @@
   role="group"
   aria-label={`${kindLabel}: ${item.label}`}
 >
-  <span class="h-1.5 w-1.5 rounded-full bg-current opacity-50"></span>
-  <span class="max-w-[12rem] truncate font-medium">{item.label}</span>
+  <button
+    type="button"
+    class="inline-flex min-w-0 items-center gap-1.5 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    aria-label={`Open details for ${item.label}`}
+    onclick={() => onOpen?.(item)}
+  >
+    <span class="h-1.5 w-1.5 rounded-full bg-current opacity-50"></span>
+    <span class="max-w-[12rem] truncate font-medium">{item.label}</span>
+  </button>
   {#if onRemove}
     <button
       type="button"

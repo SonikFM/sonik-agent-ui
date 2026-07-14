@@ -1,0 +1,64 @@
+{
+  "manifest": "copy-retrofit",
+  "name": "composer-context-tools",
+  "createdAt": "2026-07-13",
+  "status": "implemented",
+  "intent": "Reimplement the approved composer context interaction patterns on Sonik's existing Svelte context-selection and runtime-settings seams.",
+  "provenance": [
+    {
+      "source": "Onyx",
+      "revision": "3deadb6bce1784af82bfcdf2e481a69a3cd0050d",
+      "license": "MIT outside ee/",
+      "inspectedSourcePaths": [
+        "web/src/refresh-components/popovers/ActionsPopover/index.tsx",
+        "web/src/refresh-components/popovers/ActionsPopover/MCPLineItem.tsx"
+      ],
+      "use": "Search-to-server drill-down and independent enabled/pinned states",
+      "copy": "zero source lines copied; behavior reimplemented in Svelte"
+    },
+    {
+      "source": "Open Design",
+      "revision": "4567a0d57557b29eb79ef1f7a40826f2b801d982",
+      "license": "Apache-2.0",
+      "inspectedSourcePaths": [
+        "apps/web/src/components/ContextChipStrip.tsx",
+        "apps/web/src/components/ContextChipHoverCard.tsx"
+      ],
+      "use": "Unified staged-context row and sibling details/remove controls",
+      "copy": "zero source lines copied; existing Sonik ContextChip extended"
+    },
+    {
+      "source": "OpenWebUI",
+      "revision": "ecd48e2f718220a6400ecf49eafd4867a38feb10",
+      "license": "BSD-3 plus branding clause",
+      "inspectedSourcePaths": [
+        "src/lib/components/chat/Messages/Markdown.svelte",
+        "src/lib/utils/marked/mention-extension.ts"
+      ],
+      "use": "Trigger registration concept only",
+      "copy": "zero source lines copied; Tier B reimplementation"
+    },
+    {
+      "source": "Odysseus",
+      "revision": "df2fad2881a98d5d43772de9e3058162f06de93a",
+      "license": "AGPL-3.0-or-later",
+      "inspectedSourcePaths": [
+        "static/js/fileHandler.js"
+      ],
+      "use": "Technique-only file collapse and per-file state",
+      "copy": "zero source lines copied; no donor artifacts or code"
+    }
+  ],
+  "constraints": {
+    "newDependencies": false,
+    "grantsIssuedByComposer": false,
+    "binaryUploadClaim": false,
+    "localStorage": false,
+    "multiplePins": true
+  },
+  "verification": [
+    "tests/unit/composer-context-tools.test.mjs",
+    "scripts/check-agent-ui-coverage.ts",
+    "pnpm check-types"
+  ]
+}

@@ -5,17 +5,21 @@ import {
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
+  type ModelMessage,
   type UIMessage,
   type UIMessageChunk,
 } from "ai";
+import { createGoogle } from "@ai-sdk/google";
 import { pipeJsonRender, pipeUiMessageStreamSafety, type Spec } from "@json-render/core";
 import { pipeArtifactToolOutputsToSpecParts } from "$lib/artifacts/artifact-stream";
 import { logArtifactTelemetry } from "$lib/artifacts/artifact-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
+import { sanitizeRunFailure } from "$lib/server/run-error-safety";
 import { createDeploymentMetadataHeaders, resolveDeploymentMetadata } from "$lib/server/deployment-metadata";
 import { createTelemetryCorrelation, sanitizePageContext } from "@sonik-agent-ui/agent-observability";
-import { classifyRunErrorCode, sanitizeAgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
+import { sanitizeAgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
 import {
+  hasInvalidExplicitDocumentContext,
   parseAgentRunContextSelection,
   resolveAgentContextSelection,
   type AgentContextSelectionResolution,
@@ -25,9 +29,10 @@ import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
 import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-transport";
 import { tapSpecStreamForTelemetry } from "$lib/server/spec-stream-tap-telemetry";
 import { createDevSmokeStream, readDevSmokeFailMode, readDevSmokeRunId, readDevSmokeScenario, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
-import { startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
+import { persistInitiatingUserMessage, startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
 import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord, type WorkspaceSessionRecord } from "$lib/server/workspace-request-store";
-import { resolveEffectiveContextDocument } from "$lib/server/run-context-document";
+import { resolveEffectiveContextDocument, syncSessionContextDocument } from "$lib/server/run-context-document";
+import { AGENT_UI_GOOGLE_PREPROCESSING_BUDGET_MS, AgentUiFileError, requireAgentUiFileBucket, resolveAgentUiFileContextSelection, resolveAgentUiWorkspaceSession, resolveGoogleAgentUiFileParts, type AgentUiFileBucket, type AgentUiModelFilePart } from "$lib/server/agent-ui-files";
 import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings, type AgentRuntimeSettings } from "$lib/agent-settings";
@@ -46,7 +51,7 @@ import {
   createAgentHostSessionEnvelope,
   approvedCommandIdsFromHostSession,
 } from "$lib/server/host-command-runtime";
-import { AGENT_UI_HOST_CONTEXT_HEADER, resolveSignedTrustedOrganizationDisplayFromRequest } from "$lib/server/workspace-services";
+import { AGENT_UI_HOST_CONTEXT_HEADER, resolveSignedTrustedOrganizationDisplayFromRequest, resolveTrustedHostSessionSnapshot } from "$lib/server/workspace-services";
 import { sanitizeAgentHostPageContext } from "@sonik-agent-ui/agent-embed";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
 import {
@@ -88,8 +93,6 @@ function resolveRequestSkillIds(input: { requestSkillIds: unknown; selectedSkill
     : [];
   return [...new Set([...fromRequest, ...input.selectedSkillFamilies, ...(input.implicitSkillIds ?? [])])].slice(0, AGENT_SKILL_IDS_MAX_ITEMS);
 }
-
-
 
 function resolveAgentPageContext(value: unknown, defaults: { activeDocument?: WorkspaceDocumentRecord | null } = {}): AgentPageContext | undefined {
   const record = typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -222,6 +225,15 @@ function resolveLatestUserMessage(messages: UIMessage[]): string {
   return readUiMessageText(userMessage).trim();
 }
 
+function rejectUntrustedFileMessageParts(messages: UIMessage[]): void {
+  for (const message of messages) {
+    const parts = Array.isArray(message.parts) ? message.parts : [];
+    if (parts.some((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "file")) {
+      throw new AgentUiFileError(400, "File attachments must use selected file IDs");
+    }
+  }
+}
+
 function shouldRequestConversationTitle(input: { session: WorkspaceSessionRecord | null; analyticsHints?: { isFirstRun?: boolean } | null; fallbackTitle: string }): boolean {
   const session = input.session;
   if (!session) return false;
@@ -344,9 +356,13 @@ function resolveGenerateFailureStatus(error: unknown): number {
   if (error instanceof MalformedJsonRequestError) return 400;
   if ((typeof error === "object" || typeof error === "function") && error !== null && "status" in error) {
     const status = (error as { status?: unknown }).status;
-    if (status === 400 || status === 413) return status;
+    if ([400, 413].includes(Number(status))) return Number(status);
   }
   return 500;
+}
+
+function resolveGenerateFailureMessage(status: number): string {
+  return status === 500 ? "Generation failed" : "Invalid request";
 }
 
 function createGenerateFailureResponse(input: {
@@ -356,7 +372,7 @@ function createGenerateFailureResponse(input: {
 }): Response {
   const status = resolveGenerateFailureStatus(input.error);
   return new Response(
-    JSON.stringify({ error: status === 500 ? "Generation failed" : "Invalid request" }),
+    JSON.stringify({ error: resolveGenerateFailureMessage(status) }),
     {
       status,
       headers: {
@@ -366,6 +382,28 @@ function createGenerateFailureResponse(input: {
       },
     },
   );
+}
+
+async function finalizeRunFailure(runRecorder: RunRecorder | null, error: unknown): Promise<void> {
+  if (!runRecorder) return;
+  const failure = sanitizeRunFailure(error, { resumable: true });
+  await runRecorder.finalize({ status: "failed", error: failure.message, errorCode: failure.code, resumable: true });
+}
+
+function appendFilePartsToLatestUserMessage(messages: ModelMessage[], fileParts: AgentUiModelFilePart[]): ModelMessage[] {
+  if (fileParts.length === 0) return messages;
+  const index = messages.findLastIndex((message) => message.role === "user");
+  if (index < 0) throw new AgentUiFileError(400, "A user message is required for file attachments");
+  return messages.map((message, messageIndex) => {
+    if (messageIndex !== index || message.role !== "user") return message;
+    const content = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content;
+    return { ...message, content: [...content, ...fileParts] };
+  });
+}
+
+function resolveDirectGoogleModelId(modelId: string | undefined): string {
+  if (!modelId?.startsWith("google/")) throw new AgentUiFileError(400, "Selected files require a direct Google model");
+  return modelId.slice("google/".length);
 }
 
 export const POST: RequestHandler = async (event) => {
@@ -384,14 +422,39 @@ export const POST: RequestHandler = async (event) => {
   const traceId = correlation.traceId;
   const traceparent = correlation.traceparent;
   const startedAt = Date.now();
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0] ?? "anonymous";
+  const ip = event.getClientAddress();
+  let runRecorder: RunRecorder | null = null;
 
+  try {
+  const body = await request.json().catch((error) => {
+    throw new MalformedJsonRequestError(error);
+  });
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return new Response(JSON.stringify({ error: "request body object is required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", ...responseHeaders },
+    });
+  }
+  const uiMessages = body.messages as UIMessage[];
+  if (!Array.isArray(uiMessages) || uiMessages.length === 0) {
+    return new Response(JSON.stringify({ error: "messages array is required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", ...responseHeaders },
+    });
+  }
+  const rawRunContextSelection = body?.contextSelection ?? body?.workspace?.contextSelection;
+  const parsedRunContextSelection = parseAgentRunContextSelection(rawRunContextSelection);
+  const selectionResolution = resolveAgentContextSelection(parsedRunContextSelection);
+  if (hasInvalidExplicitDocumentContext(rawRunContextSelection) || selectionResolution.invalidDocumentSelection) {
+    return new Response(JSON.stringify({ error: "Invalid document context selection" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", ...responseHeaders },
+    });
+  }
   const [minuteResult, dailyResult] = await Promise.all([
     minuteRateLimit.limit(ip),
     dailyRateLimit.limit(ip),
   ]);
-
   if (!minuteResult.success || !dailyResult.success) {
     const isMinuteLimit = !minuteResult.success;
     return new Response(
@@ -407,37 +470,41 @@ export const POST: RequestHandler = async (event) => {
       },
     );
   }
-
-  try {
-  const body = await request.json().catch((error) => {
-    throw new MalformedJsonRequestError(error);
-  });
-  const uiMessages: UIMessage[] = body.messages;
-  const workspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
-  const requestPersistence = getRequestWorkspacePersistence(event);
-  const activeDocument = await resolveActiveDocumentForRequest(event, body?.workspace?.activeDocument);
-  const telemetrySessionId = activeDocument?.session_id ?? workspaceSessionId;
+  const requestedWorkspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
+  const trustedWorkspace = requestedWorkspaceSessionId ? await resolveAgentUiWorkspaceSession(event, { sessionId: requestedWorkspaceSessionId }) : null;
+  const workspaceSessionId = trustedWorkspace?.sessionId;
+  const requestPersistence = trustedWorkspace?.persistence ?? getRequestWorkspacePersistence(event);
+  const hasSelectedWorkspaceContext = selectionResolution.fileIds.length > 0 || selectionResolution.documentIds.length > 0;
+  if (hasSelectedWorkspaceContext && !workspaceSessionId) {
+    throw new AgentUiFileError(400, "Selected file and document context requires a workspace session");
+  }
+  const activeDocument = await resolveActiveDocumentForRequest(event, body?.workspace?.activeDocument, hasSelectedWorkspaceContext ? workspaceSessionId : undefined);
+  const telemetrySessionId = hasSelectedWorkspaceContext ? workspaceSessionId : activeDocument?.session_id ?? workspaceSessionId;
   const smokeRunId = readDevSmokeRunId(request);
+  const hostSession = createAgentHostSessionEnvelope(event);
+  const trustedHostSession = trustedWorkspace?.auth ?? resolveTrustedHostSessionSnapshot(event);
   // Explicit composer context selection wins over implicit host/page context.
   // When the user deselected the active-document chip, includeActiveDocument is
   // false and the document is neither injected nor exposed to the agent for this
   // turn (authoritative removal at the server boundary). Absent selection keeps
   // the current implicit behavior.
-  const runContextSelection: AgentRunContextSelection | undefined = parseAgentRunContextSelection(body?.contextSelection ?? body?.workspace?.contextSelection);
-  const selectionResolution = resolveAgentContextSelection(runContextSelection);
+  const runContextSelection: AgentRunContextSelection | undefined = parsedRunContextSelection
+    ? await resolveAgentUiFileContextSelection({ selection: parsedRunContextSelection, sessionId: workspaceSessionId, auth: trustedHostSession, persistence: requestPersistence })
+    : undefined;
+  const authorizedSelectionResolution = resolveAgentContextSelection(runContextSelection);
   // Feed the chip-selected document's content (loaded from session-scoped
   // persistence) rather than always the request's active document, so a non-active
   // document selection actually reaches the agent. Out-of-scope ids are ignored.
   const effectiveActiveDocument = await resolveEffectiveContextDocument({
-    includeActiveDocument: selectionResolution.includeActiveDocument,
-    selectedDocumentId: selectionResolution.documentIds[0],
+    includeActiveDocument: authorizedSelectionResolution.includeActiveDocument,
+    selectedDocumentId: authorizedSelectionResolution.documentIds[0],
     requestActiveDocument: activeDocument,
     sessionId: telemetrySessionId,
     loadDocument: (id) => getRequestWorkspaceDocument(event, id),
   });
   const pageContext = applyRunContextSelectionToPageContext(
     resolveAgentPageContext(body?.pageContext ?? body?.workspace?.pageContext, { activeDocument: effectiveActiveDocument }),
-    selectionResolution,
+    authorizedSelectionResolution,
   );
   const telemetryPageContext = sanitizePageContext(body?.pageContext ?? body?.workspace?.pageContext);
   const pageContextSource = resolvePageContextSource(body, activeDocument);
@@ -452,7 +519,6 @@ export const POST: RequestHandler = async (event) => {
   // silently downgrades the booking runtime to anonymous — that failure must
   // be loud in telemetry, not discovered via runtime_unavailable denials.
   const hostContextHeaderRejected = rawHostContextHeaderLength > 0 && bookingRuntimeAuth.mode !== "signed-host-context";
-  const hostSession = createAgentHostSessionEnvelope(event);
   const approvedCommandIds = approvedCommandIdsFromHostSession(hostSession);
   // Analytics-only run hints (entryFrom / turnIndex / isFirstRun /
   // hasExistingArtifact). Sanitized + bounded here and used ONLY for run and
@@ -460,17 +526,13 @@ export const POST: RequestHandler = async (event) => {
   // tool inputs. Absent/dropped hints reproduce today's behavior.
   const analyticsHints = sanitizeAgentAnalyticsHints(body?.analyticsHints ?? body?.workspace?.analyticsHints);
 
-  if (!uiMessages || !Array.isArray(uiMessages) || uiMessages.length === 0) {
-    return new Response(
-      JSON.stringify({ error: "messages array is required" }),
-      {
-        status: 400,
-        headers: { "Content-Type": "application/json", ...responseHeaders },
-      },
-    );
-  }
+  rejectUntrustedFileMessageParts(uiMessages);
 
   const lastMessage = uiMessages.at(-1);
+  const hasValidRegenerateTarget = body.trigger !== "regenerate-message" || typeof body.messageId === "string" && body.messageId.trim();
+  const activeUserMessage = hasValidRegenerateTarget && lastMessage?.role === "user" && typeof lastMessage.id === "string" && lastMessage.id.trim()
+    ? lastMessage
+    : undefined;
   const firstUserMessage = resolveFirstUserMessage(uiMessages);
   const latestUserMessage = resolveLatestUserMessage(uiMessages);
   // Load the active artifact's spec up front (F2 fix, 2026-07-08): the skill-intent guard needs
@@ -533,7 +595,7 @@ export const POST: RequestHandler = async (event) => {
     ? []
     : resolveRequestSkillIds({
         requestSkillIds: [...(Array.isArray(body?.skillIds ?? body?.workspace?.skillIds) ? (body?.skillIds ?? body?.workspace?.skillIds) : []), ...agentRuntimeSettings.skillIds],
-        selectedSkillFamilies: selectionResolution.skillFamilies,
+        selectedSkillFamilies: authorizedSelectionResolution.skillFamilies,
         implicitSkillIds,
       });
   // Slice E toolset stability (2026-07-08): decide + telemetry the booking command-family mount
@@ -570,6 +632,38 @@ export const POST: RequestHandler = async (event) => {
   void writeAgentTelemetry(startEvent).catch(() => undefined);
 
   const modelMessages = await convertToModelMessages(uiMessages);
+  const selectedFileIds = authorizedSelectionResolution.fileIds;
+  if (selectedFileIds.length > 0 && agentRuntimeSettings.requireZdr) {
+    throw new AgentUiFileError(400, "Selected files are incompatible with Gateway zero-data-retention mode");
+  }
+  if (selectedFileIds.length > 0 && !env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    throw new AgentUiFileError(503, "Google file processing is unavailable");
+  }
+  const directGoogleModelId = selectedFileIds.length > 0 ? resolveDirectGoogleModelId(agentRuntimeSettings.modelId) : null;
+  const googleDeadlineAt = selectedFileIds.length > 0 ? Date.now() + AGENT_UI_GOOGLE_PREPROCESSING_BUDGET_MS : undefined;
+  const googleAbortController = selectedFileIds.length > 0 ? new AbortController() : null;
+  const googleDeadlineTimer = googleAbortController ? setTimeout(() => googleAbortController.abort(), AGENT_UI_GOOGLE_PREPROCESSING_BUDGET_MS) : null;
+  const google = googleAbortController
+    ? createGoogle({ apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY, fetch: (url, init) => fetch(url, { ...init, signal: init?.signal ? AbortSignal.any([googleAbortController.signal, init.signal]) : googleAbortController.signal }) })
+    : null;
+  let fileParts: AgentUiModelFilePart[] = [];
+  try {
+    fileParts = google && workspaceSessionId
+      ? await resolveGoogleAgentUiFileParts({
+          fileIds: selectedFileIds,
+          sessionId: workspaceSessionId,
+          auth: trustedHostSession,
+          persistence: requestPersistence,
+          bucket: requireAgentUiFileBucket(event.platform?.env?.AGENT_UI_FILES_BUCKET as AgentUiFileBucket | undefined),
+          filesApi: google.files(),
+          deadlineAt: googleDeadlineAt,
+          abortSignal: googleAbortController?.signal,
+        })
+      : [];
+  } finally {
+    if (googleDeadlineTimer) clearTimeout(googleDeadlineTimer);
+  }
+  const messagesWithFiles = appendFilePartsToLatestUserMessage(modelMessages, fileParts);
   const contextSummary = summarizeWorkspaceContext({ activeDocument: effectiveActiveDocument });
   const includeStartupIndexes = !productTourIntent;
   const commandIndexSummary = includeStartupIndexes
@@ -600,8 +694,8 @@ export const POST: RequestHandler = async (event) => {
     : "";
   const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, knowledgeContext, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
-    ? [{ role: "system" as const, content: systemContext }, ...modelMessages]
-    : modelMessages;
+    ? [{ role: "system" as const, content: systemContext }, ...messagesWithFiles]
+    : messagesWithFiles;
   void writeAgentTelemetry({
     source: "server",
     event: "api.generate.command_index_context",
@@ -670,19 +764,20 @@ export const POST: RequestHandler = async (event) => {
     pageContext: telemetryPageContext,
     ok: true,
   }).catch(() => undefined);
-  // A run is one persisted, resumable agent turn. Requires a session to key the
-  // run to; without one (or when cloud persistence lacks host context) the
-  // recorder is null and we degrade to the existing non-persisted streaming.
-  const runRecorder: RunRecorder | null = telemetrySessionId
-    ? await startRunRecorder(requestPersistence, {
-        sessionId: telemetrySessionId,
-        messageId: null,
-        correlation,
-        contextSelection: runContextSelection ?? null,
-        promptComposition: { moduleIds: promptComposition.moduleIds, skillIds: promptComposition.skillIds, implicitSkillIds },
-        analyticsHints: analyticsHints ?? null,
-      })
-    : null;
+  // A run is one persisted, resumable agent turn. Requests without a session keep
+  // the existing non-persisted stream; session-backed turns fail before model
+  // execution if the durable run cannot be created.
+  if (telemetrySessionId) {
+    await persistInitiatingUserMessage({ persistence: requestPersistence, sessionId: telemetrySessionId, message: activeUserMessage });
+    runRecorder = await startRunRecorder(requestPersistence, {
+      sessionId: telemetrySessionId,
+      userMessageId: activeUserMessage?.id ?? null,
+      correlation,
+      contextSelection: runContextSelection ?? null,
+      promptComposition: { moduleIds: promptComposition.moduleIds, skillIds: promptComposition.skillIds, implicitSkillIds },
+      analyticsHints: analyticsHints ?? null,
+    });
+  }
 
   if (shouldUseDevSmokeStream(request)) {
     const smokeInput = {
@@ -716,7 +811,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent, model: google && directGoogleModelId ? google(directGoogleModelId) : undefined });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });
@@ -785,7 +880,7 @@ export const POST: RequestHandler = async (event) => {
           waitingMs: 10_000,
           waitingIntervalMs: 20_000,
         });
-        writer.merge((runRecorder ? teeRunEvents(instrumented, runRecorder) : instrumented) as ReadableStream<UIMessageChunk>);
+        writer.merge(instrumented as ReadableStream<UIMessageChunk>);
         void writeAgentTelemetry({
           source: "server",
           event: "api.generate.stream_attached",
@@ -802,8 +897,7 @@ export const POST: RequestHandler = async (event) => {
         }).catch(() => undefined);
       },
       onError: (error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        void runRecorder?.finalize({ status: "failed", error: message, errorCode: classifyRunErrorCode({ message }), resumable: true });
+        const failure = sanitizeRunFailure(error, { fallbackCode: "AGENT_STREAM_FAILED", resumable: true });
         void writeAgentTelemetry({
           source: "server",
           event: "api.generate.stream_error",
@@ -815,19 +909,19 @@ export const POST: RequestHandler = async (event) => {
           messageId: lastMessage?.id,
           durationMs: Date.now() - startedAt,
           ok: false,
-          error: message,
+          error: failure.message,
         }).catch(() => undefined);
         return "Generation failed";
       },
     });
 
-    const response = createUIMessageStreamResponse({ stream });
+    const response = createUIMessageStreamResponse({ stream: runRecorder ? teeRunEvents(stream, runRecorder) : stream });
     for (const [key, value] of Object.entries(responseHeaders)) response.headers.set(key, value);
     if (runRecorder) response.headers.set(AGENT_UI_RUN_ID_HEADER, runRecorder.runId);
     return response;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    void runRecorder?.finalize({ status: "failed", error: message, errorCode: classifyRunErrorCode({ message }), resumable: true });
+    const failure = sanitizeRunFailure(error, { resumable: true });
+    await finalizeRunFailure(runRecorder, error);
     void writeAgentTelemetry({
       source: "server",
       event: "api.generate.error",
@@ -839,12 +933,13 @@ export const POST: RequestHandler = async (event) => {
       messageId: lastMessage?.id,
       durationMs: Date.now() - startedAt,
       ok: false,
-      error: message,
+      error: failure.message,
     }).catch(() => undefined);
     return createGenerateFailureResponse({ error, responseHeaders, runRecorder });
   }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const failure = sanitizeRunFailure(error, { resumable: true });
+    await finalizeRunFailure(runRecorder, error);
     void writeAgentTelemetry({
       source: "server",
       event: "api.generate.error",
@@ -853,16 +948,22 @@ export const POST: RequestHandler = async (event) => {
       traceparent,
       durationMs: Date.now() - startedAt,
       ok: false,
-      error: message,
+      error: failure.message,
     }).catch(() => undefined);
-    return createGenerateFailureResponse({ error, responseHeaders });
+    return createGenerateFailureResponse({ error, responseHeaders, runRecorder });
   }
 };
 
-
-async function resolveActiveDocumentForRequest(event: RequestEvent, value: unknown): Promise<WorkspaceDocumentRecord | null> {
+async function resolveActiveDocumentForRequest(event: RequestEvent, value: unknown, sessionId?: string): Promise<WorkspaceDocumentRecord | null> {
   const snapshot = _resolveActiveDocument(value, { sync: false });
-  return snapshot?.id ? syncRequestActiveWorkspaceDocumentSnapshot(event, snapshot) : snapshot;
+  if (!snapshot?.id) return snapshot;
+  if (!sessionId) return syncRequestActiveWorkspaceDocumentSnapshot(event, snapshot);
+  return syncSessionContextDocument({
+    document: snapshot,
+    sessionId,
+    loadDocument: (id) => getRequestWorkspaceDocument(event, id),
+    syncDocument: (document) => syncRequestActiveWorkspaceDocumentSnapshot(event, document),
+  });
 }
 
 export function _resolveActiveDocument(value: unknown, options: { sync?: boolean } = {}): WorkspaceDocumentRecord | null {

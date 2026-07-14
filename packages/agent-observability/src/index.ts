@@ -189,6 +189,11 @@ export interface AgentUiPageControl {
     clearArtifact: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     reloadSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     openWorkspaceDocument: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    stageComposerSkill?: (input: { skillId?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    setComposerToolPermission?: (input: { familyId?: string; mode?: "off" | "ask" | "allow" }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    pinComposerTool?: (input: { toolId?: string; pinned?: boolean }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    removeComposerContext?: (input: { contextId?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    attachComposerDocument?: (input: { documentId?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     submitAnswer: (input: { questionId?: string; value?: unknown }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     markUnknown: (input: { questionId?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     saveDraft: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
@@ -286,6 +291,10 @@ const MAX_STRING_LENGTH = 2_000;
 const MAX_LIST_ITEMS = 8;
 const SECRET_KEY_PATTERN = /(authorization|api[-_]?key|token|secret|password|cookie|set-cookie|credential|session[_-]?token|vck_[a-z0-9]+)/i;
 const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
+const PROVIDER_PRIVATE_KEY_PATTERN = /^(?:provider(?:metadata|data|options|request|response|id|name|ref|reference|references)?|model(?:metadata|data|options|request|response|id|name)?)$/;
+const FAILURE_KEY_PATTERN = /(error|failure|exception)/i;
+const SAFE_FAILURE_STRING_KEYS = /^(schemaVersion|eventId|source|event|runId|phase|requestId|traceId|traceparent|sessionId|messageId|toolCallId|toolName|artifactId|documentId|commandId|familyId|operationId|stableInputHash|code|error_code|status|kind|type|manifestType|severity|effect|approval|method|at|surface|commandFamily|commandSource|commandEffect|runtimeStatus|hostSessionSource|loadMode|contextSource|mode|activeSessionId|activeArtifactId|activeDocumentId|pageType|conversationStatus)$/i;
+const SAFE_TELEMETRY_ERROR = "Run failed";
 
 export function createRequestId(prefix = "req"): string {
   return `${prefix}_${safeRandomId(18)}`;
@@ -328,15 +337,11 @@ export function createTelemetryCorrelation(input: { requestId?: unknown; tracepa
 }
 
 export function createTelemetryEvent<TPayload = Record<string, unknown>>(event: AgentTelemetryEvent<TPayload>): AgentTelemetryEvent<TPayload> {
-  return sanitizeTelemetryEvent({
-    schemaVersion: AGENT_UI_TELEMETRY_SCHEMA_VERSION,
-    eventId: event.eventId ?? createRequestId("evt"),
-    at: event.at ?? new Date().toISOString(),
-    ...event,
-  });
+  return sanitizeTelemetryEvent(event);
 }
 
 export function sanitizeTelemetryEvent<TPayload = Record<string, unknown>>(event: AgentTelemetryEvent<TPayload>): AgentTelemetryEvent<TPayload> {
+  const errorBearing = event.ok === false || typeof event.error === "string" || FAILURE_KEY_PATTERN.test(event.event) || containsFailureKey(event.payload);
   const payload: AgentTelemetryEvent = {
     ...event,
     schemaVersion: event.schemaVersion ?? AGENT_UI_TELEMETRY_SCHEMA_VERSION,
@@ -378,13 +383,14 @@ export function sanitizeTelemetryEvent<TPayload = Record<string, unknown>>(event
     totalMatches: cleanOptionalNumber(event.totalMatches),
     durationMs: cleanOptionalNumber(event.durationMs),
     ok: typeof event.ok === "boolean" ? event.ok : undefined,
-    error: cleanOptionalString(event.error),
-    payload: sanitizeTelemetryValue(event.payload) as Record<string, unknown> | undefined,
+    error: typeof event.error === "string" ? SAFE_TELEMETRY_ERROR : undefined,
+    payload: event.payload as Record<string, unknown> | undefined,
     pageContext: sanitizePageContext(event.pageContext),
     at: event.at ?? new Date().toISOString(),
   };
 
-  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== "")) as AgentTelemetryEvent<TPayload>;
+  const clean = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== ""));
+  return sanitizeTelemetryValue(clean, 0, errorBearing) as AgentTelemetryEvent<TPayload>;
 }
 
 export function sanitizePageContext(value: unknown): AgentUiPageContextSnapshot | undefined {
@@ -531,24 +537,30 @@ function sanitizeWorkflowCommandPreview(value: unknown): AgentUiWorkflowCommandP
   return { commandId, stableInputHash, effect, approvalRequired: record.approvalRequired === true };
 }
 
-export function sanitizeTelemetryValue(value: unknown, depth = 0): unknown {
+export function sanitizeTelemetryValue(value: unknown, depth = 0, errorBearing = false, key = ""): unknown {
   if (value === undefined || value === null) return value;
-  if (typeof value === "string") return redactTelemetryString(value);
+  if (typeof value === "string") return errorBearing && !SAFE_FAILURE_STRING_KEYS.test(key) ? SAFE_TELEMETRY_ERROR : redactTelemetryString(value);
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return value.toString();
-  if (value instanceof Error) return readableError(value);
-  if (Array.isArray(value)) return value.slice(0, MAX_LIST_ITEMS).map((entry) => sanitizeTelemetryValue(entry, depth + 1));
+  if (value instanceof Error) return errorBearing ? { name: value.name, message: SAFE_TELEMETRY_ERROR } : readableError(value);
+  if (Array.isArray(value)) return value.slice(0, MAX_LIST_ITEMS).map((entry) => sanitizeTelemetryValue(entry, depth + 1, errorBearing, key));
   if (typeof value === "object") {
     if (depth > 4) return "[MaxDepth]";
     const output: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>).slice(0, 48)) {
-      output[redactTelemetryString(key)] = SECRET_KEY_PATTERN.test(key) ? "[REDACTED]" : sanitizeTelemetryValue(entry, depth + 1);
+      if (PROVIDER_PRIVATE_KEY_PATTERN.test(key.replace(/[_-]/g, "").toLowerCase())) continue;
+      output[redactTelemetryString(key)] = SECRET_KEY_PATTERN.test(key) ? "[REDACTED]" : sanitizeTelemetryValue(entry, depth + 1, errorBearing, key);
     }
     return output;
   }
   return String(value);
 }
 
+function containsFailureKey(value: unknown, depth = 0): boolean {
+  if (!value || typeof value !== "object" || depth > 4) return false;
+  if (Array.isArray(value)) return value.some((entry) => containsFailureKey(entry, depth + 1));
+  return Object.entries(value as Record<string, unknown>).some(([key, entry]) => FAILURE_KEY_PATTERN.test(key) || containsFailureKey(entry, depth + 1));
+}
 export function redactTelemetryString(value: string): string {
   const truncated = value.length > MAX_STRING_LENGTH ? `${value.slice(0, MAX_STRING_LENGTH)}…` : value;
   return truncated.replace(SECRET_VALUE_PATTERN, "[REDACTED]");

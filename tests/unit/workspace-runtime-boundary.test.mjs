@@ -264,6 +264,8 @@ assert.equal(singletonBackedRouteCount, localOnlySingletonRouteAllowlist.size, "
 
 const wranglerSource = await readFile("apps/standalone-sveltekit/wrangler.jsonc", "utf8");
 assert.equal(wranglerSource.includes("SONIK_AGENT_UI_ALLOW_UNSIGNED_HOST_CONTEXT"), false, "deployed Worker config must not enable unsigned browser host-context authority");
+assert.equal(wranglerSource.includes('"binding": "AGENT_UI_FILES_BUCKET"'), true, "deployed Worker config must bind the private Agent UI files bucket");
+assert.equal(wranglerSource.includes('"bucket_name": "sonik-agent-ui-context-files"'), true, "deployed Worker config must target the provisioned private Agent UI files bucket");
 
 const servicesSource = await readFile("apps/standalone-sveltekit/src/lib/server/workspace-services.ts", "utf8");
 assert.equal(servicesSource.includes("createCloudWorkspaceRuntime"), true, "cloud runtime should be mounted through the workspace-session adapter");

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { resolveEffectiveContextDocument } from "../../apps/standalone-sveltekit/src/lib/server/run-context-document.ts";
+import { resolveEffectiveContextDocument, syncSessionContextDocument } from "../../apps/standalone-sveltekit/src/lib/server/run-context-document.ts";
 
 const activeDocument = { id: "doc-active", session_id: "session-1", current_content: "active content" };
 const selectedInScope = { id: "doc-selected", session_id: "session-1", current_content: "selected content" };
@@ -17,6 +17,88 @@ function loaderFor(documents) {
   };
 }
 
+// --- selected context rejects a foreign active document before sync ----------
+{
+  const calls = [];
+  await assert.rejects(
+    () => syncSessionContextDocument({
+      document: otherSessionDocument,
+      sessionId: "session-1",
+      loadDocument: async (id) => {
+        calls.push(["load", id]);
+        return otherSessionDocument;
+      },
+      syncDocument: async (document) => {
+        calls.push(["sync", document.id]);
+        return document;
+      },
+    }),
+    /active document.*session/i,
+  );
+  assert.deepEqual(calls, [], "a declared cross-session document is rejected before persistence");
+}
+
+// --- stored ownership wins over an omitted/untrusted snapshot session --------
+{
+  const calls = [];
+  await assert.rejects(
+    () => syncSessionContextDocument({
+      document: { ...activeDocument, session_id: null },
+      sessionId: "session-1",
+      loadDocument: async (id) => {
+        calls.push(["load", id]);
+        return otherSessionDocument;
+      },
+      syncDocument: async (document) => {
+        calls.push(["sync", document.id]);
+        return document;
+      },
+    }),
+    /active document.*session/i,
+  );
+  assert.deepEqual(calls, [["load", "doc-active"]], "authoritative ownership is checked before persistence");
+}
+
+// --- ownership lookup failures abort before sync -----------------------------
+{
+  const calls = [];
+  await assert.rejects(
+    () => syncSessionContextDocument({
+      document: { ...activeDocument, session_id: null },
+      sessionId: "session-1",
+      loadDocument: async (id) => {
+        calls.push(["load", id]);
+        throw new Error("ownership lookup failed");
+      },
+      syncDocument: async (document) => {
+        calls.push(["sync", document.id]);
+        return document;
+      },
+    }),
+    /ownership lookup failed/,
+  );
+  assert.deepEqual(calls, [["load", "doc-active"]], "an ownership read failure must abort before persistence");
+}
+
+// --- matching selected context is bound to the authoritative session ---------
+{
+  const calls = [];
+  const result = await syncSessionContextDocument({
+    document: { ...activeDocument, session_id: null },
+    sessionId: "session-1",
+    loadDocument: async (id) => {
+      calls.push(["load", id]);
+      return null;
+    },
+    syncDocument: async (document) => {
+      calls.push(["sync", document.session_id]);
+      return document;
+    },
+  });
+  assert.equal(result?.session_id, "session-1");
+  assert.deepEqual(calls, [["load", "doc-active"], ["sync", "session-1"]]);
+}
+
 // --- a different, in-scope selected document is loaded and fed ---------------
 {
   const loader = loaderFor([activeDocument, selectedInScope]);
@@ -32,34 +114,39 @@ function loaderFor(documents) {
   assert.deepEqual(loader.calls, ["doc-selected"], "the selected document is loaded once from persistence");
 }
 
-// --- an out-of-scope (different session) selection is ignored ----------------
+// --- an out-of-scope (different session) selection fails closed --------------
 {
   const loader = loaderFor([activeDocument, otherSessionDocument]);
-  const result = await resolveEffectiveContextDocument({
-    includeActiveDocument: true,
-    selectedDocumentId: "doc-other",
-    requestActiveDocument: activeDocument,
-    sessionId: "session-1",
-    loadDocument: loader.load,
-  });
-  assert.equal(result?.id, "doc-active", "a document from another session is not substituted");
-  assert.equal(result?.current_content, "active content", "out-of-scope content never reaches the agent");
+  await assert.rejects(
+    () => resolveEffectiveContextDocument({
+      includeActiveDocument: true,
+      selectedDocumentId: "doc-other",
+      requestActiveDocument: activeDocument,
+      sessionId: "session-1",
+      loadDocument: loader.load,
+    }),
+    /selected document.*session/i,
+  );
+  assert.deepEqual(loader.calls, ["doc-other"]);
 }
 
-// --- a missing selected document falls back to the active document -----------
+// --- a missing selected document fails closed --------------------------------
 {
   const loader = loaderFor([activeDocument]);
-  const result = await resolveEffectiveContextDocument({
-    includeActiveDocument: true,
-    selectedDocumentId: "doc-missing",
-    requestActiveDocument: activeDocument,
-    sessionId: "session-1",
-    loadDocument: loader.load,
-  });
-  assert.equal(result?.id, "doc-active", "a missing selection leaves the request's active document");
+  await assert.rejects(
+    () => resolveEffectiveContextDocument({
+      includeActiveDocument: true,
+      selectedDocumentId: "doc-missing",
+      requestActiveDocument: activeDocument,
+      sessionId: "session-1",
+      loadDocument: loader.load,
+    }),
+    /selected document.*unavailable/i,
+  );
+  assert.deepEqual(loader.calls, ["doc-missing"]);
 }
 
-// --- selecting the already-active document does not re-load -----------------
+// --- selecting the already-active document still verifies canonical storage -
 {
   const loader = loaderFor([activeDocument]);
   const result = await resolveEffectiveContextDocument({
@@ -70,7 +157,26 @@ function loaderFor(documents) {
     loadDocument: loader.load,
   });
   assert.equal(result?.id, "doc-active");
-  assert.deepEqual(loader.calls, [], "no persistence read when the selection is the active document");
+  assert.deepEqual(loader.calls, ["doc-active"]);
+}
+
+// --- ownership lookup failures propagate before downstream side effects ------
+{
+  const calls = [];
+  await assert.rejects(
+    () => resolveEffectiveContextDocument({
+      includeActiveDocument: true,
+      selectedDocumentId: "doc-selected",
+      requestActiveDocument: activeDocument,
+      sessionId: "session-1",
+      loadDocument: async (id) => {
+        calls.push(["load", id]);
+        throw new Error("ownership lookup failed");
+      },
+    }),
+    /ownership lookup failed/,
+  );
+  assert.deepEqual(calls, [["load", "doc-selected"]]);
 }
 
 // --- deselecting the active document feeds no document ----------------------
@@ -87,17 +193,19 @@ function loaderFor(documents) {
   assert.deepEqual(loader.calls, [], "no read when the document context is removed");
 }
 
-// --- no session id: the selection cannot be scoped, so it is ignored ---------
+// --- no session id: an explicit selection fails closed -----------------------
 {
   const loader = loaderFor([activeDocument, selectedInScope]);
-  const result = await resolveEffectiveContextDocument({
-    includeActiveDocument: true,
-    selectedDocumentId: "doc-selected",
-    requestActiveDocument: activeDocument,
-    sessionId: null,
-    loadDocument: loader.load,
-  });
-  assert.equal(result?.id, "doc-active", "without a session the selection cannot be scoped and is ignored");
+  await assert.rejects(
+    () => resolveEffectiveContextDocument({
+      includeActiveDocument: true,
+      selectedDocumentId: "doc-selected",
+      requestActiveDocument: activeDocument,
+      sessionId: null,
+      loadDocument: loader.load,
+    }),
+    /workspace session/i,
+  );
   assert.deepEqual(loader.calls, [], "no unscoped read is performed");
 }
 

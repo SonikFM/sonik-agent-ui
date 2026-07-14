@@ -1,4 +1,4 @@
-import type { AgentContextItem } from "@sonik-agent-ui/tool-contracts/run-context";
+import type { AgentContextItem, AgentRunContextSelection } from "@sonik-agent-ui/tool-contracts/run-context";
 
 // Minimal structural page-context shape this module needs — decoupled from the
 // full AgentUiPageContextSnapshot so it stays trivially testable.
@@ -24,6 +24,12 @@ export interface AgentContextCandidates {
   /** Full attachable catalog for the composer plus menu (seeds + manual-only
    *  sources: active artifact, command families, runtime skills). */
   sources: AgentContextItem[];
+}
+
+export interface PinnedToolContextHint {
+  id: string;
+  label: string;
+  familyId: string;
 }
 
 function dedupeById(items: AgentContextItem[]): AgentContextItem[] {
@@ -103,4 +109,45 @@ export function deriveAgentContextCandidates(input: AgentContextCandidatesInput)
   }
 
   return { seeds, sources: dedupeById(sources) };
+}
+
+/** Adds conversation-pinned tools to this turn's provenance as context hints.
+ *  These items select command-family context only; grants still come from the
+ *  existing server permission and approval contracts. */
+export function createTurnContextSelection(
+  selection: AgentRunContextSelection,
+  pinnedTools: PinnedToolContextHint[],
+): AgentRunContextSelection {
+  const pinnedToolItems: AgentContextItem[] = pinnedTools.map((tool) => ({
+    id: `pinned-tool:${tool.id}`,
+    kind: "command-family",
+    label: tool.label,
+    source: "manual",
+    ref: tool.familyId,
+    detail: `Pinned tool context hint: ${tool.id}`,
+    metadata: { pinnedToolId: tool.id, contextOnly: true },
+  }));
+  return { ...selection, items: dedupeById([...selection.items, ...pinnedToolItems]) };
+}
+
+/** Runtime skills and pinned-tool hints are sent-turn provenance, not chips for
+ *  the following turn. Persistent context and authoritative dismissals remain. */
+export function createNextTurnContextSelection(selection: AgentRunContextSelection): AgentRunContextSelection {
+  return {
+    ...selection,
+    items: selection.items.filter((item) => item.kind !== "runtime-skill" && typeof item.metadata?.pinnedToolId !== "string"),
+  };
+}
+
+export function contextItemsByUserMessageId(
+  runs: Array<{ user_message_id?: string | null; context_selection?: AgentRunContextSelection | null }>,
+  legacyUserMessageIds: string[],
+): Map<string, AgentContextItem[]> {
+  const result = new Map<string, AgentContextItem[]>();
+  runs.forEach((run, index) => {
+    const items = run.context_selection?.items ?? [];
+    const userMessageId = run.user_message_id ?? legacyUserMessageIds[index];
+    if (userMessageId && items.length > 0) result.set(userMessageId, items);
+  });
+  return result;
 }

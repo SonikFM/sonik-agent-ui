@@ -31,6 +31,7 @@ export interface ArtifactTelemetryEvent {
   toolCallId?: string;
   ok?: boolean;
   error?: string;
+  payload?: Record<string, unknown>;
   at?: string;
   /** True when a spec repair (autoFixSpec) applied a lossy content-pruning fix. */
   lossy?: boolean;

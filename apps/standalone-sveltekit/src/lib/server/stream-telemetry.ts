@@ -1,4 +1,5 @@
 import { writeAgentTelemetry, type AgentTelemetryEvent } from "./agent-telemetry.ts";
+import { sanitizeRunFailure } from "./run-error-safety.ts";
 
 export interface GenerateStreamObservation {
   event: string;
@@ -88,12 +89,13 @@ export function instrumentGenerateStream<T>(
     if (settled) return;
     settled = true;
     clearWaitTimer();
+    const failure = error === undefined ? null : sanitizeRunFailure(error, { fallbackCode: "AGENT_STREAM_FAILED" });
     write({
       ...telemetryBase(),
       event,
       durationMs: Date.now() - context.startedAt,
       ok,
-      error: error instanceof Error ? error.message : error ? String(error) : undefined,
+      error: failure?.message,
     });
   }
 
@@ -188,7 +190,7 @@ export function instrumentGenerateStream<T>(
         controller.close();
       } catch (error) {
         record("api.generate.stream_failed", false, error);
-        controller.error(error);
+        controller.error(new Error(sanitizeRunFailure(error, { fallbackCode: "AGENT_STREAM_FAILED" }).message));
       } finally {
         clearWaitTimer();
         reader.releaseLock();

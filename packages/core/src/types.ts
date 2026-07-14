@@ -1279,6 +1279,9 @@ const DEFAULT_STREAM_SAFETY_MAX_TEXT_DELTA_CHARS = 12;
 
 type TypedStreamChunk = { type: string };
 type TextDeltaChunkLike = { type: "text-delta"; id: string; delta: string };
+const SAFE_STREAM_ERROR_TEXT = "Run interrupted";
+const PROVIDER_PRIVATE_STREAM_KEY = /^(?:provider(?:metadata|data|options|request|response|id|name|ref|reference|references)?|model(?:metadata|data|options|request|response|id|name)?)$/;
+const SAFE_STREAM_ERROR_STRING_KEY = /^(type|id|messageId|toolCallId|toolName|state|finishReason)$/;
 
 function isReasoningChunk(chunk: TypedStreamChunk): boolean {
   return chunk.type === "reasoning-start" || chunk.type === "reasoning-delta" || chunk.type === "reasoning-end";
@@ -1288,8 +1291,17 @@ function isTextDeltaChunk(chunk: TypedStreamChunk): chunk is TextDeltaChunkLike 
   return chunk.type === "text-delta" && "id" in chunk && "delta" in chunk && typeof chunk.id === "string" && typeof chunk.delta === "string";
 }
 
-function cloneStats(stats: StreamSafetyStats): StreamSafetyStats {
-  return { ...stats };
+function sanitizeBrowserStreamValue(value: unknown, errorBearing = false, key = ""): unknown {
+  if (typeof value === "string") return errorBearing && key !== "error" && key !== "errorText" && !SAFE_STREAM_ERROR_STRING_KEY.test(key) ? SAFE_STREAM_ERROR_TEXT : value;
+  if (Array.isArray(value)) return value.map((entry) => sanitizeBrowserStreamValue(entry, errorBearing, key));
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  const hasError = errorBearing || record.type === "error" || record.type === "tool-output-error" || "errorText" in record || "error" in record;
+  return Object.fromEntries(Object.entries(record).flatMap(([key, entry]) => {
+    if (PROVIDER_PRIVATE_STREAM_KEY.test(key.replace(/[_-]/g, "").toLowerCase())) return [];
+    if (hasError && (key === "error" || key === "errorText")) return [[key, SAFE_STREAM_ERROR_TEXT]];
+    return [[key, sanitizeBrowserStreamValue(entry, hasError, key)]];
+  }));
 }
 
 /**
@@ -1320,7 +1332,6 @@ export function createUiMessageStreamSafetyTransform<T extends TypedStreamChunk 
     textDeltaCharsOut: 0,
     passthroughChunks: 0,
   };
-  let pendingTextId: string | null = null;
   let pendingText = "";
   let pendingTextTemplate: TextDeltaChunkLike | null = null;
   let reported = false;
@@ -1329,7 +1340,7 @@ export function createUiMessageStreamSafetyTransform<T extends TypedStreamChunk 
     if (reported) return;
     reported = true;
     try {
-      options.onStats?.(cloneStats(stats));
+      options.onStats?.({ ...stats });
     } catch {
       // Stats are observability-only. A callback failure must never turn a successful stream into a failed UI response.
     }
@@ -1339,11 +1350,11 @@ export function createUiMessageStreamSafetyTransform<T extends TypedStreamChunk 
     controller: TransformStreamDefaultController<T>,
     force = false,
   ): void {
-    if (!pendingTextId || pendingText.length === 0) return;
+    if (!pendingTextTemplate || pendingText.length === 0) return;
     while (pendingText.length >= maxTextDeltaChars || (force && pendingText.length > 0)) {
       const delta = pendingText.slice(0, maxTextDeltaChars);
       pendingText = pendingText.slice(delta.length);
-      controller.enqueue({ ...(pendingTextTemplate ?? { type: "text-delta", id: pendingTextId }), delta } as unknown as T);
+      controller.enqueue({ ...pendingTextTemplate, delta } as unknown as T);
       stats.textDeltaChunksOut += 1;
       stats.textDeltaCharsOut += delta.length;
       if (!force && pendingText.length < maxTextDeltaChars) break;
@@ -1352,7 +1363,6 @@ export function createUiMessageStreamSafetyTransform<T extends TypedStreamChunk 
 
   function flushText(controller: TransformStreamDefaultController<T>): void {
     emitText(controller, true);
-    pendingTextId = null;
     pendingTextTemplate = null;
   }
 
@@ -1364,10 +1374,10 @@ export function createUiMessageStreamSafetyTransform<T extends TypedStreamChunk 
       }
 
       if (isTextDeltaChunk(chunk)) {
+        const safeChunk = sanitizeBrowserStreamValue(chunk) as T;
         stats.textDeltaChunksIn += 1;
-        if (pendingTextId && pendingTextId !== chunk.id) flushText(controller);
-        pendingTextId = chunk.id;
-        pendingTextTemplate = chunk;
+        if (pendingTextTemplate && pendingTextTemplate.id !== chunk.id) flushText(controller);
+        pendingTextTemplate = safeChunk as unknown as TextDeltaChunkLike;
         pendingText += chunk.delta;
         emitText(controller);
         return;
@@ -1375,7 +1385,7 @@ export function createUiMessageStreamSafetyTransform<T extends TypedStreamChunk 
 
       flushText(controller);
       stats.passthroughChunks += 1;
-      controller.enqueue(chunk);
+      controller.enqueue(sanitizeBrowserStreamValue(chunk) as T);
     },
     flush(controller) {
       flushText(controller);
