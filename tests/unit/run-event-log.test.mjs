@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import { createUIMessageStream } from "ai";
 import {
   SPEC_DATA_PART_TYPE,
@@ -156,7 +155,12 @@ for (const terminal of ["succeeded", "failed", "canceled"]) {
   const session = createWorkspaceSession({ id: `run-log-outer-${terminal}`, name: terminal, mode: "chat" });
   const recorder = await startRunRecorder(port, { sessionId: session.id, correlation: { requestId: `req_outer_${terminal}`, traceId: "0123456789abcdef0123456789abcdef", traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01" } });
   const messageId = `outer-assistant-${terminal}`;
-  const outer = createUIMessageStream({
+  const outer = terminal === "canceled" ? new ReadableStream({
+    start(controller) {
+      controller.enqueue({ type: "start", messageId });
+      controller.enqueue({ type: "text-delta", id: "t", delta: "answer" });
+    },
+  }) : createUIMessageStream({
     generateId: () => messageId,
     execute: ({ writer }) => {
       writer.write({ type: "start" });
@@ -169,9 +173,7 @@ for (const terminal of ["succeeded", "failed", "canceled"]) {
   const first = await reader.read();
   assert.deepEqual(first.value, { type: "start", messageId }, `${terminal} exposes the generated outer assistant id`);
   if (terminal === "canceled") {
-    const sdkCancellation = once(process, "unhandledRejection");
     await reader.cancel();
-    await sdkCancellation;
   } else while (!(await reader.read()).done) {}
   const run = getWorkspaceRun(recorder.runId);
   assert.equal(run.status, terminal, `outer ${terminal} controls durable terminal status`);

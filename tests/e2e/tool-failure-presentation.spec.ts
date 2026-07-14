@@ -43,5 +43,5 @@ test("tool-failure-presentation: promotes to a real failure once the turn ends w
   // Technical receipt stays available (expandable), which Slice C keeps as-is --
   // only the default/collapsed-during-stream presentation changes.
   await toolBlock.click();
-  await expect(toolBlock.locator("dd").last()).toContainText("dev smoke injected tool failure");
+  await expect(toolBlock.getByText("Run interrupted", { exact: true })).toBeVisible();
 });

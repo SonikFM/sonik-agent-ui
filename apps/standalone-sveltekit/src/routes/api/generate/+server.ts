@@ -435,18 +435,19 @@ export const POST: RequestHandler = async (event) => {
       headers: { "Content-Type": "application/json", ...responseHeaders },
     });
   }
-  const uiMessages = body.messages as UIMessage[];
-  if (!Array.isArray(uiMessages) || uiMessages.length === 0) {
-    return new Response(JSON.stringify({ error: "messages array is required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", ...responseHeaders },
-    });
-  }
   const rawRunContextSelection = body?.contextSelection ?? body?.workspace?.contextSelection;
   const parsedRunContextSelection = parseAgentRunContextSelection(rawRunContextSelection);
   const selectionResolution = resolveAgentContextSelection(parsedRunContextSelection);
   if (hasInvalidExplicitDocumentContext(rawRunContextSelection) || selectionResolution.invalidDocumentSelection) {
     return new Response(JSON.stringify({ error: "Invalid document context selection" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", ...responseHeaders },
+    });
+  }
+  const requestedWorkspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
+  const uiMessages = body.messages as UIMessage[];
+  if (!Array.isArray(uiMessages) || uiMessages.length === 0) {
+    return new Response(JSON.stringify({ error: "messages array is required" }), {
       status: 400,
       headers: { "Content-Type": "application/json", ...responseHeaders },
     });
@@ -470,11 +471,12 @@ export const POST: RequestHandler = async (event) => {
       },
     );
   }
-  const requestedWorkspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
-  const trustedWorkspace = requestedWorkspaceSessionId ? await resolveAgentUiWorkspaceSession(event, { sessionId: requestedWorkspaceSessionId }) : null;
-  const workspaceSessionId = trustedWorkspace?.sessionId;
-  const requestPersistence = trustedWorkspace?.persistence ?? getRequestWorkspacePersistence(event);
   const hasSelectedWorkspaceContext = selectionResolution.fileIds.length > 0 || selectionResolution.documentIds.length > 0;
+  const trustedWorkspace = requestedWorkspaceSessionId && hasSelectedWorkspaceContext
+    ? await resolveAgentUiWorkspaceSession(event, { sessionId: requestedWorkspaceSessionId })
+    : null;
+  const workspaceSessionId = trustedWorkspace?.sessionId ?? requestedWorkspaceSessionId;
+  const requestPersistence = trustedWorkspace?.persistence ?? getRequestWorkspacePersistence(event);
   if (hasSelectedWorkspaceContext && !workspaceSessionId) {
     throw new AgentUiFileError(400, "Selected file and document context requires a workspace session");
   }

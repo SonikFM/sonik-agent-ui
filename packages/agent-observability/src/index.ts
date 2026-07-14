@@ -294,6 +294,7 @@ const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Be
 const PROVIDER_PRIVATE_KEY_PATTERN = /^(?:provider(?:metadata|data|options|request|response|id|name|ref|reference|references)?|model(?:metadata|data|options|request|response|id|name)?)$/;
 const FAILURE_KEY_PATTERN = /(error|failure|exception)/i;
 const SAFE_FAILURE_STRING_KEYS = /^(schemaVersion|eventId|source|event|runId|phase|requestId|traceId|traceparent|sessionId|messageId|toolCallId|toolName|artifactId|documentId|commandId|familyId|operationId|stableInputHash|code|error_code|status|kind|type|manifestType|severity|effect|approval|method|at|surface|commandFamily|commandSource|commandEffect|runtimeStatus|hostSessionSource|loadMode|contextSource|mode|activeSessionId|activeArtifactId|activeDocumentId|pageType|conversationStatus)$/i;
+const SAFE_FAILURE_REASON_CODES = new Set(["duplicate", "busy", "blocked"]);
 const SAFE_TELEMETRY_ERROR = "Run failed";
 
 export function createRequestId(prefix = "req"): string {
@@ -539,7 +540,10 @@ function sanitizeWorkflowCommandPreview(value: unknown): AgentUiWorkflowCommandP
 
 export function sanitizeTelemetryValue(value: unknown, depth = 0, errorBearing = false, key = ""): unknown {
   if (value === undefined || value === null) return value;
-  if (typeof value === "string") return errorBearing && !SAFE_FAILURE_STRING_KEYS.test(key) ? SAFE_TELEMETRY_ERROR : redactTelemetryString(value);
+  if (typeof value === "string") {
+    if (!errorBearing || SAFE_FAILURE_STRING_KEYS.test(key) || key === "reason" && SAFE_FAILURE_REASON_CODES.has(value)) return redactTelemetryString(value);
+    return SAFE_TELEMETRY_ERROR;
+  }
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return value.toString();
   if (value instanceof Error) return errorBearing ? { name: value.name, message: SAFE_TELEMETRY_ERROR } : readableError(value);

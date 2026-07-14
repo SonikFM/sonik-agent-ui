@@ -29,6 +29,6 @@ test("document-artifact-intent: terminal document tool failure exposes retryable
   await expect(toolBlock).toHaveAttribute("data-tool-state", "output-error", { timeout: 10_000 });
   await expect(toolBlock.locator("summary")).toContainText("Document creation failed", { timeout: 10_000 });
   await toolBlock.click();
-  await expect(toolBlock.locator("dd").last()).toContainText("dev smoke injected document failure");
-  await expect(toolBlock.locator("dd").last()).toContainText(/Retry the document request/i);
+  await expect(toolBlock.getByText("Run interrupted", { exact: true })).toBeVisible();
+  await expect(toolBlock.getByText("Retry the document request.", { exact: true })).toBeVisible();
 });

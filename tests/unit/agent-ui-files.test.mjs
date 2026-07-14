@@ -447,7 +447,8 @@ assert.match(postRoute, /retry_file_id/, "upload failures may expose only the op
 assert.doesNotMatch(postRoute, /storage_key|provider_references/, "upload failure responses never expose storage or provider metadata");
 
 const generateRoute = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/generate/+server.ts", import.meta.url), "utf8");
-assert.match(generateRoute, /resolveAgentUiWorkspaceSession\(event, \{ sessionId: requestedWorkspaceSessionId \}\)/, "generate resolves its workspace selector once through trusted host scope");
+assert.match(generateRoute, /requestedWorkspaceSessionId && hasSelectedWorkspaceContext[\s\S]*resolveAgentUiWorkspaceSession\(event, \{ sessionId: requestedWorkspaceSessionId \}\)/, "generate resolves selected workspace context once through trusted host scope");
+assert.match(generateRoute, /trustedWorkspace\?\.sessionId \?\? requestedWorkspaceSessionId/, "ordinary session-backed turns preserve existing persistence without requiring file-context authentication");
 assert.match(generateRoute, /resolveAgentUiFileContextSelection\(\{ selection: parsedRunContextSelection, sessionId: workspaceSessionId/, "generate file selection uses the canonical trusted workspace");
 
 const sessionRoute = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/session/[id]/+server.ts", import.meta.url), "utf8");

@@ -78,6 +78,12 @@ const rawProviderError = "Google provider files/raw-ref at https://example.inval
 }
 
 {
+  const event = sanitizeTelemetryEvent({ source: "client", event: "workflow_launcher.suppressed", reason: "duplicate", title: "private title", ok: false });
+  assert.equal(event.reason, "duplicate", "bounded internal failure reason codes remain useful for operational telemetry");
+  assert.equal(event.title, "Run failed", "untrusted descriptive fields remain sanitized on failure-bearing events");
+}
+
+{
   const dirtyPayload = {
     detail: rawProviderError,
     code: "AGENT_STREAM_FAILED",
