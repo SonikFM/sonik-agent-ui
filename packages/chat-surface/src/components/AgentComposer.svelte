@@ -1,5 +1,6 @@
 <script lang="ts" module>
   import type { AgentContextItem } from "@sonik-agent-ui/tool-contracts/run-context";
+  import type { ComposerCatalogStatus, ComposerRecentDocument, ComposerSuggestionItem, ComposerToolItem } from "../composer-context.js";
 
   export type AgentChatStatus = "ready" | "submitted" | "streaming" | "error";
 
@@ -15,13 +16,32 @@
     contextSources?: AgentContextItem[];
     onAttachContext?: (item: AgentContextItem) => void;
     onRemoveContext?: (id: string) => void;
+    onOpenContext?: (item: AgentContextItem) => void;
+    suggestions?: ComposerSuggestionItem[];
+    tools?: ComposerToolItem[];
+    toolPermissionModes?: Record<string, "off" | "ask" | "allow">;
+    pinnedToolIds?: string[];
+    recentDocuments?: ComposerRecentDocument[];
+    skillCatalogStatus?: ComposerCatalogStatus;
+    commandCatalogStatus?: ComposerCatalogStatus;
+    toolCatalogStatus?: ComposerCatalogStatus;
+    recentDocumentCatalogStatus?: ComposerCatalogStatus;
+    onRetryComposerCatalogs?: () => void;
+    onRetryRecentDocuments?: () => void;
+    onToolPermissionChange?: (familyId: string, mode: "off" | "ask" | "allow") => void;
+    onPinToolChange?: (toolId: string, pinned: boolean) => void;
+    onAttachRecentDocument?: (item: ComposerRecentDocument) => void;
+    onUploadFile?: (file: File, signal: AbortSignal) => Promise<AgentContextItem>;
   }
 </script>
 
 <script lang="ts">
   import * as PromptInput from "../vendor/amplify-chat/PromptInput/index.js";
-  import ContextChip from "./ContextChip.svelte";
-  import ComposerContextMenu from "./ComposerContextMenu.svelte";
+  import ComposerAttachmentMenu from "./ComposerAttachmentMenu.svelte";
+  import ComposerSuggestions from "./ComposerSuggestions.svelte";
+  import ComposerToolSelector from "./ComposerToolSelector.svelte";
+  import StagedContextRow from "./StagedContextRow.svelte";
+  import { filterComposerSuggestions, findComposerTrigger, replaceComposerTrigger } from "../composer-context.js";
 
   let {
     value = $bindable(""),
@@ -33,13 +53,37 @@
     contextSources = [],
     onAttachContext,
     onRemoveContext,
+    onOpenContext,
+    suggestions = [],
+    tools = [],
+    toolPermissionModes = {},
+    pinnedToolIds = [],
+    recentDocuments = [],
+    skillCatalogStatus = "ready",
+    commandCatalogStatus = "ready",
+    toolCatalogStatus = "ready",
+    recentDocumentCatalogStatus = "ready",
+    onRetryComposerCatalogs,
+    onRetryRecentDocuments,
+    onToolPermissionChange,
+    onPinToolChange,
+    onAttachRecentDocument,
+    onUploadFile,
   }: AgentComposerProps = $props();
 
   const isGenerating = $derived(status === "submitted" || status === "streaming");
   // The context row is only shown when the host wired context sources in — the
   // plain composer (no context props) renders exactly as before.
-  const contextEnabled = $derived(Boolean(onAttachContext || onRemoveContext) && (contextItems.length > 0 || contextSources.length > 0));
+  const contextEnabled = $derived(Boolean(onAttachContext || onRemoveContext || onUploadFile) || contextItems.length > 0 || pinnedToolIds.length > 0);
   const attachedIds = $derived(contextItems.map((item) => item.id));
+  const trigger = $derived(findComposerTrigger(value));
+  let suggestionsDismissed = $state(false);
+  const visibleTrigger = $derived(suggestionsDismissed ? null : trigger);
+  const filteredSuggestions = $derived(filterComposerSuggestions(suggestions, visibleTrigger));
+  const pinnedTools = $derived(tools.filter((tool) => pinnedToolIds.includes(tool.id)));
+  let activeSuggestion = $state(0);
+  let dragging = $state(false);
+  let uploads = $state<Array<{ id: string; label: string; controller: AbortController; error?: string }>>([]);
 
   function handleSubmit(message: { text: string }): void {
     const text = message.text.trim();
@@ -48,35 +92,141 @@
     value = "";
     onSubmit(text);
   }
+
+  function selectSuggestion(item: ComposerSuggestionItem): void {
+    if (!trigger) return;
+    suggestionsDismissed = false;
+    if (item.kind === "skill") {
+      onAttachContext?.({ id: `runtime-skill:${item.id}`, kind: "runtime-skill", label: item.label, source: "manual", ref: item.id, detail: item.description });
+      value = replaceComposerTrigger(value, trigger);
+      return;
+    }
+    value = replaceComposerTrigger(value, trigger, `/${item.id} `);
+  }
+
+  function handleEditorKeydown(event: KeyboardEvent): void {
+    if (!trigger) return;
+    if (event.key === "Escape") {
+      suggestionsDismissed = true;
+      event.preventDefault();
+      return;
+    }
+    if (filteredSuggestions.length === 0) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      activeSuggestion = (activeSuggestion + delta + filteredSuggestions.length) % filteredSuggestions.length;
+      event.preventDefault();
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      const selection = filteredSuggestions[activeSuggestion];
+      if (selection) selectSuggestion(selection);
+      event.preventDefault();
+    }
+  }
+
+  function fileUploadError(file: File): string | null {
+    const extension = file.name.toLowerCase().match(/\.([^.]+)$/)?.[1];
+    if (extension === "docx") return "DOCX is unsupported. Convert it to PDF, text, or Markdown.";
+    if (extension === "xlsx") return "XLSX is unsupported. Convert it to CSV.";
+    if (extension === "pptx") return "PPTX is unsupported. Convert it to PDF.";
+    const allowed = /^(application\/(pdf|json|javascript|xml)|text\/(plain|markdown|csv|html|xml|css|javascript)|image\/(bmp|jpeg|png|webp))$/i.test(file.type);
+    if (!allowed) return "Unsupported file type. Use PDF, plain text, Markdown, CSV, HTML, XML, CSS, JavaScript, JSON, BMP, JPEG, PNG, or WebP.";
+    if (file.size > 10 * 1024 * 1024) return "File exceeds the 10 MiB limit.";
+    return null;
+  }
+
+  async function uploadFiles(files: File[]): Promise<void> {
+    if (!onUploadFile) return;
+    for (const file of files) {
+      const id = crypto.randomUUID();
+      const controller = new AbortController();
+      const error = fileUploadError(file);
+      if (error) {
+        uploads = [...uploads, { id, label: file.name, controller, error }];
+        continue;
+      }
+      uploads = [...uploads, { id, label: file.name, controller }];
+      void onUploadFile(file, controller.signal)
+        .then((item) => { if (!controller.signal.aborted) onAttachContext?.(item); })
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          uploads = uploads.map((upload) => upload.id === id ? { ...upload, error: error instanceof Error ? error.message : "Upload failed" } : upload);
+        })
+        .finally(() => {
+          if (!uploads.find((upload) => upload.id === id)?.error) uploads = uploads.filter((upload) => upload.id !== id);
+        });
+    }
+  }
+
+  function cancelUpload(id: string): void {
+    uploads.find((upload) => upload.id === id)?.controller.abort();
+    uploads = uploads.filter((upload) => upload.id !== id);
+  }
 </script>
 
-<div class="px-6 pb-6 pt-3 flex-shrink-0 bg-background relative">
+<div
+  role="region"
+  aria-label="Message composer"
+  class="px-6 pb-6 pt-3 flex-shrink-0 bg-background relative"
+  class:ring-2={dragging}
+  class:ring-ring={dragging}
+  ondragover={(event) => { if (onUploadFile) { event.preventDefault(); dragging = true; } }}
+  ondragleave={() => dragging = false}
+  ondrop={(event) => { if (onUploadFile) { event.preventDefault(); dragging = false; void uploadFiles([...(event.dataTransfer?.files ?? [])]); } }}
+>
   <div class="max-w-3xl mx-auto relative">
     <PromptInput.Root {status} onSubmit={handleSubmit} class="rounded-3xl border border-border bg-card shadow-[var(--app-shadow-soft)]">
-      {#if contextEnabled}
-        <div class="flex flex-wrap items-center gap-1.5 px-3 pt-3" data-testid="composer-context-bar">
-          {#if onAttachContext}
-            <ComposerContextMenu
-              sources={contextSources}
-              {attachedIds}
-              onAttach={onAttachContext}
-              disabled={isGenerating}
-            />
-          {/if}
-          {#each contextItems as item (item.id)}
-            <ContextChip {item} onRemove={onRemoveContext} testId={`context-chip-${item.id}`} />
-          {/each}
-        </div>
+      {#if contextEnabled && (contextItems.length || pinnedTools.length || uploads.length)}
+        <StagedContextRow
+          items={contextItems}
+          {pinnedTools}
+          uploads={uploads.map(({ id, label, error }) => ({ id, label, error }))}
+          onOpen={onOpenContext}
+          onRemove={onRemoveContext}
+          onUnpin={(id) => onPinToolChange?.(id, false)}
+          onCancelUpload={cancelUpload}
+        />
       {/if}
       <PromptInput.Body>
+        {#if visibleTrigger}<ComposerSuggestions trigger={visibleTrigger} items={filteredSuggestions} activeIndex={activeSuggestion} {skillCatalogStatus} {commandCatalogStatus} onRetry={onRetryComposerCatalogs} onSelect={selectSuggestion} />{/if}
         <PromptInput.Textarea
           bind:value
           {placeholder}
           rows={3}
           class="min-h-[76px] pr-16 text-sm text-foreground placeholder:text-muted-foreground"
+          oninput={() => { activeSuggestion = 0; suggestionsDismissed = false; }}
+          onkeydown={handleEditorKeydown}
+          onpaste={(event) => {
+            const files = [...(event.clipboardData?.files ?? [])];
+            if (files.length && onUploadFile) { event.preventDefault(); void uploadFiles(files); }
+          }}
         />
       </PromptInput.Body>
-      <PromptInput.Toolbar class="justify-end border-t-0 px-3 pb-2 pt-0">
+      <PromptInput.Toolbar class="justify-between border-t-0 px-3 pb-2 pt-0">
+        <div class="flex items-center gap-2">
+          <ComposerAttachmentMenu
+            sources={contextSources}
+            {attachedIds}
+            {recentDocuments}
+            catalogStatus={recentDocumentCatalogStatus}
+            onRetry={onRetryRecentDocuments}
+            disabled={isGenerating}
+            onAttach={onAttachContext}
+            onAttachRecent={onAttachRecentDocument}
+            onUpload={onUploadFile ? uploadFiles : undefined}
+          />
+          {#if tools.length || toolCatalogStatus !== "ready"}
+            <ComposerToolSelector
+              {tools}
+              catalogStatus={toolCatalogStatus}
+              onRetry={onRetryComposerCatalogs}
+              permissionModes={toolPermissionModes}
+              pinnedIds={pinnedToolIds}
+              disabled={isGenerating}
+              onPermissionChange={onToolPermissionChange}
+              onPinChange={onPinToolChange}
+            />
+          {/if}
+        </div>
         <PromptInput.Submit {status} {onStop} class="h-8 min-h-8 rounded-full px-4">
           {isGenerating ? "Stop" : "Send"}
         </PromptInput.Submit>

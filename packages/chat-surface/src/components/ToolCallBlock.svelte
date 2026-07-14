@@ -20,6 +20,11 @@
   const isError = $derived(activity.isError);
   const label = $derived(activity.label);
   const stateLabel = $derived(tool.state ?? "unknown");
+  const recoveryGuidance = $derived(
+    isError && tool.state === "output-error"
+      ? activity.phase === "document" ? "Retry the document request." : "Retry the request."
+      : null,
+  );
 
   const commitSuccess = $derived.by(() => {
     const output = tool.output as { kind?: string; ok?: boolean; command?: { input?: { name?: unknown } } } | null | undefined;
@@ -92,6 +97,12 @@
       <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2 text-error">
         <dt>Error</dt>
         <dd>{tool.errorText}</dd>
+      </div>
+    {/if}
+    {#if recoveryGuidance}
+      <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
+        <dt>Recovery</dt>
+        <dd>{recoveryGuidance}</dd>
       </div>
     {/if}
   </dl>

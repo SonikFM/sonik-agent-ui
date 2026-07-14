@@ -25,15 +25,19 @@ export type WorkspaceRuntimeRequest = {
 };
 
 export const AGENT_UI_HOST_CONTEXT_HEADER = "x-sonik-agent-ui-host-context";
+export const AGENT_UI_WORKSPACE_SESSION_CONTEXT_HEADER = "x-sonik-agent-ui-workspace-session-context";
 export const WORKSPACE_HOST_CONTEXT_SIGNATURE_VERSION = "sonik.agent_ui.host_context.hmac.v1";
 const WORKSPACE_HOST_CONTEXT_MAX_AGE_MS = 10 * 60 * 1000;
+const WORKSPACE_SESSION_CONTEXT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS = 60 * 1000;
+const WORKSPACE_SESSION_CONTEXT_PURPOSE = "workspace-session";
 
 export type WorkspaceTrustedHostContext = {
   authenticated?: boolean;
   organizationId?: string | null;
   scopes?: string[];
   hostSession?: Partial<WorkspaceHostSessionSnapshot> | null;
+  purpose?: string;
   signatureVersion?: string | null;
   issuedAt?: string | null;
   expiresAt?: string | null;
@@ -63,6 +67,8 @@ export type WorkspaceRuntimeDiagnostics = {
 };
 
 const localWorkspacePersistence = createInMemoryWorkspacePersistence();
+// ponytail: process-local tenant cache matches memory persistence; add eviction only if long-lived fallback workers show growth.
+const scopedLocalWorkspacePersistence = new Map<string, WorkspacePersistenceAdapter>();
 const localWorkspaceRuntime = createMemoryWorkspaceRuntime({
   persistence: localWorkspacePersistence,
   reason: "local",
@@ -112,16 +118,13 @@ export function resolveWorkspaceRuntime(input: {
   const policy = resolveWorkspacePersistencePolicy({ env, override: input.policy });
 
   if (policy === "memory") {
-    return localWorkspaceRuntime;
+    return resolveLocalWorkspaceRuntime(input.event ?? null, input.memoryReason ?? "local");
   }
 
   if (policy === "auto") {
     const cloudRuntime = tryResolveCloudWorkspaceRuntime(input.event ?? null, correlationIdFromRequest(input.event?.request));
     if (cloudRuntime) return cloudRuntime;
-    return {
-      ...localWorkspaceRuntime,
-      reason: input.memoryReason ?? "cloud-unavailable",
-    };
+    return resolveLocalWorkspaceRuntime(input.event ?? null, input.memoryReason ?? "cloud-unavailable");
   }
 
   return resolveCloudWorkspaceRuntime(input.event ?? null, correlationIdFromRequest(input.event?.request));
@@ -209,6 +212,20 @@ export function createAsyncLocalWorkspacePersistence(): AsyncWorkspacePersistenc
   return createAsyncWorkspacePersistenceAdapter(localWorkspacePersistence);
 }
 
+function resolveLocalWorkspaceRuntime(event: WorkspaceRuntimeRequest | null, reason: MemoryWorkspaceRuntimeReason): ResolvedWorkspaceRuntime {
+  const hostSession = resolveTrustedHostSessionSnapshot(event);
+  if (!hostSession.authenticated || !hostSession.organizationId || !hostSession.userId) {
+    return { ...localWorkspaceRuntime, reason };
+  }
+  const scope = JSON.stringify([hostSession.organizationId, hostSession.userId, hostSession.sessionId]);
+  let persistence = scopedLocalWorkspacePersistence.get(scope);
+  if (!persistence) {
+    persistence = createInMemoryWorkspacePersistence();
+    scopedLocalWorkspacePersistence.set(scope, persistence);
+  }
+  return createMemoryWorkspaceRuntime({ persistence, reason });
+}
+
 function parseWorkspacePersistencePolicy(value: string | null, label: string): WorkspacePersistencePolicy | null {
   if (value === null) return null;
   if (value === "memory" || value === "cloud" || value === "auto") return value;
@@ -258,6 +275,35 @@ export function createSignedTrustedHostContext(input: {
     ...unsigned,
     signature: signTrustedHostContext(unsigned, input.secret),
   };
+}
+
+export function createSignedWorkspaceSessionContextHeader(event: WorkspaceRuntimeRequest, workspaceId: string): string | null {
+  const secret = readEnvString(event.platform?.env, "SONIK_AGENT_UI_HOST_CONTEXT_SECRET");
+  const auth = resolveTrustedHostSessionSnapshot(event);
+  const workspaceSessionId = cleanRuntimeString(workspaceId);
+  if (!secret || !workspaceSessionId || !auth.authenticated || !auth.organizationId || !auth.userId || !auth.sessionId) return null;
+  return createSignedTrustedHostContextHeader({
+    secret,
+    ttlMs: WORKSPACE_SESSION_CONTEXT_MAX_AGE_MS,
+    context: {
+      authenticated: true,
+      organizationId: auth.organizationId,
+      scopes: auth.scopes,
+      hostSession: { ...auth, metadata: { workspaceSessionId } },
+      purpose: WORKSPACE_SESSION_CONTEXT_PURPOSE,
+    },
+  });
+}
+
+export function resolveSignedWorkspaceSessionId(event: WorkspaceRuntimeRequest): string | null {
+  const encoded = event.request?.headers.get(AGENT_UI_WORKSPACE_SESSION_CONTEXT_HEADER);
+  const secret = readEnvString(event.platform?.env, "SONIK_AGENT_UI_HOST_CONTEXT_SECRET");
+  const context = decodeTrustedHostContext(encoded);
+  if (!secret || !context || context.purpose !== WORKSPACE_SESSION_CONTEXT_PURPOSE || !isSignedTrustedHostContextValid(context, secret, new Date(), WORKSPACE_SESSION_CONTEXT_MAX_AGE_MS) || !context.hostSession) return null;
+  const tokenAuth = normalizeHostSessionSnapshot(context.hostSession, "signed-workspace-session-context", context);
+  const requestAuth = resolveTrustedHostSessionSnapshot(event);
+  if (!requestAuth.authenticated || tokenAuth.organizationId !== requestAuth.organizationId || tokenAuth.userId !== requestAuth.userId || tokenAuth.sessionId !== requestAuth.sessionId) return null;
+  return isRecord(tokenAuth.metadata) ? cleanRuntimeString(tokenAuth.metadata.workspaceSessionId) : null;
 }
 
 export function decodeTrustedHostContext(value: string | null | undefined): WorkspaceTrustedHostContext | null {
@@ -403,7 +449,7 @@ function isUnsignedBrowserHostContextAllowed(env: Record<string, unknown> | null
   return readEnvString(env, "SONIK_AGENT_UI_ALLOW_UNSIGNED_HOST_CONTEXT") === "true";
 }
 
-function isSignedTrustedHostContextValid(context: WorkspaceTrustedHostContext, secret: string, now = new Date()): boolean {
+function isSignedTrustedHostContextValid(context: WorkspaceTrustedHostContext, secret: string, now = new Date(), maxAgeMs = WORKSPACE_HOST_CONTEXT_MAX_AGE_MS): boolean {
   const signature = cleanRuntimeString(context.signature);
   if (!signature) return false;
   if (context.signatureVersion !== WORKSPACE_HOST_CONTEXT_SIGNATURE_VERSION) return false;
@@ -412,7 +458,7 @@ function isSignedTrustedHostContextValid(context: WorkspaceTrustedHostContext, s
   if (!issuedAt || !expiresAt) return false;
   if (issuedAt.getTime() - WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS > now.getTime()) return false;
   if (expiresAt.getTime() + WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS < now.getTime()) return false;
-  if (expiresAt.getTime() - issuedAt.getTime() > WORKSPACE_HOST_CONTEXT_MAX_AGE_MS + WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS) return false;
+  if (expiresAt.getTime() - issuedAt.getTime() > maxAgeMs + WORKSPACE_HOST_CONTEXT_CLOCK_SKEW_MS) return false;
 
   const unsigned = stripTrustedHostContextSignature(context);
   const expected = signTrustedHostContext(unsigned, secret);
@@ -449,6 +495,7 @@ function normalizeTrustedHostContext(value: unknown): WorkspaceTrustedHostContex
     organizationId: cleanRuntimeString(value.organizationId) ?? null,
     scopes: normalizeScopes(value.scopes),
     hostSession: isRecord(value.hostSession) ? value.hostSession as Partial<WorkspaceHostSessionSnapshot> : null,
+    purpose: cleanRuntimeString(value.purpose) ?? undefined,
     signatureVersion: cleanRuntimeString(value.signatureVersion) ?? null,
     issuedAt: cleanRuntimeString(value.issuedAt) ?? null,
     expiresAt: cleanRuntimeString(value.expiresAt) ?? null,

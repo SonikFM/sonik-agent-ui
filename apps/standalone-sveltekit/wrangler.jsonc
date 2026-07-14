@@ -16,6 +16,12 @@
       "service": "sonik-booking-service-pipe-b"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "AGENT_UI_FILES_BUCKET",
+      "bucket_name": "sonik-agent-ui-context-files"
+    }
+  ],
   "observability": {
     "logs": {
       "enabled": true,

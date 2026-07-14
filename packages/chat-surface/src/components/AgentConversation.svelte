@@ -5,6 +5,7 @@
   import type { AgentChatMessage } from "./AgentMessage.svelte";
   import type { AgentChatStatus } from "./AgentComposer.svelte";
   import type { ToolActivityLabelOverrides } from "../tool-activity.js";
+  import type { ComposerCatalogStatus, ComposerRecentDocument, ComposerSuggestionItem, ComposerToolItem } from "../composer-context.js";
 
   export interface AgentSuggestion {
     label: string;
@@ -72,6 +73,22 @@
     contextSources?: AgentContextItem[];
     onAttachContext?: (item: AgentContextItem) => void;
     onRemoveContext?: (id: string) => void;
+    onOpenContext?: (item: AgentContextItem) => void;
+    composerSuggestions?: ComposerSuggestionItem[];
+    composerTools?: ComposerToolItem[];
+    toolPermissionModes?: Record<string, "off" | "ask" | "allow">;
+    pinnedToolIds?: string[];
+    recentDocuments?: ComposerRecentDocument[];
+    skillCatalogStatus?: ComposerCatalogStatus;
+    commandCatalogStatus?: ComposerCatalogStatus;
+    toolCatalogStatus?: ComposerCatalogStatus;
+    recentDocumentCatalogStatus?: ComposerCatalogStatus;
+    onRetryComposerCatalogs?: () => void;
+    onRetryRecentDocuments?: () => void;
+    onToolPermissionChange?: (familyId: string, mode: "off" | "ask" | "allow") => void;
+    onPinToolChange?: (toolId: string, pinned: boolean) => void;
+    onAttachRecentDocument?: (item: ComposerRecentDocument) => void;
+    onUploadFile?: (file: File, signal: AbortSignal) => Promise<AgentContextItem>;
     /** Resolves the persisted context selection to render as provenance on a past message. */
     messageContext?: (message: AgentChatMessage) => AgentContextItem[] | undefined;
     /** Chat switcher rendered in place of the static title. Embedded widgets
@@ -112,6 +129,22 @@
     contextSources = [],
     onAttachContext,
     onRemoveContext,
+    onOpenContext,
+    composerSuggestions = [],
+    composerTools = [],
+    toolPermissionModes = {},
+    pinnedToolIds = [],
+    recentDocuments = [],
+    skillCatalogStatus = "ready",
+    commandCatalogStatus = "ready",
+    toolCatalogStatus = "ready",
+    recentDocumentCatalogStatus = "ready",
+    onRetryComposerCatalogs,
+    onRetryRecentDocuments,
+    onToolPermissionChange,
+    onPinToolChange,
+    onAttachRecentDocument,
+    onUploadFile,
     messageContext,
     sessionOptions,
     activeSessionId = null,
@@ -326,6 +359,7 @@
                   class="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                   onclick={approvalAffordance.onRequestPreview}
                   disabled={isStreaming || approvalAffordance.disabled}
+                  data-disabled-reason={isStreaming ? "streaming" : approvalAffordance.disabledReason ?? undefined}
                   data-approval-action="preview"
                 >
                   {approvalAffordance.previewLabel ?? "Preview setup"}
@@ -335,6 +369,7 @@
                   class="rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   onclick={approvalAffordance.onApprove}
                   disabled={isStreaming || approvalAffordance.disabled}
+                  data-disabled-reason={isStreaming ? "streaming" : approvalAffordance.disabledReason ?? undefined}
                   data-approval-action="approve"
                 >
                   {approvalAffordance.approveLabel ?? "Approve and create"}
@@ -344,6 +379,7 @@
                   class="rounded-full px-3 py-1.5 text-xs font-semibold text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   onclick={approvalAffordance.onCancel}
                   disabled={isStreaming || approvalAffordance.disabled}
+                  data-disabled-reason={isStreaming ? "streaming" : approvalAffordance.disabledReason ?? undefined}
                   data-approval-action="cancel"
                 >
                   {approvalAffordance.cancelLabel ?? "Cancel"}
@@ -387,5 +423,21 @@
     {contextSources}
     {onAttachContext}
     {onRemoveContext}
+    {onOpenContext}
+    suggestions={composerSuggestions}
+    tools={composerTools}
+    {toolPermissionModes}
+    {pinnedToolIds}
+    {recentDocuments}
+    {skillCatalogStatus}
+    {commandCatalogStatus}
+    {toolCatalogStatus}
+    {recentDocumentCatalogStatus}
+    {onRetryComposerCatalogs}
+    {onRetryRecentDocuments}
+    {onToolPermissionChange}
+    {onPinToolChange}
+    {onAttachRecentDocument}
+    {onUploadFile}
   />
 </Conversation.Root>

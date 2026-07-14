@@ -1,12 +1,13 @@
 import { error, json } from "@sveltejs/kit";
 import { appendRequestWorkspaceMessage, getRequestWorkspaceSession, listRequestWorkspaceMessages } from "$lib/server/workspace-request-store";
 import { routeString, WORKSPACE_CONTENT_MAX_CHARS, WORKSPACE_SESSION_ID_MAX_CHARS } from "$lib/server/workspace-route-limits";
+import { sanitizeSessionMessages } from "$lib/server/run-error-safety";
 import type { RequestHandler } from "./$types";
 
 export const GET: RequestHandler = async (event) => {
   const session = await getRequestWorkspaceSession(event, event.params.id);
   if (!session) error(404, "Session not found");
-  return json(await listRequestWorkspaceMessages(event, session.id));
+  return json(sanitizeSessionMessages(await listRequestWorkspaceMessages(event, session.id)));
 };
 
 export const POST: RequestHandler = async (event) => {
@@ -32,7 +33,7 @@ export const POST: RequestHandler = async (event) => {
     content,
     parts: Array.isArray(body.parts) ? body.parts : null,
   });
-  return json(record);
+  return json(sanitizeSessionMessages([record])[0]);
 };
 
 function normalizeRole(value: unknown): "system" | "user" | "assistant" | "tool" {

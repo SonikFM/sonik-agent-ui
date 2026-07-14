@@ -12,6 +12,7 @@
 export const AGENT_CONTEXT_KINDS = [
   "document",
   "artifact",
+  "file",
   "booking-context",
   "page",
   "command-family",
@@ -44,6 +45,12 @@ export interface AgentContextItem {
   metadata?: Record<string, unknown>;
 }
 
+export interface AgentFileContextMetadata extends Record<string, unknown> {
+  filename: string;
+  mediaType: string;
+  byteSize: number;
+}
+
 export interface AgentRunContextSelection {
   items: AgentContextItem[];
   /** Ids of auto-seeded items the user explicitly removed. Removal is
@@ -62,6 +69,7 @@ export function agentContextKindLabel(kind: AgentContextKind): string {
   switch (kind) {
     case "document": return "Document";
     case "artifact": return "Artifact";
+    case "file": return "File";
     case "booking-context": return "Booking context";
     case "page": return "Current page";
     case "command-family": return "Command family";
@@ -105,26 +113,40 @@ function normalizeItem(value: unknown): AgentContextItem | null {
   const label = boundedString(record.label);
   if (!id || !label || !isAgentContextKind(record.kind)) return null;
   const source: AgentContextSource = record.source === "manual" ? "manual" : "auto";
-  const metadata = record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata)
+  const rawMetadata = record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata)
     ? (record.metadata as Record<string, unknown>)
     : undefined;
+  const ref = boundedString(record.ref);
+  if (record.kind === "file" && !ref) return null;
+  const metadata = record.kind === "file"
+    ? normalizeFileMetadata(rawMetadata)
+    : rawMetadata;
   return {
     id,
     kind: record.kind,
     label,
     source,
-    ref: boundedString(record.ref),
+    ref,
     detail: boundedString(record.detail),
     route: boundedString(record.route),
     ...(metadata ? { metadata } : {}),
   };
 }
 
+function normalizeFileMetadata(value: Record<string, unknown> | undefined): AgentFileContextMetadata | undefined {
+  if (!value) return undefined;
+  const filename = boundedString(value.filename);
+  const mediaType = boundedString(value.mediaType);
+  const byteSize = typeof value.byteSize === "number" && Number.isSafeInteger(value.byteSize) && value.byteSize >= 0
+    ? value.byteSize
+    : undefined;
+  return filename && mediaType && byteSize !== undefined ? { filename, mediaType, byteSize } : undefined;
+}
+
 /** Validates/bounds an untrusted selection payload (e.g. from the request body).
  *  Returns a normalized selection; drops malformed items rather than throwing so
- *  a bad chip never breaks a turn. Returns undefined when nothing usable remains
- *  AND no dismissals were recorded, so the caller can treat "no selection" as the
- *  implicit-context fallback. */
+ *  a bad chip never breaks a turn. A supplied but wholly malformed item list
+ *  remains an explicit empty selection so it cannot fall back to implicit context. */
 export function parseAgentRunContextSelection(value: unknown): AgentRunContextSelection | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -134,8 +156,18 @@ export function parseAgentRunContextSelection(value: unknown): AgentRunContextSe
   const dismissedAutoSeedIds = Array.isArray(record.dismissedAutoSeedIds)
     ? dedupeStrings(record.dismissedAutoSeedIds.map((entry) => boundedString(entry)).filter((entry): entry is string => Boolean(entry))).slice(0, MAX_DISMISSED_IDS)
     : [];
-  if (items.length === 0 && dismissedAutoSeedIds.length === 0) return undefined;
+  if (items.length === 0 && dismissedAutoSeedIds.length === 0 && (!Array.isArray(record.items) || record.items.length === 0)) return undefined;
   return { items: dedupeById(items), dismissedAutoSeedIds };
+}
+
+export function hasInvalidExplicitDocumentContext(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const items = (value as Record<string, unknown>).items;
+  return Array.isArray(items) && items.some((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item) || (item as Record<string, unknown>).kind !== "document") return false;
+    const normalized = normalizeItem(item);
+    return normalized?.kind !== "document" || !boundedString(normalized.ref);
+  });
 }
 
 function normalizeSelection(value: AgentRunContextSelection | null | undefined): AgentRunContextSelection {
@@ -205,12 +237,13 @@ export function removeAgentContextItem(
 }
 
 /** Derived view the server uses to layer an explicit selection over implicit
- *  host/page context. `explicit` is false for an empty/absent selection so the
- *  caller keeps the current implicit behavior (graceful degradation). */
+ *  host/page context. `explicit` is false only when the selection is absent. */
 export interface AgentContextSelectionResolution {
   explicit: boolean;
+  invalidDocumentSelection: boolean;
   documentIds: string[];
   artifactIds: string[];
+  fileIds: string[];
   activeEntity: { type: string; id: string; label?: string } | null;
   commandFamilies: string[];
   skillFamilies: string[];
@@ -229,9 +262,10 @@ export function resolveAgentContextSelection(
   // A dismissal is itself explicit intent: removing the only seed leaves items
   // empty but must still suppress the implicit fallback, or the server would
   // silently re-inject what the user removed.
-  const explicit = items.length > 0 || (selection?.dismissedAutoSeedIds?.length ?? 0) > 0;
+  const explicit = selection != null;
   const byKind = (kind: AgentContextKind) => items.filter((item) => item.kind === kind);
   const documentItems = byKind("document");
+  const documentIds = documentItems.map((item) => boundedString(item.ref)).filter((ref): ref is string => Boolean(ref));
   const pageItem = byKind("page")[0];
   const entityItem = byKind("booking-context")[0];
   const entityType = typeof entityItem?.metadata?.entityType === "string" && entityItem.metadata.entityType.trim()
@@ -242,14 +276,16 @@ export function resolveAgentContextSelection(
     : null;
   return {
     explicit,
-    documentIds: documentItems.map((item) => item.ref).filter((ref): ref is string => Boolean(ref)),
+    invalidDocumentSelection: documentItems.some((item) => !boundedString(item.ref)),
+    documentIds,
     artifactIds: byKind("artifact").map((item) => item.ref).filter((ref): ref is string => Boolean(ref)),
+    fileIds: byKind("file").map((item) => item.ref).filter((ref): ref is string => Boolean(ref)),
     activeEntity,
     commandFamilies: dedupeStrings(byKind("command-family").map((item) => item.ref ?? item.label).filter(Boolean)),
     skillFamilies: dedupeStrings(byKind("runtime-skill").map((item) => item.ref ?? item.label).filter(Boolean)),
     page: pageItem ? { route: pageItem.route ?? pageItem.ref, title: pageItem.label } : null,
     // No explicit selection → keep implicit behavior. Explicit selection →
     // include the document only when a document chip is present.
-    includeActiveDocument: !explicit || documentItems.length > 0,
+    includeActiveDocument: !explicit || documentIds.length > 0,
   };
 }

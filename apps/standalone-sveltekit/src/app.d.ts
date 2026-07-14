@@ -4,6 +4,7 @@ declare global {
   namespace App {
     interface Platform {
       env?: Record<string, unknown> & {
+        AGENT_UI_FILES_BUCKET?: R2Bucket;
         CF_VERSION_METADATA?: {
           id?: string;
           tag?: string;

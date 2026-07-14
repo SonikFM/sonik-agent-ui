@@ -758,8 +758,11 @@ export function createBookingRuntimeAuthContextFromTrustedHostHeader(input: {
   header: string | null | undefined;
   fallback?: BookingRuntimeAuthContext | null;
 }): BookingRuntimeAuthContext {
+  if (input.header == null) return resolveBookingRuntimeAuthContext(input.fallback);
   const signedHostContextHeader = safeSignedEnvelopeHeaderValue(input.header);
-  if (!signedHostContextHeader) return resolveBookingRuntimeAuthContext(input.fallback);
+  if (!signedHostContextHeader) {
+    return { mode: "anonymous", token: null, includeCredentials: false, signedHostContextHeader: null, source: "host" };
+  }
   return {
     mode: "signed-host-context",
     token: null,

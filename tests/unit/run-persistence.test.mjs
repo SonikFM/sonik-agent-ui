@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   appendWorkspaceRunEvent,
+  appendWorkspaceMessage,
   createWorkspaceRun,
   createWorkspaceSession,
   deleteWorkspaceSession,
@@ -12,10 +13,12 @@ import {
 } from "../../apps/standalone-sveltekit/src/lib/server/workspace-store.ts";
 
 const session = createWorkspaceSession({ id: "run-session", name: "Run Session", mode: "chat" });
+appendWorkspaceMessage({ id: "user-msg-1", session_id: session.id, role: "user", content: "Run this" });
 
 const run = createWorkspaceRun({
   session_id: session.id,
   message_id: "assistant-msg-1",
+  user_message_id: "user-msg-1",
   request_id: "req_run_1",
   trace_id: "0123456789abcdef0123456789abcdef",
   traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
@@ -25,7 +28,15 @@ assert.equal(run.resumable, false, "new runs are not resumable until they fail")
 assert.equal(run.ended_at, null, "running runs have no ended_at");
 assert.equal(run.session_id, session.id);
 assert.equal(run.message_id, "assistant-msg-1");
+assert.equal(run.user_message_id, "user-msg-1");
 assert.equal(run.request_id, "req_run_1");
+
+const otherSession = createWorkspaceSession({ id: "run-session-other" });
+appendWorkspaceMessage({ id: "other-user-msg", session_id: otherSession.id, role: "user", content: "Other" });
+appendWorkspaceMessage({ id: "assistant-msg-invalid", session_id: session.id, role: "assistant", content: "Not provenance" });
+assert.throws(() => createWorkspaceRun({ session_id: session.id, user_message_id: "assistant-msg-invalid" }), /user message in the same session/i);
+assert.throws(() => createWorkspaceRun({ session_id: session.id, user_message_id: "other-user-msg" }), /user message in the same session/i);
+assert.throws(() => createWorkspaceRun({ session_id: session.id, user_message_id: "" }), /user message in the same session/i);
 
 // Ordered event log; auto-incrementing seq.
 const first = appendWorkspaceRunEvent({ run_id: run.id, session_id: session.id, kind: "status", event: { kind: "status", label: "started" } });
@@ -49,6 +60,7 @@ assert.equal(getWorkspaceRun(run.id)?.status, "failed");
 
 // Succeeded run in the same session, listed in creation order.
 const run2 = createWorkspaceRun({ session_id: session.id });
+assert.equal(run2.user_message_id, null, "legacy-compatible runs may omit the user message id");
 updateWorkspaceRun(run2.id, { status: "succeeded" });
 const runs = listWorkspaceRuns(session.id);
 assert.equal(runs.length, 2);

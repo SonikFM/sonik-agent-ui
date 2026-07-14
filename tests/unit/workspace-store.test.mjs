@@ -90,8 +90,13 @@ const localAuth = localWorkspaceAuthAdapter.resolveContext();
 assert.equal(localAuth.authority, "local-only", "standalone auth context should not claim host org authority");
 assert.equal(localAuth.organizationId, null, "standalone auth context should not invent an organization");
 const persistedMessage = appendWorkspaceMessage({ session_id: session.id, id: "message-test-1", role: "user", content: "persist me" });
-const replayedPersistedMessage = appendWorkspaceMessage({ session_id: session.id, id: "message-test-1", role: "user", content: "persist me again" });
+const replayedPersistedMessage = appendWorkspaceMessage({ session_id: session.id, id: "message-test-1", role: "user", content: "persist me" });
 assert.equal(replayedPersistedMessage.id, persistedMessage.id, "message persistence should be idempotent across repeated client sends");
+assert.throws(
+  () => appendWorkspaceMessage({ session_id: session.id, id: "message-test-1", role: "user", content: "persist me again" }),
+  /different payload/,
+  "message persistence should reject changed repeated client sends",
+);
 assert.equal(listWorkspaceMessages(session.id).filter((message) => message.id === persistedMessage.id).length, 1, "message history should not duplicate replayed message ids");
 assert.equal(listWorkspaceMessages(session.id).some((message) => message.id === persistedMessage.id), true, "message history should be available through the workspace persistence seam");
 const persistedToolCall = recordWorkspaceToolCall({

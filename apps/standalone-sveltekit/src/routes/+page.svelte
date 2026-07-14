@@ -10,7 +10,7 @@
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
   import { JsonRenderDevtools } from "@json-render/devtools-svelte";
-  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentSuggestion, type AgentToolPermissionMode } from "@sonik-agent-ui/chat-surface";
+  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentSuggestion, type AgentToolPermissionMode, type ComposerCatalogStatus, type ComposerRecentDocument, type ComposerSuggestionItem, type ComposerToolItem } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, createDefaultHostUiTargetRegistry, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
@@ -23,7 +23,7 @@
     type AgentContextItem,
     type AgentRunContextSelection,
   } from "@sonik-agent-ui/tool-contracts/run-context";
-  import { deriveAgentContextCandidates } from "$lib/agent-context/context-sources";
+  import { contextItemsByUserMessageId, createNextTurnContextSelection, createTurnContextSelection, deriveAgentContextCandidates } from "$lib/agent-context/context-sources";
   import { promoteJsonRenderArtifact } from "$lib/artifacts/json-render-promotion";
   import { findDocumentArtifactToolCandidate, findJsonArtifactToolCandidate, type PreferredDocumentView } from "$lib/artifacts/tool-artifact-extraction";
   import { findStreamingJsonArtifactSpecCandidate } from "$lib/artifacts/streaming-artifact";
@@ -59,6 +59,7 @@
     type AgentEmbedRailMode,
   } from "@sonik-agent-ui/agent-embed";
   import { nextSignedWorkspaceHostContextCache, selectSignedWorkspaceHostContext } from "$lib/host-context-authority";
+  import { fetchComposerCatalog } from "$lib/composer-catalog";
   import { createQuestionErrorStatePath, createQuestionLifecycleStatePath, escapeJsonPointerSegment } from "$lib/render/question-card-state";
   import { registry } from "$lib/render/registry";
   import {
@@ -178,6 +179,7 @@
     error: string | null;
     error_code: string | null;
     message_id: string | null;
+    user_message_id: string | null;
     context_selection?: AgentRunContextSelection | null;
     started_at: string;
     ended_at: string | null;
@@ -265,8 +267,20 @@
   // /api/agent-prompt-preview to populate the Prompt tab's skill-override editors.
   let agentSkillPromptDefaults = $state<{ id: string; familyId: string; title: string; defaultBody: string }[]>([]);
   let agentSkillPromptDefaultsStatus = $state<"idle" | "loading" | "ready" | "error">("idle");
+  let composerSuggestions = $state<ComposerSuggestionItem[]>([]);
+  let composerTools = $state<ComposerToolItem[]>([]);
+  let recentComposerDocuments = $state<ComposerRecentDocument[]>([]);
+  let composerSkillCatalogStatus = $state<ComposerCatalogStatus>("loading");
+  let composerCommandCatalogStatus = $state<ComposerCatalogStatus>("loading");
+  let composerToolCatalogStatus = $state<ComposerCatalogStatus>("loading");
+  let recentComposerDocumentCatalogStatus = $state<ComposerCatalogStatus>("loading");
+  let composerCatalogLoadRevision = 0;
+  let recentComposerDocumentLoadRevision = 0;
+  const pinnedComposerToolsBySession = new SvelteMap<string, string[]>();
+  const pinnedComposerToolIds = $derived(activeSessionId ? pinnedComposerToolsBySession.get(activeSessionId) ?? [] : []);
   // Composer context selection for the next turn (chips + authoritative dismissals).
   let runContextSelection = $state<AgentRunContextSelection>(createEmptyAgentRunContextSelection());
+  let pendingRunContextSelection: AgentRunContextSelection | null = null;
   // Analytics-only run hints, computed client-side at send time. `analyticsTurnIndex`
   // is 0-based per workspace session (reset on clear/switch); `pendingAnalyticsHints`
   // is the object read by the transport for the in-flight send.
@@ -299,6 +313,7 @@
   let lastPageContextSignature = "";
   let lastActivityTelemetrySignature = "";
   let lastWorkspaceRuntimeTelemetrySignature = "";
+  let workspaceSessionContext: string | null = null;
   const SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST = "sonik:agent-ui:request-page-context";
   let sessionBootstrapKey: string | null = null;
   let sessionBootstrapPromise: Promise<void> | null = null;
@@ -340,6 +355,8 @@
       fetch: fetchGenerateWithSupportCorrelation,
       prepareSendMessagesRequest({ messages, id, trigger, messageId, body, headers }) {
         const correlation = createPreparedTurnCorrelation(messageId ?? messages.at(-1)?.id);
+        const contextSelection = pendingRunContextSelection ?? $state.snapshot(runContextSelection);
+        pendingRunContextSelection = null;
         return {
           headers: {
             ...headers,
@@ -361,7 +378,7 @@
               pageContext: createPageContextSnapshot(),
             },
             pageContext: createPageContextSnapshot(),
-            contextSelection: $state.snapshot(runContextSelection),
+            contextSelection,
             analyticsHints: pendingAnalyticsHints ?? undefined,
             agentSettings: createAgentSettingsSnapshot(),
             skillIds: enabledAgentSkillIds,
@@ -1309,6 +1326,11 @@
     const requestId = requestHeaders.get("x-sonik-request-id") ?? undefined;
     const prepared = requestId ? pendingTurnCorrelationByKey.get(requestId) : undefined;
     try {
+      await persistConversationMessages();
+      const userMessageId = [...conversation.messages].reverse().find((message) => message.role === "user")?.id;
+      if (activeSessionId && userMessageId && !persistedMessageIds.has(userMessageId)) {
+        throw new Error("The user message must be saved before generation starts.");
+      }
       const response = await fetch(input, init);
       const deployment = deploymentSnapshotFromHeaders(response.headers);
       if (deployment) latestDeploymentSnapshot = deployment;
@@ -1361,15 +1383,19 @@
       logSessionTelemetry("workspace.fetch.blocked_missing_host_context", { ok: false, reason: "missing_signed_host_context" });
       throw new Error("Workspace cloud runtime is not available. (missing-host-context)");
     }
+    const requestSessionSelectionRevision = sessionSelectionRevision;
     const response = await fetch(input, {
       ...init,
       headers: {
         ...createDevSmokeHeaders(),
         ...createWorkspaceRequestHeaders(),
+        ...(workspaceSessionContext ? { "x-sonik-agent-ui-workspace-session-context": workspaceSessionContext } : {}),
         ...headersToRecord(init.headers),
       },
     });
     recordWorkspaceRuntimeDiagnostics(response, input);
+    const refreshedWorkspaceSessionContext = response.headers.get("x-sonik-agent-ui-workspace-session-context");
+    if (response.ok && refreshedWorkspaceSessionContext && requestSessionSelectionRevision === sessionSelectionRevision) workspaceSessionContext = refreshedWorkspaceSessionContext;
     return response;
   }
 
@@ -1579,6 +1605,7 @@
       ok: true,
     });
     syncDevPageContext("host_page_context_updated");
+    void loadComposerCatalogs();
     maybeBootstrapSessions("host_page_context_updated");
   }
 
@@ -1792,6 +1819,28 @@
       createActionDescriptor("openWorkspaceDocument", "Open workspace document", {
         enabled: !isStreaming,
         disabledReason: isStreaming ? "streaming" : undefined,
+      }),
+      createActionDescriptor("stageComposerSkill", "Stage composer skill", {
+        enabled: !isStreaming && composerSkillCatalogStatus === "ready" && composerSuggestions.some((item) => item.kind === "skill"),
+        disabledReason: isStreaming ? "streaming" : composerSkillCatalogStatus === "loading" ? "skill_catalog_loading" : composerSkillCatalogStatus === "unavailable" ? "skill_catalog_unavailable" : composerSuggestions.some((item) => item.kind === "skill") ? undefined : "skill_catalog_empty",
+      }),
+      createActionDescriptor("setComposerToolPermission", "Set composer tool permission", {
+        enabled: !isStreaming && composerToolCatalogStatus === "ready" && composerTools.length > 0,
+        disabledReason: isStreaming ? "streaming" : composerToolCatalogStatus === "loading" ? "tool_catalog_loading" : composerToolCatalogStatus === "unavailable" ? "tool_catalog_unavailable" : composerTools.length ? undefined : "tool_catalog_empty",
+        policyMode: "ask",
+      }),
+      createActionDescriptor("pinComposerTool", "Pin composer tool", {
+        enabled: !isStreaming && Boolean(activeSessionId) && composerToolCatalogStatus === "ready" && composerTools.length > 0,
+        disabledReason: isStreaming ? "streaming" : !activeSessionId ? "missing_session" : composerToolCatalogStatus === "loading" ? "tool_catalog_loading" : composerToolCatalogStatus === "unavailable" ? "tool_catalog_unavailable" : composerTools.length ? undefined : "tool_catalog_empty",
+      }),
+      createActionDescriptor("removeComposerContext", "Remove composer context", {
+        enabled: !isStreaming && runContextSelection.items.length > 0,
+        disabledReason: isStreaming ? "streaming" : runContextSelection.items.length ? undefined : "composer_context_empty",
+      }),
+      createActionDescriptor("attachComposerDocument", "Attach recent document", {
+        enabled: !isStreaming && recentComposerDocumentCatalogStatus === "ready" && recentComposerDocuments.length > 0,
+        disabledReason: isStreaming ? "streaming" : recentComposerDocumentCatalogStatus === "loading" ? "document_catalog_loading" : recentComposerDocumentCatalogStatus === "unavailable" ? "document_catalog_unavailable" : recentComposerDocuments.length ? undefined : "document_catalog_empty",
+        effect: "read",
       }),
       createActionDescriptor("submitAnswer", "Submit question answer", {
         enabled: workflow.canSubmitAnswer,
@@ -2183,6 +2232,41 @@
           await openDocumentEditor();
           return semanticActionResult(true, "Workspace document opened.");
         },
+        stageComposerSkill: ({ skillId }) => {
+          if (isStreaming) return semanticActionResult(false, "Stop the current stream before staging context.", "streaming");
+          const skill = composerSuggestions.find((item) => item.kind === "skill" && item.id === skillId);
+          if (!skill) return semanticActionResult(false, "Skill is not in the current catalog.", "unknown_skill");
+          handleAttachContext({ id: `runtime-skill:${skill.id}`, kind: "runtime-skill", label: skill.label, source: "manual", ref: skill.id, detail: skill.description });
+          return semanticActionResult(true, "Skill staged for the next turn.");
+        },
+        setComposerToolPermission: ({ familyId, mode }) => {
+          if (isStreaming) return semanticActionResult(false, "Stop the current stream before changing tool permissions.", "streaming");
+          if (!familyId || !composerTools.some((tool) => tool.familyId === familyId)) return semanticActionResult(false, "Tool family is not in the current catalog.", "unknown_tool_family");
+          if (mode !== "off" && mode !== "ask" && mode !== "allow") return semanticActionResult(false, "Tool permission mode is invalid.", "invalid_tool_permission_mode");
+          handleAgentToolPermissionChange(familyId, mode);
+          return semanticActionResult(true, "Tool permission updated. Server grants still apply.");
+        },
+        pinComposerTool: ({ toolId, pinned }) => {
+          if (isStreaming) return semanticActionResult(false, "Stop the current stream before changing tool pins.", "streaming");
+          if (!toolId || !composerTools.some((tool) => tool.id === toolId)) return semanticActionResult(false, "Tool is not in the current catalog.", "unknown_tool");
+          handleComposerToolPin(toolId, pinned !== false);
+          return semanticActionResult(true, pinned === false ? "Tool unpinned." : "Tool pinned as a conversation-scoped non-grant context preference. Server grants and approval still apply.");
+        },
+        removeComposerContext: ({ contextId }) => {
+          if (isStreaming) return semanticActionResult(false, "Stop the current stream before removing context.", "streaming");
+          const id = typeof contextId === "string" ? contextId.trim() : "";
+          if (!id) return semanticActionResult(false, "Context id is required.", "missing_context_id");
+          if (!runContextSelection.items.some((item) => item.id === id)) return semanticActionResult(false, "Context is not staged for the next turn.", "unknown_context");
+          handleRemoveContext(id);
+          return semanticActionResult(true, "Context removed from the next turn.");
+        },
+        attachComposerDocument: ({ documentId }) => {
+          if (isStreaming) return semanticActionResult(false, "Stop the current stream before staging context.", "streaming");
+          const document = recentComposerDocuments.find((item) => item.id === documentId);
+          if (!document) return semanticActionResult(false, "Document is not in the recent catalog.", "unknown_document");
+          attachRecentComposerDocument(document);
+          return semanticActionResult(true, "Document staged for the next turn.");
+        },
         submitAnswer: async ({ questionId, value }) => {
           return submitPageControlQuestionAnswer({ questionId, value, skipped: false });
         },
@@ -2350,6 +2434,7 @@
     }
     void refreshAgentModelCatalog();
     void loadAgentSkillPromptDefaults();
+    void loadComposerCatalogs();
     return () => {
       stopLongTaskTelemetry?.();
       window.clearInterval(activityTimer);
@@ -2372,6 +2457,11 @@
 
   $effect(() => {
     recordAgentActivity(agentActivity);
+  });
+
+  $effect(() => {
+    activeSessionId;
+    void loadRecentComposerDocuments();
   });
 
   $effect(() => {
@@ -2795,10 +2885,7 @@
     if (!reattach?.run || reattach.run.status === "succeeded") return;
 
     const rebuilt = reattach.message;
-    const runCount = detail.runs?.length ?? 0;
-    const localAssistantCount = conversation.messages.filter((message) => message.role === "assistant").length;
-    const localAssistantTurnExists = runCount > 0 && localAssistantCount >= runCount;
-    if (rebuilt && rebuilt.parts.length > 0 && !localAssistantTurnExists && !persistedMessageIds.has(rebuilt.id)) {
+    if (rebuilt && rebuilt.parts.length > 0 && !persistedMessageIds.has(rebuilt.id)) {
       conversation.messages = [
         ...conversation.messages,
         { id: rebuilt.id, role: "assistant", parts: snapshotDataParts(rebuilt.parts) },
@@ -2826,14 +2913,10 @@
     turnContextByMessageId.clear();
     const runs = detail.runs ?? [];
     const userMessageIds = detail.messages.filter((message) => message.role === "user").map((message) => message.id);
-    runs.forEach((run, index) => {
-      const items = (run.context_selection?.items ?? []) as AgentContextItem[];
-      const userId = userMessageIds[index];
-      if (userId && items.length > 0) turnContextByMessageId.set(userId, items);
-    });
+    contextItemsByUserMessageId(runs, userMessageIds).forEach((items, userId) => turnContextByMessageId.set(userId, items));
     const latest = [...runs].reverse().find((run) => run.context_selection);
     runContextSelection = latest?.context_selection
-      ? parseAgentRunContextSelection(latest.context_selection) ?? createEmptyAgentRunContextSelection()
+      ? createNextTurnContextSelection(parseAgentRunContextSelection(latest.context_selection) ?? createEmptyAgentRunContextSelection())
       : createEmptyAgentRunContextSelection();
   }
 
@@ -3160,6 +3243,121 @@
     }
   }
 
+  async function loadComposerCatalogs(): Promise<void> {
+    const revision = ++composerCatalogLoadRevision;
+    composerSkillCatalogStatus = "loading";
+    composerCommandCatalogStatus = "loading";
+    composerToolCatalogStatus = "loading";
+    const [skillsResult, commandsResult, toolsResult] = await Promise.all([
+      fetchComposerCatalog<{ skills?: Record<string, unknown>[] }>(workspaceFetch, "/api/skill-catalog?limit=40"),
+      fetchComposerCatalog<{ commands?: Record<string, unknown>[] }>(workspaceFetch, "/api/commands/search?limit=40"),
+      fetchComposerCatalog<{ tools?: Record<string, unknown>[] }>(workspaceFetch, "/api/tool-manifest"),
+    ]);
+    if (revision !== composerCatalogLoadRevision) return;
+    composerSkillCatalogStatus = skillsResult.status === "ready" && !Array.isArray(skillsResult.value.skills) ? "unavailable" : skillsResult.status;
+    composerCommandCatalogStatus = commandsResult.status === "ready" && !Array.isArray(commandsResult.value.commands) ? "unavailable" : commandsResult.status;
+    composerToolCatalogStatus = toolsResult.status === "ready" && !Array.isArray(toolsResult.value.tools) ? "unavailable" : toolsResult.status;
+    const skills = skillsResult.status === "ready" && Array.isArray(skillsResult.value.skills) ? skillsResult.value.skills : [];
+    const commands = commandsResult.status === "ready" && Array.isArray(commandsResult.value.commands) ? commandsResult.value.commands : [];
+    composerSuggestions = [
+      ...skills.map((skill: Record<string, unknown>) => ({
+        id: String(skill.id ?? ""),
+        label: String(skill.title ?? skill.id ?? "Skill"),
+        description: typeof skill.description === "string" ? skill.description : undefined,
+        kind: "skill" as const,
+      })),
+      ...commands.map((command: Record<string, unknown>) => ({
+        id: String(command.id ?? ""),
+        label: String(command.title ?? command.id ?? "Command"),
+        description: typeof command.description === "string" ? command.description : undefined,
+        kind: "command" as const,
+      })),
+    ].filter((item) => item.id);
+
+    const tools = toolsResult.status === "ready" && Array.isArray(toolsResult.value.tools) ? toolsResult.value.tools : [];
+    composerTools = tools.map((tool: Record<string, unknown>) => {
+      const metadata = tool.metadata && typeof tool.metadata === "object" && !Array.isArray(tool.metadata) ? tool.metadata as Record<string, unknown> : {};
+      const source = typeof tool.source === "string" ? tool.source : "local";
+      return {
+        id: String(tool.id ?? ""),
+        label: String(tool.title ?? tool.id ?? "Tool"),
+        description: typeof tool.description === "string" ? tool.description : undefined,
+        familyId: typeof metadata.familyId === "string" ? metadata.familyId : source,
+        serverId: typeof metadata.serverId === "string" ? metadata.serverId : source === "mcp" ? "MCP tools" : `${source} tools`,
+      };
+    }).filter((tool: ComposerToolItem) => tool.id);
+  }
+
+  async function loadRecentComposerDocuments(): Promise<void> {
+    const revision = ++recentComposerDocumentLoadRevision;
+    if (!activeSessionId) {
+      recentComposerDocuments = [];
+      recentComposerDocumentCatalogStatus = "ready";
+      return;
+    }
+    recentComposerDocumentCatalogStatus = "loading";
+    const result = await fetchComposerCatalog<{ documents?: Array<{ id: string; title?: string; language?: string; session_name?: string | null }> }>(workspaceFetch, "/api/documents/library?sort=updated&limit=8");
+    if (revision !== recentComposerDocumentLoadRevision) return;
+    recentComposerDocumentCatalogStatus = result.status;
+    if (result.status === "ready") {
+      const payload = result.value;
+      recentComposerDocuments = (payload.documents ?? []).map((document) => ({
+        id: document.id,
+        label: document.title?.trim() || "Untitled document",
+        detail: [document.language, document.session_name].filter(Boolean).join(" · "),
+      }));
+    } else {
+      recentComposerDocuments = [];
+    }
+  }
+
+  function attachRecentComposerDocument(document: ComposerRecentDocument): void {
+    handleAttachContext({ id: `document:${document.id}`, kind: "document", label: document.label, source: "manual", ref: document.id, detail: document.detail });
+  }
+
+  async function uploadComposerFile(file: File, signal: AbortSignal): Promise<AgentContextItem> {
+    if (!activeSessionId) throw new Error("Start a conversation before attaching a file.");
+    const form = new FormData();
+    form.append("file", file);
+    form.append("session_id", activeSessionId);
+    const response = await workspaceFetch("/api/files", {
+      method: "POST",
+      signal,
+      body: form,
+    });
+    if (!response.ok) {
+      const failure = await response.json().catch(() => null) as { error?: string; retry_file_id?: string } | null;
+      if (failure?.retry_file_id) {
+        await workspaceFetch(`/api/files/${encodeURIComponent(failure.retry_file_id)}`, { method: "DELETE" }).catch(() => undefined);
+      }
+      throw new Error(failure?.error || "Upload failed");
+    }
+    const uploaded = await response.json() as { id: string; original_filename: string; media_type: string; byte_size: number };
+    return { id: `file:${uploaded.id}`, kind: "file", label: uploaded.original_filename, source: "manual", ref: uploaded.id, detail: `${uploaded.media_type} · ${uploaded.byte_size} bytes` };
+  }
+
+  function handleComposerToolPin(toolId: string, pinned: boolean): void {
+    if (!activeSessionId || !composerTools.some((tool) => tool.id === toolId)) return;
+    const current = pinnedComposerToolsBySession.get(activeSessionId) ?? [];
+    pinnedComposerToolsBySession.set(activeSessionId, pinned ? [...new Set([...current, toolId])] : current.filter((id) => id !== toolId));
+    logArtifactTelemetry({ source: "client", event: "composer.tool.pin", sessionId: activeSessionId, reason: `${toolId}:${pinned ? "on" : "off"}`, ok: true });
+  }
+
+  async function openComposerContext(item: AgentContextItem): Promise<void> {
+    if (item.kind !== "document" || !item.ref) return;
+    try {
+      const response = await workspaceFetch(`/api/document/${encodeURIComponent(item.ref)}`);
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      const document = await response.json() as ActiveDocumentSnapshot;
+      activeDocument = document;
+      documentSeed = document;
+      documentPreferredView = inferPreferredDocumentView(document.language);
+      documentEditorOpen = true;
+    } catch (error) {
+      sessionRailError = friendlySessionError("We couldn't open that document.", error);
+    }
+  }
+
   function handleAgentPromptModuleOverrideChange(moduleId: string, overrideBody: string | undefined): void {
     if (overrideBody === undefined) {
       const next = { ...agentPromptModuleOverrides };
@@ -3261,6 +3459,16 @@
     analyticsTurnIndex = turnIndex + 1;
   }
 
+  function stageTurnContextSelection(): AgentRunContextSelection {
+    const selection = createTurnContextSelection(
+      $state.snapshot(runContextSelection),
+      composerTools.filter((tool) => pinnedComposerToolIds.includes(tool.id)),
+    );
+    pendingRunContextSelection = selection;
+    runContextSelection = createNextTurnContextSelection(selection);
+    return selection;
+  }
+
   function handleSubmit(message: string): boolean {
     const trimmed = message.trim();
     if (getSubmitDisabledReason(trimmed)) return false;
@@ -3274,7 +3482,7 @@
     resumableRun = null;
     stampAnalyticsHints("composer");
     maybeNameNewChat(trimmed);
-    const turnContext = ($state.snapshot(runContextSelection).items ?? []) as AgentContextItem[];
+    const turnContext = stageTurnContextSelection().items;
     conversation.sendMessage({ text: trimmed });
     // Associate the selection sent with this turn to the just-appended user
     // message so it renders as provenance (survives reload via persisted runs).
@@ -3331,7 +3539,7 @@
     if (!trimmed || isStreaming || getSubmitDisabledReason(trimmed)) return false;
     resumableRun = null;
     stampAnalyticsHints(entryFrom);
-    const turnContext = ($state.snapshot(runContextSelection).items ?? []) as AgentContextItem[];
+    const turnContext = stageTurnContextSelection().items;
     conversation.sendMessage({ text: trimmed });
     const sentUserMessage = conversation.messages.at(-1);
     if (turnContext.length > 0 && sentUserMessage?.role === "user") {
@@ -3804,7 +4012,12 @@
     resumableRun = null;
     logSessionTelemetry("chat.continue.start", { sessionId: activeSessionId, reason: run.error_code ?? run.status });
     stampAnalyticsHints("resume_continue");
+    const turnContext = stageTurnContextSelection().items;
     conversation.sendMessage({ text: RESUME_CONTINUE_PROMPT });
+    const sentUserMessage = conversation.messages.at(-1);
+    if (turnContext.length > 0 && sentUserMessage?.role === "user") {
+      turnContextByMessageId.set(sentUserMessage.id, turnContext);
+    }
   }
 
   function handleClear() {
@@ -3815,6 +4028,7 @@
     // A cleared chat drops manual chips and prior dismissals; the reconcile
     // effect re-seeds fresh page/document chips for the new turn.
     runContextSelection = createEmptyAgentRunContextSelection();
+    pendingRunContextSelection = null;
     turnContextByMessageId.clear();
     // New conversation → restart the per-session analytics turn sequence.
     analyticsTurnIndex = 0;
@@ -4125,6 +4339,22 @@
       contextSources={contextCandidates.sources}
       onAttachContext={handleAttachContext}
       onRemoveContext={handleRemoveContext}
+      onOpenContext={(item) => void openComposerContext(item)}
+      {composerSuggestions}
+      composerTools={composerTools}
+      toolPermissionModes={agentToolPermissionModes}
+      pinnedToolIds={pinnedComposerToolIds}
+      recentDocuments={recentComposerDocuments}
+      skillCatalogStatus={composerSkillCatalogStatus}
+      commandCatalogStatus={composerCommandCatalogStatus}
+      toolCatalogStatus={composerToolCatalogStatus}
+      recentDocumentCatalogStatus={recentComposerDocumentCatalogStatus}
+      onRetryComposerCatalogs={() => void loadComposerCatalogs()}
+      onRetryRecentDocuments={() => void loadRecentComposerDocuments()}
+      onToolPermissionChange={handleAgentToolPermissionChange}
+      onPinToolChange={handleComposerToolPin}
+      onAttachRecentDocument={attachRecentComposerDocument}
+      onUploadFile={uploadComposerFile}
       messageContext={messageContextItems}
       shouldRenderArtifact={shouldRenderInlineArtifact}
     >

@@ -4,6 +4,39 @@ import { classifyRunErrorCode } from "@sonik-agent-ui/tool-contracts";
 import type { AgentAnalyticsHints, PersistedRunEvent, RunCorrelation, RunErrorCode } from "@sonik-agent-ui/tool-contracts";
 import type { AgentRunContextSelection } from "@sonik-agent-ui/tool-contracts/run-context";
 import type { WorkspaceRunContextSelection, WorkspaceRunEventRecord, WorkspaceRunRecord, WorkspaceRunStatus } from "@sonik-agent-ui/workspace-session";
+import type { AsyncWorkspacePersistenceAdapter } from "@sonik-agent-ui/workspace-session";
+import type { UIMessage } from "ai";
+import { AgentUiFileError } from "./agent-ui-files.ts";
+import { sanitizeRunFailure } from "./run-error-safety.ts";
+
+export async function persistInitiatingUserMessage(input: {
+  persistence: AsyncWorkspacePersistenceAdapter;
+  sessionId: string;
+  message: UIMessage | undefined;
+}): Promise<void> {
+  const message = input.message;
+  if (!message?.id || message.role !== "user") throw new AgentUiFileError(400, "A user message with an id is required");
+  const session = await input.persistence.getSession(input.sessionId);
+  if (!session) throw new AgentUiFileError(404, "Session not found");
+  const parts = Array.isArray(message.parts) ? message.parts : [];
+  const content = parts.map((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "").join("");
+  const persistedParts = parts.length > 0 ? parts : null;
+  const persisted = await input.persistence.appendMessage({ session_id: session.id, id: message.id, role: "user", content, parts: persistedParts });
+  if (persisted.id !== message.id || persisted.session_id !== session.id || persisted.role !== "user" || persisted.content !== content || stableJsonStringify(persisted.parts) !== stableJsonStringify(persistedParts)) {
+    throw new AgentUiFileError(400, "User message provenance is invalid");
+  }
+}
+
+function stableJsonStringify(value: unknown): string | undefined {
+  return JSON.stringify(sortJsonValue(value));
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJsonValue);
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(record).sort().filter((key) => record[key] !== undefined).map((key) => [key, sortJsonValue(record[key])]));
+}
 
 // Flush the coalesced text/reasoning buffer once it grows past this, so a
 // mid-turn interrupt still persists most of what streamed (bounded row count).
@@ -99,7 +132,8 @@ export function createRunEventMapper() {
       }
       if (type === "tool-output-error") {
         flushPending(out);
-        out.push({ kind: "tool_result", toolCallId: asString(candidate.toolCallId), output: { errorText: asString(candidate.errorText) }, isError: true });
+        const failure = sanitizeRunFailure(candidate.errorText, { fallbackCode: "AGENT_STREAM_FAILED" });
+        out.push({ kind: "tool_result", toolCallId: asString(candidate.toolCallId), output: { errorText: failure.message }, isError: true });
         return out;
       }
       if (type === SPEC_DATA_PART_TYPE) {
@@ -110,7 +144,8 @@ export function createRunEventMapper() {
       }
       if (type === "error") {
         flushPending(out);
-        out.push({ kind: "error", message: asString(candidate.errorText) || asString(candidate.error) || "Stream error" });
+        const failure = sanitizeRunFailure(asString(candidate.errorText) || asString(candidate.error) || "Stream error", { fallbackCode: "AGENT_STREAM_FAILED" });
+        out.push({ kind: "error", message: failure.message, code: failure.code });
         return out;
       }
       if (type === "finish" || type === "finish-step") {
@@ -199,7 +234,7 @@ export function rebuildRunMessageParts(events: Array<Pick<WorkspaceRunEventRecor
       case "tool_result": {
         const index = event.toolCallId ? toolPartIndexById.get(event.toolCallId) : undefined;
         const errorText = event.isError
-          ? asString((event.output as { errorText?: unknown } | null | undefined)?.errorText) || "Tool error"
+          ? sanitizeRunFailure(asString((event.output as { errorText?: unknown } | null | undefined)?.errorText) || "Tool error", { fallbackCode: "AGENT_STREAM_FAILED" }).message
           : undefined;
         if (index !== undefined) {
           const part = parts[index] as RebuiltToolPart;
@@ -243,18 +278,13 @@ export function rebuildRunMessageText(events: Array<Pick<WorkspaceRunEventRecord
 // The client persists an interrupted turn (user + partial assistant) together once
 // the tab survives to a not-streaming state, under the assistant message's own id.
 // Reattaching the same turn from the run event log would then double it. A run's
-// assistant turn is already persisted when its back-filled message_id is among the
-// persisted messages, or — when that id was never captured — when the persisted
-// assistant messages already cover every run (runs are 1:1 with turns, so an
-// assistant count below the run count means the latest turn was never persisted).
+// assistant turn is already persisted only when its back-filled message_id matches
+// a persisted assistant message.
 export function runAssistantTurnPersisted(
   run: { message_id?: string | null },
-  runCount: number,
   messages: ReadonlyArray<{ id: string; role: string }>,
 ): boolean {
-  if (run.message_id && messages.some((message) => message.id === run.message_id)) return true;
-  const assistantCount = messages.reduce((count, message) => (message.role === "assistant" ? count + 1 : count), 0);
-  return assistantCount >= runCount;
+  return Boolean(run.message_id && messages.some((message) => message.role === "assistant" && message.id === run.message_id));
 }
 
 export interface RunReattachMessage {
@@ -270,13 +300,12 @@ export interface RunReattachMessage {
 // dedupes against the persisted turn; falls back to `run:<id>` otherwise.
 export function buildRunReattachMessage(input: {
   run: { id: string; status: WorkspaceRunStatus; message_id?: string | null };
-  runCount: number;
   messages: ReadonlyArray<{ id: string; role: string }>;
   events: Array<Pick<WorkspaceRunEventRecord<PersistedRunEvent>, "event">> | PersistedRunEvent[];
 }): RunReattachMessage | null {
   const { run } = input;
   if (run.status === "succeeded") return null;
-  if (runAssistantTurnPersisted(run, input.runCount, input.messages)) return null;
+  if (runAssistantTurnPersisted(run, input.messages)) return null;
   const parts = rebuildRunMessageParts(input.events);
   if (parts.length === 0) return null;
   return { id: run.message_id ?? `run:${run.id}`, role: "assistant", content: rebuildRunMessageText(input.events), parts };
@@ -285,7 +314,7 @@ export function buildRunReattachMessage(input: {
 // Minimal persistence surface the recorder needs. Accepts sync or async
 // implementations (in-memory adapter is sync; cloud is async) by awaiting.
 export interface RunPersistencePort {
-  createRun(input: { session_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord | Promise<WorkspaceRunRecord>;
+  createRun(input: { session_id?: string | null; user_message_id?: string | null; message_id?: string | null; request_id?: string | null; trace_id?: string | null; traceparent?: string | null; context_selection?: WorkspaceRunContextSelection | null }): WorkspaceRunRecord | Promise<WorkspaceRunRecord>;
   appendRunEvent(input: { run_id: string; session_id?: string | null; kind: string; event: PersistedRunEvent }): unknown;
   updateRun(id: string, input: { status?: WorkspaceRunStatus; resumable?: boolean; error?: string | null; error_code?: string | null; message_id?: string | null }): unknown;
 }
@@ -305,9 +334,8 @@ export interface RunRecorder {
 
 /**
  * Creates a run and returns a recorder that persists mapped stream events in
- * order and finalizes run status. Returns null when a run cannot be created
- * (e.g. cloud persistence without host context) so the caller degrades to the
- * existing, non-persisted streaming behavior.
+ * order and finalizes run status. Run creation fails closed so a validated,
+ * session-backed user message cannot execute without its durable run record.
  */
 export interface RunPromptComposition {
   moduleIds: string[];
@@ -317,27 +345,26 @@ export interface RunPromptComposition {
 
 export async function startRunRecorder(
   persistence: RunPersistencePort,
-  input: { sessionId: string; messageId?: string | null; correlation: RunCorrelation; contextSelection?: AgentRunContextSelection | null; promptComposition?: RunPromptComposition | null; analyticsHints?: AgentAnalyticsHints | null },
-): Promise<RunRecorder | null> {
-  let run: WorkspaceRunRecord;
-  try {
-    run = await persistence.createRun({
-      session_id: input.sessionId,
-      message_id: input.messageId ?? null,
-      request_id: input.correlation.requestId,
-      trace_id: input.correlation.traceId,
-      traceparent: input.correlation.traceparent,
-      // The composer selection for this turn is persisted on the run so it can be
-      // replayed as provenance and re-hydrated on reload (removed chips stay
-      // removed). Structurally compatible with WorkspaceRunContextSelection.
-      context_selection: input.contextSelection ?? null,
-    });
-  } catch {
-    return null;
-  }
+  input: { sessionId: string; userMessageId?: string | null; correlation: RunCorrelation; contextSelection?: AgentRunContextSelection | null; promptComposition?: RunPromptComposition | null; analyticsHints?: AgentAnalyticsHints | null },
+): Promise<RunRecorder> {
+  const run = await persistence.createRun({
+    session_id: input.sessionId,
+    user_message_id: input.userMessageId ?? null,
+    message_id: null,
+    request_id: input.correlation.requestId,
+    trace_id: input.correlation.traceId,
+    traceparent: input.correlation.traceparent,
+    // The composer selection for this turn is persisted on the run so it can be
+    // replayed as provenance and re-hydrated on reload (removed chips stay
+    // removed). Structurally compatible with WorkspaceRunContextSelection.
+    context_selection: input.contextSelection ?? null,
+  });
 
   const mapper = createRunEventMapper();
   let finalized = false;
+  let finalizing: Promise<void> | null = null;
+  let terminalInput: RunFinalizeInput | null = null;
+  let terminalErrorQueued = false;
   // The assistant message id from the stream's `start` chunk, back-filled onto the
   // run on finalize so a persisted assistant turn and its run share one id namespace
   // (reattach can then tell an already-persisted turn from an interrupted one).
@@ -346,11 +373,26 @@ export async function startRunRecorder(
   // turn that emitted an error part but still closed the stream normally finalizes
   // failed rather than succeeded.
   let recordedErrorMessage: string | null = null;
+  let recordedErrorCode: RunErrorCode | null = null;
   // Serialize persistence so appended events keep a monotonic seq and never
   // race, while the stream itself is never blocked on a persistence write.
   let tail: Promise<unknown> = Promise.resolve();
+  let appendFailed = false;
+  let appendFailure: unknown;
+  let appendFailureReported = false;
+  const retryAppends: Array<() => unknown> = [];
   const enqueue = (fn: () => unknown): void => {
-    tail = tail.then(fn).catch(() => undefined);
+    tail = tail.then(() => {
+      if (appendFailed) {
+        retryAppends.push(fn);
+        return;
+      }
+      return fn();
+    }).catch((error) => {
+      retryAppends.push(fn);
+      appendFailed = true;
+      appendFailure ??= error;
+    });
   };
   const persistEvents = (events: PersistedRunEvent[]): void => {
     for (const event of events) {
@@ -392,7 +434,10 @@ export async function startRunRecorder(
         }
         const events = mapper.map(chunk);
         for (const event of events) {
-          if (event.kind === "error" && !recordedErrorMessage) recordedErrorMessage = event.message || "Stream error";
+          if (event.kind === "error" && !recordedErrorMessage) {
+            recordedErrorMessage = event.message || "Run interrupted";
+            recordedErrorCode = event.code ?? "AGENT_STREAM_FAILED";
+          }
         }
         persistEvents(events);
       } catch {
@@ -401,36 +446,55 @@ export async function startRunRecorder(
     },
     async finalize(finalizeInput: RunFinalizeInput): Promise<void> {
       if (finalized) return;
-      finalized = true;
-      persistEvents(mapper.finalize());
-      let status = finalizeInput.status;
-      let error = finalizeInput.error ?? null;
-      let errorCode: RunErrorCode | null = finalizeInput.errorCode ?? null;
-      let resumable = finalizeInput.resumable ?? false;
-      // A turn that emitted an AI-SDK error part but still closed the stream
-      // normally has really failed: finalize it failed + resumable so it reattaches
-      // and offers Continue rather than masquerading as a clean success.
-      if (status === "succeeded" && recordedErrorMessage) {
-        status = "failed";
-        error = error ?? recordedErrorMessage;
-        errorCode = errorCode ?? classifyRunErrorCode({ message: recordedErrorMessage });
-        resumable = true;
-      }
-      // Synthesize a typed error event only when the stream failed without the
-      // mapper already logging one (e.g. a transport rejection). An error part that
-      // flowed through the mapper is already persisted.
-      if (status === "failed" && errorCode && !recordedErrorMessage) {
-        enqueue(() =>
-          persistence.appendRunEvent({
-            run_id: run.id,
-            session_id: input.sessionId,
-            kind: "error",
-            event: { kind: "error", message: error ?? "Run failed", code: errorCode ?? undefined },
-          }),
-        );
-      }
-      await tail;
-      try {
+      if (finalizing) return finalizing;
+      terminalInput ??= finalizeInput;
+      finalizing = (async () => {
+        if (appendFailureReported) {
+          appendFailed = false;
+          appendFailure = undefined;
+          appendFailureReported = false;
+          for (const retry of retryAppends.splice(0)) enqueue(retry);
+        }
+        persistEvents(mapper.finalize());
+        let status = terminalInput.status;
+        let error = terminalInput.error ?? null;
+        let errorCode: RunErrorCode | null = terminalInput.errorCode ?? null;
+        let resumable = terminalInput.resumable ?? false;
+        // A turn that emitted an AI-SDK error part but still closed the stream
+        // normally has really failed: finalize it failed + resumable so it reattaches
+        // and offers Continue rather than masquerading as a clean success.
+        if (status === "succeeded" && recordedErrorMessage) {
+          status = "failed";
+          error = error ?? recordedErrorMessage;
+          errorCode = errorCode ?? recordedErrorCode ?? classifyRunErrorCode({ message: recordedErrorMessage });
+          resumable = true;
+        }
+        // Synthesize a typed error event only when the stream failed without the
+        // mapper already logging one (e.g. a transport rejection). An error part that
+        // flowed through the mapper is already persisted.
+        const safeFailure = sanitizeRunFailure(error, {
+          code: errorCode,
+          fallbackCode: status === "failed" ? "AGENT_STREAM_FAILED" : undefined,
+          resumable,
+        });
+        error = error === null ? null : safeFailure.message;
+        errorCode = errorCode ?? (status === "failed" ? safeFailure.code : null);
+        if (status === "failed" && errorCode && !recordedErrorMessage && !terminalErrorQueued) {
+          terminalErrorQueued = true;
+          enqueue(() =>
+            persistence.appendRunEvent({
+              run_id: run.id,
+              session_id: input.sessionId,
+              kind: "error",
+              event: { kind: "error", message: error ?? safeFailure.message, code: errorCode ?? undefined },
+            }),
+          );
+        }
+        await tail;
+        if (appendFailed) {
+          appendFailureReported = true;
+          throw appendFailure;
+        }
         await persistence.updateRun(run.id, {
           status,
           resumable,
@@ -438,8 +502,12 @@ export async function startRunRecorder(
           error_code: errorCode,
           ...(assistantMessageId ? { message_id: assistantMessageId } : {}),
         });
-      } catch {
-        // Best-effort: a status write failure must not surface as a stream error.
+        finalized = true;
+      })();
+      try {
+        await finalizing;
+      } finally {
+        if (!finalized) finalizing = null;
       }
     },
   };
@@ -459,22 +527,30 @@ export function teeRunEvents<T>(source: ReadableStream<T>, recorder: RunRecorder
     async start(controller) {
       reader = source.getReader();
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          recorder.record(value);
-          controller.enqueue(value);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            recorder.record(value);
+            controller.enqueue(value);
+          }
+        } catch (error) {
+          const failure = sanitizeRunFailure(error, { fallbackCode: "AGENT_STREAM_FAILED", resumable: true });
+          try {
+            await recorder.finalize({
+              status: "failed",
+              error: failure.message,
+              errorCode: failure.code,
+              resumable: true,
+            });
+          } catch (persistenceError) {
+            console.error("Run terminal persistence failed", persistenceError);
+          }
+          controller.error(new Error(failure.message));
+          return;
         }
         await recorder.finalize({ status: "succeeded" });
         controller.close();
-      } catch (error) {
-        await recorder.finalize({
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error),
-          errorCode: "AGENT_STREAM_FAILED",
-          resumable: true,
-        });
-        controller.error(error);
       } finally {
         try {
           reader?.releaseLock();
@@ -485,13 +561,16 @@ export function teeRunEvents<T>(source: ReadableStream<T>, recorder: RunRecorder
       }
     },
     async cancel(reason) {
-      await recorder.finalize({
-        status: "canceled",
-        error: reason ? String(reason) : null,
-        errorCode: "AGENT_STREAM_FAILED",
-        resumable: true,
-      });
-      await reader?.cancel(reason).catch(() => undefined);
+      try {
+        await recorder.finalize({
+          status: "canceled",
+          error: reason ? String(reason) : null,
+          errorCode: "AGENT_STREAM_FAILED",
+          resumable: true,
+        });
+      } finally {
+        await reader?.cancel(reason).catch(() => undefined);
+      }
     },
   });
 }

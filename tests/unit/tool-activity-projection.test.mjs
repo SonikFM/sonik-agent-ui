@@ -99,6 +99,7 @@ assert.doesNotMatch(toolCallBlockSource, /title=\{title\}/);
 assert.match(toolCallBlockSource, /<details/);
 assert.match(toolCallBlockSource, /Technical tool receipt/);
 assert.match(toolCallBlockSource, />Receipt<\/span>/);
+assert.match(toolCallBlockSource, /Retry the document request\./, "sanitized terminal document errors retain an actionable recovery hint");
 assert.doesNotMatch(toolCallBlockSource, /return\s+tool\.toolName/);
 assert.doesNotMatch(toolCallBlockSource, /\?\?\s*tool\.toolName/);
 

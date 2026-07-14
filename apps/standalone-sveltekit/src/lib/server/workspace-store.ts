@@ -198,6 +198,7 @@ export function listWorkspaceMessages<TParts = unknown>(sessionId: string): Work
 export function createWorkspaceRun(input: {
   id?: string;
   session_id?: string | null;
+  user_message_id?: string | null;
   message_id?: string | null;
   request_id?: string | null;
   trace_id?: string | null;

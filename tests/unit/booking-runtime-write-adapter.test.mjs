@@ -484,4 +484,7 @@ console.log(JSON.stringify({
   assert.equal(hasBookingRuntimeCredential(accepted), true, "an accepted signed host-context header must count as a runtime credential");
   const oversized = createBookingRuntimeAuthContextFromTrustedHostHeader({ header: "e".repeat(SIGNED_HOST_CONTEXT_HEADER_MAX_CHARS + 1), fallback: null });
   assert.notEqual(oversized.mode, "signed-host-context", "an envelope beyond the signed-envelope cap must still be rejected");
+  const fallback = { mode: "bearer", token: "env-secret", includeCredentials: false, signedHostContextHeader: null, source: "env" };
+  assert.equal(createBookingRuntimeAuthContextFromTrustedHostHeader({ header: null, fallback }).mode, "bearer", "an absent host header may use env fallback");
+  assert.equal(createBookingRuntimeAuthContextFromTrustedHostHeader({ header: "e".repeat(SIGNED_HOST_CONTEXT_HEADER_MAX_CHARS + 1), fallback }).mode, "anonymous", "a present rejected host header must fail closed instead of using env credentials");
 }

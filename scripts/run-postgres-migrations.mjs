@@ -93,8 +93,60 @@ const migrations = [
 				)::text
 			`,
 	},
+	{
+		version: "0008",
+		name: "agent_workspace_files",
+		file: "packages/workspace-session/migrations/postgres/0008_agent_workspace_files.sql",
+		baselineCheck: `select (to_regclass('sonik_agent_ui.agent_workspace_files') is not null)::text`,
+	},
+	{
+		version: "0009",
+		name: "run_user_message_id",
+		file: "packages/workspace-session/migrations/postgres/0009_run_user_message_id.sql",
+		baselineCheck: `
+			select exists (
+				select 1 from information_schema.columns
+				where table_schema = 'sonik_agent_ui'
+					and table_name = 'agent_workspace_runs'
+					and column_name = 'user_message_id'
+			)::text
+		`,
+	},
+	{
+		version: "0010",
+		name: "run_user_message_provenance",
+		file: "packages/workspace-session/migrations/postgres/0010_run_user_message_provenance.sql",
+		baselineCheck: `
+			select exists (
+				select 1
+				from pg_trigger as migration_trigger
+				join pg_proc as trigger_function on trigger_function.oid = migration_trigger.tgfoid
+				join pg_namespace as function_schema on function_schema.oid = trigger_function.pronamespace
+				where migration_trigger.tgrelid = to_regclass('sonik_agent_ui.agent_workspace_runs')
+					and migration_trigger.tgname = 'enforce_run_user_message_provenance'
+					and not migration_trigger.tgisinternal
+					and function_schema.nspname = 'sonik_agent_ui'
+					and trigger_function.proname = 'enforce_run_user_message_provenance'
+					and not trigger_function.prosecdef
+					and trigger_function.proconfig @> array['search_path=pg_catalog']
+			)::text
+		`,
+	},
+	{
+		version: "0011",
+		name: "session_deletion_lifecycle",
+		file: "packages/workspace-session/migrations/postgres/0011_session_deletion_lifecycle.sql",
+		baselineCheck: `
+			select exists (
+				select 1 from information_schema.columns
+				where table_schema = 'sonik_agent_ui'
+					and table_name = 'agent_workspace_sessions'
+					and column_name = 'deleting_at'
+			)::text
+		`,
+	},
 	// NOTE for the next lane appending here: this is the ONE shared migrations
-	// manifest (per prod-slice-plan.md) -- add new entries after 0007, don't
+	// manifest (per prod-slice-plan.md) -- add new entries after 0011, don't
 	// reorder/renumber existing ones.
 ];
 
