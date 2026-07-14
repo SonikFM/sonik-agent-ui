@@ -63,9 +63,13 @@ assert.equal(rootSource.includes("layoutMode?: WorkspaceLayoutMode"), true, "Wor
 assert.equal(rootSource.includes("railMode?: WorkspaceRailMode"), true, "WorkspaceRoot should expose an embeddable rail mode seam");
 assert.equal(rootSource.includes("--workspace-pane-split"), true, "WorkspaceRoot should expose a CSS-variable seam for future pane resizing");
 assert.equal(rootSource.includes('grid-template-areas: "artifact" "chat"'), true, "canvas artifact-open layout should place the artifact above compact chat");
-assert.equal(rootSource.includes('grid-template-rows: minmax(0, 1fr) minmax(7rem, 12rem)'), true, "canvas artifact-open layout should reserve only a compact row for chat");
-assert.equal(rootSource.includes('.workspace-pane--chat\n    :global([role="log"] > header)'), true, "embedded hidden-rail canvas should narrowly hide the conversation header");
-assert.equal(rootSource.includes('.workspace-root[data-layout-mode="canvas"] .workspace-grid--artifact-open {\n      grid-template-columns: minmax(0, 1fr);\n    }'), true, "desktop canvas should remain a single-column layout");
+// 2026-07-13 live report ("when I switch to canvas I can't see my chat"): the
+// compact 7-12rem chat strip and single-column desktop canvas WERE the defect.
+// Narrow canvas now keeps a usable conversation pane; wide canvas places chat
+// beside the artifact behind the resizable split variable.
+assert.equal(rootSource.includes('grid-template-rows: minmax(0, 1.4fr) minmax(14rem, 1fr)'), true, "narrow canvas must keep a usable conversation pane, not a composer sliver");
+assert.equal(rootSource.includes('.workspace-pane--chat\n    :global([role="log"] > header)'), false, "canvas must NOT hide the conversation header — it carries the chat-history switcher");
+assert.equal(rootSource.includes('--workspace-canvas-pane-split'), true, "desktop canvas must place chat beside the artifact behind the resizable split seam");
 assert.equal(agentObservabilitySource.includes("createSession: () => AgentUiSemanticActionResult"), true, "agent page-control types should include the fresh-session semantic action");
 assert.equal(agentObservabilitySource.includes("sessionId?: string | null"), true, "agent page-control submit type should accept an expected session id");
 assert.equal(agentObservabilitySource.includes("expectedSessionId?: string | null"), true, "semantic action results should report the expected session id selected by createSession");

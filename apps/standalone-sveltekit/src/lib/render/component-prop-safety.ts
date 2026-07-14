@@ -114,7 +114,11 @@ export function sanitizeQuestionCardProps(input: Partial<QuestionCardProps> | Re
       lifecycleState: normalizeLifecycleState(raw.lifecycleState),
       errorMessage: typeof raw.errorMessage === "string" && raw.errorMessage.trim() ? raw.errorMessage : null,
       required: raw.required === true,
-      allowSkip: raw.allowSkip === false ? false : true,
+      // Required questions are never skippable — mirrors the contract's
+      // "Required questions must not allow skip" refinement so a spec that
+      // omits allowSkip renders (and submits) consistently with what the
+      // schema accepts (2026-07-13 unanswerable-intake fix).
+      allowSkip: raw.required === true ? false : raw.allowSkip !== false,
       skipValue: raw.skipValue ?? "unknown",
       writesTo: typeof raw.writesTo === "string" && raw.writesTo.trim() ? raw.writesTo : null,
       minSelections: degraded ? 0 : minSelections,

@@ -208,33 +208,40 @@
 </script>
 
 <Conversation.Root class="bg-background text-foreground">
-  <header class="border-b border-border bg-card/95 px-8 py-4 flex items-center justify-between flex-shrink-0">
+  <!-- flex-wrap: the embedded sidecar is narrow; without it the actions group
+       overlaps the session switcher (2026-07-13 live report). The switcher
+       carries an explicit "Chat history" caption so a session title like
+       "Create a Booking Workflow" reads as history, not a call to action. -->
+  <header class="border-b border-border bg-card/95 px-8 py-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 flex-shrink-0">
     <div class="flex items-center gap-3 min-w-0">
       {#if sessionOptions && sessionOptions.length > 0 && onSessionSwitch}
-        <select
-          aria-label="Switch chat"
-          data-testid="agent-session-switcher"
-          class="max-w-60 truncate rounded-md border border-border bg-card px-2 py-1.5 text-sm font-medium text-foreground"
-          value={activeSessionId ?? ""}
-          onchange={(event) => {
-            const nextId = event.currentTarget.value;
-            if (nextId && nextId !== activeSessionId) onSessionSwitch(nextId);
-          }}
-        >
-          {#each sessionOptions as option (option.id)}
-            <option value={option.id}>{option.title}</option>
-          {/each}
-        </select>
+        <label class="flex min-w-0 items-center gap-2" data-testid="agent-session-switcher-group">
+          <span class="text-xs font-medium whitespace-nowrap text-muted-foreground">Chat history</span>
+          <select
+            aria-label="Switch chat"
+            data-testid="agent-session-switcher"
+            class="min-w-0 max-w-60 truncate rounded-md border border-border bg-card px-2 py-1.5 text-sm font-medium text-foreground"
+            value={activeSessionId ?? ""}
+            onchange={(event) => {
+              const nextId = event.currentTarget.value;
+              if (nextId && nextId !== activeSessionId) onSessionSwitch(nextId);
+            }}
+          >
+            {#each sessionOptions as option (option.id)}
+              <option value={option.id}>{option.title}</option>
+            {/each}
+          </select>
+        </label>
       {:else}
         <h1 class="text-lg font-semibold text-foreground">{title}</h1>
       {/if}
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       {@render actions?.()}
       {#if messages.length > 0}
         <button
           onclick={clear}
-          class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+          class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
           New chat
         </button>
       {/if}

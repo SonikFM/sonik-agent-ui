@@ -92,6 +92,27 @@ assert.throws(() => createAskUserQuestionSpec({
   required: true,
   allowSkip: true,
 }), /Required questions must not allow skip/, "required questions cannot be skippable");
+
+// 2026-07-13 unanswerable-intake regression: a required question that simply
+// OMITS allowSkip must be valid (allowSkip derives from required). The blanket
+// default(true) previously made the omission the schema's own footgun — every
+// agent-drafted required question failed creation AND answer submission.
+const requiredWithoutAllowSkip = createAskUserQuestionSpec({
+  id: "q_required_omitted_skip",
+  title: "Goal",
+  body: "What is the campaign goal?",
+  answerType: "short_text",
+  required: true,
+});
+assert.equal(requiredWithoutAllowSkip.allowSkip, false, "required questions default allowSkip to false when omitted");
+const optionalWithoutAllowSkip = createAskUserQuestionSpec({
+  id: "q_optional_omitted_skip",
+  title: "Offer",
+  body: "What is the offer?",
+  answerType: "short_text",
+});
+assert.equal(optionalWithoutAllowSkip.allowSkip, true, "optional questions keep the skippable default");
+
 assert.throws(() => createAskUserQuestionSpec({
   id: "q_duplicate_choices",
   title: "Bad choices",
