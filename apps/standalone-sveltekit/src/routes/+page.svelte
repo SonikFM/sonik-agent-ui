@@ -287,6 +287,10 @@
   // so an inline "Open canvas" fallback can be offered in chat.
   let hostCanvasOpenRequestedIds = new SvelteSet<string>();
   let hostCanvasOpenDeclined = $state(false);
+  // True once any agent stream has started in this page lifetime. Gates host
+  // canvas escalation to freshly streamed artifacts — restored history must
+  // never force the host's canvas open (see notifyHostCanvasOpen).
+  let hasStreamedSinceMount = false;
   let messagePersistInFlight = false;
   let pendingDocumentSnapshot: ActiveDocumentSnapshot | null = null;
   let documentPersistPromise: Promise<void> | null = null;
@@ -375,6 +379,9 @@
   const isStreaming = $derived(
     conversation.status === "streaming" || conversation.status === "submitted",
   );
+  $effect(() => {
+    if (isStreaming) hasStreamedSinceMount = true;
+  });
   const currentSession = $derived(sessions.find((session) => session.id === activeSessionId) ?? null);
   const activeArtifactRawSpec = $derived(
     activeArtifact ? JSON.stringify(activeArtifact.content, null, 2) : "",
@@ -539,7 +546,16 @@
       const parts = snapshotDataParts(message.parts as DataPart[]) as Array<DataPart & { toolCallId?: string; state?: string; output?: unknown }>;
       for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
         const part = parts[partIndex];
-        if (part.type === "tool-commitBookingReservationCommand" && part.state === "output-available") commitSeenAfterPreview = true;
+        // A successful commit OR an explicit user cancel consumes the preview.
+        // Failed commits keep it so the human can retry — but Cancel must
+        // always dismiss (2026-07-13 live report: "the approval module won't
+        // go away" — cancel receipts carry state output-error, which the old
+        // success-only check ignored).
+        if (part.type === "tool-commitBookingReservationCommand") {
+          const committed = part.state === "output-available";
+          const cancelled = isRecord(part.output) && (part.output as { error?: unknown }).error === "cancelled";
+          if (committed || cancelled) commitSeenAfterPreview = true;
+        }
         if (part.type !== "tool-previewBookingReservationCommand" || part.state !== "output-available") continue;
         if (commitSeenAfterPreview) return null;
         const output = isRecord(part.output) ? part.output : null;
@@ -2031,8 +2047,17 @@
   // renderable artifact/document mounts in embedded chat mode. Embedded chat
   // suppresses the local artifact pane, so the host owns canvas opening. If it
   // declines or does not answer, expose the inline fallback action in chat.
+  //
+  // Escalation is gated to artifacts born from a stream in THIS page lifetime:
+  // restored persisted sessions re-run the promotion effects on load (the
+  // dedup sets are in-memory), and mode switches remount the iframe in hosts
+  // without moveBefore — so without this gate an old artifact force-opens the
+  // host canvas on every load and re-opens it after every "dock chat"
+  // (2026-07-13 live report: stale reservation receipt trapped the booking
+  // embed in the canvas modal).
   function notifyHostCanvasOpen(id: string, intentLabel: string): void {
     if (!browser || embedMode !== "chat") return;
+    if (!hasStreamedSinceMount) return;
     if (window.parent === window) return;
     if (hostCanvasOpenRequestedIds.has(id)) return;
     hostCanvasOpenRequestedIds.add(id);
@@ -2257,9 +2282,22 @@
     applyEmbeddedThemeFromHost(embeddedUrlTheme);
   }
 
+  // The booking host donates ITS design-system theme names, which collide with
+  // this app's registry: the host's "neumorphic-light" is its clean white/gray
+  // booking theme, while our "neumorphic-light" is the experimental warm-taupe
+  // soft-UI theme. Unmapped, the embed renders a muddy tan surface inside a
+  // white host page (documented 2026-07-02 manual test run, re-reported live
+  // 2026-07-13). Host vocabulary maps onto booking-parity themes here; the
+  // standalone theme picker is unaffected.
+  const EMBEDDED_HOST_THEME_ALIASES: Record<string, string> = {
+    "neumorphic-light": "light",
+    "neumorphic-dark": "sonik-operator-dark",
+  };
+
   function applyEmbeddedThemeFromHost(hostTheme?: string | null): void {
     if (!isEmbeddedHostContextExpected()) return;
-    applyEmbeddedThemeSetting({ hostTheme });
+    const trimmed = hostTheme?.trim();
+    applyEmbeddedThemeSetting({ hostTheme: (trimmed && EMBEDDED_HOST_THEME_ALIASES[trimmed]) ?? hostTheme });
   }
 
   function installDevLongTaskTelemetry(): (() => void) | undefined {
@@ -2947,6 +2985,29 @@
         }
         continue;
       }
+      // Stale-echo guard, worker side: a snapshot queued BEFORE a version
+      // restore/agent update must not PATCH the old content back over the
+      // server's newer version (2026-07-13 revert-loop report). The
+      // handleDocumentEvent guard stops new stale events; this stops ones
+      // that were already queued when the version bumped.
+      if (
+        activeDocument &&
+        snapshot.id === activeDocument.id &&
+        (snapshot.version_count ?? 1) < (activeDocument.version_count ?? 1)
+      ) {
+        if (pendingDocumentSnapshot && createDocumentSnapshotSignature(pendingDocumentSnapshot) === signature) {
+          pendingDocumentSnapshot = null;
+        }
+        logArtifactTelemetry({
+          source: "client",
+          event: "document_persist.stale_snapshot_dropped",
+          documentId: snapshot.id,
+          documentVersion: snapshot.version_count,
+          reason: `behind_v${activeDocument.version_count}`,
+          ok: true,
+        });
+        continue;
+      }
 
       const response = await workspaceFetch(`/api/document/${encodeURIComponent(snapshot.id)}`, {
         method: "PATCH",
@@ -3521,6 +3582,9 @@
         return false;
       }
       appendIntakeCommitReceiptMessage(receipt);
+      // Same durability rule as the reservation path: persist the receipt now,
+      // not on the next stream turn (see runReservationCommitEndpoint).
+      void persistConversationMessages();
       logArtifactTelemetry({
         source: "client",
         event: receipt.ok === true ? "intake.commit_endpoint.completed" : "intake.commit_endpoint.error",
@@ -3546,12 +3610,22 @@
   }
 
 
+  // Double-commit hazard guards (2026-07-13 live report: the Approve card
+  // reappeared after opening the canvas and stayed clickable). Three layers:
+  // this in-flight flag hides the card the instant Approve is clicked; the
+  // receipt message is persisted immediately after commit (not on the next
+  // stream turn) so a session reload can't resurrect the card; and the commit
+  // endpoint dedupes on previewToolCallId server-side as the final backstop.
+  let reservationCommitInFlight = $state(false);
+
   async function runReservationCommitEndpoint(preview: ReservationApprovalPreview): Promise<boolean> {
+    if (reservationCommitInFlight) return false;
+    reservationCommitInFlight = true;
     try {
       const response = await workspaceFetch("/api/reservation/commit", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: activeSessionId, guest: preview.guest, booking: preview.booking }),
+        body: JSON.stringify({ sessionId: activeSessionId, previewToolCallId: preview.toolCallId, guest: preview.guest, booking: preview.booking }),
       });
       const receipt = await response.json().catch(() => null) as { ok?: boolean; kind?: string; steps?: unknown[]; error?: string } | null;
       if (!receipt) {
@@ -3565,6 +3639,10 @@
         return false;
       }
       appendReservationCommitReceiptMessage(receipt);
+      // Persist the receipt NOW: message persistence otherwise waits for the
+      // next stream turn, and a canvas-driven session reload in that window
+      // drops the receipt and resurrects the Approve card.
+      void persistConversationMessages();
       logArtifactTelemetry({
         source: "client",
         event: receipt.ok === true ? "reservation.commit_endpoint.completed" : "reservation.commit_endpoint.error",
@@ -3583,6 +3661,8 @@
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
+    } finally {
+      reservationCommitInFlight = false;
     }
   }
 
@@ -3825,6 +3905,29 @@
       }
       return;
     }
+    // Stale-echo guard (2026-07-13 live report: restored/agent-updated versions
+    // "kept switching back to v1"): the island's snapshot loop can deliver an
+    // event queued BEFORE a version restore or agent update. Adopting it would
+    // regress activeDocument, and the persistence worker would then PATCH the
+    // old content back over the server's newer version — a last-write-wins
+    // revert loop. Same-version events are normal edits; only strictly older
+    // version_counts for the same document are echoes.
+    if (
+      activeDocument &&
+      event.document.id === activeDocument.id &&
+      (event.document.version_count ?? 1) < (activeDocument.version_count ?? 1)
+    ) {
+      logArtifactTelemetry({
+        source: "client",
+        event: "document_frame.stale_event_dropped",
+        documentId: event.document.id,
+        documentVersion: event.document.version_count,
+        reason: `behind_v${activeDocument.version_count}`,
+        mode: documentPreferredView,
+        ok: true,
+      });
+      return;
+    }
     activeDocument = event.document;
     if (!documentSeed || event.type === "opened") {
       documentSeed = event.document;
@@ -3880,7 +3983,61 @@
   }
 
 
+  // Chat<->canvas pane split (drag divider in WorkspaceRoot). Fractions are
+  // remembered per layout mode in localStorage — the chat rail you size in
+  // chat/workspace mode is independent of the canvas layout's split.
+  const PANE_SPLIT_STORAGE_KEY = "sonik.agent_ui.pane_split.v1";
+
+  function readStoredPaneSplits(): { workspace?: number; canvas?: number } {
+    if (typeof window === "undefined") return {};
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(PANE_SPLIT_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
+      const fraction = (value: unknown) => (typeof value === "number" && value >= 0.25 && value <= 0.75 ? value : undefined);
+      return { workspace: fraction(parsed.workspace), canvas: fraction(parsed.canvas) };
+    } catch {
+      return {};
+    }
+  }
+
+  let paneSplits = $state<{ workspace?: number; canvas?: number }>(readStoredPaneSplits());
+
+  function paneSplitModeKey(): "workspace" | "canvas" {
+    return workspaceLayoutMode === "canvas" ? "canvas" : "workspace";
+  }
+
+  function paneSplitTemplate(mode: "workspace" | "canvas"): string | undefined {
+    const fraction = paneSplits[mode];
+    if (fraction === undefined) return undefined;
+    const chat = Math.round(fraction * 1000) / 1000;
+    const artifact = Math.round((1 - fraction) * 1000) / 1000;
+    // Same px floors as WorkspaceRoot's defaults so a drag can't collapse a pane.
+    return mode === "canvas"
+      ? `minmax(320px, ${chat}fr) minmax(480px, ${artifact}fr)`
+      : `minmax(360px, ${chat}fr) minmax(420px, ${artifact}fr)`;
+  }
+
+  function persistPaneSplits(): void {
+    try {
+      window.localStorage.setItem(PANE_SPLIT_STORAGE_KEY, JSON.stringify(paneSplits));
+    } catch {
+      // Sizing is a convenience; storage failures must never break the workspace.
+    }
+  }
+
+  function handlePaneSplitChange(chatFraction: number): void {
+    paneSplits = { ...paneSplits, [paneSplitModeKey()]: chatFraction };
+    persistPaneSplits();
+  }
+
+  function handlePaneSplitReset(): void {
+    paneSplits = { ...paneSplits, [paneSplitModeKey()]: undefined };
+    persistPaneSplits();
+  }
+
   function createReservationApprovalAffordance(): AgentApprovalAffordance | null {
+    // Hide the card the moment Approve is clicked; it only returns if the
+    // commit fails (in-flight resets in runReservationCommitEndpoint's finally).
+    if (reservationCommitInFlight) return null;
     const preview = findLatestReservationApprovalPreview();
     if (!preview) return null;
     return createApprovalAffordanceFromWorkflowRun(deriveReservationWorkflowRunState(preview), {
@@ -3914,7 +4071,16 @@
 {#if workspaceMode === "workflow-builder"}
 <WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} onExit={() => { workspaceMode = "workspace"; }} />
 {:else}
-<WorkspaceRoot title="Sonik Chat" {artifactOpen} layoutMode={workspaceLayoutMode} railMode={workspaceRailMode}>
+<WorkspaceRoot
+  title="Sonik Chat"
+  {artifactOpen}
+  layoutMode={workspaceLayoutMode}
+  railMode={workspaceRailMode}
+  chatArtifactSplit={paneSplitTemplate("workspace")}
+  canvasChatArtifactSplit={paneSplitTemplate("canvas")}
+  onSplitChange={handlePaneSplitChange}
+  onSplitReset={handlePaneSplitReset}
+>
   {#snippet rail()}
     <SessionRail
       {sessions}
@@ -3998,7 +4164,7 @@
         <button
           type="button"
           onclick={openDocumentEditor}
-          class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           aria-label="Open or create a workspace document"
         >
           Workspace document
@@ -4067,6 +4233,7 @@
           language={documentFrameLanguage}
           content={documentFrameContent}
           preferredView={documentFramePreferredView}
+          requestHeaders={createWorkspaceRequestHeaders()}
           onDocumentEvent={handleDocumentEvent}
         />
       {/snippet}

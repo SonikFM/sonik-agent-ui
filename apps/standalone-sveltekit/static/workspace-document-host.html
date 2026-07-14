@@ -103,6 +103,25 @@
       let parentTargetOrigin = window.location.origin;
       const allowedParentOrigin = window.location.origin;
       const pending = [];
+      // Cloud persistence guards /api/document/* behind the signed workspace
+      // host context. This island cannot compute that header itself, so the
+      // parent donates it (sonik:workspace-document:request-headers) and a
+      // fetch wrapper attaches it to same-origin /api/ calls (2026-07-13 live
+      // report: Version History panel showed "Failed to load versions").
+      let workspaceRequestHeaders = {};
+      const islandFetch = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        try {
+          const url = typeof input === 'string' ? input : (input && input.url) || '';
+          const sameOriginApi = url.startsWith('/api/') || url.startsWith(window.location.origin + '/api/');
+          if (sameOriginApi && Object.keys(workspaceRequestHeaders).length > 0) {
+            init = { ...(init || {}), headers: { ...workspaceRequestHeaders, ...((init && init.headers) || {}) } };
+          }
+        } catch {
+          // Never let header donation break document editing.
+        }
+        return islandFetch(input, init);
+      };
 
       function post(type, payload = {}) {
         window.parent?.postMessage({ type, source: 'sonik-workspace-document-host', payload }, parentTargetOrigin);
@@ -450,6 +469,7 @@ ${snapshot.current_content}`;
         if (message.source !== 'sonik-agent-ui-parent') return;
         if (message.type === 'sonik:workspace-document:theme') applyTheme(message.payload);
         if (message.type === 'sonik:workspace-document:open') openDocument(message.payload);
+        if (message.type === 'sonik:workspace-document:request-headers') workspaceRequestHeaders = (message.payload && message.payload.headers) || {};
       });
 
       try {

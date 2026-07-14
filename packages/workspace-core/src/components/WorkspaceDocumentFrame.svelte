@@ -27,6 +27,10 @@
     preferredView?: PreferredDocumentView;
     targetOrigin?: string;
     allowedOrigin?: string;
+    /** Same-origin request headers the island must attach to its /api/ fetches
+     *  (e.g. the signed workspace host-context header in embedded cloud mode —
+     *  the island iframe cannot compute these itself). */
+    requestHeaders?: Record<string, string>;
     onDocumentEvent?: (event: WorkspaceDocumentEvent) => void;
   }
 </script>
@@ -43,6 +47,7 @@
     preferredView = "auto",
     targetOrigin,
     allowedOrigin,
+    requestHeaders,
     onDocumentEvent,
   }: WorkspaceDocumentFrameProps = $props();
 
@@ -106,8 +111,30 @@
     );
   }
 
+  function postRequestHeaders(): void {
+    if (!frame?.contentWindow || !requestHeaders) return;
+    frame.contentWindow.postMessage(
+      {
+        type: "sonik:workspace-document:request-headers",
+        source: "sonik-agent-ui-parent",
+        payload: { headers: requestHeaders },
+      },
+      messageTargetOrigin,
+    );
+  }
+
+  const requestHeadersSignature = $derived(JSON.stringify(requestHeaders ?? null));
+
   $effect(() => {
     if (status === "ready" || status === "opened") postOpen();
+  });
+
+  // Re-donate headers whenever they change (e.g. the signed host context is
+  // refreshed) and once the island reports ready — before that, the island's
+  // message listener isn't wired yet.
+  $effect(() => {
+    void requestHeadersSignature;
+    if (status === "ready" || status === "opened") postRequestHeaders();
   });
 
   onMount(() => {

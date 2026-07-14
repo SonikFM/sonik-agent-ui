@@ -87,6 +87,8 @@ export function mountSonikAgentUI(options) {
   annotateHostElement(optionalElement(ownerDocument, options.elements.openCanvas), "open-canvas");
   annotateHostElement(optionalElement(ownerDocument, options.elements.expandCanvas), "expand-canvas");
   annotateHostElement(optionalElement(ownerDocument, options.elements.dockChat), "dock-chat");
+  const canvasResizeHandle = optionalElement(ownerDocument, options.elements.canvasResizeHandle);
+  annotateHostElement(canvasResizeHandle, "canvas-resize");
   annotateHostElement(optionalElement(ownerDocument, options.elements.closeChat), "close-chat");
   annotateHostElement(optionalElement(ownerDocument, options.elements.closeCanvas), "close-canvas");
   const disposers = [];
@@ -171,6 +173,39 @@ export function mountSonikAgentUI(options) {
     ownerDocument.documentElement.style.setProperty("--agent-chat-width", `${clamped}px`);
     resizeHandle?.setAttribute("aria-valuenow", String(Math.round(clamped)));
   };
+
+  // Outer canvas wall: drag the canvas window's left edge over the host page.
+  // The host binds `left: var(--agent-canvas-left, <default>)` on its canvas
+  // window element; clamping keeps a usable canvas width on any viewport.
+  const setCanvasLeft = (left) => {
+    const min = options.minCanvasLeft ?? 16;
+    const max = Math.max(min, ownerWindow.innerWidth - (options.minCanvasWidth ?? 640));
+    const clamped = Math.max(min, Math.min(max, left));
+    ownerDocument.documentElement.style.setProperty("--agent-canvas-left", `${clamped}px`);
+    canvasResizeHandle?.setAttribute("aria-valuenow", String(Math.round(clamped)));
+  };
+
+  const startCanvasResize = (event) => {
+    if (activeMode !== "canvas") return;
+    event.preventDefault();
+    canvasResizeHandle?.setPointerCapture?.(event.pointerId);
+    ownerDocument.body.dataset.agentUiResizing = "true";
+    const move = (moveEvent) => {
+      ownerWindow.cancelAnimationFrame(resizeFrame);
+      resizeFrame = ownerWindow.requestAnimationFrame(() => setCanvasLeft(moveEvent.clientX));
+    };
+    const end = () => {
+      ownerWindow.cancelAnimationFrame(resizeFrame);
+      delete ownerDocument.body.dataset.agentUiResizing;
+      ownerWindow.removeEventListener("pointermove", move);
+      ownerWindow.removeEventListener("pointerup", end);
+      ownerWindow.removeEventListener("pointercancel", end);
+    };
+    ownerWindow.addEventListener("pointermove", move);
+    ownerWindow.addEventListener("pointerup", end, { once: true });
+    ownerWindow.addEventListener("pointercancel", end, { once: true });
+  };
+  canvasResizeHandle?.addEventListener("pointerdown", startCanvasResize);
 
   const startResize = (event) => {
     if (activeMode !== "chat") return;
@@ -284,6 +319,7 @@ export function mountSonikAgentUI(options) {
     setChatWidth,
     openChat: () => open("chat"),
     openCanvas: () => open("canvas"),
+    setCanvasLeft,
     getState: () => ({ mode: activeMode, iframeSrc: iframe.getAttribute("src") }),
   };
   const controller = { iframe, open, close, postContext, scheduleContextPosts, update, destroy, getMode, setChatWidth };

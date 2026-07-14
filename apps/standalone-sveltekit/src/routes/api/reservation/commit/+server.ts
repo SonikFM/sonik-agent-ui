@@ -11,7 +11,20 @@ import {
 import { commitBookingReservationCommand } from "$lib/server/booking-workflows/reservation-commit";
 import { routeString, WORKSPACE_SESSION_ID_MAX_CHARS } from "$lib/server/workspace-route-limits";
 import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-transport";
+import { createRequestWorkspaceArtifact, getRequestWorkspaceArtifact } from "$lib/server/workspace-request-store";
 import type { RequestHandler } from "./$types";
+
+// Idempotency ledger (2026-07-13: a resurrected Approve card could re-POST the
+// same preview and double-book). Successful commits are recorded under a
+// deterministic artifact id keyed on the preview's toolCallId; a repeat POST
+// for the same preview replays the stored receipt instead of re-running the
+// booking writes. ponytail: reuses the workspace artifact store as the ledger;
+// upgrade path is a dedicated commit-ledger table when migrations next open.
+const COMMIT_LEDGER_PREFIX = "reservation-commit-ledger-";
+
+function commitLedgerId(previewToolCallId: string): string {
+  return `${COMMIT_LEDGER_PREFIX}${previewToolCallId.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 120)}`;
+}
 
 // A2 reservation-commit (2026-07-08): the ONLY code path that commits a reservation
 // (booking.create.guest -> booking.create.booking). Invoked directly by the human clicking Approve
@@ -22,6 +35,7 @@ import type { RequestHandler } from "./$types";
 export const POST: RequestHandler = async (event) => {
   const body = await parseCommitBody(event.request);
   const sessionId = optionalTrimmedString(body.sessionId, "sessionId");
+  const previewToolCallId = optionalTrimmedString(body.previewToolCallId, "previewToolCallId");
   const guest = requireObject(body.guest, "guest");
   const booking = requireObject(body.booking, "booking");
   // The client supplies the reservation DATA; the endpoint fixes WHICH commands run and resolves
@@ -35,6 +49,17 @@ export const POST: RequestHandler = async (event) => {
       { ok: false, error: "unauthenticated", message: "A trusted, authenticated host session is required to book this reservation." },
       { status: 401 },
     );
+  }
+
+  // Idempotency replay: a commit already recorded for this preview returns the
+  // stored receipt without re-running the booking writes. Checked only after
+  // the trust boundary above — an unauthenticated caller can't probe the ledger.
+  if (previewToolCallId) {
+    const prior = await getRequestWorkspaceArtifact(event, commitLedgerId(previewToolCallId)).catch(() => null);
+    if (prior?.content) {
+      await recordCommitTelemetry({ ok: true, sessionId, reason: "idempotent_replay" });
+      return json({ ...(prior.content as unknown as Record<string, unknown>), replayed: true }, { status: 200 });
+    }
   }
 
   const approvedCommandIds = approvedCommandIdsFromHostSession(hostSession);
@@ -56,6 +81,25 @@ export const POST: RequestHandler = async (event) => {
     },
     { guest, booking: bookingInput },
   );
+
+  // Record successful commits in the ledger; failures stay unrecorded so a
+  // legitimate retry can run. Ledger write errors must never mask a completed
+  // booking — the receipt still returns.
+  if (previewToolCallId && (result as { ok?: unknown }).ok === true) {
+    await createRequestWorkspaceArtifact(event, {
+      session_id: sessionId ?? null,
+      id: commitLedgerId(previewToolCallId),
+      kind: "json-render",
+      title: "Reservation commit receipt",
+      // The request-store wrapper types content as Spec | WorkspaceDocumentRecord;
+      // the underlying store is generic, and this ledger entry is plain JSON.
+      content: result as unknown as import("@json-render/core").Spec,
+      summary: "Idempotency ledger entry for a human-approved reservation commit.",
+    }).catch(async (ledgerError: unknown) => {
+      await recordCommitTelemetry({ ok: false, sessionId, reason: `ledger_write_failed: ${ledgerError instanceof Error ? ledgerError.message : String(ledgerError)}` });
+      return null;
+    });
+  }
 
   // commitBookingReservationCommand emits commit.human_approved telemetry per write command; this
   // endpoint only covers the request-shape / trust-boundary failures above that never reach it.

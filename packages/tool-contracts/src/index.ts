@@ -269,6 +269,14 @@ export const askUserQuestionChoiceSchema = z.union([
 function normalizeAskQuestionWireInput(input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input;
   const raw = input as Record<string, unknown>;
+  // allowSkip derives from required when omitted (2026-07-13 live report:
+  // intake questions were unanswerable). The field's schema default is a
+  // blanket `true`, so any agent-drafted REQUIRED question that simply
+  // omitted allowSkip tripped the "Required questions must not allow skip"
+  // refinement — rejecting both artifact creation and every answer
+  // submission. Explicit allowSkip still wins (and explicit true + required
+  // still refuses — that remains the honest contract-violation signal).
+  const explicitAllowSkip = raw.allowSkip ?? raw.allow_skip;
   return {
     ...raw,
     version: raw.version ?? "sonik-agent-ui.ask-user-question.v1",
@@ -276,7 +284,7 @@ function normalizeAskQuestionWireInput(input: unknown): unknown {
     whyThisMatters: raw.whyThisMatters ?? raw.why_this_matters,
     answerType: raw.answerType ?? raw.answer_type,
     defaultValue: raw.defaultValue ?? raw.default,
-    allowSkip: raw.allowSkip ?? raw.allow_skip,
+    allowSkip: explicitAllowSkip ?? (raw.required === true ? false : undefined),
     skipValue: raw.skipValue ?? raw.skip_value,
     writesTo: raw.writesTo ?? raw.writes_to,
     maxSelections: raw.maxSelections ?? raw.max_selections,
