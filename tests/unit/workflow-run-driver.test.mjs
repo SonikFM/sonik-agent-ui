@@ -125,7 +125,7 @@ function approvalDefinition() {
 {
   const definition = approvalDefinition();
   let commits = 0;
-  const { runId, driver } = harness(definition, "commit", {
+  const { runId, driver, journal } = harness(definition, "commit", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
     executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => {
@@ -253,13 +253,14 @@ function approvalDefinition() {
   definition.nodes[1].nodeType = "tool_preview";
   let attempts = 0;
   const { runId, driver } = harness(definition, "retry", {
-    executionContext: (node) => node.nodeType === "tool_preview" ? { executors: { tool_preview: (engineRequest) => {
+    executionContext: (node) => node.nodeType === "tool_preview" ? { executors: { tool_preview: () => {
       attempts += 1;
-      return attempts < 3 ? { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } } : { status: "succeeded", output: { storage: "inline", value: engineRequest.input, byteLength: 2 } };
+      return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } };
     } } } : {},
   });
-  const completed = await driver.start(request(runId, "retry-a"));
-  assert.equal(completed.status, "succeeded");
+  const failed = await driver.start(request(runId, "retry-a"));
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.compatibilityPhase, "safe_read_retry_exhausted");
   assert.equal(attempts, 3, "safe reads retry only within the fixed attempt bound");
 }
 

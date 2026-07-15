@@ -17,20 +17,10 @@ import {
   type WorkflowVNextNode,
 } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import { requireCallableCapability } from "./capability-readiness.ts";
-import { dispatchWorkflowNode, type WorkflowNodeExecutionContext } from "./workflow-node-executors.ts";
+import { dispatchWorkflowNode, hashWorkflowInput, type WorkflowNodeExecutionContext } from "./workflow-node-executors.ts";
 import type { WorkflowRunJournalStore, WorkflowRunOwner, WorkflowRunSnapshot } from "./workflow-run-store.ts";
 
 type PumpRequest = ReturnType<typeof runDriverPumpRequestSchema.parse>;
-
-function canonicalJson(value: JsonValue): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
-  return JSON.stringify(value);
-}
-
-function hashWorkflowInput(value: JsonValue): string {
-  return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
-}
 
 export interface WorkflowRunDriverDeps {
   journal: WorkflowRunJournalStore;
