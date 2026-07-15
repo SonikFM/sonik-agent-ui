@@ -24,27 +24,36 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
   const query = normalizeQuery(queryInput);
   if (!Object.keys(query).length) return { ok: false as const, reason: "history_identifier_required" };
 
-  const [workflowCandidates, exactConversation] = await Promise.all([
+  const [workflowCandidates, exactConversation, artifact] = await Promise.all([
     query.workflowRunId
       ? deps.workflowRuns.getRun(deps.owner, query.workflowRunId).then((row) => row ? [row] : [])
       : deps.workflowRuns.listRuns(deps.owner),
     query.conversationRunId ? deps.workspace.getRun(query.conversationRunId) : Promise.resolve(null),
+    query.artifactId ? failSoft(() => deps.workspace.getArtifact(query.artifactId), null) : Promise.resolve(null),
   ]);
-  const sessionId = query.sessionId ?? exactConversation?.session_id ?? workflowCandidates.find((row) => row.hostSessionId)?.hostSessionId ?? undefined;
-  const workflowRows = workflowCandidates.filter((row) => matchesWorkflow(row, query, sessionId));
-  const exactWorkflowId = query.workflowRunId && workflowRows[0]?.runId === query.workflowRunId ? query.workflowRunId : undefined;
-  const conversationRunId = query.conversationRunId;
-  const artifactId = query.artifactId;
+  const workflowMatches = workflowCandidates.filter((row) => matchesWorkflow(row, query));
+  const sessionId = query.sessionId
+    ?? exactConversation?.session_id
+    ?? deps.owner.hostSessionId
+    ?? artifact?.session_id
+    ?? workflowMatches.find((row) => row.hostSessionId)?.hostSessionId
+    ?? undefined;
+  const workflowRows = workflowMatches.filter((row) => !sessionId || row.hostSessionId === sessionId);
+  const correlatedWorkflowId = workflowRows.length === 1 ? workflowRows[0]?.runId : undefined;
 
-  const [conversationCandidates, conversationEvents, workflowEvents, toolCalls, artifact] = await Promise.all([
+  const [conversationCandidates, workflowEvents, toolCalls] = await Promise.all([
     exactConversation ? Promise.resolve([exactConversation]) : sessionId ? deps.workspace.listRuns(sessionId) : Promise.resolve([]),
-    conversationRunId ? failSoft(() => deps.workspace.listRunEvents(conversationRunId), []) : Promise.resolve([]),
-    exactWorkflowId ? deps.journal.listEvents(deps.owner, exactWorkflowId) : Promise.resolve([]),
+    correlatedWorkflowId ? deps.journal.listEvents(deps.owner, correlatedWorkflowId) : Promise.resolve([]),
     sessionId ? failSoft(() => deps.workspace.listToolCalls(sessionId), []) : Promise.resolve([]),
-    artifactId ? failSoft(() => deps.workspace.getArtifact(artifactId), null) : Promise.resolve(null),
   ]);
-  const conversations = conversationCandidates.filter((run) => matchesConversation(run, query));
-  const filteredToolCalls = toolCalls.filter((call) => matchesToolCall(call, query));
+  const correlationIds = new Set(workflowEvents.flatMap((event) => event.correlationIds));
+  const conversations = conversationCandidates.filter((run) => matchesConversation(run, query, correlationIds));
+  const conversationRequestIds = new Set(conversations.flatMap((run) => run.request_id ? [run.request_id] : []));
+  const filteredToolCalls = toolCalls.filter((call) => matchesToolCall(call, query, correlationIds, conversationRequestIds));
+  const correlatedConversationId = conversations.length === 1 ? conversations[0]?.id : undefined;
+  const conversationEvents = correlatedConversationId
+    ? await failSoft(() => deps.workspace.listRunEvents(correlatedConversationId), [])
+    : [];
 
   return {
     ok: true as const,
@@ -95,16 +104,23 @@ function dedupeById<T extends Record<K, string>, K extends keyof T>(entries: T[]
   return [...new Map(entries.map((entry) => [entry[key], entry])).values()];
 }
 
-function matchesConversation(run: WorkspaceRunRecord, query: WorkflowHistoryQuery): boolean {
-  return (!query.conversationRunId || run.id === query.conversationRunId)
+function matchesConversation(run: WorkspaceRunRecord, query: WorkflowHistoryQuery, correlationIds: Set<string>): boolean {
+  const explicitlyMatched = (!query.conversationRunId || run.id === query.conversationRunId)
     && (!query.requestId || run.request_id === query.requestId)
     && (!query.traceId || run.trace_id === query.traceId);
+  if (!explicitlyMatched) return false;
+  if (!correlationIds.size) return true;
+  return correlationIds.has(run.id) || Boolean(run.request_id && correlationIds.has(run.request_id)) || Boolean(run.trace_id && correlationIds.has(run.trace_id));
 }
 
-function matchesToolCall(call: WorkspaceToolCallRecord, query: WorkflowHistoryQuery): boolean {
-  return (!query.toolCallId || call.id === query.toolCallId)
+function matchesToolCall(call: WorkspaceToolCallRecord, query: WorkflowHistoryQuery, correlationIds: Set<string>, conversationRequestIds: Set<string>): boolean {
+  const explicitlyMatched = (!query.toolCallId || call.id === query.toolCallId)
     && (!query.requestId || call.request_id === query.requestId)
     && (!query.artifactId || call.artifact_id === query.artifactId);
+  if (!explicitlyMatched) return false;
+  if (correlationIds.size) return correlationIds.has(call.id) || Boolean(call.request_id && correlationIds.has(call.request_id));
+  if (query.traceId || query.conversationRunId) return Boolean(call.request_id && conversationRequestIds.has(call.request_id));
+  return true;
 }
 
 function projectConversation(run: WorkspaceRunRecord) {
