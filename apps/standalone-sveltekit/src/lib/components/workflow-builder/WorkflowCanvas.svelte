@@ -146,7 +146,7 @@
 
   <div class="flex flex-col gap-3">
     {#each workflow.nodes as node, index (node.nodeId)}
-      <Card.Root tabindex="0" data-workflow-node-index={index} onkeydown={(event) => handleNodeKey(event, node.nodeId, index)}>
+      <Card.Root tabindex={0} data-workflow-node-index={index} onkeydown={(event) => handleNodeKey(event, node.nodeId, index)}>
         <Card.Content class="flex flex-col gap-2 pt-4">
           <div class="flex items-center justify-between gap-2">
             <Badge variant="outline">#{index + 1}</Badge>

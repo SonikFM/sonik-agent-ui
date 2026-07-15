@@ -16,6 +16,9 @@ import {
   resolveWorkflowRunActionDisabledState,
   resolveWorkflowRunBusyDisabledState,
   selectActiveWorkflowRun,
+  resolveWorkflowDraftLifecycle,
+  workflowDefinitionToVNext,
+  workflowVNextToDefinition,
 } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts";
 
 // Phase 5 (agent-creation-tool-plan-2026-07-13.md, Decision 3): the missing
@@ -111,6 +114,18 @@ assert.equal(validWorkflowResult.workflow?.workflowId, "agent_test.workflow");
 const invalidWorkflowResult = validateWorkflowDefinition({ nodes: [{ nodeId: "n1", type: "not_a_real_type" }] });
 assert.equal(invalidWorkflowResult.ok, false, "an invalid node type must fail workflowDefinitionSchema validation");
 assert.ok(Array.isArray(invalidWorkflowResult.issues) && invalidWorkflowResult.issues.length > 0);
+
+assert.equal(resolveWorkflowDraftLifecycle({ valid: false, saving: false, conflicted: false, dirty: false, draftRevision: null, publishedRevision: null }), "invalid");
+assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: true, conflicted: false, dirty: true, draftRevision: 1, publishedRevision: null }), "saving");
+assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: false, conflicted: true, dirty: false, draftRevision: 1, publishedRevision: null }), "conflicted");
+assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: false, conflicted: false, dirty: true, draftRevision: 1, publishedRevision: 1 }), "dirty");
+assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: false, conflicted: false, dirty: false, draftRevision: 2, publishedRevision: 1 }), "outdated");
+assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: false, conflicted: false, dirty: false, draftRevision: 2, publishedRevision: 2 }), "published");
+
+const vNextWorkflow = workflowDefinitionToVNext(emptyWorkflow);
+assert.equal(vNextWorkflow.schemaVersion, "sonik.workflow.vnext.v1");
+assert.equal(vNextWorkflow.entryNodeId, "trigger");
+assert.equal(workflowVNextToDefinition(vNextWorkflow).workflowId, emptyWorkflow.workflowId, "the explicit legacy/VNext bridge preserves workflow identity");
 
 // A tool_commit node without preview_then_trusted_approval must fail the
 // schema's write/commit refinement (marketplace.ts:219-220) -- the canvas
@@ -406,9 +421,10 @@ assert.equal(
   "tool-scoping edits should patch toolPolicy on the bindable definition for the parent to validate/save",
 );
 assert.equal(
-  configPanelSource.includes('import { isModelIncompatible, formatModelContextWindow } from "./builder-model"'),
+  configPanelSource.includes('import { formatModelContextWindow } from "./builder-model"')
+    && configPanelSource.includes("modelDisabledReason"),
   true,
-  "config panel's model picker must source incompatible-flagging and context-window formatting from the shared builder-model helpers",
+  "config panel's model picker must source authoritative disabled reasons and shared context-window formatting",
 );
 assert.equal(
   configPanelSource.includes("modelOptions?: AgentModelOption[]"),
@@ -421,7 +437,7 @@ assert.equal(
   "the model picker must be searchable (Dify-bar UX), not a plain static select",
 );
 assert.equal(
-  configPanelSource.includes("isModelIncompatible(definition, option)"),
+  configPanelSource.includes("modelDisabledReason(definition, option"),
   true,
   "each rendered model option must be checked against the current definition's tool grants for incompatible flagging",
 );
