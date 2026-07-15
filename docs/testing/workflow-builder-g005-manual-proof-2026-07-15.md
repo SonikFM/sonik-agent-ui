@@ -1,7 +1,7 @@
 # Workflow Builder G005 — Browser and Accessibility Proof (2026-07-15)
 
-**Source:** `506a466a70a38c011c5001e73909d3210159eefc`  
-**Surface:** standalone and signed embedded Workflow Builder, desktop Chromium  
+**Source:** `506a466a70a38c011c5001e73909d3210159eefc`
+**Surface:** standalone and signed embedded Workflow Builder, desktop Chromium
 **Scope:** UI-01–UI-05, UI-06 regression, E2E-01, E2E-03, OBS-01
 
 ## Operator run
