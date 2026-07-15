@@ -403,6 +403,7 @@ const artifactRouteSource = await readFile("apps/standalone-sveltekit/src/routes
 const sessionRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/session/+server.ts", "utf8");
 const sessionDetailRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/session/[id]/+server.ts", "utf8");
 const workspaceFetchSource = pageSource.slice(pageSource.indexOf("async function workspaceFetch"), pageSource.indexOf("function recordWorkspaceRuntimeDiagnostics"));
+const handleAgentHostMessageSource = pageSource.match(/function handleAgentHostMessage[\s\S]*?(?=\n  function createLocalHostUiTargetRegistry)/)?.[0] ?? "";
 const sessionsRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/sessions/+server.ts", "utf8");
 const observabilityPackageSource = await readFile("packages/agent-observability/src/index.ts", "utf8");
 const evidenceServerSource = await readFile("scripts/agent-ui-dev-evidence-server.mjs", "utf8");
@@ -451,7 +452,7 @@ assert.equal(sessionDetailRouteSource.includes('pragma: "no-cache"'), true, "ses
 assert.equal(sessionDetailRouteSource.includes('expires: "0"'), true, "session GET responses carrying workspace tokens must be immediately expired");
 assert.equal(pageSource.includes("let hostAuthority = $state.raw<AgentHostAuthorityDonation | null>(null)"), true, "embedded workspace requests keep opaque authority separate from display page context");
 assert.equal(pageSource.includes("selectOpaqueHostAuthority({ current: hostAuthority, cached: null })"), true, "embedded workspace requests select only unexpired opaque authority");
-assert.equal(pageSource.includes("acceptNewerOpaqueHostAuthority({ current: previous, next: event.data.authority })"), true, "host-context updates accept only monotonic authority donations");
+assert.match(handleAgentHostMessageSource, /const\s+nextAuthority\s*=\s*event\.data\.authority\s*\?\?\s*createAgentHostAuthorityDonationFromLegacyPayload\(\s*event\.data\.payload\s*\)\s*;\s*if\s*\(\s*nextAuthority\s*\)\s*\{[\s\S]*?acceptNewerOpaqueHostAuthority\(\s*\{\s*current:\s*previous,\s*next:\s*nextAuthority\s*\}\s*\)/, "the live host-message flow prefers explicit authority, guards the legacy fallback, and accepts only monotonic donations");
 assert.equal(pageSource.includes("workspace.fetch.blocked_missing_host_context"), true, "workspace calls should fail closed before reaching cloud APIs without signed host context");
 assert.equal(pageSource.includes("session.bootstrap.embedded_fresh_session"), false, "embedded bootstrap must resume the most recent session — forcing a fresh chat per mount lost the user's conversation every time the widget reopened (2026-07-08 regression report)");
 assert.equal(pageSource.includes("function createSignedWorkspaceHostSession"), false, "the browser must never reconstruct a signed host-session envelope");
