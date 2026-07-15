@@ -152,12 +152,12 @@ function approvalDefinition() {
 }
 
 {
-  const definition = train0WorkflowFixtures.approval;
+  const definition = approvalDefinition();
   let commits = 0;
   const { runId, driver, journal } = harness(definition, "reconciled-replay", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
-    executionContext: (node) => node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { commits += 1; throw new Error("must not redispatch"); } } } : {},
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { commits += 1; throw new Error("must not redispatch"); } } } : {},
   });
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const binding = definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding;
@@ -176,7 +176,7 @@ function approvalDefinition() {
 }
 
 {
-  const definition = train0WorkflowFixtures.approval;
+  const definition = approvalDefinition();
   let approved = false;
   const { runId, driver } = harness(definition, "approval-wait", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
@@ -194,9 +194,10 @@ function approvalDefinition() {
 
 {
   const definition = approvalDefinition();
+  let commits = 0;
   const { runId, driver } = harness(definition, "unsafe-write-retry", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId }, resolveReadiness: () => [readiness("booking.create.booking")],
-    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => ({ status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }) } } : {},
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { commits += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {},
   });
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const failed = await driver.start(request(runId, "unsafe-a"));
