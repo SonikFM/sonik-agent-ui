@@ -38,6 +38,9 @@
   import WorkflowCanvas from "./WorkflowCanvas.svelte";
   import DebugPreviewPane from "./DebugPreviewPane.svelte";
   import WorkflowRunPanel from "./WorkflowRunPanel.svelte";
+  import OrganizerPanel from "./OrganizerPanel.svelte";
+  import RunHistoryPanel from "./RunHistoryPanel.svelte";
+  import type { OrganizerAction, OrganizerParameter, OrganizerPatchRequest, WorkflowHistoryProjection } from "./organizer-model";
   import {
     createEmptyAgentDefinition,
     createEmptyWorkflowDefinition,
@@ -63,13 +66,14 @@
     workspaceContextReady?: boolean;
     signedHostApprovedCommandIds?: string[];
     workflowPublishPins?: WorkflowDependencyPins;
+    activeSessionId?: string | null;
     onController?: (controller: WorkflowBuilderController | null) => void;
     /** Return to the chat workspace. The mode toggle lives in WorkspaceRoot's
      *  toolbar, which unmounts in builder mode — without this the builder is a
      *  one-way door (Lane D e2e finding, prod slice 2026-07-13). */
     onExit?: () => void;
   }
-  let { workspaceFetch, workspaceContextReady = true, signedHostApprovedCommandIds = [], workflowPublishPins, onController, onExit }: Props = $props();
+  let { workspaceFetch, workspaceContextReady = true, signedHostApprovedCommandIds = [], workflowPublishPins, activeSessionId = null, onController, onExit }: Props = $props();
 
   function freshAgentId(): string {
     return `agent_${Math.random().toString(36).slice(2, 10)}`;
@@ -102,6 +106,10 @@
   let workflowSaving = $state(false);
   let workflowConflicted = $state(false);
   let publishedRevision = $state<number | null>(null);
+  let audience = $state<"builder" | "organizer" | "history">("builder");
+  let organizerBusy = $state(false);
+  let historyBusy = $state(false);
+  let workflowHistory = $state<WorkflowHistoryProjection | null>(null);
 
   const definitionValidation = $derived(validateAgentDefinition(definition));
   const workflowValidation = $derived(validateWorkflowDefinition(draftWorkflow));
@@ -113,6 +121,16 @@
     draftRevision: workflowDraft?.draftRevision ?? null,
     publishedRevision,
   }));
+  const organizerParameters = $derived<OrganizerParameter[]>(draftWorkflow.nodes.map((node) => ({
+    path: `nodes.${node.nodeId}.config.title`,
+    kind: "safe_patch",
+    label: `${node.title} title`,
+    type: "text",
+    value: node.title,
+    description: "Organizer-safe label; graph structure remains hidden.",
+  })));
+  const organizerSafePatchPaths = $derived(organizerParameters.map((parameter) => parameter.path));
+  const activeReceiptIds = $derived(activeRunSelection?.run.receipts.map((receipt) => receipt.receiptRef) ?? []);
 
   // Model catalog: fetched here (not in AgentConfigPanel) so the config panel
   // stays network-free -- same /api/agent-models route + fallback shape the
@@ -276,6 +294,48 @@
     publishedRevision = null;
   }
 
+  async function configureOrganizer(request: OrganizerPatchRequest): Promise<void> {
+    organizerBusy = true;
+    try {
+      const result = await workflowDefinitions(request as unknown as Record<string, unknown>);
+      workflowDraft = result.draft as DraftRecord;
+      draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
+      workflowDirty = false;
+      workflowConflicted = false;
+      saveStatus = "saved";
+      saveMessage = `Organizer configuration saved at revision ${workflowDraft.draftRevision}.`;
+      await refreshWorkflowVersions();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Organizer configuration failed.";
+      workflowConflicted = message.includes("conflict");
+      saveStatus = "error";
+      saveMessage = message;
+    } finally { organizerBusy = false; }
+  }
+
+  async function handleOrganizerAction(action: OrganizerAction): Promise<void> {
+    if (action === "publish") { await publishWorkflow(); return; }
+    saveMessage = action === "test"
+      ? "Testing uses the workflow run controls in the Builder audience."
+      : "Approval truth is shown by the active run and operator history.";
+  }
+
+  async function refreshWorkflowHistory(extra: Record<string, string> = {}): Promise<void> {
+    const query = new URLSearchParams(extra);
+    if (activeSessionId) query.set("sessionId", activeSessionId);
+    if (activeRunSelection?.run.runId) query.set("workflowRunId", activeRunSelection.run.runId);
+    historyBusy = true;
+    try {
+      const response = await workspaceFetch(`/api/workflow-history?${query}`);
+      const result = await response.json().catch(() => null) as { ok?: boolean; history?: WorkflowHistoryProjection; reason?: string } | null;
+      if (!response.ok || result?.ok !== true || !result.history) throw new Error(result?.reason ?? `History request failed (${response.status})`);
+      workflowHistory = result.history;
+    } catch (error) {
+      workflowHistory = null;
+      saveMessage = error instanceof Error ? error.message : "Workflow history failed to load.";
+    } finally { historyBusy = false; }
+  }
+
   function newAgent(): void {
     agentId = freshAgentId();
     definition = createEmptyAgentDefinition(agentId);
@@ -297,6 +357,7 @@
 
   function handleRunStateChange(workflowId: string, nextRun: WorkflowRunState | null): void {
     activeRunSelection = selectActiveWorkflowRun(activeRunSelection, workflowId, nextRun);
+    if (audience === "history") void refreshWorkflowHistory();
   }
 
   const controller: WorkflowBuilderController = {
@@ -366,6 +427,13 @@
     </label>
   {/if}
 
+  <nav class="flex gap-2" aria-label="Workflow audience">
+    <Button variant={audience === "builder" ? "default" : "outline"} onclick={() => { audience = "builder"; }}>Builder</Button>
+    <Button variant={audience === "organizer" ? "default" : "outline"} onclick={() => { audience = "organizer"; }}>Organizer</Button>
+    <Button variant={audience === "history" ? "default" : "outline"} onclick={() => { audience = "history"; void refreshWorkflowHistory(); }}>History</Button>
+  </nav>
+
+  {#if audience === "builder"}
   <Tabs.Root value={tab} onValueChange={(value) => setTab((value ?? "config") as WorkflowBuilderSnapshot["tab"])}>
     <Tabs.List>
       <Tabs.Trigger value="config">Config</Tabs.Trigger>
@@ -447,4 +515,25 @@
       />
     </Tabs.Content>
   </Tabs.Root>
+  {:else if audience === "organizer"}
+    <OrganizerPanel
+      workflow={draftWorkflow}
+      revision={workflowDraft?.draftRevision ?? 0}
+      parameters={organizerParameters}
+      safePatchPaths={organizerSafePatchPaths}
+      busy={organizerBusy || !workflowDraft}
+      receiptIds={activeReceiptIds}
+      onConfigure={(request) => void configureOrganizer(request)}
+      onAction={(action) => void handleOrganizerAction(action)}
+      onInspectReceipt={(receiptId) => { audience = "history"; void refreshWorkflowHistory({ receiptId }); }}
+    />
+  {:else}
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-sm text-muted-foreground">Redacted operator history for the active session and workflow run. Builder and organizer state remain separate.</p>
+        <Button variant="outline" onclick={() => void refreshWorkflowHistory()} disabled={historyBusy}>{historyBusy ? "Loading…" : "Refresh history"}</Button>
+      </div>
+      <RunHistoryPanel history={workflowHistory} />
+    </div>
+  {/if}
 </div>

@@ -74,6 +74,7 @@ test("Config, Canvas, and Debug & Preview tabs switch panels", async ({ page }) 
 
 test("draft save round-trips through the agent-definitions API", async ({ page }) => {
   await gotoFreshWorkspace(page, smokeUrl(null));
+  await submitPrompt(page, "Initialize an authenticated workspace owner for builder testing");
   await openWorkflowBuilder(page);
 
   const [request, response] = await Promise.all([
@@ -93,6 +94,7 @@ test("draft save round-trips through the agent-definitions API", async ({ page }
 
 test("Debug & Preview sends draftAgentId with every generate request", async ({ page }) => {
   await gotoFreshWorkspace(page, smokeUrl(null));
+  await submitPrompt(page, "Initialize an authenticated workspace owner for preview testing");
   await openWorkflowBuilder(page);
 
   const agentId = await page
@@ -115,6 +117,7 @@ test("Debug & Preview sends draftAgentId with every generate request", async ({ 
 
 test("describe, draft, and canvas uses the current saved draft through the deterministic smoke stream", async ({ page }) => {
   await gotoFreshWorkspace(page, smokeUrl(WORKFLOW_DRAFT_SCENARIO));
+  await submitPrompt(page, "Initialize the workflow drafting session");
   await openWorkflowBuilder(page);
   await page.getByRole("tab", { name: "Debug & Preview" }).click();
 
@@ -162,4 +165,10 @@ test("builder exposes honest lifecycle, isolated preview context, and keyboard c
   await page.getByRole("tab", { name: "Debug & Preview" }).click();
   await expect(page.locator("[data-debug-preview-context]")).toContainText("Isolated preview context");
   await expect(page.locator("[data-debug-preview-context]")).toContainText("read/preview only");
+
+  await page.getByRole("button", { name: "Organizer", exact: true }).click();
+  await expect(page.locator("[data-organizer-panel]")).toBeVisible();
+  await expect(page.locator('[data-agent-panel="workflow-builder-canvas"]')).toHaveCount(0);
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await expect(page.locator("[data-run-history-panel]")).toBeVisible();
 });
