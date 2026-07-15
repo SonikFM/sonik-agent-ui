@@ -126,8 +126,9 @@
   }
 
   function openInspector(nodeId: string): void {
-    document.querySelector<HTMLInputElement>(`[data-workflow-node-id="${nodeId}"] input[aria-label="${nodeId} title"]`)?.focus();
-    announcement = `Opened inspector for ${nodeId}.`;
+    const target = document.querySelector<HTMLInputElement>(`[data-workflow-node-id="${nodeId}"] input[aria-label="${nodeId} title"]`);
+    target?.focus();
+    announcement = target && document.activeElement === target ? `Opened inspector for ${nodeId}.` : `Inspector for ${nodeId} is read only.`;
   }
 
   function handleNodeKey(event: KeyboardEvent, nodeId: string, index: number): void {

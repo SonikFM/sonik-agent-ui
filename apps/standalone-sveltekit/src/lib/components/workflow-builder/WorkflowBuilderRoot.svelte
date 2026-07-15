@@ -396,7 +396,9 @@
     };
     const target = document.querySelector<HTMLElement>(selectors[action]);
     target?.focus();
-    builderAnnouncement = target ? `${action} control focused.` : `${action} control is not available.`;
+    builderAnnouncement = target && document.activeElement === target
+      ? `${target.textContent?.trim() || action} control focused.`
+      : `${action} control is not available.`;
   }
 
   let builderAnnouncement = $state("");
