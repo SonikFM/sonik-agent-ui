@@ -8,14 +8,9 @@
 // are structural, driven by applyWorkflowRunEvent directly (request_approval/approve) or already
 // active from run start.
 //
-// Node-execution callbacks are an explicit registry, not a generic command dispatcher: this is the
-// controller's first caller outside the reservation regression floor and the Amplify campaign wow
-// demo, and only those two already have real, reviewed preview/commit implementations. Booking
-// stays reads-only here by construction (fence: no real booking writes) -- the reservation write
-// path keeps living solely at /api/reservation/commit, untouched. A workflowId with no registry
-// entry (e.g. an arbitrary builder draft) still runs start/approve/commit lifecycle mechanics; its
-// preview/commit calls surface the controller's own honest "no_callback_registered" rather than
-// fabricating an execution.
+// Normal builder workflows dispatch by nodeType@typeVersion through workflow-node-executors.ts.
+// The reviewed Amplify demo remains an explicit internal override; workflow IDs are not the normal
+// execution switch and unknown builder workflow IDs need no server registration.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -23,9 +18,10 @@ import {
   startControllerRun,
   type WorkflowControllerCallbacks,
 } from "@sonik-agent-ui/tool-contracts/workflow-controller";
-import { applyWorkflowRunEvent, type WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
+import { applyWorkflowRunEvent, type WorkflowRunCommandPreview, type WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
 import { workflowDefinitionSchema, type WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
 import { amplifyCampaignWorkflowManifest } from "@sonik-agent-ui/tool-contracts/marketplace-fixtures";
+import { workflowEffectIdempotencyKey, type EngineResponse, type JsonValue, type WorkflowVNextNodeType } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import { validateDraftedWorkflow } from "../agent-workflows/drafting-agent.ts";
 import {
@@ -35,7 +31,12 @@ import {
 } from "../agent-workflows/amplify-campaign-workflow.ts";
 import { createKnowledgeStore, defaultKnowledgeRoot, type KnowledgeStore } from "../knowledge/knowledge-store.ts";
 import { approvedCommandIdsFromHostSession } from "./host-command-runtime.ts";
-import { workflowRunStore, wrapWorkflowRunStoreAsync, type AsyncWorkflowRunStore, type WorkflowRunOwner } from "./workflow-run-store.ts";
+import {
+  dispatchWorkflowNode,
+  type WorkflowNodeAttemptEvent,
+  type WorkflowNodeExecutor,
+} from "./workflow-node-executors.ts";
+import { workflowRunStore, wrapWorkflowRunStoreAsync, type AsyncWorkflowRunStore, type WorkflowRunOwner, type WorkflowRunRow } from "./workflow-run-store.ts";
 
 const AMPLIFY_CAMPAIGN_KNOWLEDGE_STORE_ID = "sonik.knowledge.campaign-artifacts";
 
@@ -60,6 +61,9 @@ export interface WorkflowRunsDeps {
    *  writeArtifactFile actually durably persists on Workers. Ignored when
    *  knowledgeStore is passed directly (tests/callers that override it). */
   env?: Record<string, unknown> | null;
+  /** Optional package/runtime executors. The registry still owns validation and descriptor dispatch. */
+  nodeExecutors?: Partial<Record<WorkflowVNextNodeType, WorkflowNodeExecutor>>;
+  onNodeAttempt?: (event: WorkflowNodeAttemptEvent) => void;
 }
 
 export function workflowRunOwnerFromHostSession(hostSession: HostSessionEnvelope | null): WorkflowRunOwner | null {
@@ -73,33 +77,31 @@ export function workflowRunOwnerFromHostSession(hostSession: HostSessionEnvelope
   };
 }
 
-/** Registered node-callback factories, keyed by the workflow's own workflowId (not packageVersionId
- *  -- callbacks are the same across draft/published versions of one workflow). */
-interface RegisteredWorkflow {
+/** Explicit internal workflows may override individual node executors. Builder workflows do not. */
+interface RegisteredInternalWorkflow {
   definition: WorkflowDefinition;
   workflowVersionId: string;
-  buildCallbacks(input: unknown, knowledgeStore: KnowledgeStore): WorkflowControllerCallbacks;
+  buildExecutors(input: unknown, knowledgeStore: KnowledgeStore): Record<string, WorkflowNodeExecutor>;
 }
 
-const registeredWorkflows: Record<string, RegisteredWorkflow> = {
+const registeredInternalWorkflows: Record<string, RegisteredInternalWorkflow> = {
   "amplify.campaign.create": {
     definition: amplifyCampaignWorkflowManifest.payload.workflow as WorkflowDefinition,
     workflowVersionId: amplifyCampaignWorkflowManifest.packageVersionId,
-    buildCallbacks(input, knowledgeStore) {
+    buildExecutors(input, knowledgeStore) {
       const brief = input as AmplifyCampaignBrief;
       return {
         preview: () => {
           assembleAmplifyCampaignContent(brief);
-          return {
-            kind: "preview",
-            ok: true,
-            preview: { commandId: "amplify.campaign.create", stableInputHash: "campaign-hash", effect: "write", approvalRequired: true },
-          };
+          return inlineEngineResponse({ preview: { commandId: "amplify.campaign.create", stableInputHash: "campaign-hash", effect: "write", approvalRequired: true } });
         },
         commit: async () => {
           const content = assembleAmplifyCampaignContent(brief);
           const { receiptRef } = await commitAmplifyCampaignArtifact(knowledgeStore, AMPLIFY_CAMPAIGN_KNOWLEDGE_STORE_ID, content);
-          return { kind: "commit", ok: true, receiptRef };
+          return {
+            ...inlineEngineResponse({ receiptRef }),
+            receipt: { receiptId: receiptRef, semanticStatus: "success" },
+          };
         },
       };
     },
@@ -132,7 +134,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
   const store = deps.store ?? wrapWorkflowRunStoreAsync(workflowRunStore);
 
   if (action.action === "start") {
-    const registered = registeredWorkflows[action.workflowId];
+    const registered = registeredInternalWorkflows[action.workflowId];
     let definition: WorkflowDefinition;
     let workflowVersionId: string;
     let runInput: unknown = null;
@@ -184,7 +186,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     const node = nodeById(row.definition, action.nodeId);
     if (!node) return { ok: false, reason: "unknown_node", run: row.state };
     if (node.type !== "tool_preview") return { ok: false, reason: "node_is_not_tool_preview", run: row.state };
-    const callbacks = resolveCallbacks(row.workflowId, row.input, deps.knowledgeStore, deps.env);
+    const callbacks = resolveCallbacks(row, deps);
     const result = await runWorkflowNode(row.state, row.definition, action.nodeId, callbacks);
     const updated = (await store.updateRunState(owner, action.runId, result.state)) ?? row;
     return result.ok ? { ok: true, run: updated.state } : { ok: false, reason: result.reason, run: updated.state };
@@ -217,15 +219,73 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
   const node = nodeById(row.definition, action.nodeId);
   if (!node) return { ok: false, reason: "unknown_node", run: row.state };
   if (node.type !== "tool_commit") return { ok: false, reason: "node_is_not_tool_commit", run: row.state };
-  const callbacks = resolveCallbacks(row.workflowId, row.input, deps.knowledgeStore, deps.env);
+  const callbacks = resolveCallbacks(row, deps);
   const result = await runWorkflowNode(row.state, row.definition, action.nodeId, callbacks);
   const updated = (await store.updateRunState(owner, action.runId, result.state)) ?? row;
   return result.ok ? { ok: true, run: updated.state } : { ok: false, reason: result.reason, run: updated.state };
 }
 
-function resolveCallbacks(workflowId: string, input: unknown, knowledgeStoreOverride?: KnowledgeStore, env?: Record<string, unknown> | null): WorkflowControllerCallbacks {
-  const registered = registeredWorkflows[workflowId];
-  if (!registered) return {};
-  const knowledgeStore = knowledgeStoreOverride ?? createKnowledgeStore(defaultKnowledgeRoot(), env);
-  return registered.buildCallbacks(input, knowledgeStore);
+function inlineEngineResponse(value: JsonValue): Extract<EngineResponse, { status: "succeeded" }> {
+  return {
+    status: "succeeded",
+    output: { storage: "inline", value, byteLength: new TextEncoder().encode(JSON.stringify(value)).byteLength },
+  };
+}
+
+function jsonInput(value: unknown): JsonValue {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value)) as JsonValue;
+}
+
+function resolveCallbacks(row: WorkflowRunRow, deps: WorkflowRunsDeps): WorkflowControllerCallbacks {
+  const registered = registeredInternalWorkflows[row.workflowId];
+  const knowledgeStore = registered
+    ? deps.knowledgeStore ?? createKnowledgeStore(defaultKnowledgeRoot(), deps.env)
+    : deps.knowledgeStore;
+  const internalExecutors = registered && knowledgeStore ? registered.buildExecutors(row.input, knowledgeStore) : {};
+  return Object.fromEntries(row.definition.nodes
+    .filter((node) => node.type === "tool_preview" || node.type === "tool_commit")
+    .map((node) => [node.nodeId, async () => {
+      const logicalEffectId = node.type === "tool_commit" ? `${node.nodeId}:${node.commandId ?? "unbound"}` : undefined;
+      const attemptId = `${row.runId}:${node.nodeId}:attempt:1`;
+      const response = await dispatchWorkflowNode({
+        workflowRunId: row.runId,
+        workflowVersionId: row.workflowVersionId,
+        nodeId: node.nodeId,
+        nodeType: node.type,
+        typeVersion: 1,
+        attempt: 1,
+        attemptId,
+        logicalEffectId,
+        input: jsonInput(row.input),
+        contextSnapshot: { organizationId: row.organizationId, userId: row.userId },
+        capabilityPins: row.definition.facadeToolIds,
+        idempotencyKey: logicalEffectId ? workflowEffectIdempotencyKey(row.runId, logicalEffectId) : attemptId,
+      }, {
+        subjectId: row.userId,
+        commandId: node.commandId,
+        executors: {
+          ...deps.nodeExecutors,
+          ...(internalExecutors[node.nodeId] ? { [node.type]: internalExecutors[node.nodeId] } : {}),
+        },
+        onAttempt: deps.onNodeAttempt,
+      });
+      if (node.type === "tool_preview") {
+        if (response.status !== "succeeded" || response.output.storage !== "inline") {
+          const error = response.status === "retryable_error" || response.status === "terminal_error"
+            ? response.error
+            : { code: "executor_response_mismatch", message: "Preview executor did not return inline output" };
+          return { kind: "preview", ok: false, error } as const;
+        }
+        const output = response.output.value as { preview?: unknown };
+        return { kind: "preview", ok: true, preview: (output.preview ?? output) as WorkflowRunCommandPreview } as const;
+      }
+      if (response.status === "succeeded" && response.receipt) {
+        const output = response.output.storage === "inline" ? response.output.value as { receiptRef?: string } : {};
+        return { kind: "commit", ok: true, receiptRef: output.receiptRef ?? response.receipt.receiptId } as const;
+      }
+      const error = response.status === "retryable_error" || response.status === "terminal_error"
+        ? response.error
+        : { code: "semantic_receipt_required", message: "Commit executor did not return a semantic receipt" };
+      return { kind: "commit", ok: false, error } as const;
+    }]));
 }
