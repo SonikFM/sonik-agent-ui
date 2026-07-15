@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import {
   dispatchWorkflowNode,
   workflowNodeExecutorDescriptors,
+  workflowNodeExecutorRuntimeRegistry,
 } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
 import { handleWorkflowRunsAction } from "../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts";
 import { createInMemoryWorkflowRunStore, wrapWorkflowRunStoreAsync } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
-import { workflowEffectIdempotencyKey } from "../../packages/tool-contracts/src/workflow-vnext.ts";
+import { validateWorkflowForPublish, workflowEffectIdempotencyKey } from "../../packages/tool-contracts/src/workflow-vnext.ts";
+import { train0WorkflowFixtures } from "../../packages/tool-contracts/src/workflow-vnext-fixtures.ts";
 
 const request = (nodeType, extra = {}) => ({
   workflowRunId: "run-registry",
@@ -28,6 +30,14 @@ assert.deepEqual(
 );
 await assert.rejects(() => dispatchWorkflowNode({ ...request("skill"), typeVersion: 2 }), /unsupported_node_version:skill@2/);
 await assert.rejects(() => dispatchWorkflowNode(request("remote_execution")), /unsupported_node_version:remote_execution@1/);
+const unsupportedVersion = structuredClone(train0WorkflowFixtures.linear);
+unsupportedVersion.nodes[1].typeVersion = 2;
+assert.ok(validateWorkflowForPublish(unsupportedVersion, workflowNodeExecutorRuntimeRegistry).issues.some(({ code }) => code === "unsupported_node_version"));
+for (const nodeType of ["remote_execution", "creative", "promotion"]) {
+  const unsupportedNode = structuredClone(train0WorkflowFixtures.linear);
+  unsupportedNode.nodes[1].nodeType = nodeType;
+  assert.ok(validateWorkflowForPublish(unsupportedNode, workflowNodeExecutorRuntimeRegistry).issues.some(({ code }) => code === "node_not_publishable"));
+}
 
 const attempts = [];
 const skill = await dispatchWorkflowNode(request("skill"), { onAttempt: (event) => attempts.push(event) });
