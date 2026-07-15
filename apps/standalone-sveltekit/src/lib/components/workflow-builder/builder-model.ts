@@ -18,10 +18,16 @@ import {
   type CapabilityRegistry,
 } from "@sonik-agent-ui/tool-contracts/capability-registry";
 import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
+import {
+  WORKFLOW_VNEXT_SCHEMA_VERSION,
+  workflowVNextDefinitionSchema,
+  type WorkflowVNextDefinition,
+} from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { AgentUiApprovalStateSnapshot, AgentUiWorkflowPhase } from "@sonik-agent-ui/agent-observability";
 
 export type BuilderTab = "config" | "canvas" | "preview";
 export type WorkflowLockState = "draft" | "locked";
+export type WorkflowDraftLifecycle = "dirty" | "saving" | "saved" | "conflicted" | "published" | "outdated" | "invalid";
 export type KnowledgeRef = AgentDefinition["knowledgeRefs"][number];
 export type ActiveWorkflowRunSelection = { workflowId: string; run: WorkflowRunState };
 export type WorkflowRunAction = "preview" | "approve" | "commit";
@@ -183,6 +189,69 @@ export interface WorkflowDefinitionValidation {
   ok: boolean;
   workflow?: WorkflowDefinition;
   issues?: string[];
+}
+
+export function resolveWorkflowDraftLifecycle(input: {
+  valid: boolean;
+  saving: boolean;
+  conflicted: boolean;
+  dirty: boolean;
+  draftRevision: number | null;
+  publishedRevision: number | null;
+}): WorkflowDraftLifecycle {
+  if (!input.valid) return "invalid";
+  if (input.saving) return "saving";
+  if (input.conflicted) return "conflicted";
+  if (input.dirty) return "dirty";
+  if (input.publishedRevision !== null) {
+    return input.publishedRevision === input.draftRevision ? "published" : "outdated";
+  }
+  return "saved";
+}
+
+/** Minimal explicit bridge while the canvas still edits the deprecated marketplace shape. */
+export function workflowDefinitionToVNext(workflow: WorkflowDefinition): WorkflowVNextDefinition {
+  return workflowVNextDefinitionSchema.parse({
+    schemaVersion: WORKFLOW_VNEXT_SCHEMA_VERSION,
+    workflowId: workflow.workflowId,
+    definitionVersion: 1,
+    title: workflow.title,
+    entryNodeId: workflow.nodes[0]?.nodeId,
+    nodes: workflow.nodes.map((node) => ({
+      nodeId: node.nodeId,
+      nodeType: node.type,
+      typeVersion: 1,
+      config: { title: node.title, effect: node.effect, approvalPolicy: node.approvalPolicy },
+      bindings: {},
+      requiredHostContext: node.requiredHostContext ?? [],
+      capabilityPins: node.commandId ? [node.commandId] : [],
+      output: { inlineByteLimit: 64 * 1024 },
+    })),
+    edges: workflow.edges.map((edge) => ({ edgeId: edge.edgeId, from: edge.from, to: edge.to, default: !edge.condition })),
+    facadeToolIds: workflow.facadeToolIds ?? [],
+  });
+}
+
+export function workflowVNextToDefinition(workflow: WorkflowVNextDefinition): WorkflowDefinition {
+  return workflowDefinitionSchema.parse({
+    workflowId: workflow.workflowId,
+    title: workflow.title,
+    version: `0.${workflow.definitionVersion}.0`,
+    nodes: workflow.nodes.map((node) => {
+      const config = node.config && typeof node.config === "object" && !Array.isArray(node.config) ? node.config : {};
+      return {
+        nodeId: node.nodeId,
+        type: node.nodeType,
+        title: typeof config.title === "string" ? config.title : node.nodeId,
+        effect: typeof config.effect === "string" ? config.effect : "none",
+        approvalPolicy: typeof config.approvalPolicy === "string" ? config.approvalPolicy : "none",
+        requiredHostContext: node.requiredHostContext,
+        commandId: node.capabilityPins[0],
+      };
+    }),
+    edges: workflow.edges.map((edge) => ({ edgeId: edge.edgeId, from: edge.from, to: edge.to })),
+    facadeToolIds: workflow.facadeToolIds,
+  });
 }
 
 export function validateWorkflowDefinition(candidate: unknown): WorkflowDefinitionValidation {

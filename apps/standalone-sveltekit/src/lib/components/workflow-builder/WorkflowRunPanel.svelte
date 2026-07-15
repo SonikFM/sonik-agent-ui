@@ -8,13 +8,9 @@
   // model-callable tool; the server derives hostSigned from the resolved trusted host session, not
   // from anything this component sends.
   //
-  // ponytail: the campaign brief inputs are hardcoded to the one workflow this endpoint has a real
-  // callback for (amplify.campaign.create) -- generalize to a per-workflow input schema when a
-  // second callback-backed workflow needs its own shape.
   import * as Card from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
-  import { Input } from "$lib/components/ui/input";
   import { createApprovalAffordanceFromWorkflowRun } from "../../agent-workflows/approval-affordance";
   import { resolveWorkflowRunActionDisabledState, resolveWorkflowRunBusyDisabledState } from "./builder-model";
   import type { WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
@@ -32,12 +28,16 @@
   const commitNodeId = $derived(workflow.nodes.find((node) => node.type === "tool_commit")?.nodeId ?? null);
   const needsCampaignBrief = $derived(workflow.workflowId === "amplify.campaign.create");
 
-  let brief = $state({ productName: "Loyalty Weekend", audience: "returning_members", offer: "20% off", launchDate: "2026-08-01" });
+  let workflowInput = $state(needsCampaignBrief
+    ? JSON.stringify({ productName: "Loyalty Weekend", audience: "returning_members", offer: "20% off", launchDate: "2026-08-01" }, null, 2)
+    : "{}");
+  let resumeAnswer = $state("");
   let runId = $state<string | null>(null);
   let run = $state<WorkflowRunState | null>(null);
   let statusMessage = $state("");
   let busy = $state(false);
   let receiptRef = $state<string | null>(null);
+  const traceRows = $derived(run ? Object.values(run.nodeStates) : []);
 
   const commitCommandId = $derived(
     commitNodeId ? (run?.nodeStates[commitNodeId]?.commandId ?? null) : null,
@@ -121,10 +121,13 @@
     statusMessage = "";
     receiptRef = null;
     try {
+      let input: unknown;
+      try { input = JSON.parse(workflowInput); }
+      catch { statusMessage = "Workflow input must be valid JSON."; return; }
       const result = await callEndpoint({
         action: "start",
         workflowId: workflow.workflowId,
-        ...(needsCampaignBrief ? { brief } : { workflow }),
+        ...(needsCampaignBrief ? { brief: input } : { workflow, workflowInput: input }),
       });
       if (!result.ok || !result.run) {
         statusMessage = result.reason ?? "Run could not be started.";
@@ -138,6 +141,26 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function resume(kind: "answer" | "approval"): Promise<void> {
+    if (!runId) return;
+    const wait = (run as unknown as { waits?: Array<{ waitpointId: string; nodeId: string; logicalEffectId?: string }> })?.waits?.[0];
+    if (!wait) { statusMessage = "This run has no active waitpoint to resume."; return; }
+    busy = true;
+    try {
+      const resumeEvent = {
+        kind,
+        eventId: crypto.randomUUID(),
+        issuedAt: new Date().toISOString(),
+        waitpointId: wait.waitpointId,
+        nodeId: wait.nodeId,
+        ...(kind === "answer" ? { answer: resumeAnswer } : { logicalEffectId: wait.logicalEffectId ?? "" }),
+      };
+      const result = await callEndpoint({ action: "resume_run", request: { workflowRunId: runId, resumeEvent } });
+      updateRun(result.run ?? run);
+      statusMessage = result.ok ? "Run resumed." : (result.reason ?? "Resume failed.");
+    } finally { busy = false; }
   }
 
   async function preview(): Promise<void> {
@@ -206,13 +229,11 @@
     <Card.Description>Drive this workflow through the shipped controller: start, preview, approve, commit.</Card.Description>
   </Card.Header>
   <Card.Content class="flex flex-col gap-3">
-    {#if needsCampaignBrief && !runId}
-      <div class="grid grid-cols-2 gap-2">
-        <Input placeholder="Product name" bind:value={brief.productName} />
-        <Input placeholder="Audience" bind:value={brief.audience} />
-        <Input placeholder="Offer" bind:value={brief.offer} />
-        <Input placeholder="Launch date" bind:value={brief.launchDate} />
-      </div>
+    {#if !runId}
+      <label class="grid gap-1 text-sm">
+        <span class="font-medium">Workflow input (JSON)</span>
+        <textarea class="min-h-28 rounded-md border border-input bg-background p-2 font-mono text-xs" bind:value={workflowInput}></textarea>
+      </label>
     {/if}
 
     <div class="flex items-center gap-2">
@@ -248,6 +269,17 @@
 
     {#if statusMessage}
       <p class="text-sm text-muted-foreground" data-workflow-run-status>{statusMessage}</p>
+    {/if}
+
+    {#if (run as unknown as { waits?: unknown[] } | null)?.waits?.length}
+      <div class="grid gap-2 rounded-md border border-border p-3" data-workflow-run-waitpoint>
+        <p class="text-sm font-medium">Run paused at a human waitpoint.</p>
+        <textarea class="min-h-16 rounded-md border border-input bg-background p-2 text-sm" placeholder="Answer" bind:value={resumeAnswer}></textarea>
+        <div class="flex gap-2">
+          <Button size="sm" onclick={() => void resume("answer")} disabled={busy || !resumeAnswer.trim()}>Answer &amp; resume</Button>
+          <Button size="sm" variant="outline" onclick={() => void resume("approval")} disabled={busy}>Approve &amp; resume</Button>
+        </div>
+      </div>
     {/if}
 
     {#if affordance}
@@ -313,6 +345,24 @@
 
     {#if receiptRef}
       <p class="text-sm" data-workflow-run-receipt>Committed. Receipt: <span class="font-mono text-xs">{receiptRef}</span></p>
+    {/if}
+    {#if traceRows.length > 0}
+      <details data-workflow-run-trace>
+        <summary class="cursor-pointer text-sm font-medium">Run trace ({traceRows.length} nodes)</summary>
+        <ol class="mt-2 grid gap-1 text-xs">
+          {#each traceRows as node}
+            <li><span class="font-mono">{node.nodeId}</span> — {node.status}</li>
+          {/each}
+        </ol>
+      </details>
+    {/if}
+    {#if run?.receipts.length}
+      <details data-workflow-run-history>
+        <summary class="cursor-pointer text-sm font-medium">Receipts ({run.receipts.length})</summary>
+        {#each run.receipts as receipt}
+          <p class="font-mono text-xs">{receipt.receiptRef}</p>
+        {/each}
+      </details>
     {/if}
   </Card.Content>
 </Card.Root>
