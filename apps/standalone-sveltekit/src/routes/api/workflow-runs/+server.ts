@@ -35,7 +35,9 @@ export const POST: RequestHandler = async (event) => {
   let driverLease: { owner: NonNullable<ReturnType<typeof workflowRunOwnerFromHostSession>>; runId: string; leaseId: string } | undefined;
   if (action.action === "run_until_blocked" || action.action === "resume_run" || action.action === "cancel_run") {
     const owner = workflowRunOwnerFromHostSession(hostSession)!;
-    if (action.action === "cancel_run" && "lease" in publicBody) return json({ ok: false, reason: "public_lease_forbidden" }, { status: 400 });
+    if (action.action === "cancel_run" && "lease" in action) {
+      if ("lease" in publicBody) return json({ ok: false, reason: "public_lease_forbidden" }, { status: 400 });
+    }
     const request = action.action === "cancel_run" ? {} : action.request;
     if (!request || typeof request !== "object" || Array.isArray(request)) return json({ ok: false, reason: "invalid_driver_request" }, { status: 400 });
     const publicRequest = request as Record<string, unknown>;
