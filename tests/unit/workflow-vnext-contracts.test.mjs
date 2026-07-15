@@ -123,9 +123,11 @@ assert.equal(engineResponseSchema.safeParse({ status: "succeeded", output: { sto
 const approval = {
   decisionId: "decision-1", decision: "approved", runId: "run-1", approvalNodeId: "approve", previewNodeId: "preview",
   commitNodeId: "commit", commandId: "booking.create.booking", logicalEffectId: "booking.create.booking:input-a", organizationId: "org-1", approverId: "user-1",
-  grantEvidenceDigest: digest, resolvedInputHash: digest, issuedAt: "2026-07-15T12:00:00.000Z", expiresAt: "2026-07-15T12:05:00.000Z", hostSigned: true,
+  grantEvidenceDigest: digest, resolvedInputHash: digest,
+  externalEffectIdentity: { namespace: "booking:v1:create", keyDigest: digest, commandId: "booking.create.booking", resolvedInputHash: digest },
+  issuedAt: "2026-07-15T12:00:00.000Z", expiresAt: "2026-07-15T12:05:00.000Z", hostSigned: true,
 };
-const approvalContext = { runId: "run-1", organizationId: "org-1", evaluatedAt: "2026-07-15T12:01:00.000Z" };
+const approvalContext = { runId: "run-1", organizationId: "org-1", evaluatedAt: "2026-07-15T12:01:00.000Z", externalEffectIdentity: approval.externalEffectIdentity };
 assert.equal(approvalDecisionSchema.safeParse(approval).success, true);
 assert.equal(publicApprovalDecisionRequestSchema.safeParse(approval).success, false, "public DTO rejects hostSigned");
 assert.equal(validateApprovalDecisionForCommit(approval, definition, "commit", approvalContext).decision, "approved");
@@ -137,13 +139,14 @@ assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "com
 assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "commit", { ...approvalContext, organizationId: "other-org" }), /approval_context_mismatch/);
 assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "commit", { ...approvalContext, evaluatedAt: approval.expiresAt }), /approval_decision_expired/);
 assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "commit", { ...approvalContext, evaluatedAt: "2026-07-15T11:59:59.999Z" }), /approval_decision_not_yet_valid/);
+assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "commit", { ...approvalContext, externalEffectIdentity: { ...approval.externalEffectIdentity, keyDigest: `sha256:${"b".repeat(64)}` } }), /approval_external_effect_identity_mismatch/, "approval cannot be replayed with a different trusted external effect key");
 assert.throws(() => validateApprovalDecisionForCommit({ ...approval, runId: "attacker-run", organizationId: "other-org", issuedAt: "2020-01-01T00:00:00.000Z", expiresAt: "2020-01-01T00:05:00.000Z" }, definition, "commit", approvalContext), /approval_context_mismatch/, "cross-run cross-org expired approvals cannot be replayed");
 assert.equal(approvalCommitContextSchema.safeParse({ ...approvalContext, extra: true }).success, false, "expected approval context is strict");
-const { hostSigned: _hostSigned, ...publicApproval } = approval;
+const { hostSigned: _hostSigned, externalEffectIdentity: _externalEffectIdentity, ...publicApproval } = approval;
 assert.equal(publicApprovalDecisionRequestSchema.safeParse(publicApproval).success, true, "server derives hostSigned after public DTO validation");
 for (const field of [
   "decisionId", "decision", "runId", "approvalNodeId", "previewNodeId", "commitNodeId", "commandId", "logicalEffectId",
-  "organizationId", "approverId", "grantEvidenceDigest", "resolvedInputHash", "issuedAt", "expiresAt", "hostSigned",
+  "organizationId", "approverId", "grantEvidenceDigest", "resolvedInputHash", "externalEffectIdentity", "issuedAt", "expiresAt", "hostSigned",
 ]) {
   const invalid = structuredClone(approval);
   delete invalid[field];
