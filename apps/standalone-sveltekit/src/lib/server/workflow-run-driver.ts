@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   authenticatedResumeEventSchema,
+  engineResponseSchema,
   runDriverPumpRequestSchema,
   validateApprovalDecisionForCommit,
   workflowEffectIdempotencyKey,
@@ -114,15 +115,16 @@ export class WorkflowRunDriver {
         catch (error) { return this.appendStatus(state, request, "failed", error instanceof Error ? error.message : "commit_authorization_failed", { schedulerFrontier: [] }); }
         claim = await this.deps.journal.claimEffect(this.deps.owner, { claimId: randomUUID(), runId: state.workflowRunId, logicalEffectId, attemptId, idempotencyKey: engineRequest.idempotencyKey, providerSupportsIdempotency: true });
         if (!claim.created) {
-          if (claim.claim.status === "succeeded" && claim.claim.result) {
-            state = await this.complete(state, request, node, claim.claim.result as BoundedNodeOutput);
+          const replay = this.persistedEffectResponse(claim.claim.result);
+          if ((claim.claim.status === "succeeded" || claim.claim.status === "reconciled") && replay) {
+            state = await this.complete(state, request, node, replay.output);
             completed += 1;
             continue;
           }
           if (claim.claim.status === "outcome_unknown" && this.deps.reconcileEffect) {
             const reconciled = await this.deps.reconcileEffect(node, claim.claim);
             if (reconciled.status === "succeeded" && reconciled.receipt) {
-              await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "outcome_unknown", "reconciled", reconciled.output);
+              await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "outcome_unknown", "reconciled", reconciled);
               state = await this.complete(state, request, node, reconciled.output);
               completed += 1;
               continue;
@@ -134,11 +136,20 @@ export class WorkflowRunDriver {
       }
 
       let response: EngineResponse;
-      try { response = await dispatchWorkflowNode(engineRequest, this.deps.executionContext?.(node)); }
-      catch (error) {
-        if (!logicalEffectId) throw error;
-        await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "outcome_unknown", { code: "provider_response_lost" });
-        return this.appendStatus(state, request, "waiting", "outcome_unknown");
+      const executionContext = this.deps.executionContext?.(node);
+      const maxAttempts = node.nodeType === "tool_preview" ? 3 : node.nodeType === "reasoning" ? node.reasoning?.budgets.maxSteps ?? 1 : 1;
+      const reasoningStartedAt = this.now();
+      for (let retry = 0; ; retry += 1) {
+        const retryRequest = retry === 0 ? engineRequest : { ...engineRequest, attempt: attempt + retry, attemptId: `${state.workflowRunId}:${node.nodeId}:${attempt + retry}`, idempotencyKey: `${state.workflowRunId}:${node.nodeId}:${attempt + retry}` };
+        try { response = await dispatchWorkflowNode(retryRequest, executionContext); }
+        catch (error) {
+          if (!logicalEffectId) throw error;
+          await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "outcome_unknown", { code: "provider_response_lost" });
+          return this.appendStatus(state, request, "waiting", "outcome_unknown");
+        }
+        const reasoningTimeExhausted = node.nodeType === "reasoning" && this.now() - reasoningStartedAt >= (node.reasoning?.budgets.maxWallTimeMs ?? 0);
+        if (reasoningTimeExhausted) return this.appendStatus(state, request, "failed", "reasoning_budget_exhausted", { schedulerFrontier: [] });
+        if (response.status !== "retryable_error" || logicalEffectId || retry + 1 >= maxAttempts) break;
       }
       if (response.status === "waiting") {
         await this.deps.journal.createWaitpoint(this.deps.owner, response.waitpoint);
@@ -149,7 +160,7 @@ export class WorkflowRunDriver {
           await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "failed", response);
           return this.appendStatus(state, request, "failed", "unsafe_write_retry_refused", { schedulerFrontier: [] });
         }
-        return this.appendStatus(state, request, "waiting", "retry_pending");
+        return this.appendStatus(state, request, "failed", node.nodeType === "reasoning" ? "reasoning_budget_exhausted" : node.nodeType === "tool_preview" ? "safe_read_retry_exhausted" : "unsafe_retry_refused", { schedulerFrontier: [] });
       }
       if (response.status === "terminal_error") {
         if (logicalEffectId) await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "failed", response);
@@ -157,7 +168,7 @@ export class WorkflowRunDriver {
       }
       if (logicalEffectId) {
         if (!response.receipt) return this.appendStatus(state, request, "failed", "semantic_receipt_required", { schedulerFrontier: [] });
-        await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "succeeded", response.output);
+        await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "succeeded", response);
       }
       state = await this.complete(state, request, node, response.output);
       completed += 1;
@@ -242,6 +253,10 @@ export class WorkflowRunDriver {
     return (binding.source === "constant" || binding.source === "host_context" ? root : binding.path.reduce<JsonValue>((value, key) => value && typeof value === "object" && !Array.isArray(value) ? value[key] ?? null : null, root));
   }
   private inline(value: JsonValue): BoundedNodeOutput { return { storage: "inline", value, byteLength: new TextEncoder().encode(JSON.stringify(value)).byteLength }; }
+  private persistedEffectResponse(result: unknown): Extract<EngineResponse, { status: "succeeded" }> | undefined {
+    const parsed = engineResponseSchema.safeParse(result);
+    return parsed.success && parsed.data.status === "succeeded" && parsed.data.receipt ? parsed.data : undefined;
+  }
   private node(nodeId: string): WorkflowVNextNode { const node = this.deps.definition.nodes.find((candidate) => candidate.nodeId === nodeId); if (!node) throw new Error(`unknown_node:${nodeId}`); return node; }
   private load(): Promise<WorkflowRunSnapshot> { return this.deps.journal.getSnapshot(this.deps.owner, this.deps.initialState.workflowRunId).then((state) => state ?? this.deps.initialState); }
   private now(): number { return (this.deps.now ?? Date.now)(); }
