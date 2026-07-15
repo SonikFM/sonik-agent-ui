@@ -52,6 +52,7 @@ export type WorkflowEffectClaim = ReturnType<typeof effectClaimSchema.parse> & {
 
 export interface AppendWorkflowRunEventInput {
   expectedRevision: number;
+  leaseId: string;
   event: CanonicalWorkflowEvent;
   snapshot: WorkflowRunSnapshot;
 }
@@ -67,6 +68,7 @@ export interface ClaimWorkflowEffectInput {
 
 export interface WorkflowRunJournalStore {
   appendEventAndProject(owner: WorkflowRunOwner, input: AppendWorkflowRunEventInput): Promise<boolean>;
+  getSnapshot(owner: WorkflowRunOwner, runId: string): Promise<WorkflowRunSnapshot | null>;
   listEvents(owner: WorkflowRunOwner, runId: string): Promise<CanonicalWorkflowEvent[]>;
   replayEvents(owner: WorkflowRunOwner, initial: WorkflowRunSnapshot): Promise<WorkflowRunSnapshot>;
   acquireLease(owner: WorkflowRunOwner, runId: string, lease: WorkflowRunLease): Promise<boolean>;
@@ -148,7 +150,10 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       if (!runStore.getRun(owner, event.workflowRunId)) return false;
       const key = workflowRunKey(owner, event.workflowRunId);
       const current = snapshots.get(key);
-      if ((current?.revision ?? 0) !== input.expectedRevision) return false;
+      const lease = leases.get(key);
+      if ((current?.revision ?? 0) !== input.expectedRevision
+        || lease?.leaseId !== input.leaseId
+        || Date.parse(lease.expiresAt) <= Date.now()) return false;
       events.set(key, [...(events.get(key) ?? []), event]);
       snapshots.set(key, input.snapshot);
       return true;
@@ -157,6 +162,10 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       const owner = normalizeWorkflowRunOwner(ownerInput);
       return [...(events.get(workflowRunKey(owner, runId)) ?? [])];
     },
+    async getSnapshot(ownerInput, runId) {
+      const snapshot = snapshots.get(workflowRunKey(normalizeWorkflowRunOwner(ownerInput), runId));
+      return snapshot ? structuredClone(snapshot) : null;
+    },
     async replayEvents(owner, initial) {
       return replayCanonicalWorkflowEvents(initial, await this.listEvents(owner, initial.workflowRunId));
     },
@@ -164,6 +173,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       const owner = normalizeWorkflowRunOwner(ownerInput);
       if (!runStore.getRun(owner, runId)) return false;
       const lease = runLeaseSchema.parse(leaseInput);
+      if (Date.parse(lease.expiresAt) <= Date.now()) return false;
       const key = workflowRunKey(owner, runId);
       const current = leases.get(key);
       if (current && current.leaseId !== lease.leaseId && Date.parse(current.expiresAt) > Date.now()) return false;
@@ -187,7 +197,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
     async resolveWaitpoint(ownerInput, runId, waitpointId) {
       const key = waitpointKey(normalizeWorkflowRunOwner(ownerInput), runId, waitpointId);
       const current = waitpoints.get(key);
-      if (!current || current.resolved) return false;
+      if (!current || current.resolved || ("expiresAt" in current && current.expiresAt && Date.parse(current.expiresAt) <= Date.now())) return false;
       waitpoints.set(key, { ...current, resolved: true });
       return true;
     },
@@ -364,14 +374,19 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
                 journal_sequence = $5,
                 canonical_snapshot = $6::jsonb,
                 compatibility_phase = $7,
-                updated_at = $8
+                updated_at = now()
             where organization_id = $1 and user_id = $2 and run_id = $3
-              and journal_revision = $9
+              and journal_revision = $8
+              and exists (
+                select 1 from sonik_agent_ui.agent_workflow_run_leases
+                where organization_id = $1 and user_id = $2 and run_id = $3
+                  and lease_id = $12 and lease_expires_at > now()
+              )
             returning organization_id, user_id, run_id
           ), appended as (
             insert into sonik_agent_ui.agent_workflow_run_events
               (organization_id, user_id, run_id, sequence, revision, event_id, event_type, event, created_at)
-            select organization_id, user_id, run_id, $5, $4, $10, $11, $12::jsonb, $8
+            select organization_id, user_id, run_id, $5, $4, $9, $10, $11::jsonb, now()
             from projected
             returning event_id
           )
@@ -384,11 +399,11 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
           event.sequence,
           JSON.stringify(input.snapshot),
           input.snapshot.compatibilityPhase,
-          event.timestamp,
           input.expectedRevision,
           event.eventId,
           event.eventType,
           JSON.stringify(event),
+          input.leaseId,
         ]);
         return result.rows.length === 1;
       });
@@ -402,6 +417,19 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
           order by sequence
         `, [owner.organizationId, owner.userId, runId]);
         return result.rows.map(({ event }) => parseCanonicalWorkflowEvent(parseJsonColumn(event)));
+      });
+    },
+    async getSnapshot(ownerInput, runId) {
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<{ canonical_snapshot: WorkflowRunSnapshot | string }>(`
+          select canonical_snapshot
+          from sonik_agent_ui.agent_workflow_runs
+          where organization_id = $1 and user_id = $2 and run_id = $3
+            and canonical_snapshot is not null
+        `, [owner.organizationId, owner.userId, runId]);
+        return result.rows[0]
+          ? workflowVNextRunStateSchema.parse(parseJsonColumn(result.rows[0].canonical_snapshot))
+          : null;
       });
     },
     async replayEvents(owner, initial) {
@@ -418,6 +446,7 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
             select 1 from sonik_agent_ui.agent_workflow_runs
             where organization_id = $1 and user_id = $2 and run_id = $3
           )
+            and $6::timestamptz > now()
           on conflict (organization_id, user_id, run_id) do update
           set lease_id = excluded.lease_id,
               owner_id = excluded.owner_id,
@@ -465,6 +494,7 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
           set status = 'resolved', updated_at = now()
           where organization_id = $1 and user_id = $2 and run_id = $3
             and waitpoint_id = $4 and status = 'open'
+            and (waitpoint->>'expiresAt' is null or (waitpoint->>'expiresAt')::timestamptz > now())
           returning waitpoint_id
         `, [owner.organizationId, owner.userId, runId, waitpointId]);
         return result.rows.length === 1;
@@ -586,6 +616,7 @@ function validateJournalAppend(input: AppendWorkflowRunEventInput): CanonicalWor
   const event = parseCanonicalWorkflowEvent(input.event);
   const snapshot = workflowVNextRunStateSchema.parse(input.snapshot);
   if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new Error("invalid_expected_revision");
+  if (typeof input.leaseId !== "string" || !input.leaseId.trim()) throw new Error("invalid_workflow_run_lease");
   if (event.workflowRunId !== snapshot.workflowRunId
     || event.revision !== input.expectedRevision + 1
     || event.sequence !== input.expectedRevision + 1

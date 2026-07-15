@@ -8,6 +8,20 @@ alter table sonik_agent_ui.agent_workflow_runs
   add column if not exists canonical_snapshot jsonb,
   add column if not exists compatibility_phase text not null default 'legacy_v1';
 
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'sonik_agent_ui.agent_workflow_runs'::regclass
+      and conname = 'agent_workflow_runs_journal_position_check'
+  ) then
+    alter table sonik_agent_ui.agent_workflow_runs
+      add constraint agent_workflow_runs_journal_position_check
+      check (journal_revision = journal_sequence);
+  end if;
+end
+$$;
+
 create table if not exists sonik_agent_ui.agent_workflow_run_events (
   organization_id text not null,
   user_id text not null,
@@ -45,7 +59,7 @@ create table if not exists sonik_agent_ui.agent_workflow_run_waitpoints (
   user_id text not null,
   run_id text not null,
   waitpoint_id text not null,
-  kind text not null check (kind in ('answer', 'approval')),
+  kind text not null check (kind in ('answer', 'approval', 'budget_yield')),
   waitpoint jsonb not null,
   status text not null check (status in ('open', 'resolved')),
   created_at timestamptz not null default now(),
