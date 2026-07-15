@@ -130,7 +130,9 @@
     description: "Organizer-safe label; graph structure remains hidden.",
   })));
   const organizerSafePatchPaths = $derived(organizerParameters.map((parameter) => parameter.path));
-  const activeReceiptIds = $derived(activeRunSelection?.run.receipts.map((receipt) => receipt.receiptRef) ?? []);
+  const activeReceiptIds = $derived(activeRunSelection?.run.receipts
+    .map((receipt) => receipt.receiptRef)
+    .filter((receiptId): receiptId is string => Boolean(receiptId)) ?? []);
 
   // Model catalog: fetched here (not in AgentConfigPanel) so the config panel
   // stays network-free -- same /api/agent-models route + fallback shape the
