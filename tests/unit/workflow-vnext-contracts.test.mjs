@@ -12,6 +12,7 @@ import {
   parseEngineRequestForRegistry,
   engineResponseSchema,
   publicApprovalDecisionRequestSchema,
+  publicResumeEventSchema,
   validateWorkflowForPublish,
   validateApprovalDecisionForCommit,
   workflowOrganizerPatchSchema,
@@ -111,6 +112,11 @@ assert.equal(boundedNodeOutputSchema.safeParse({ storage: "inline", value: inlin
 assert.equal(boundedNodeOutputSchema.safeParse({ storage: "inline", value: "x", byteLength: MAX_INLINE_OUTPUT_BYTES + 1 }).success, false);
 
 assert.equal(workflowWaitpointSchema.safeParse({ kind: "answer", waitpointId: "w1", runId: "r1", nodeId: "ask", subjectId: "u1" }).success, true);
+const publicAnswer = { kind: "answer", answer: { name: "Ada" }, eventId: "answer-1", waitpointId: "w1", workflowRunId: "r1", nodeId: "ask", runRevision: 1, issuedAt: "2026-07-15T12:00:00.000Z" };
+assert.equal(publicResumeEventSchema.safeParse(publicAnswer).success, true, "public answers carry validated JSON payloads");
+assert.equal(publicResumeEventSchema.safeParse({ ...publicAnswer, subjectId: "attacker" }).success, false, "public resume DTO cannot assert subject authority");
+assert.equal(publicResumeEventSchema.safeParse({ ...publicAnswer, hostSigned: true }).success, false, "public resume DTO cannot assert host authority");
+assert.equal(publicResumeEventSchema.safeParse({ ...publicAnswer, answer: undefined }).success, false, "answer resumes require a payload");
 assert.equal(workflowWaitpointSchema.safeParse({ kind: "delayed_retry", waitpointId: "w2" }).success, false, "unproven delayed retries stay excluded");
 assert.equal(engineResponseSchema.safeParse({ status: "succeeded", output: { storage: "inline", value: null, byteLength: 4 }, receipt: { receiptId: "r", semanticStatus: "failure" } }).success, false, "success receipts require semantic success");
 

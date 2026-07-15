@@ -11,7 +11,6 @@ import { resolveWorkflowDefinitionRepository } from "$lib/server/workflow-defini
 import { WorkflowRunDriver } from "$lib/server/workflow-run-driver";
 import { resolveStandaloneCapabilityReadiness } from "$lib/server/standalone-capability-readiness";
 import { approvedCommandIdsFromHostSession } from "$lib/server/host-command-runtime";
-import { startControllerRun } from "@sonik-agent-ui/tool-contracts/workflow-controller";
 import { publicResumeEventSchema } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { RequestHandler } from "./$types";
 
@@ -41,7 +40,7 @@ export const POST: RequestHandler = async (event) => {
     for (const field of ["workflowVersionId", "runInput", "lease", "hostSigned"]) {
       if (field in publicRequest) return json({ ok: false, reason: `public_${field}_forbidden` }, { status: 400 });
     }
-    const runId = action.action === "cancel_run" ? action.runId : String(request?.workflowRunId ?? "");
+    const runId = action.action === "cancel_run" ? action.runId : String(publicRequest.workflowRunId ?? "");
     if (!runId) return json({ ok: false, reason: "workflowRunId_required" }, { status: 400 });
     const row = await store.getRun(owner, runId);
     if (!row) return json({ ok: false, reason: "run_not_found" }, { status: 404 });
@@ -90,16 +89,3 @@ export const POST: RequestHandler = async (event) => {
 };
 
 function digest(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
-function legacyProjection(definition: import("@sonik-agent-ui/tool-contracts/workflow-vnext").WorkflowVNextDefinition) {
-  const entry = definition.nodes.find((node) => node.nodeId === definition.entryNodeId)!;
-  const nodes = [entry, ...definition.nodes.filter((node) => node !== entry)].map((node) => ({
-    nodeId: node.nodeId,
-    type: node.nodeType === "reasoning" ? "skill" as const : node.nodeType as Exclude<typeof node.nodeType, "reasoning" | "creative" | "promotion">,
-    title: node.nodeId,
-    ...(node.previewEffect?.commandId || node.effectBinding?.commandId ? { commandId: node.previewEffect?.commandId ?? node.effectBinding?.commandId } : {}),
-    effect: node.nodeType === "tool_commit" ? "write" as const : node.nodeType === "tool_preview" ? "read" as const : "none" as const,
-    approvalPolicy: node.nodeType === "tool_commit" ? "preview_then_trusted_approval" as const : "none" as const,
-    requiredHostContext: node.requiredHostContext,
-  }));
-  return { workflowId: definition.workflowId, title: definition.title, triggerPhrases: [], nodes, edges: definition.edges.map((edge) => ({ edgeId: edge.edgeId, from: edge.from, to: edge.to })), requiredSkills: [], requiredCommands: definition.facadeToolIds, facadeToolIds: definition.facadeToolIds, version: "1.0.0" };
-}

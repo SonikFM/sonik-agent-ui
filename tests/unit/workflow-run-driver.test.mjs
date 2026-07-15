@@ -76,10 +76,10 @@ function harness(definition, suffix, options = {}) {
   answered = true;
   const resumed = await driver.resume({
     ...request(runId, "ask-a"),
-    resumeEvent: { kind: "answer", eventId: "answer-1", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` },
+    resumeEvent: { kind: "answer", answer: "Ada", eventId: "answer-1", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` },
   });
   assert.equal(resumed.status, "succeeded", "a persisted wait resumes once after service recreation-compatible state load");
-  await assert.rejects(() => driver.resume({ ...request(runId, "ask-a"), resumeEvent: { kind: "answer", eventId: "answer-2", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` } }), /waitpoint|terminal|resume/i);
+  await assert.rejects(() => driver.resume({ ...request(runId, "ask-a"), resumeEvent: { kind: "answer", answer: "Ada", eventId: "answer-2", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` } }), /waitpoint|terminal|resume/i);
 }
 
 {
