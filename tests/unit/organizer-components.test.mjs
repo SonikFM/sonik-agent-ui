@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createEmptyAgentDefinition, createEmptyWorkflowDefinition } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts";
+import { createEmptyWorkflowDefinition } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts";
 import {
   COLLAPSED_MODEL_ROW_LIMIT,
   createOrganizerPatchRequest,
@@ -55,10 +55,9 @@ assert.deepEqual(
   ["Tools", "Image", "Reasoning", "Video", "Chat", "Text"],
   "catalog metadata normalizes capability, task, and modality badges without duplicates",
 );
-const toolAgent = { ...createEmptyAgentDefinition("agent_tools"), toolPolicy: { "booking.create": "ask" } };
-assert.match(modelDisabledReason(toolAgent, { id: "no-tools", label: "No tools", provider: "Test", supportsTools: false }), /does not support tool use/);
-assert.equal(modelDisabledReason(toolAgent, { id: "tools", label: "Tools", provider: "Test", supportsTools: true }), null);
-assert.equal(modelDisabledReason(toolAgent, { id: "disabled", label: "Disabled", provider: "Test", disabledReason: "Provider outage" }), "Provider outage");
+assert.match(modelDisabledReason(true, { id: "no-tools", label: "No tools", provider: "Test", supportsTools: false }), /does not support tool use/);
+assert.equal(modelDisabledReason(false, { id: "tools", label: "Tools", provider: "Test", supportsTools: true }), null);
+assert.equal(modelDisabledReason(false, { id: "disabled", label: "Disabled", provider: "Test", disabledReason: "Provider outage" }), "Provider outage");
 
 const componentRoot = new URL("../../apps/standalone-sveltekit/src/lib/components/workflow-builder/", import.meta.url);
 const [configSource, organizerSource, historySource] = await Promise.all([

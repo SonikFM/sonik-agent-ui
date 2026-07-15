@@ -1,6 +1,5 @@
 import type { AgentModelOption } from "../../agent-settings.ts";
-import type { AgentDefinition, WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
-import { isModelIncompatible } from "./builder-model.ts";
+import type { WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
 
 export const COLLAPSED_MODEL_ROW_LIMIT = 10;
 
@@ -88,9 +87,9 @@ export function createOrganizerPatchRequest(
   };
 }
 
-export function modelDisabledReason(definition: AgentDefinition, model: CatalogModelOption): string | null {
+export function modelDisabledReason(incompatible: boolean, model: CatalogModelOption): string | null {
   if (model.disabledReason) return model.disabledReason;
-  if (isModelIncompatible(definition, model)) {
+  if (incompatible) {
     return "This agent grants tools, but the catalog reports that this model does not support tool use.";
   }
   return null;
