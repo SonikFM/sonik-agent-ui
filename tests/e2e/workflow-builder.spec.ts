@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { amplifyCampaignWorkflowManifest } from "../../packages/tool-contracts/dist/marketplace-fixtures.js";
 import { gotoFreshWorkspace, smokeUrl, submitPrompt, WORKFLOW_DRAFT_SCENARIO } from "./support/dev-smoke";
 
 // Slice D (production-readiness-agent-creation-2026-07-13.md P1 #7): the
@@ -31,6 +32,37 @@ async function installWorkflowBuilderDraftPersistenceFixture(page: Page): Promis
           };
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
   });
+}
+
+async function installWorkflowDraftStreamFixture(page: Page): Promise<void> {
+  const toolCallId = "workflow-builder-e2e-draft";
+  const chunks = [
+    { type: "tool-input-start", toolCallId, toolName: "draftWorkflow" },
+    {
+      type: "tool-input-available",
+      toolCallId,
+      toolName: "draftWorkflow",
+      input: { description: "Create an Amplify campaign" },
+    },
+    {
+      type: "tool-output-available",
+      toolCallId,
+      output: {
+        kind: "workflow-draft",
+        ok: true,
+        workflow: amplifyCampaignWorkflowManifest.payload.workflow,
+      },
+    },
+  ];
+
+  await page.route("**/api/generate", (route) => route.fulfill({
+    status: 200,
+    headers: {
+      "content-type": "text/event-stream",
+      "x-vercel-ai-ui-message-stream": "v1",
+    },
+    body: `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}`).join("\n\n")}\n\ndata: [DONE]\n\n`,
+  }));
 }
 
 test("workflow builder mode toggle mounts the builder", async ({ page }) => {
@@ -139,13 +171,18 @@ test("Debug & Preview sends draftAgentId with every generate request", async ({ 
 
 test("describe, draft, and canvas uses the current saved draft through the deterministic smoke stream", async ({ page }) => {
   await installWorkflowBuilderDraftPersistenceFixture(page);
+  await installWorkflowDraftStreamFixture(page);
   await gotoFreshWorkspace(page, smokeUrl(WORKFLOW_DRAFT_SCENARIO));
   await openWorkflowBuilder(page);
   await page.getByRole("tab", { name: "Debug & Preview" }).click();
 
   const previewPanel = page.locator('[data-agent-panel="workflow-builder-preview"]');
   await previewPanel.locator("textarea").fill("Draft a campaign workflow");
+  const generateRequest = page.waitForRequest((request) => request.url().includes("/api/generate") && request.method() === "POST");
   await previewPanel.getByRole("button", { name: "Send" }).click();
+
+  const requestBody = (await generateRequest).postDataJSON() as { draftAgentId?: string };
+  expect(requestBody.draftAgentId).toBeTruthy();
 
   await expect(page.getByRole("tab", { name: "Canvas", selected: true })).toBeVisible();
   const draftCard = page.locator('[data-slot="card"]').filter({ hasText: "Your workflow (draft)" }).first();
