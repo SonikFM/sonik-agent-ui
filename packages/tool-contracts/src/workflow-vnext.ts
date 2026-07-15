@@ -344,7 +344,7 @@ export const engineRequestSchema = z.object({
   contextSnapshot: z.record(z.string(), jsonValueSchema), capabilityPins: z.array(capabilityIdSchema), idempotencyKey: z.string().min(1),
   externalEffectIdentity: externalEffectIdentitySchema.optional(),
 }).strict().superRefine((request, ctx) => {
-  const expected = request.externalEffectIdentity ? externalEffectIdempotencyKey(request.externalEffectIdentity) : request.logicalEffectId ? workflowEffectIdempotencyKey(request.workflowRunId, request.logicalEffectId) : undefined;
+  const expected = request.logicalEffectId ? request.externalEffectIdentity ? externalEffectIdempotencyKey(request.externalEffectIdentity) : workflowEffectIdempotencyKey(request.workflowRunId, request.logicalEffectId) : undefined;
   if (expected && request.idempotencyKey !== expected) ctx.addIssue({ code: "custom", path: ["idempotencyKey"], message: "Effect idempotencyKey must match its trusted effect identity" });
 });
 export const engineResponseSchema = z.discriminatedUnion("status", [

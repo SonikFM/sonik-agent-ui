@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   authenticatedResumeEventSchema,
   engineResponseSchema,
+  externalEffectIdempotencyKey,
   runDriverPumpRequestSchema,
   validateApprovalDecisionForCommit,
   workflowEffectIdempotencyKey,
@@ -12,6 +13,7 @@ import {
   type CapabilityReadiness,
   type EngineRequest,
   type EngineResponse,
+  type ExternalEffectIdentity,
   type JsonValue,
   type WorkflowVNextDefinition,
   type WorkflowVNextNode,
@@ -32,7 +34,7 @@ export interface WorkflowRunDriverDeps {
   executionContext?: (node: WorkflowVNextNode) => WorkflowNodeExecutionContext;
   resolveReadiness?: () => readonly CapabilityReadiness[];
   resolveDependencyPins?: () => WorkflowRunSnapshot["dependencyPins"];
-  approvalDecision?: (commitNodeId: string) => ApprovalDecision | undefined;
+  approvalDecision?: (commitNodeId: string, externalEffectIdentity: ExternalEffectIdentity) => ApprovalDecision | undefined;
   reconcileEffect?: (node: WorkflowVNextNode, claim: Awaited<ReturnType<WorkflowRunJournalStore["claimEffect"]>>["claim"]) => Promise<EngineResponse> | EngineResponse;
   now?: () => number;
 }
@@ -92,6 +94,8 @@ export class WorkflowRunDriver {
       }
 
       const logicalEffectId = node.nodeType === "tool_commit" ? node.effectBinding?.logicalEffectId : undefined;
+      const executionContext = this.deps.executionContext?.(node);
+      const externalEffectIdentity = this.externalEffectIdentity(node, state, executionContext);
       const attempt = state.eventSequence + 1;
       const attemptId = `${state.workflowRunId}:${node.nodeId}:${attempt}`;
       const engineRequest: EngineRequest = {
@@ -103,17 +107,18 @@ export class WorkflowRunDriver {
         attempt,
         attemptId,
         ...(logicalEffectId ? { logicalEffectId } : {}),
+        ...(externalEffectIdentity ? { externalEffectIdentity } : {}),
         input: inputValue,
         contextSnapshot: { ...(this.deps.hostContext ?? {}) },
         capabilityPins: node.capabilityPins,
-        idempotencyKey: logicalEffectId ? workflowEffectIdempotencyKey(state.workflowRunId, logicalEffectId) : attemptId,
+        idempotencyKey: logicalEffectId && externalEffectIdentity ? externalEffectIdempotencyKey(externalEffectIdentity) : logicalEffectId ? workflowEffectIdempotencyKey(state.workflowRunId, logicalEffectId) : attemptId,
       };
 
       let claim: Awaited<ReturnType<WorkflowRunJournalStore["claimEffect"]>> | undefined;
       if (logicalEffectId) {
-        try { this.authorizeCommit(node, state, inputValue); }
+        try { this.authorizeCommit(node, state, inputValue, externalEffectIdentity); }
         catch (error) { return this.appendStatus(state, request, "failed", error instanceof Error ? error.message : "commit_authorization_failed", { schedulerFrontier: [] }); }
-        claim = await this.deps.journal.claimEffect(this.deps.owner, { claimId: randomUUID(), runId: state.workflowRunId, logicalEffectId, attemptId, idempotencyKey: engineRequest.idempotencyKey, providerSupportsIdempotency: true });
+        claim = await this.deps.journal.claimEffect(this.deps.owner, { claimId: randomUUID(), runId: state.workflowRunId, logicalEffectId, attemptId, idempotencyKey: engineRequest.idempotencyKey, providerSupportsIdempotency: true, externalEffectIdentity: externalEffectIdentity! });
         if (!claim.created) {
           const replay = this.persistedEffectResponse(claim.claim.result);
           if ((claim.claim.status === "succeeded" || claim.claim.status === "reconciled") && replay) {
@@ -136,7 +141,6 @@ export class WorkflowRunDriver {
       }
 
       let response: EngineResponse;
-      const executionContext = this.deps.executionContext?.(node);
       const maxAttempts = node.nodeType === "tool_preview" ? 3 : node.nodeType === "reasoning" ? node.reasoning?.budgets.maxSteps ?? 1 : 1;
       const reasoningStartedAt = this.now();
       for (let retry = 0; ; retry += 1) {
@@ -188,9 +192,10 @@ export class WorkflowRunDriver {
     return this.appendStatus(state, request, "running", "saving", { waits: [] });
   }
 
-  private authorizeCommit(node: WorkflowVNextNode, state: WorkflowRunSnapshot, resolvedInput: JsonValue): void {
+  private authorizeCommit(node: WorkflowVNextNode, state: WorkflowRunSnapshot, resolvedInput: JsonValue, externalEffectIdentity?: ExternalEffectIdentity): void {
     const binding = node.effectBinding;
     if (!binding) throw new Error("commit_effect_binding_missing");
+    if (!externalEffectIdentity) throw new Error("external_effect_identity_missing");
     if (hashWorkflowInput(resolvedInput) !== binding.resolvedInputHash) throw new Error("resolved_input_hash_mismatch");
     const preview = this.node(binding.previewNodeId);
     const approval = this.node(binding.approvalNodeId);
@@ -202,11 +207,22 @@ export class WorkflowRunDriver {
     if (approval.nodeType !== "approval" || !sameEffect(approval.approvalEffect) || approval.approvalEffect?.previewNodeId !== preview.nodeId || approval.approvalEffect.approvalNodeId !== approval.nodeId || approval.approvalEffect.commitNodeId !== node.nodeId) throw new Error("approval_effect_binding_mismatch");
     const previewOutput = state.outputs[preview.nodeId];
     const previewValue = previewOutput?.storage === "inline" && previewOutput.value && typeof previewOutput.value === "object" && !Array.isArray(previewOutput.value) ? previewOutput.value : undefined;
-    if (previewValue?.commandId !== binding.commandId || previewValue.stableInputHash !== binding.resolvedInputHash) throw new Error("preview_output_binding_mismatch");
+    if (previewValue?.commandId !== binding.commandId || previewValue.stableInputHash !== binding.resolvedInputHash || JSON.stringify(previewValue.externalEffectIdentity) !== JSON.stringify(externalEffectIdentity)) throw new Error("preview_output_binding_mismatch");
     for (const key of node.requiredHostContext) if (this.deps.hostContext?.[key] == null) throw new Error(`missing_context:${key}`);
     requireCallableCapability(this.deps.resolveReadiness?.() ?? [], binding.commandId);
-    const decision = this.deps.approvalDecision?.(node.nodeId);
-    validateApprovalDecisionForCommit(decision, this.deps.definition, node.nodeId, { runId: state.workflowRunId, organizationId: state.organizationId, evaluatedAt: new Date(this.now()).toISOString() });
+    const decision = this.deps.approvalDecision?.(node.nodeId, externalEffectIdentity);
+    validateApprovalDecisionForCommit(decision, this.deps.definition, node.nodeId, { runId: state.workflowRunId, organizationId: state.organizationId, evaluatedAt: new Date(this.now()).toISOString(), externalEffectIdentity });
+  }
+
+  private externalEffectIdentity(node: WorkflowVNextNode, state: WorkflowRunSnapshot, context?: WorkflowNodeExecutionContext): ExternalEffectIdentity | undefined {
+    const binding = node.effectBinding ?? node.previewEffect ?? node.approvalEffect;
+    if (!binding) return undefined;
+    return {
+      namespace: context?.externalEffectIdentity?.namespace ?? "workflow-run-v1",
+      keyDigest: context?.externalEffectIdentity?.keyDigest ?? hashWorkflowInput({ workflowRunId: state.workflowRunId, logicalEffectId: binding.logicalEffectId }),
+      commandId: binding.commandId,
+      resolvedInputHash: binding.resolvedInputHash,
+    };
   }
 
   private async complete(state: WorkflowRunSnapshot, request: PumpRequest, node: WorkflowVNextNode, output: BoundedNodeOutput, next = this.next(node.nodeId)): Promise<WorkflowRunSnapshot> {
