@@ -8,6 +8,7 @@ import {
   workflowSchemaRefKey,
   type EngineRequest,
   type EngineResponse,
+  type ExternalEffectIdentity,
   type JsonValue,
   type WorkflowNodeDescriptor,
   type WorkflowRuntimeRegistry,
@@ -66,6 +67,7 @@ export interface WorkflowNodeExecutionContext {
   approvalDecision?: "approved" | "rejected";
   reasoning?: unknown;
   reasoningUsage?: { steps: number; tokens: number };
+  externalEffectIdentity?: Pick<ExternalEffectIdentity, "namespace" | "keyDigest">;
   inlineOutputByteLimit?: number;
   now?: () => number;
   executors?: Partial<Record<WorkflowVNextNodeType, WorkflowNodeExecutor>>;
@@ -118,7 +120,7 @@ function defaultExecutor(request: EngineRequest, context: WorkflowNodeExecutionC
     }
     case "tool_preview": {
       const stableInputHash = hashWorkflowInput(request.input);
-      return inline({ commandId: context.commandId ?? "unbound", stableInputHash, effect: "read", approvalRequired: false });
+      return inline({ commandId: context.commandId ?? "unbound", stableInputHash, effect: "read", approvalRequired: false, ...(request.externalEffectIdentity ? { externalEffectIdentity: request.externalEffectIdentity } : {}) });
     }
     case "tool_commit":
       return terminal("executor_unavailable", "No governed commit executor is mounted for this node");
