@@ -38,6 +38,12 @@
 
   let values = $state<Record<string, string | number | boolean>>({});
   const editableParameters = $derived(parameters.filter((parameter) => safePatchPaths.includes(parameter.path)));
+  const operatorSections = [
+    ["Identity", /identity|title|name/i],
+    ["Instructions", /instruction|prompt/i],
+    ["Knowledge", /knowledge/i],
+    ["Curated capabilities", /capabilit|tool/i],
+  ] as const;
 
   function currentValue(parameter: OrganizerParameter): string | number | boolean {
     return values[parameter.path] ?? parameter.value;
@@ -62,6 +68,14 @@
       <Card.Description>{workflow.workflowId} · {workflow.version}</Card.Description>
     </Card.Header>
     <Card.Content class="flex flex-col gap-4">
+      <div class="grid gap-3 sm:grid-cols-2" aria-label="Organizer configuration summary">
+        {#each operatorSections as [title, matcher] (title)}
+          <section class="rounded-md border border-border p-3">
+            <h3 class="text-sm font-medium">{title}</h3>
+            <p class="text-xs text-muted-foreground">{editableParameters.filter((parameter) => matcher.test(parameter.path)).length} editable field(s)</p>
+          </section>
+        {/each}
+      </div>
       {#each editableParameters as parameter (parameter.path)}
         <div class="flex flex-col gap-2">
           <Label for={`organizer-${parameter.path}`}>{parameter.label}</Label>
@@ -117,4 +131,15 @@
       </Card.Content>
     </Card.Root>
   {/if}
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    <Card.Root>
+      <Card.Header><Card.Title>Pending approval</Card.Title></Card.Header>
+      <Card.Content class="text-sm text-muted-foreground">Review approval requests with the action above.</Card.Content>
+    </Card.Root>
+    <Card.Root>
+      <Card.Header><Card.Title>Recent run</Card.Title></Card.Header>
+      <Card.Content class="text-sm text-muted-foreground">Run evidence appears in receipts when available.</Card.Content>
+    </Card.Root>
+  </div>
 </section>

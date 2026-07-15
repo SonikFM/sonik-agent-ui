@@ -4,6 +4,7 @@ import { createEmptyWorkflowDefinition } from "../../apps/standalone-sveltekit/s
 import {
   COLLAPSED_MODEL_ROW_LIMIT,
   createOrganizerPatchRequest,
+  filterCatalogModels,
   modelCapabilityBadges,
   modelDisabledReason,
 } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/organizer-model.ts";
@@ -39,6 +40,8 @@ assert.deepEqual(
 );
 
 assert.equal(COLLAPSED_MODEL_ROW_LIMIT, 10, "the collapsed catalog viewport is exactly ten fixed-height rows");
+const largeCatalog = Array.from({ length: 31 }, (_, index) => ({ id: `provider/model-${index}`, label: `Model ${index}`, provider: "Provider" }));
+assert.deepEqual(filterCatalogModels(largeCatalog, "model 30").map((model) => model.id), ["provider/model-30"], "search covers models beyond the ten-row viewport");
 assert.deepEqual(
   modelCapabilityBadges({
     id: "provider/model",
@@ -71,12 +74,18 @@ assert.match(configSource, /role="listbox"/);
 assert.match(configSource, /role="option"/);
 assert.match(configSource, /aria-live="polite"/);
 assert.match(configSource, /ArrowDown/);
+for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) assert.match(configSource, new RegExp(key));
+assert.match(configSource, /Selected model:/, "screen readers receive selection changes");
+assert.match(configSource, /disabled=\{mode !== "off"/, "non-callable families cannot be saved runnable");
 assert.match(configSource, /max-h-\[50rem\]/, "ten h-20 rows define the collapsed scrolling viewport");
 assert.match(configSource, /h-20 shrink-0/, "catalog rows have a fixed height so the viewport cap is deterministic");
 assert.match(organizerSource, /createOrganizerPatchRequest\(workflow, revision/);
 assert.doesNotMatch(organizerSource, /nodes|edges|topology/i, "the organizer surface exposes no graph or topology editor");
 for (const action of ["configure", "test", "publish", "approve", "receipt"]) {
   assert.match(organizerSource, new RegExp(action, "i"), `organizer supports ${action} through an injected callback`);
+}
+for (const surface of ["Identity", "Instructions", "Knowledge", "Curated capabilities", "Pending approval", "Recent run", "Receipts"]) {
+  assert.match(organizerSource, new RegExp(surface), `organizer exposes ${surface}`);
 }
 for (const field of ["history.query", "events", "approvals", "artifacts", "receipts"]) {
   assert.match(historySource, new RegExp(field), `operator history renders typed ${field}`);

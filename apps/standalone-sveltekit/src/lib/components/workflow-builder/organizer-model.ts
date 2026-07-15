@@ -59,6 +59,18 @@ export type CatalogModelOption = AgentModelOption & {
   disabledReason?: string;
 };
 
+export function filterCatalogModels(models: readonly CatalogModelOption[], query: string): CatalogModelOption[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return [...models];
+  return models.filter((model) =>
+    [model.label, model.id, model.provider, model.description]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(normalized),
+  );
+}
+
 export function createOrganizerPatchRequest(
   workflow: WorkflowDefinition,
   expectedRevision: number,

@@ -18,7 +18,7 @@
   import { groupCapabilitiesByFamily, effectiveFamilyMode, type KnowledgeRef } from "./builder-model";
   import { isModelIncompatible } from "./builder-model";
   import { formatModelContextWindow } from "./builder-model";
-  import { COLLAPSED_MODEL_ROW_LIMIT, modelCapabilityBadges, modelDisabledReason, type CatalogModelOption } from "./organizer-model";
+  import { COLLAPSED_MODEL_ROW_LIMIT, filterCatalogModels, modelCapabilityBadges, modelDisabledReason, type CatalogModelOption } from "./organizer-model";
   import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
   import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 
@@ -48,11 +48,8 @@
   let expandedFamilyIds = $state<string[]>([]);
   let modelQuery = $state("");
   let modelCatalogExpanded = $state(false);
-  const filteredModelOptions = $derived(modelOptions.filter((option) => {
-    const query = modelQuery.trim().toLowerCase();
-    if (!query) return true;
-    return [option.label, option.id, option.provider, option.description].filter(Boolean).join(" ").toLowerCase().includes(query);
-  }));
+  const filteredModelOptions = $derived(filterCatalogModels(modelOptions as CatalogModelOption[], modelQuery));
+  const selectedModelLabel = $derived(modelOptions.find((option) => option.id === definition.modelPolicy?.modelId)?.label ?? "No model selected");
 
   function handleModelListKeydown(event: KeyboardEvent): void {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -85,7 +82,17 @@
   }
 
   function setFamilyMode(familyId: string, mode: AgentToolPermissionMode): void {
+    if (mode !== "off" && familyDisabledReason(familyId)) return;
     definition = { ...definition, toolPolicy: { ...definition.toolPolicy, [familyId]: mode } };
+  }
+
+  function familyDisabledReason(familyId: string): string | null {
+    if (capabilityReadiness.length === 0) return null;
+    const blocked = capabilityFamilies
+      .find((family) => family.familyId === familyId)
+      ?.capabilities.map((capability) => readinessById.get(capability.capabilityId))
+      .filter((readiness) => readiness && !readiness.callable) ?? [];
+    return blocked.length > 0 ? `Not runnable: ${[...new Set(blocked.flatMap((readiness) => readiness?.reasonCodes ?? []))].join(", ")}` : null;
   }
 
   const availableModuleIds = $derived(
@@ -202,6 +209,7 @@
       <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>{filteredModelOptions.length} {filteredModelOptions.length === 1 ? "result" : "results"}</span>
         <span class="sr-only" role="status" aria-live="polite">{filteredModelOptions.length} model results available.</span>
+        <span class="sr-only" role="status" aria-live="polite">Selected model: {selectedModelLabel}.</span>
         {#if filteredModelOptions.length > COLLAPSED_MODEL_ROW_LIMIT}
           <Button variant="ghost" size="sm" onclick={() => modelCatalogExpanded = !modelCatalogExpanded} aria-expanded={modelCatalogExpanded}>
             {modelCatalogExpanded ? "Collapse catalog" : "Expand catalog"}
@@ -301,6 +309,7 @@
     <Card.Content>
       <Accordion.Root type="multiple" bind:value={expandedFamilyIds} class="w-full">
         {#each capabilityFamilies as family (family.familyId)}
+          {@const policyDisabledReason = familyDisabledReason(family.familyId)}
           <Accordion.Item value={family.familyId}>
             <Accordion.Trigger>
               <span class="flex flex-1 items-center justify-between gap-3 pr-2">
@@ -319,10 +328,11 @@
                   <Select.Trigger aria-label="{family.familyId} tool policy">{effectiveFamilyMode(definition, family.familyId)}</Select.Trigger>
                   <Select.Content>
                     {#each TOOL_MODES as mode (mode)}
-                      <Select.Item value={mode}>{mode}</Select.Item>
+                      <Select.Item value={mode} disabled={mode !== "off" && Boolean(policyDisabledReason)}>{mode}</Select.Item>
                     {/each}
                   </Select.Content>
                 </Select.Root>
+                {#if policyDisabledReason}<p class="text-xs text-destructive" role="status">{policyDisabledReason}</p>{/if}
                 <Separator />
                 <div class="flex flex-col gap-1">
                   {#each family.capabilities as capability (capability.capabilityId)}
@@ -334,6 +344,7 @@
                         <Badge variant={readiness?.callable ? "default" : "secondary"} title={readiness?.reasonCodes.join(", ") ?? "Server readiness unavailable"}>
                           {readiness?.callable ? "callable" : readiness?.nextAction ?? "unavailable"}
                         </Badge>
+                        {#if readiness && !readiness.callable}<span class="sr-only">Blocked: {readiness.reasonCodes.join(", ")}</span>{/if}
                         <span class="text-xs text-muted-foreground">inherits {effectiveFamilyMode(definition, family.familyId)}</span>
                       </span>
                     </div>
