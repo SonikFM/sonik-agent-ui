@@ -11,6 +11,28 @@ async function openWorkflowBuilder(page: Page): Promise<void> {
   await expect(page.locator('[data-agent-mode="workflow-builder"]')).toBeVisible();
 }
 
+async function installWorkflowBuilderDraftPersistenceFixture(page: Page): Promise<void> {
+  await page.route("**/api/agent-definitions", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
+  await page.route("**/api/workflow-definitions", async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as { action?: string; definition?: Record<string, unknown> };
+    const response = body.action === "versions"
+      ? { ok: true, versions: [] }
+      : body.action === "list"
+        ? { ok: true, drafts: [] }
+        : {
+            ok: true,
+            draft: {
+              organizationId: "workflow-builder-e2e",
+              workflowId: body.definition?.workflowId,
+              draftRevision: 0,
+              definitionDigest: `sha256:${"a".repeat(64)}`,
+              definition: body.definition,
+            },
+          };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
+  });
+}
+
 test("workflow builder mode toggle mounts the builder", async ({ page }) => {
   await gotoFreshWorkspace(page, smokeUrl(null));
 
@@ -73,8 +95,8 @@ test("Config, Canvas, and Debug & Preview tabs switch panels", async ({ page }) 
 });
 
 test("draft save round-trips through the agent-definitions API", async ({ page }) => {
+  await installWorkflowBuilderDraftPersistenceFixture(page);
   await gotoFreshWorkspace(page, smokeUrl(null));
-  await submitPrompt(page, "Initialize an authenticated workspace owner for builder testing");
   await openWorkflowBuilder(page);
 
   const [request, response] = await Promise.all([
@@ -93,8 +115,8 @@ test("draft save round-trips through the agent-definitions API", async ({ page }
 });
 
 test("Debug & Preview sends draftAgentId with every generate request", async ({ page }) => {
+  await installWorkflowBuilderDraftPersistenceFixture(page);
   await gotoFreshWorkspace(page, smokeUrl(null));
-  await submitPrompt(page, "Initialize an authenticated workspace owner for preview testing");
   await openWorkflowBuilder(page);
 
   const agentId = await page
@@ -116,8 +138,8 @@ test("Debug & Preview sends draftAgentId with every generate request", async ({ 
 });
 
 test("describe, draft, and canvas uses the current saved draft through the deterministic smoke stream", async ({ page }) => {
+  await installWorkflowBuilderDraftPersistenceFixture(page);
   await gotoFreshWorkspace(page, smokeUrl(WORKFLOW_DRAFT_SCENARIO));
-  await submitPrompt(page, "Initialize the workflow drafting session");
   await openWorkflowBuilder(page);
   await page.getByRole("tab", { name: "Debug & Preview" }).click();
 
