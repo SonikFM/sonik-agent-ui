@@ -16,7 +16,8 @@
   import { AGENT_MODEL_OPTIONS, DEFAULT_AGENT_MODEL_ID, MAX_AGENT_PROMPT_OVERRIDE_CHARS, type AgentModelOption, type AgentToolPermissionMode } from "$lib/agent-settings";
   import { AGENT_PROMPT_MODULES, CORE_MODULE_ID } from "$lib/agent-prompt";
   import { groupCapabilitiesByFamily, effectiveFamilyMode, type KnowledgeRef } from "./builder-model";
-  import { isModelIncompatible, formatModelContextWindow } from "./builder-model";
+  import { formatModelContextWindow } from "./builder-model";
+  import { COLLAPSED_MODEL_ROW_LIMIT, modelCapabilityBadges, modelDisabledReason, type CatalogModelOption } from "./organizer-model";
   import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
   import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 
@@ -45,11 +46,28 @@
 
   let expandedFamilyIds = $state<string[]>([]);
   let modelQuery = $state("");
+  let modelCatalogExpanded = $state(false);
   const filteredModelOptions = $derived(modelOptions.filter((option) => {
     const query = modelQuery.trim().toLowerCase();
     if (!query) return true;
     return [option.label, option.id, option.provider, option.description].filter(Boolean).join(" ").toLowerCase().includes(query);
   }));
+
+  function handleModelListKeydown(event: KeyboardEvent): void {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]:not([aria-disabled="true"])')];
+    if (options.length === 0) return;
+    event.preventDefault();
+    const current = options.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? options.length - 1
+        : event.key === "ArrowDown"
+          ? Math.min(current + 1, options.length - 1)
+          : Math.max(current - 1, 0);
+    options[next]?.focus();
+  }
 
   function setTitle(value: string): void {
     definition = { ...definition, title: value };
@@ -180,25 +198,44 @@
         </Button>
       </div>
       <Input placeholder="Search models" bind:value={modelQuery} aria-label="Search models" />
-      <div class="flex flex-col divide-y divide-border rounded-md border border-border" role="listbox" aria-label="Model">
+      <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{filteredModelOptions.length} {filteredModelOptions.length === 1 ? "result" : "results"}</span>
+        <span class="sr-only" role="status" aria-live="polite">{filteredModelOptions.length} model results available.</span>
+        {#if filteredModelOptions.length > COLLAPSED_MODEL_ROW_LIMIT}
+          <Button variant="ghost" size="sm" onclick={() => modelCatalogExpanded = !modelCatalogExpanded} aria-expanded={modelCatalogExpanded}>
+            {modelCatalogExpanded ? "Collapse catalog" : "Expand catalog"}
+          </Button>
+        {/if}
+      </div>
+      <div
+        class="flex flex-col divide-y divide-border overflow-y-auto rounded-md border border-border {modelCatalogExpanded ? 'max-h-none' : 'max-h-[50rem]'}"
+        role="listbox"
+        aria-label="Model"
+        onkeydown={handleModelListKeydown}
+      >
         {#each filteredModelOptions as option (option.id)}
-          {@const incompatible = isModelIncompatible(definition, option)}
+          {@const disabledReason = modelDisabledReason(definition, option as CatalogModelOption)}
           {@const selected = (definition.modelPolicy?.modelId ?? "") === option.id}
           <button
             type="button"
-            class="flex items-start justify-between gap-3 p-2 text-left text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {selected ? 'bg-accent/30' : ''}"
+            class="flex h-20 shrink-0 items-start justify-between gap-3 overflow-hidden p-2 text-left text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {selected ? 'bg-accent/30' : ''}"
             role="option"
             aria-selected={selected}
-            onclick={() => setModel(option.id)}
+            aria-disabled={Boolean(disabledReason)}
+            title={disabledReason ?? undefined}
+            onclick={() => disabledReason ? undefined : setModel(option.id)}
           >
             <span class="flex min-w-0 flex-col gap-1">
               <span class="flex flex-wrap items-center gap-2">
                 <span class="font-medium">{option.label}</span>
                 <span class="text-xs text-muted-foreground">{option.provider}</span>
                 {#if option.recommended}<Badge variant="secondary">Recommended</Badge>{/if}
-                {#if incompatible}<Badge variant="destructive">No tool-use support</Badge>{/if}
+                {#each modelCapabilityBadges(option as CatalogModelOption) as badge (badge)}
+                  <Badge variant="outline">{badge}</Badge>
+                {/each}
               </span>
               <span class="text-xs text-muted-foreground">{option.id} &middot; {formatModelContextWindow(option.contextWindow)}</span>
+              {#if disabledReason}<span class="text-xs text-destructive">{disabledReason}</span>{/if}
             </span>
           </button>
         {:else}
