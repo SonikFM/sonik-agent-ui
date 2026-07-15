@@ -18,7 +18,8 @@ import {
 import { createStandaloneHostCommandIndex } from "./host-command-runtime.ts";
 import { resolveStandaloneHostSession } from "./host-command-runtime.ts";
 import type { BookingRuntimeAuthContext } from "./host-command-runtime.ts";
-import { resolveStandaloneCapabilityReadiness, type CapabilityVersionPins } from "./capability-readiness.ts";
+import type { CapabilityVersionPins } from "./capability-readiness.ts";
+import { resolveStandaloneCapabilityReadiness } from "./standalone-capability-readiness.ts";
 
 export type StandaloneToolManifestInput = {
   sessionId?: string | null;

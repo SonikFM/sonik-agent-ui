@@ -13,7 +13,8 @@ import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import { writeAgentTelemetry } from "../server/agent-telemetry.ts";
 import { resolveAgentToolPermissionMode, type AgentToolPermissionMode } from "../agent-settings.ts";
 import { validateReservationGuestForBooking } from "../server/booking-workflows/reservation-guest-validation.ts";
-import { requireCallableCapability, resolveStandaloneCapabilityReadiness, type CapabilityVersionPins } from "../server/capability-readiness.ts";
+import { requireCallableCapability, type CapabilityVersionPins } from "../server/capability-readiness.ts";
+import { resolveStandaloneCapabilityReadiness } from "../server/standalone-capability-readiness.ts";
 
 const commandAspectSchema = z.enum(["description", "schema", "examples", "policy", "output", "surfaces", "transport", "auth"]);
 const directCommandInputSchema = z.object({

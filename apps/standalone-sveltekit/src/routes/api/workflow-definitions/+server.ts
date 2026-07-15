@@ -3,7 +3,7 @@ import { createAgentHostSessionEnvelope } from "$lib/server/host-command-runtime
 import { resolveWorkflowDefinitionRepository } from "$lib/server/workflow-definition-repository";
 import { handleWorkflowDefinitionsAction, workflowDefinitionOwnerFromHostSession, type WorkflowDefinitionsAction } from "$lib/server/workflow-definitions";
 import type { RequestHandler } from "./$types";
-import { resolveStandaloneCapabilityReadiness } from "$lib/server/capability-readiness";
+import { resolveStandaloneCapabilityReadiness } from "$lib/server/standalone-capability-readiness";
 import { approvedCommandIdsFromHostSession } from "$lib/server/host-command-runtime";
 
 const ACTIONS = new Set(["create", "update", "get", "list", "publish", "versions", "archive", "clone", "resolve"]);

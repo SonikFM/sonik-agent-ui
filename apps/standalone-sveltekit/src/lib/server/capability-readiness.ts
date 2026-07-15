@@ -7,8 +7,6 @@ import {
 } from "@sonik-agent-ui/tool-contracts/capability-registry";
 import { computeCapabilityReadiness, type CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { HostCommandRuntimeAdapter } from "@sonik-agent-ui/platform-adapters";
-import { resolveCapabilityToolPermissionModes, synthesizeCapabilityGrantsFromRuntimeState } from "@sonik-agent-ui/tool-contracts/grant-synthesis";
-import { createStandaloneHostCommandRuntimeBundle, type StandaloneHostRuntimeInput } from "./host-command-runtime.ts";
 
 export type CapabilityVersionPins = Readonly<Record<string, number>>;
 
@@ -73,30 +71,6 @@ export function resolveCapabilityReadiness(input: CapabilityReadinessResolverInp
       versionPinned,
       approvalGranted: !write || approved.has(descriptor.capabilityId),
     });
-  });
-}
-
-export function resolveStandaloneCapabilityReadiness(input: StandaloneHostRuntimeInput & {
-  approvedCommandIds?: string[];
-  revokedCapabilityIds?: string[];
-  capabilityVersionPins?: CapabilityVersionPins;
-  requireVersionPins?: boolean;
-  toolPermissionModes?: Record<string, "off" | "ask" | "allow">;
-} = {}): CapabilityReadiness[] {
-  const bundle = createStandaloneHostCommandRuntimeBundle(input);
-  const registry = sonikBookingCapabilityRegistry;
-  const familyIds = Object.fromEntries(bundle.catalog.commands.map((command) => [command.id, command.familyId]));
-  return resolveCapabilityReadiness({
-    catalog: bundle.catalog,
-    runtimeAdapters: bundle.runtimeAdapters,
-    executionContext: bundle.executionContext,
-    registry,
-    grants: synthesizeCapabilityGrantsFromRuntimeState({ registry }),
-    revokedCapabilityIds: input.revokedCapabilityIds,
-    capabilityVersionPins: input.capabilityVersionPins,
-    requireVersionPins: input.requireVersionPins,
-    approvedCommandIds: input.approvedCommandIds,
-    toolPermissionModes: resolveCapabilityToolPermissionModes({ registry, capabilityFamilyIds: familyIds, familyModes: input.toolPermissionModes }),
   });
 }
 
