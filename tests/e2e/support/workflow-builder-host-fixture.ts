@@ -3,7 +3,7 @@ import type { Page, Route } from "@playwright/test";
 export const AMPLIFY_CAMPAIGN_COMMAND_ID = "amplify.campaign.create";
 
 type RunPhase = "intake" | "preview_ready" | "approved" | "committed";
-type SignedRequestKind = "agentModels" | "agentDefinitions" | "workflowRuns";
+type SignedRequestKind = "agentModels" | "agentDefinitions" | "workflowDefinitions" | "workflowRuns";
 
 export interface WorkflowBuilderHostFixtureObservation {
   signedHostContextHeaders: Record<SignedRequestKind, string[]>;
@@ -82,7 +82,7 @@ export async function installWorkflowBuilderHostFixture(
   options: WorkflowBuilderHostFixtureOptions = {},
 ): Promise<WorkflowBuilderHostFixtureObservation> {
   const observation: WorkflowBuilderHostFixtureObservation = {
-    signedHostContextHeaders: { agentModels: [], agentDefinitions: [], workflowRuns: [] },
+    signedHostContextHeaders: { agentModels: [], agentDefinitions: [], workflowDefinitions: [], workflowRuns: [] },
     sessionId: SESSION_ID,
   };
   const recordSignedHeader = (kind: SignedRequestKind, route: Route) => {
@@ -96,6 +96,22 @@ export async function installWorkflowBuilderHostFixture(
   await page.route("**/api/agent-definitions", (route) => {
     recordSignedHeader("agentDefinitions", route);
     return fulfillJson(route, { ok: true });
+  });
+  await page.route("**/api/workflow-definitions", (route) => {
+    recordSignedHeader("workflowDefinitions", route);
+    const body = JSON.parse(route.request().postData() ?? "{}") as { action?: string; definition?: { workflowId?: string } };
+    if (body.action === "list") return fulfillJson(route, { ok: true, drafts: [] });
+    if (body.action === "versions") return fulfillJson(route, { ok: true, versions: [] });
+    return fulfillJson(route, {
+      ok: true,
+      draft: {
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        workflowId: body.definition?.workflowId,
+        draftRevision: 0,
+        definitionDigest: `sha256:${"a".repeat(64)}`,
+        definition: body.definition,
+      },
+    });
   });
   await page.route("**/api/workflow-runs", async (route) => {
     recordSignedHeader("workflowRuns", route);
