@@ -3,15 +3,11 @@
 // that plain module so it stays testable without a SvelteKit runtime, matching the
 // api/reservation/commit precedent.
 import { json } from "@sveltejs/kit";
-import { createHash, randomUUID } from "node:crypto";
 import { createAgentHostSessionEnvelope } from "$lib/server/host-command-runtime";
 import { handleWorkflowRunsAction, workflowRunOwnerFromHostSession, type WorkflowRunsAction } from "$lib/server/workflow-runs";
 import { resolveWorkflowRunJournalStore, resolveWorkflowRunStore } from "$lib/server/workflow-run-store";
 import { resolveWorkflowDefinitionRepository } from "$lib/server/workflow-definition-repository";
-import { WorkflowRunDriver } from "$lib/server/workflow-run-driver";
-import { resolveStandaloneCapabilityReadiness } from "$lib/server/standalone-capability-readiness";
-import { approvedCommandIdsFromHostSession } from "$lib/server/host-command-runtime";
-import { publicResumeEventSchema } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import { handlePublicWorkflowDriverAction, type PublicWorkflowDriverAction } from "$lib/server/workflow-runs-public";
 import type { RequestHandler } from "./$types";
 
 export const POST: RequestHandler = async (event) => {
@@ -31,8 +27,6 @@ export const POST: RequestHandler = async (event) => {
   }
   const env = event.platform?.env as Record<string, unknown> | undefined;
   const store = resolveWorkflowRunStore(env);
-  let driver: WorkflowRunDriver | undefined;
-  let driverLease: { owner: NonNullable<ReturnType<typeof workflowRunOwnerFromHostSession>>; runId: string; leaseId: string } | undefined;
   if (action.action === "run_until_blocked" || action.action === "resume_run" || action.action === "cancel_run") {
     const owner = workflowRunOwnerFromHostSession(hostSession)!;
     if (action.action === "cancel_run" && "lease" in action) {
@@ -84,13 +78,8 @@ export const POST: RequestHandler = async (event) => {
         return { decisionId: String(signedResumeEvent.eventId), decision: "approved", runId, approvalNodeId: commit.effectBinding.approvalNodeId, previewNodeId: commit.effectBinding.previewNodeId, commitNodeId, commandId: commit.effectBinding.commandId, logicalEffectId: commit.effectBinding.logicalEffectId, organizationId: owner.organizationId, approverId: owner.userId, grantEvidenceDigest: digest(JSON.stringify(readiness())), resolvedInputHash: commit.effectBinding.resolvedInputHash, externalEffectIdentity, issuedAt: String(signedResumeEvent.issuedAt), expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), hostSigned: true };
       },
     });
+    return json(response.result, { status: response.status });
   }
-  try {
-    const result = await handleWorkflowRunsAction(action, { hostSession, store, env, driver });
-    return json(result, { status: 200 });
-  } finally {
-    if (driverLease) await resolveWorkflowRunJournalStore(env).releaseLease(driverLease.owner, driverLease.runId, driverLease.leaseId);
-  }
+  const result = await handleWorkflowRunsAction(action, { hostSession, store, env });
+  return json(result, { status: 200 });
 };
-
-function digest(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
