@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   dispatchWorkflowNode,
+  hashWorkflowInput,
   workflowNodeExecutorDescriptors,
   workflowNodeExecutorRuntimeRegistry,
 } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
@@ -28,6 +29,8 @@ assert.deepEqual(
   workflowNodeExecutorDescriptors.map(({ nodeType, typeVersion }) => `${nodeType}@${typeVersion}`),
   ["trigger@1", "ask_user@1", "skill@1", "reasoning@1", "artifact@1", "evidence@1", "tool_preview@1", "approval@1", "tool_commit@1", "branch@1"],
 );
+assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({ a: { c: 3, d: 4 }, b: 2 }), "object insertion order does not change workflow input identity");
+assert.notEqual(hashWorkflowInput([1, 2]), hashWorkflowInput([2, 1]), "array order remains part of workflow input identity");
 await assert.rejects(() => dispatchWorkflowNode({ ...request("skill"), typeVersion: 2 }), /unsupported_node_version:skill@2/);
 await assert.rejects(() => dispatchWorkflowNode(request("remote_execution")), /unsupported_node_version:remote_execution@1/);
 const unsupportedVersion = structuredClone(train0WorkflowFixtures.linear);
@@ -90,7 +93,7 @@ const referenced = await dispatchWorkflowNode(request("reasoning"), {
   reasoning: reasoningContract,
   reasoningUsage: { steps: 1, tokens: 1 },
   inlineOutputByteLimit: 1,
-  executors: { reasoning: () => ({ status: "succeeded", output: { storage: "artifact", artifactId: "artifact-1", version: 1, digest: `sha256:${"b".repeat(64)}`, byteLength: 100 } }) },
+  executors: { reasoning: () => ({ status: "succeeded", output: { storage: "artifact", artifact: { artifactId: "artifact-1", organizationId: "org-1", contentType: "application/json", byteLength: 100, digest: `sha256:${"b".repeat(64)}`, createdByNodeId: "reasoning" } } }) },
 });
 assert.equal(referenced.status, "succeeded", "artifact references remain valid when inline output would exceed budget");
 
