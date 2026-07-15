@@ -28,54 +28,94 @@
   interface Props {
     workflow: WorkflowDefinition;
     lockState: WorkflowLockState;
+    onMutation?: () => void;
   }
-  let { workflow = $bindable(), lockState }: Props = $props();
+  let { workflow = $bindable(), lockState, onMutation }: Props = $props();
 
   const locked = $derived(lockState === "locked");
   const EFFECTS: NodeEffect[] = ["none", "read", "write", "external", "destructive"];
   const APPROVAL_POLICIES: NodeApprovalPolicy[] = ["none", "preview", "preview_then_trusted_approval"];
 
   const liveValidation = $derived(validateWorkflowDefinition(workflow));
+  let undoStack = $state<WorkflowDefinition[]>([]);
+  let announcement = $state("");
+
+  function commit(next: WorkflowDefinition, message = "Workflow updated."): void {
+    if (locked) return;
+    undoStack = [...undoStack.slice(-19), structuredClone($state.snapshot(workflow))];
+    workflow = next;
+    announcement = message;
+    onMutation?.();
+  }
 
   function patchWorkflow(next: Partial<WorkflowDefinition>): void {
-    workflow = { ...workflow, ...next };
+    commit({ ...workflow, ...next });
   }
 
   function patchNode(nodeId: string, patch: Partial<WorkflowNodeDefinition>): void {
-    workflow = { ...workflow, nodes: workflow.nodes.map((node) => (node.nodeId === nodeId ? { ...node, ...patch } : node)) };
+    commit({ ...workflow, nodes: workflow.nodes.map((node) => (node.nodeId === nodeId ? { ...node, ...patch } : node)) });
   }
 
   function addNode(): void {
     if (locked) return;
     const nodeId = `node_${workflow.nodes.length + 1}`;
-    workflow = {
+    commit({
       ...workflow,
       nodes: [...workflow.nodes, { nodeId, type: "ask_user", title: "New step", effect: "none", approvalPolicy: "none", requiredHostContext: [] }],
-    };
+    }, `Added ${nodeId}.`);
   }
 
   function removeNode(nodeId: string): void {
     if (locked) return;
-    workflow = {
+    commit({
       ...workflow,
       nodes: workflow.nodes.filter((node) => node.nodeId !== nodeId),
       edges: workflow.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId),
-    };
+    }, `Deleted ${nodeId}.`);
   }
 
   function addEdge(): void {
     if (locked || workflow.nodes.length < 2) return;
     const edgeId = `edge_${workflow.edges.length + 1}`;
-    workflow = { ...workflow, edges: [...workflow.edges, { edgeId, from: workflow.nodes[0].nodeId, to: workflow.nodes[1].nodeId }] };
+    commit({ ...workflow, edges: [...workflow.edges, { edgeId, from: workflow.nodes[0].nodeId, to: workflow.nodes[1].nodeId }] }, `Connected ${workflow.nodes[0].nodeId} to ${workflow.nodes[1].nodeId}.`);
   }
 
   function patchEdge(edgeId: string, patch: Partial<WorkflowDefinition["edges"][number]>): void {
-    workflow = { ...workflow, edges: workflow.edges.map((edge) => (edge.edgeId === edgeId ? { ...edge, ...patch } : edge)) };
+    commit({ ...workflow, edges: workflow.edges.map((edge) => (edge.edgeId === edgeId ? { ...edge, ...patch } : edge)) });
   }
 
   function removeEdge(edgeId: string): void {
     if (locked) return;
-    workflow = { ...workflow, edges: workflow.edges.filter((edge) => edge.edgeId !== edgeId) };
+    commit({ ...workflow, edges: workflow.edges.filter((edge) => edge.edgeId !== edgeId) }, `Disconnected ${edgeId}.`);
+  }
+
+  function undo(): void {
+    const previous = undoStack.at(-1);
+    if (!previous || locked) return;
+    undoStack = undoStack.slice(0, -1);
+    workflow = previous;
+    announcement = "Undid the last canvas change.";
+    onMutation?.();
+  }
+
+  function focusNode(index: number): void {
+    const next = Math.max(0, Math.min(workflow.nodes.length - 1, index));
+    document.querySelector<HTMLElement>(`[data-workflow-node-index="${next}"]`)?.focus();
+  }
+
+  function handleNodeKey(event: KeyboardEvent, nodeId: string, index: number): void {
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") { event.preventDefault(); focusNode(index + 1); }
+    else if (event.key === "ArrowUp" || event.key === "ArrowLeft") { event.preventDefault(); focusNode(index - 1); }
+    else if (!locked && (event.key === "Delete" || event.key === "Backspace")) { event.preventDefault(); removeNode(nodeId); focusNode(index - 1); }
+    else if (!locked && event.key.toLowerCase() === "c" && workflow.nodes[index + 1]) {
+      event.preventDefault();
+      const to = workflow.nodes[index + 1].nodeId;
+      const edgeId = `edge_${workflow.edges.length + 1}`;
+      commit({ ...workflow, edges: [...workflow.edges, { edgeId, from: nodeId, to }] }, `Connected ${nodeId} to ${to}.`);
+    } else if (!locked && event.key.toLowerCase() === "d") {
+      event.preventDefault();
+      commit({ ...workflow, edges: workflow.edges.filter((edge) => edge.from !== nodeId) }, `Disconnected outgoing edges from ${nodeId}.`);
+    } else if (!locked && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); undo(); }
   }
 </script>
 
@@ -106,7 +146,7 @@
 
   <div class="flex flex-col gap-3">
     {#each workflow.nodes as node, index (node.nodeId)}
-      <Card.Root>
+      <Card.Root tabindex="0" data-workflow-node-index={index} onkeydown={(event) => handleNodeKey(event, node.nodeId, index)}>
         <Card.Content class="flex flex-col gap-2 pt-4">
           <div class="flex items-center justify-between gap-2">
             <Badge variant="outline">#{index + 1}</Badge>
@@ -166,7 +206,10 @@
       {/if}
     {/each}
     {#if !locked}
-      <Button variant="secondary" onclick={addNode}>Add node</Button>
+      <div class="flex gap-2">
+        <Button variant="secondary" onclick={addNode}>Add node</Button>
+        <Button variant="ghost" onclick={undo} disabled={undoStack.length === 0}>Undo</Button>
+      </div>
     {/if}
   </div>
 
@@ -210,4 +253,5 @@
       <Button variant="secondary" size="sm" onclick={addEdge} disabled={workflow.nodes.length < 2}>Add edge</Button>
     {/if}
   </div>
+  <p class="sr-only" aria-live="polite">{announcement}</p>
 </div>

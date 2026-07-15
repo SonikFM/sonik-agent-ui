@@ -110,6 +110,18 @@
       <Badge variant={isStreaming ? "default" : "secondary"}>{isStreaming ? "streaming" : "idle"}</Badge>
     </span>
   </div>
+  <div class="rounded-md border border-border bg-muted/30 p-3" data-debug-preview-context>
+    <div class="flex items-center justify-between gap-2">
+      <p class="text-sm font-medium">Isolated preview context</p>
+      <Badge variant="secondary">read/preview only</Badge>
+    </div>
+    <ul class="mt-2 grid gap-1 text-xs text-muted-foreground">
+      <li>✓ Separate conversation; main chat history is not included.</li>
+      <li>✓ Current saved draft agent: <span class="font-mono">{draftAgentId}</span>.</li>
+      <li>✓ Model, prompt modules, knowledge references, and tool scope come from that draft.</li>
+      <li>✓ Write/destructive effects require the normal trusted approval path; preview does not grant authority.</li>
+    </ul>
+  </div>
   <div class="flex-1 overflow-y-auto rounded-md border border-border p-3">
     {#if preview.messages.length === 0}
       <p class="text-sm text-muted-foreground">Send a message to test the current draft's model, prompt modules, and tool scoping before publishing.</p>
