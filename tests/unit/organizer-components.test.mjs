@@ -60,10 +60,11 @@ assert.equal(modelDisabledReason(false, { id: "tools", label: "Tools", provider:
 assert.equal(modelDisabledReason(false, { id: "disabled", label: "Disabled", provider: "Test", disabledReason: "Provider outage" }), "Provider outage");
 
 const componentRoot = new URL("../../apps/standalone-sveltekit/src/lib/components/workflow-builder/", import.meta.url);
-const [configSource, organizerSource, historySource] = await Promise.all([
+const [configSource, organizerSource, historySource, rootSource] = await Promise.all([
   readFile(new URL("AgentConfigPanel.svelte", componentRoot), "utf8"),
   readFile(new URL("OrganizerPanel.svelte", componentRoot), "utf8"),
   readFile(new URL("RunHistoryPanel.svelte", componentRoot), "utf8"),
+  readFile(new URL("WorkflowBuilderRoot.svelte", componentRoot), "utf8"),
 ]);
 
 assert.match(configSource, /role="listbox"/);
@@ -80,5 +81,9 @@ for (const action of ["configure", "test", "publish", "approve", "receipt"]) {
 for (const field of ["history.query", "events", "approvals", "artifacts", "receipts"]) {
   assert.match(historySource, new RegExp(field), `operator history renders typed ${field}`);
 }
+assert.match(rootSource, /<OrganizerPanel/, "the root mounts the graph-free P2 organizer audience");
+assert.match(rootSource, /<RunHistoryPanel/, "the root mounts redacted operator history without merging stores");
+assert.match(rootSource, /workflowDefinitions\(request as unknown as Record<string, unknown>\)/, "organizer_patch crosses the root boundary unchanged");
+assert.match(rootSource, /workspaceFetch\(`\/api\/workflow-history\?\$\{query\}`\)/, "history uses the shared workspace fetch with active correlation filters");
 
 console.log("organizer component unit and accessibility checks passed");

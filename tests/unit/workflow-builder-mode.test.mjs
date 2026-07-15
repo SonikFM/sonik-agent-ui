@@ -437,7 +437,7 @@ assert.equal(
   "the model picker must be searchable (Dify-bar UX), not a plain static select",
 );
 assert.equal(
-  configPanelSource.includes("modelDisabledReason(definition, option"),
+  configPanelSource.includes("modelDisabledReason(isModelIncompatible(definition, option), option"),
   true,
   "each rendered model option must be checked against the current definition's tool grants for incompatible flagging",
 );
