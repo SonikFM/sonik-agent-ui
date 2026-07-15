@@ -73,14 +73,20 @@ const reasoningContract = {
 };
 const reasoningSuccess = { status: "succeeded", output: { storage: "inline", value: { answer: 42 }, byteLength: 13 } };
 for (const [name, context] of [
-  ["steps", { reasoningUsage: { steps: 3, tokens: 1 } }],
-  ["tokens", { reasoningUsage: { steps: 1, tokens: 11 } }],
-  ["wall-time", { reasoningUsage: { steps: 1, tokens: 1 }, now: (() => { let now = 0; return () => (now += 101); })() }],
+  ["steps", { reasoningUsage: { steps: 3, tokens: 1 }, inlineOutputByteLimit: 100 }],
+  ["tokens", { reasoningUsage: { steps: 1, tokens: 11 }, inlineOutputByteLimit: 100 }],
+  ["wall-time", { reasoningUsage: { steps: 1, tokens: 1 }, inlineOutputByteLimit: 100, now: (() => { let now = 0; return () => (now += 101); })() }],
 ]) {
   const exhausted = await dispatchWorkflowNode(request("reasoning"), { reasoning: reasoningContract, executors: { reasoning: () => reasoningSuccess }, ...context });
   assert.equal(exhausted.status, "terminal_error", `${name} exhaustion is terminal`);
   assert.equal(exhausted.error.code, "reasoning_budget_exhausted");
 }
+const unmetered = await dispatchWorkflowNode(request("reasoning"), { reasoning: reasoningContract, inlineOutputByteLimit: 100, executors: { reasoning: () => reasoningSuccess } });
+assert.equal(unmetered.status, "terminal_error");
+assert.equal(unmetered.error.code, "reasoning_usage_required", "custom reasoning cannot return unmetered output");
+const unboundedOutput = await dispatchWorkflowNode(request("reasoning"), { reasoning: reasoningContract, reasoningUsage: { steps: 1, tokens: 1 }, executors: { reasoning: () => reasoningSuccess } });
+assert.equal(unboundedOutput.status, "terminal_error");
+assert.equal(unboundedOutput.error.code, "reasoning_output_budget_required", "inline reasoning output cannot omit its byte budget");
 const oversized = await dispatchWorkflowNode(request("reasoning"), {
   reasoning: reasoningContract,
   reasoningUsage: { steps: 1, tokens: 1 },
