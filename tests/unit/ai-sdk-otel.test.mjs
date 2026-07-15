@@ -54,6 +54,7 @@ assert.equal(mainChild.status, 0, `main ToolLoopAgent probe failed:\n${mainChild
 const main = JSON.parse(mainChild.stdout.trim().split("\n").at(-1));
 assert.equal(main.outputPreserved, true);
 assert.equal(main.zdr, true, "the real createAgent path must preserve Gateway ZDR");
+assert.deepEqual(main.toolChoice, { type: "tool", toolName: "createDocumentArtifact" }, "an explicit document-creation turn must mechanically require the artifact tool instead of trusting prompt prose");
 assert.ok(main.events.length >= 9, "the real createAgent and nested factory paths must emit spans");
 assert.ok(main.events.some((event) => event.payload?.type === AI_FUNCTION.main));
 assert.ok(main.events.some((event) => event.payload?.type === AI_FUNCTION.search), "real search factory spans must retain turn correlation");

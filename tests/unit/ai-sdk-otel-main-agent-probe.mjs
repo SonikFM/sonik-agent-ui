@@ -38,6 +38,7 @@ try {
   const agent = createAgent({
     model,
     productTourIntent: true,
+    workspaceDocumentIntent: "create",
     agentSettings: { requireZdr: true },
     aiTelemetry: {
       requestId: "req_g016_main",
@@ -71,6 +72,7 @@ try {
     outputPreserved: true,
     nestedOutputs: { search, draft },
     zdr: model.doGenerateCalls[0]?.providerOptions?.gateway?.zeroDataRetention === true,
+    toolChoice: model.doGenerateCalls[0]?.toolChoice,
   })}\n`);
 } finally {
   console.info = originalConsoleInfo;

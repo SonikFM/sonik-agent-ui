@@ -132,6 +132,16 @@ export function createAgent(context: AgentRuntimeContext = {}) {
     allowSystemInMessages: true,
     runtimeContext: telemetryRuntimeContext,
     telemetry: createAiSdkTelemetryOptions(AI_SDK_TELEMETRY_FUNCTION.main, Boolean(telemetryRuntimeContext.requestId)),
+    ...(context.workspaceDocumentIntent === "create"
+      ? {
+          // Prompt rules are advisory. For an explicit create-document turn,
+          // require the real artifact call on step 0 so a prose promise cannot
+          // terminate the run without creating anything.
+          prepareStep: ({ stepNumber }: { stepNumber: number }) => stepNumber === 0
+            ? { toolChoice: { type: "tool" as const, toolName: "createDocumentArtifact" as const } }
+            : {},
+        }
+      : {}),
     stopWhen: isStepCount(12),
     // AI SDK 7 wall-clock bounds (we previously had only the step cap): a stalled
     // provider stream or a hung tool now aborts instead of holding the request open.
