@@ -11,7 +11,12 @@ import {
 import { commitBookingReservationCommand } from "$lib/server/booking-workflows/reservation-commit";
 import { routeString, WORKSPACE_SESSION_ID_MAX_CHARS } from "$lib/server/workspace-route-limits";
 import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-transport";
-import { getRequestWorkspaceCommitReceipt, recordRequestWorkspaceCommitReceipt } from "$lib/server/workspace-request-store";
+import {
+  claimRequestWorkspaceCommit,
+  getRequestWorkspaceCommitReceipt,
+  recordRequestWorkspaceCommitReceipt,
+  releaseRequestWorkspaceCommitClaim,
+} from "$lib/server/workspace-request-store";
 import { commitLedgerFailureReason, runIdempotentCommit } from "$lib/server/commit-idempotency";
 import type { RequestHandler } from "./$types";
 
@@ -25,6 +30,7 @@ export const POST: RequestHandler = async (event) => {
   const body = await parseCommitBody(event.request);
   const sessionId = optionalTrimmedString(body.sessionId, "sessionId");
   const previewToolCallId = optionalTrimmedString(body.previewToolCallId, "previewToolCallId");
+  if (!previewToolCallId) error(400, "previewToolCallId is required");
   const guest = requireObject(body.guest, "guest");
   const booking = requireObject(body.booking, "booking");
   // The client supplies the reservation DATA; the endpoint fixes WHICH commands run and resolves
@@ -51,6 +57,7 @@ export const POST: RequestHandler = async (event) => {
   const commit = () => commitBookingReservationCommand(
     {
       sessionId,
+      requestId: `reservation:${previewToolCallId}`,
       hostSession,
       approvedCommandIds,
       bookingServiceBaseUrl,
@@ -60,13 +67,22 @@ export const POST: RequestHandler = async (event) => {
     { guest, booking: bookingInput },
   );
 
-  if (!previewToolCallId) return json(await commit(), { status: 200 });
-
+  const claimToken = globalThis.crypto.randomUUID();
   const outcome = await runIdempotentCommit({
     getReceipt: async () => (await getRequestWorkspaceCommitReceipt<Awaited<ReturnType<typeof commit>>>(event, {
       kind: "reservation",
       idempotency_key: previewToolCallId,
     }))?.receipt ?? null,
+    claim: async () => (await claimRequestWorkspaceCommit(event, {
+      kind: "reservation",
+      idempotency_key: previewToolCallId,
+      claim_token: claimToken,
+    })).acquired,
+    releaseClaim: () => releaseRequestWorkspaceCommitClaim(event, {
+      kind: "reservation",
+      idempotency_key: previewToolCallId,
+      claim_token: claimToken,
+    }),
     commit,
     recordReceipt: (receipt) => recordRequestWorkspaceCommitReceipt(event, {
       kind: "reservation",
@@ -82,10 +98,16 @@ export const POST: RequestHandler = async (event) => {
     }),
   });
 
-  if (outcome.kind === "ledger_read_failed") {
+  if (outcome.kind === "ledger_read_failed" || outcome.kind === "ledger_claim_failed") {
     return json(
       { ok: false, error: "idempotency_unavailable", message: "The reservation could not be safely retried because commit history is unavailable." },
       { status: 503 },
+    );
+  }
+  if (outcome.kind === "commit_in_progress") {
+    return json(
+      { ok: false, error: "commit_in_progress", safeToRetry: true, message: "This reservation approval is already being committed." },
+      { status: 409 },
     );
   }
   if (outcome.kind === "replayed") await recordCommitTelemetry({ ok: true, sessionId, reason: "idempotent_replay" });

@@ -37,6 +37,26 @@ const saveFixtureTriggerBindingBodySchema = z.strictObject({
   targetPath: z.string(),
 });
 
+const channelsSaveTails = new Map<string, Promise<void>>();
+
+async function withChannelsSaveLock<T>(scope: ChannelsRequestScope, operation: () => Promise<T>): Promise<T> {
+  const key = JSON.stringify([scope.organizationId, scope.userId, scope.sessionId]);
+  const previous = channelsSaveTails.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.catch(() => undefined).then(() => current);
+  channelsSaveTails.set(key, tail);
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (channelsSaveTails.get(key) === tail) channelsSaveTails.delete(key);
+  }
+}
+
 function resolveChannelsScope(event: Parameters<RequestHandler>[0]): ChannelsRequestScope {
   const auth = resolveTrustedHostSessionSnapshot(event);
   if (auth.authenticated) {
@@ -88,11 +108,14 @@ export const POST: RequestHandler = async (event) => {
     return json(binding, { status: 400, headers: PRIVATE_HEADERS });
   }
 
-  const envelope = mergeTriggerBindingIntoEnvelope(await loadEnvelope(event), binding.binding);
-  await recordRequestWorkspacePageContextSnapshot(
-    event,
-    createChannelsSnapshotRecordInput(scope, envelope),
-  );
+  const envelope = await withChannelsSaveLock(scope, async () => {
+    const next = mergeTriggerBindingIntoEnvelope(await loadEnvelope(event), binding.binding);
+    await recordRequestWorkspacePageContextSnapshot(
+      event,
+      createChannelsSnapshotRecordInput(scope, next),
+    );
+    return next;
+  });
   return json({
     ok: true,
     projection: createChannelsProjection({ scope, envelope }),

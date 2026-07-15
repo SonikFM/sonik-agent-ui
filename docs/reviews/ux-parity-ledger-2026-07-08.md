@@ -61,4 +61,4 @@ This is a labels-only change (component titles, toolbar eyebrow text, default pr
 
 ## Append-only governance entries
 
-- **MT-056-UX-001 — 2026-07-15:** Added `docs/testing/agent-ui-pr56-manual-test-2026-07-15.html` as a self-contained manual-test document composition. This is not a production visual-parity departure: shipped Agent UI behavior, signed host authority, stable org/user ownership, typed telemetry privacy, and fixture-only Channels remain the product truth. No deploys, production mutations, or booking writes are execution boundaries of this manual test plan, not global product invariants.
+- **MT-056-UX-001 — 2026-07-15:** Added `docs/testing/agent-ui-pr56-manual-test-2026-07-15.html` as a self-contained manual-test document composition. This is not a production visual-parity departure: shipped Agent UI behavior, signed host authority, stable org/user ownership, typed telemetry privacy, and fixture-only Channels remain the product truth. No deploys, production mutations, or booking writes occur during this manual test plan; those are execution boundaries for the test, not claims about global product invariants.

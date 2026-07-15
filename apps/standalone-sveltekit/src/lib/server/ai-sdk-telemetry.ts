@@ -68,22 +68,26 @@ export function createAiSdkTelemetryOptions(
 export function registerAiSdkTelemetry(): boolean {
   const state = globalThis as typeof globalThis & { [REGISTERED]?: boolean };
   if (state[REGISTERED]) return false;
-  registerTelemetry(new OpenTelemetry({
-    tracer: createAiSdkTelemetryTracer(),
-    enrichSpan: ({ spanType, operationId, runtimeContext }) => ({
-      "sonik.span_type": SPAN_TYPES.has(spanType) ? spanType : "operation",
-      "sonik.operation_id": OPERATIONS.has(operationId) ? operationId : "ai.unknown",
-      ...toSafeAttributes(runtimeContext),
-    }),
-    usage: false,
-    providerMetadata: false,
-    embedding: false,
-    reranking: false,
-    runtimeContext: false,
-    headers: false,
-    toolChoice: false,
-    schema: false,
-  }));
+  try {
+    registerTelemetry(new OpenTelemetry({
+      tracer: createAiSdkTelemetryTracer(),
+      enrichSpan: ({ spanType, operationId, runtimeContext }) => ({
+        "sonik.span_type": SPAN_TYPES.has(spanType) ? spanType : "operation",
+        "sonik.operation_id": OPERATIONS.has(operationId) ? operationId : "ai.unknown",
+        ...toSafeAttributes(runtimeContext),
+      }),
+      usage: false,
+      providerMetadata: false,
+      embedding: false,
+      reranking: false,
+      runtimeContext: false,
+      headers: false,
+      toolChoice: false,
+      schema: false,
+    }));
+  } catch {
+    return false;
+  }
   state[REGISTERED] = true;
   return true;
 }

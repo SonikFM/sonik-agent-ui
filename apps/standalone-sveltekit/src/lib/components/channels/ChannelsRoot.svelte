@@ -20,7 +20,7 @@
 
   let { projection, saveDisabledReason, onSave, onExit }: Props = $props();
 
-  const workflowIds = $derived([...new Set(projection.triggerBindings.map((binding) => binding.workflowId))]);
+  const workflowIds = $derived(projection.workflows.map((workflow) => workflow.workflowId));
   const preferredChannelId = $derived(
     projection.channels.find((channel) => channel.provisioningState === "connected")?.channelId
       ?? projection.channels[0]?.channelId
@@ -118,7 +118,7 @@
                     </Button>
                   </div>
                   <p id={`channel-disabled-reason-${channel.channelId}`} class="mt-2 text-xs text-muted-foreground">
-                    Unavailable: integration_not_yet_available
+                    Unavailable: {channel.integrationAction.disabledReason}
                   </p>
                 </article>
               {/each}
@@ -155,7 +155,7 @@
                 </Button>
               </div>
               <p id={`trigger-disabled-reason-${binding.bindingId}`} class="mt-2 text-xs text-muted-foreground">
-                Unavailable: integration_not_yet_available
+                Unavailable: {binding.disabledReason}
               </p>
             </article>
           {/each}

@@ -31,7 +31,7 @@ export function resolveApprovalDisabledState(input: {
   if (!input.disabled) return null;
 
   const reason = input.reason?.trim();
-  if (reason && reason in APPROVAL_DISABLED_MESSAGES) {
+  if (reason && Object.prototype.hasOwnProperty.call(APPROVAL_DISABLED_MESSAGES, reason)) {
     const code = reason as ApprovalDisabledCode;
     return { code, message: APPROVAL_DISABLED_MESSAGES[code] };
   }

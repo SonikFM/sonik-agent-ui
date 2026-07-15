@@ -5,6 +5,9 @@ import type {
   WorkspaceArtifactKind,
   WorkspaceArtifactRecord as BaseWorkspaceArtifactRecord,
   WorkspaceArtifactVersionRecord,
+  WorkspaceCommitClaimInput,
+  WorkspaceCommitClaimReleaseInput,
+  WorkspaceCommitClaimResult,
   WorkspaceCommitLedgerInput,
   WorkspaceCommitLedgerKey,
   WorkspaceCommitLedgerRecord,
@@ -164,6 +167,14 @@ export async function recordRequestWorkspaceCommitReceipt<TReceipt extends Recor
   return getRequestWorkspacePersistence(event).recordCommitReceipt<TReceipt>(input);
 }
 
+export async function claimRequestWorkspaceCommit(event: RequestWorkspaceEvent, input: WorkspaceCommitClaimInput): Promise<WorkspaceCommitClaimResult> {
+  return getRequestWorkspacePersistence(event).claimCommit(input);
+}
+
+export async function releaseRequestWorkspaceCommitClaim(event: RequestWorkspaceEvent, input: WorkspaceCommitClaimReleaseInput): Promise<boolean> {
+  return getRequestWorkspacePersistence(event).releaseCommitClaim(input);
+}
+
 export async function listRequestWorkspaceRuns(event: RequestWorkspaceEvent, sessionId: string): Promise<WorkspaceRunRecord[]> {
   return getRequestWorkspacePersistence(event).listRuns(sessionId);
 }
@@ -176,6 +187,9 @@ export type {
   DocumentLibraryResult,
   WorkspaceArtifactKind,
   WorkspaceArtifactVersionRecord,
+  WorkspaceCommitClaimInput,
+  WorkspaceCommitClaimReleaseInput,
+  WorkspaceCommitClaimResult,
   WorkspaceCommitKind,
   WorkspaceCommitLedgerInput,
   WorkspaceCommitLedgerKey,

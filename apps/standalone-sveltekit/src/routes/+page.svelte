@@ -256,6 +256,7 @@
     fixtureOnly: true,
     sessionId: null,
     status: "idle",
+    workflows: [],
     channels: [],
     triggerBindings: [],
   });
@@ -1498,6 +1499,7 @@
       fixtureOnly: true,
       sessionId,
       status,
+      workflows: [],
       channels: [],
       triggerBindings: [],
       message,
@@ -1518,7 +1520,7 @@
     if (channelsProjection.sessionId !== activeSessionId) return "active_session_mismatch";
     if (channelsProjection.status === "loading") return "channels_loading";
     if (channelsProjection.status !== "ready") return channelsProjection.disabledReason ?? "channels_not_ready";
-    if (channelsProjection.channels.length === 0 || channelsProjection.triggerBindings.length === 0) return "channels_projection_empty";
+    if (channelsProjection.channels.length === 0 || channelsProjection.workflows.length === 0) return "channels_projection_empty";
     return undefined;
   }
 
@@ -1537,6 +1539,7 @@
       && record.fixtureOnly === true
       && typeof record.sessionId === "string"
       && record.status === "ready"
+      && Array.isArray(record.workflows)
       && Array.isArray(record.channels)
       && Array.isArray(record.triggerBindings);
   }
@@ -3792,16 +3795,10 @@
   }
 
   async function refreshAgentModelCatalog(): Promise<void> {
-    if (isEmbeddedHostContextExpected() && !isWorkspaceHostContextReady()) {
-      agentModelOptions = AGENT_MODEL_OPTIONS;
-      agentModelCatalogStatus = "error";
-      agentModelCatalogMessage = "Reconnect the embedded page with an authenticated workspace session to load cloud models.";
-      return;
-    }
     agentModelCatalogStatus = "loading";
     agentModelCatalogMessage = null;
     try {
-      const response = await fetch("/api/agent-models");
+      const response = await workspaceFetch("/api/agent-models");
       if (!response.ok) throw new Error(`model_catalog_http_${response.status}`);
       const catalog = await response.json() as { models?: AgentModelOption[]; source?: string; error?: string };
       const models = Array.isArray(catalog.models) && catalog.models.length > 0 ? catalog.models : AGENT_MODEL_OPTIONS;

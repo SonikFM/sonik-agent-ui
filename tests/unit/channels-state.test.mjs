@@ -28,6 +28,11 @@ assert.equal("workspaceId" in defaultEnvelope.triggerBindings[0], false, "persis
 const projection = createChannelsProjection({ scope, envelope: defaultEnvelope });
 assert.equal(projection.sessionId, scope.sessionId);
 assert.equal(projection.status, "ready");
+assert.deepEqual(
+  projection.workflows.map((workflow) => workflow.workflowId),
+  ["booking.reservation.create", "amplify.campaign.create"],
+  "projection exposes every scoped bindable fixture workflow independently of persisted bindings",
+);
 assert.equal(projection.channels.length, 8);
 assert.deepEqual(
   [...new Set(projection.channels.map((channel) => channel.kind))].sort(),
@@ -44,6 +49,28 @@ assert.equal(projection.channels.every((channel) => channel.integrationAction.di
 assert.equal(projection.triggerBindings.every((binding) => binding.runtimeMode === "fixture_only" && binding.enabled === false), true);
 assert.equal(Object.isFrozen(projection), true, "one immutable server projection must feed every consumer");
 assert.equal(Object.isFrozen(projection.channels[0]), true);
+
+const staleEnvelope = {
+  ...defaultEnvelope,
+  triggerBindings: [
+    ...defaultEnvelope.triggerBindings,
+    {
+      ...defaultEnvelope.triggerBindings[0],
+      bindingId: "fixture.binding.stale.workflow",
+      workflowId: "fixture.workflow.removed",
+    },
+    {
+      ...defaultEnvelope.triggerBindings[0],
+      bindingId: "fixture.binding.stale.pointer",
+      inputMapping: [{ sourcePath: "event/message", targetPath: "/input/request" }],
+    },
+  ],
+};
+const staleProjection = createChannelsProjection({ scope, envelope: staleEnvelope });
+assert.equal(staleProjection.status, "ready");
+assert.equal(staleProjection.triggerBindings.length, defaultEnvelope.triggerBindings.length, "stale persisted references are skipped without breaking the projection");
+assert.equal(staleProjection.triggerBindings.some((binding) => binding.bindingId === "fixture.binding.stale.workflow"), false);
+assert.equal(staleProjection.triggerBindings.some((binding) => binding.bindingId === "fixture.binding.stale.pointer"), false);
 
 const invalidReference = createScopedFixtureTriggerBinding({
   channelId: "fixture.slack.connected",
@@ -113,6 +140,21 @@ const listed = memory.listPageContextSnapshots(scope.sessionId);
 assert.deepEqual(listed.map((entry) => entry.id), [newest.id, unrelatedNewer.id, older.id]);
 assert.deepEqual(readLatestChannelsEnvelope(listed), mergedEnvelope, "latest exact channels snapshot wins");
 assert.deepEqual(readLatestChannelsEnvelope([unrelatedNewer]), defaultEnvelope, "unrelated page context cannot become channel state");
+
+const secondCreated = createScopedFixtureTriggerBinding({
+  channelId: "fixture.whatsapp.connected",
+  event: "message.edited",
+  workflowId: "booking.reservation.create",
+  sourcePath: "/event/message",
+  targetPath: "/input/request",
+}, scope);
+assert.equal(secondCreated.ok, true);
+const independentlyMergedEnvelope = mergeTriggerBindingIntoEnvelope(defaultEnvelope, secondCreated.binding);
+const concurrentNewest = memory.recordPageContextSnapshot(createChannelsSnapshotRecordInput(scope, independentlyMergedEnvelope));
+const mergedConcurrentSnapshots = readLatestChannelsEnvelope([concurrentNewest, newest]);
+assert.equal(mergedConcurrentSnapshots.triggerBindings.length, 4, "append-only snapshots merge distinct concurrent bindings instead of losing the earlier write");
+assert.equal(mergedConcurrentSnapshots.triggerBindings.some((binding) => binding.event === "reaction.added"), true);
+assert.equal(mergedConcurrentSnapshots.triggerBindings.some((binding) => binding.event === "message.edited"), true);
 assert.throws(
   () => memory.recordPageContextSnapshot({ ...snapshotInput, authority: "trusted-server-derived" }),
   /Browser page context snapshots must remain display-only/,

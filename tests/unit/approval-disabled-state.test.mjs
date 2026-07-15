@@ -26,6 +26,11 @@ assert.deepEqual(
   "unknown machine codes must not leak into visible copy or data attributes",
 );
 assert.deepEqual(
+  resolveApprovalDisabledState({ isStreaming: false, disabled: true, reason: "toString" }),
+  { code: "approval_not_ready", message: "toString" },
+  "prototype properties must not be mistaken for owned disabled-reason codes",
+);
+assert.deepEqual(
   resolveApprovalDisabledState({ isStreaming: false, disabled: true, reason: null }),
   { code: "approval_not_ready", message: "Approval actions are not ready yet." },
   "disabled affordances without a reason must still expose a non-empty typed and human state",

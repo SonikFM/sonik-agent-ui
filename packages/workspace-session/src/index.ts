@@ -306,6 +306,20 @@ export type WorkspaceCommitLedgerInput<TReceipt extends Record<string, unknown> 
   receipt: TReceipt;
 };
 
+export type WorkspaceCommitClaimInput = WorkspaceCommitLedgerKey & {
+  claim_token: string;
+  lease_ms?: number;
+};
+
+export type WorkspaceCommitClaimReleaseInput = WorkspaceCommitLedgerKey & {
+  claim_token: string;
+};
+
+export type WorkspaceCommitClaimResult = WorkspaceCommitLedgerKey & {
+  acquired: boolean;
+  lease_expires_at: string | null;
+};
+
 export type WorkspaceRunStatus = "running" | "succeeded" | "failed" | "canceled";
 
 // Composer context selection persisted on a run. Structural (not imported from
@@ -442,6 +456,8 @@ export interface WorkspaceTelemetryStore {
 export interface WorkspaceCommitLedgerStore {
   getCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey): WorkspaceCommitLedgerRecord<TReceipt> | null;
   recordCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerInput<TReceipt>): WorkspaceCommitLedgerRecord<TReceipt>;
+  claimCommit(input: WorkspaceCommitClaimInput): WorkspaceCommitClaimResult;
+  releaseCommitClaim(input: WorkspaceCommitClaimReleaseInput): boolean;
 }
 
 export interface WorkspaceRunStore {
@@ -546,6 +562,8 @@ export interface AsyncWorkspaceTelemetryStore {
 export interface AsyncWorkspaceCommitLedgerStore {
   getCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey): Promise<WorkspaceCommitLedgerRecord<TReceipt> | null>;
   recordCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerInput<TReceipt>): Promise<WorkspaceCommitLedgerRecord<TReceipt>>;
+  claimCommit(input: WorkspaceCommitClaimInput): Promise<WorkspaceCommitClaimResult>;
+  releaseCommitClaim(input: WorkspaceCommitClaimReleaseInput): Promise<boolean>;
 }
 
 export interface AsyncWorkspaceRunStore {
@@ -660,6 +678,8 @@ export function createAsyncWorkspacePersistenceAdapter(adapter: WorkspacePersist
     listTelemetryEvents: async (sessionId) => adapter.listTelemetryEvents(sessionId),
     getCommitReceipt: async <TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey) => adapter.getCommitReceipt<TReceipt>(input),
     recordCommitReceipt: async <TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerInput<TReceipt>) => adapter.recordCommitReceipt<TReceipt>(input),
+    claimCommit: async (input) => adapter.claimCommit(input),
+    releaseCommitClaim: async (input) => adapter.releaseCommitClaim(input),
     createRun: async (input) => adapter.createRun(input),
     getRun: async (id) => adapter.getRun(id),
     listRuns: async (sessionId) => adapter.listRuns(sessionId),
@@ -855,6 +875,12 @@ type CloudWorkspaceCommitLedgerRow<TReceipt extends Record<string, unknown> = Re
   receipt_version: number;
   receipt: TReceipt;
   created_at: string | Date;
+};
+
+type CloudWorkspaceCommitClaimRow = {
+  commit_kind: WorkspaceCommitKind;
+  idempotency_key: string;
+  lease_expires_at: string | Date;
 };
 
 class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
@@ -1741,6 +1767,53 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     });
   }
 
+  claimCommit(input: WorkspaceCommitClaimInput): Promise<WorkspaceCommitClaimResult> {
+    return this.#withContext(async (tx) => {
+      const leaseMs = normalizeCommitLeaseMs(input.lease_ms);
+      const params = [
+        this.#authorized.organizationId,
+        this.#authorized.userId,
+        input.kind,
+        input.idempotency_key,
+        input.claim_token,
+        leaseMs,
+      ];
+      const { rows } = await tx.query<CloudWorkspaceCommitClaimRow>(
+        `insert into sonik_agent_ui.agent_workspace_commit_claims
+          (organization_id, user_id, commit_kind, idempotency_key, claim_token, lease_expires_at)
+         values ($1, $2, $3, $4, $5, now() + ($6::integer * interval '1 millisecond'))
+         on conflict (organization_id, user_id, commit_kind, idempotency_key) do update
+         set claim_token = excluded.claim_token,
+             lease_expires_at = excluded.lease_expires_at,
+             updated_at = now()
+         where sonik_agent_ui.agent_workspace_commit_claims.lease_expires_at <= now()
+         returning commit_kind, idempotency_key, lease_expires_at`,
+        params,
+      );
+      if (rows[0]) {
+        return {
+          kind: rows[0].commit_kind,
+          idempotency_key: rows[0].idempotency_key,
+          acquired: true,
+          lease_expires_at: toIsoTimestamp(rows[0].lease_expires_at),
+        };
+      }
+      return { kind: input.kind, idempotency_key: input.idempotency_key, acquired: false, lease_expires_at: null };
+    });
+  }
+
+  releaseCommitClaim(input: WorkspaceCommitClaimReleaseInput): Promise<boolean> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<{ idempotency_key: string }>(
+        `delete from sonik_agent_ui.agent_workspace_commit_claims
+         where organization_id = $1 and user_id = $2 and commit_kind = $3 and idempotency_key = $4 and claim_token = $5
+         returning idempotency_key`,
+        [this.#authorized.organizationId, this.#authorized.userId, input.kind, input.idempotency_key, input.claim_token],
+      );
+      return rows.length > 0;
+    });
+  }
+
   async #withContext<T>(fn: (tx: WorkspaceSqlTransaction) => Promise<T>): Promise<T> {
     this.#assertAuthorized();
     return this.#authorized.db.transaction(async (tx) => {
@@ -2177,6 +2250,11 @@ function toIsoTimestamp(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+function normalizeCommitLeaseMs(value?: number): number {
+  if (!Number.isFinite(value)) return 120_000;
+  return Math.min(300_000, Math.max(1_000, Math.trunc(value as number)));
+}
+
 export interface InMemoryWorkspacePersistenceOptions {
   maxTelemetryEvents?: number;
   maxTelemetryPayloadChars?: number;
@@ -2210,6 +2288,7 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
   #pageContextSnapshots = new Map<string, WorkspacePageContextSnapshotRecord[]>();
   #telemetryEvents: WorkspaceTelemetryEventRecord[] = [];
   #commitReceipts = new Map<string, WorkspaceCommitLedgerRecord>();
+  #commitClaims = new Map<string, { claim_token: string; lease_expires_at: number }>();
   #runs = new Map<string, WorkspaceRunRecord>();
   #runEvents = new Map<string, WorkspaceRunEventRecord[]>();
   #deletingSessionIds = new Set<string>();
@@ -2862,6 +2941,26 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
     };
     this.#commitReceipts.set(key, record as WorkspaceCommitLedgerRecord);
     return clone(record);
+  }
+
+  claimCommit(input: WorkspaceCommitClaimInput): WorkspaceCommitClaimResult {
+    const key = this.#commitReceiptKey(input);
+    const now = Date.now();
+    const existing = this.#commitClaims.get(key);
+    if (existing && existing.lease_expires_at > now) {
+      return { kind: input.kind, idempotency_key: input.idempotency_key, acquired: false, lease_expires_at: new Date(existing.lease_expires_at).toISOString() };
+    }
+    const leaseExpiresAt = now + normalizeCommitLeaseMs(input.lease_ms);
+    this.#commitClaims.set(key, { claim_token: input.claim_token, lease_expires_at: leaseExpiresAt });
+    return { kind: input.kind, idempotency_key: input.idempotency_key, acquired: true, lease_expires_at: new Date(leaseExpiresAt).toISOString() };
+  }
+
+  releaseCommitClaim(input: WorkspaceCommitClaimReleaseInput): boolean {
+    const key = this.#commitReceiptKey(input);
+    const existing = this.#commitClaims.get(key);
+    if (!existing || existing.claim_token !== input.claim_token) return false;
+    this.#commitClaims.delete(key);
+    return true;
   }
 
   #commitReceiptKey(input: WorkspaceCommitLedgerKey): string {

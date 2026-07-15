@@ -121,7 +121,13 @@ export async function resolveAgentUiWorkspaceSession(
   const persistence = getRequestWorkspacePersistence(event);
   const sessionId = input.sessionId?.trim();
   const session = sessionId ? await persistence.getSession(sessionId) : null;
-  if (!session) throw new AgentUiFileError(404, "Session not found");
+  if (!session) {
+    throw new AgentUiFileError(404, "Session not found", {
+      code: "session_not_found",
+      phase: input.phase ?? "read",
+      safeToRetry: input.safeToRetry ?? false,
+    });
+  }
   return { sessionId: session.id, auth, persistence };
 }
 

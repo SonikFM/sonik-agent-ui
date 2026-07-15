@@ -121,6 +121,11 @@
   }
 
   async function saveDraft(): Promise<{ ok: boolean; message: string }> {
+    if (!workspaceContextReady) {
+      saveStatus = "error";
+      saveMessage = "Reconnect the embedded page with an authenticated workspace session to save agent drafts.";
+      return { ok: false, message: saveMessage };
+    }
     const validation = validateAgentDefinition($state.snapshot(definition));
     if (!validation.ok) {
       saveStatus = "error";

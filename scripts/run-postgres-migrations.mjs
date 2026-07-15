@@ -182,8 +182,18 @@ const migrations = [
 			)::text
 		`,
 	},
+	{
+		version: "0014",
+		name: "commit_claim_leases",
+		file: "packages/workspace-session/migrations/postgres/0014_commit_claim_leases.sql",
+		baselineCheck: `
+			select (
+				to_regclass('sonik_agent_ui.agent_workspace_commit_claims') is not null
+			)::text
+		`,
+	},
 	// NOTE for the next lane appending here: this is the ONE shared migrations
-	// manifest (per prod-slice-plan.md) -- add new entries after 0013, don't
+	// manifest (per prod-slice-plan.md) -- add new entries after 0014, don't
 	// reorder/renumber existing ones.
 ];
 

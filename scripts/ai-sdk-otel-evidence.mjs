@@ -7,6 +7,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const probe = path.join(root, "tests/unit/ai-sdk-otel-probe.mjs");
 const mainAgentProbe = path.join(root, "tests/unit/ai-sdk-otel-main-agent-probe.mjs");
 const evidenceDir = path.join(root, ".omx/evidence");
+const STRUCTURAL_TRACE_FIELDS = new Set([
+  "at", "durationMs", "event", "eventId", "ok", "payload", "requestId", "runId",
+  "schemaVersion", "sessionId", "source", "traceId", "traceparent", "workflowRunId",
+]);
+const STRUCTURAL_PAYLOAD_FIELDS = new Set(["kind", "operationId", "status", "type"]);
+const INPUT_FIELD = /^(?:content|input|inputs|messages|prompt|prompts|tool[_-]?input|gen_ai\.input(?:\.|$)|ai\.input(?:\.|$))$/i;
+const OUTPUT_FIELD = /^(?:completion|completions|content|output|outputs|response|responses|result|results|tool[_-]?output|gen_ai\.output(?:\.|$)|ai\.output(?:\.|$))$/i;
 mkdirSync(evidenceDir, { recursive: true });
 
 const run = (scenario) => {
@@ -26,12 +33,7 @@ const evidence = {
   schemaVersion: "sonik.agent_ui.ai_sdk_otel_evidence.v1",
   generatedAt: new Date().toISOString(),
   runner: "MockLanguageModelV4",
-  privacy: {
-    traceEventCount: trace.events.length,
-    onlyStructuralFields: true,
-    inputsRecorded: false,
-    outputsRecorded: false,
-  },
+  privacy: summarizeTracePrivacy(trace.events),
   benchmark: { warmup: 25, iterations: 200, results: benchmarks },
   deltaMs: {
     enabledMinusUnregisteredP50: round(enabled.p50Ms - unregistered.p50Ms),
@@ -45,4 +47,36 @@ process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
 
 function round(value) {
   return Number(value.toFixed(6));
+}
+
+function summarizeTracePrivacy(events) {
+  const fields = collectFieldNames(events);
+  return {
+    traceEventCount: events.length,
+    onlyStructuralFields: events.every((event) => isStructuralTraceEvent(event)),
+    inputsRecorded: fields.some((field) => INPUT_FIELD.test(field)),
+    outputsRecorded: fields.some((field) => OUTPUT_FIELD.test(field)),
+  };
+}
+
+function isStructuralTraceEvent(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return false;
+  if (Object.keys(event).some((field) => !STRUCTURAL_TRACE_FIELDS.has(field))) return false;
+  const payload = event.payload;
+  return Boolean(payload)
+    && typeof payload === "object"
+    && !Array.isArray(payload)
+    && Object.keys(payload).every((field) => STRUCTURAL_PAYLOAD_FIELDS.has(field));
+}
+
+function collectFieldNames(value, fields = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectFieldNames(item, fields);
+  } else if (value && typeof value === "object") {
+    for (const [field, item] of Object.entries(value)) {
+      fields.push(field);
+      collectFieldNames(item, fields);
+    }
+  }
+  return fields;
 }

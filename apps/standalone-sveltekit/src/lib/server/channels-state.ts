@@ -12,7 +12,6 @@ import {
 import {
   getChannelContractIssueCode,
   parseChannelDefinition,
-  parseTriggerBinding,
   safeParseTriggerBinding,
   validateTriggerBindingReferences,
   type ChannelDefinition,
@@ -128,12 +127,13 @@ function toStoredTriggerBinding(binding: TriggerBinding): StoredTriggerBinding {
 function scopeStoredTriggerBinding(
   binding: StoredTriggerBinding,
   scope: ChannelsRequestScope,
-): TriggerBinding {
-  return parseTriggerBinding({
+): TriggerBinding | null {
+  const parsed = safeParseTriggerBinding({
     ...binding,
     organizationId: scope.organizationId,
     workspaceId: scope.workspaceId,
   });
+  return parsed.success ? parsed.data : null;
 }
 
 function defaultStoredTriggerBindings(): StoredTriggerBinding[] {
@@ -151,6 +151,8 @@ export function createDefaultChannelsEnvelope(): ChannelsStateEnvelope {
 export function readLatestChannelsEnvelope(
   snapshots: ReadonlyArray<WorkspacePageContextSnapshotRecord<unknown>>,
 ): ChannelsStateEnvelope {
+  const triggerBindings = new Map<string, StoredTriggerBinding>();
+  let foundChannelsSnapshot = false;
   for (const snapshot of snapshots) {
     if (
       snapshot.route !== "/" ||
@@ -162,9 +164,22 @@ export function readLatestChannelsEnvelope(
       continue;
     }
     const parsed = channelsStateEnvelopeSchema.safeParse(snapshot.context);
-    if (parsed.success) return parsed.data;
+    if (!parsed.success) continue;
+    foundChannelsSnapshot = true;
+    // Snapshots are newest-first. First-write-per-binding therefore preserves
+    // the latest replacement while merging distinct bindings from concurrent
+    // append-only saves that may each have loaded the same prior envelope.
+    for (const binding of parsed.data.triggerBindings) {
+      if (!triggerBindings.has(binding.bindingId)) triggerBindings.set(binding.bindingId, binding);
+    }
   }
-  return createDefaultChannelsEnvelope();
+  return foundChannelsSnapshot
+    ? channelsStateEnvelopeSchema.parse({
+        schemaVersion: CHANNELS_STATE_SCHEMA_VERSION,
+        fixtureOnly: true,
+        triggerBindings: [...triggerBindings.values()],
+      })
+    : createDefaultChannelsEnvelope();
 }
 
 function projectTriggerBinding(binding: TriggerBinding): AgentUiTriggerBindingSnapshot {
@@ -197,19 +212,18 @@ export function createChannelsProjection(input: {
   const channels = scopeChannelFixtures(input.scope);
   const workflows = scopeWorkflowReferences(input.scope);
   const envelope = channelsStateEnvelopeSchema.parse(input.envelope ?? createDefaultChannelsEnvelope());
-  const triggerBindings = envelope.triggerBindings.map((stored) => {
+  const triggerBindings = envelope.triggerBindings.flatMap((stored) => {
     const binding = scopeStoredTriggerBinding(stored, input.scope);
+    if (!binding) return [];
     const references = validateTriggerBindingReferences({ binding, channels, workflows });
-    if (!references.valid) {
-      throw new Error(`Invalid persisted fixture trigger binding: ${references.issues[0]?.code ?? "invalid_reference"}`);
-    }
-    return projectTriggerBinding(binding);
+    return references.valid ? [projectTriggerBinding(binding)] : [];
   });
   return freezeProjection({
     schemaVersion: CHANNELS_STATE_SCHEMA_VERSION,
     fixtureOnly: true,
     sessionId: input.scope.sessionId,
     status: "ready",
+    workflows: workflows.map((workflow) => ({ workflowId: workflow.workflowId })),
     channels: channels.map((channel) => ({
       schemaVersion: channel.schemaVersion,
       channelId: channel.channelId,

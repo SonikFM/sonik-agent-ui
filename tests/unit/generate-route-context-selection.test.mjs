@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 
 globalThis.__generateRouteEffects = { rateLimit: 0, workspace: 0, telemetry: 0, message: 0, run: 0, provider: 0, model: 0 };
+globalThis.__generateRateLimitSuccess = false;
 
 const stub = (source) => ({ url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true });
 
@@ -9,7 +10,7 @@ registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "$env/dynamic/private") return stub("export const env = {}");
     if (specifier === "$app/environment") return stub('export const browser=false, dev=false, building=false, version="test"');
-    if (specifier === "$lib/rate-limit") return stub(`const limiter={limit:async()=>{globalThis.__generateRouteEffects.rateLimit+=1;return {success:false}}};export const minuteRateLimit=limiter,dailyRateLimit=limiter;`);
+    if (specifier === "$lib/rate-limit") return stub(`const limiter={limit:async()=>{globalThis.__generateRouteEffects.rateLimit+=1;return {success:globalThis.__generateRateLimitSuccess}}};export const minuteRateLimit=limiter,dailyRateLimit=limiter;`);
     if (specifier === "$lib/server/workspace-request-store") return stub(`const hit=()=>{globalThis.__generateRouteEffects.workspace+=1};export const getRequestWorkspaceDocument=async()=>{hit();return null},getRequestWorkspacePersistence=()=>{hit();return {}},syncRequestActiveWorkspaceDocumentSnapshot=async()=>{hit();return null};`);
     if (specifier === "$lib/server/agent-telemetry") return stub(`export const writeAgentTelemetry=async()=>{globalThis.__generateRouteEffects.telemetry+=1};`);
     if (specifier === "$lib/server/run-event-log") return stub(`export const persistInitiatingUserMessage=async()=>{globalThis.__generateRouteEffects.message+=1},startRunRecorder=async()=>{globalThis.__generateRouteEffects.run+=1},teeRunEvents=(stream)=>stream;`);
@@ -60,6 +61,23 @@ assert.equal(globalThis.__generateRouteEffects.message, beforeAuthFailure.messag
 assert.equal(globalThis.__generateRouteEffects.run, beforeAuthFailure.run, "pre-stream auth failure starts no run");
 assert.equal(globalThis.__generateRouteEffects.provider, beforeAuthFailure.provider, "pre-stream auth failure reaches no provider");
 assert.equal(globalThis.__generateRouteEffects.model, beforeAuthFailure.model, "pre-stream auth failure constructs no model");
+
+globalThis.__generateRateLimitSuccess = true;
+const missingSelectedContextSession = await post({
+  items: [{ id: "file:file-1", kind: "file", label: "Private file", source: "manual", ref: "file-1" }],
+  dismissedAutoSeedIds: [],
+});
+assert.equal(missingSelectedContextSession.status, 400);
+assert.deepEqual(await missingSelectedContextSession.json(), {
+  ok: false,
+  error: "Selected file and document context requires a workspace session",
+  code: "invalid_request",
+  phase: "pre_stream",
+  safeToRetry: false,
+  requestId: "req-generate-auth",
+  traceId: "a".repeat(32),
+});
+globalThis.__generateRateLimitSuccess = false;
 
 for (const selection of [
   undefined,

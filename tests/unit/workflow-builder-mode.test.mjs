@@ -355,6 +355,13 @@ assert.equal(
   true,
   "saveDraft must call the Phase 4 agent-definitions endpoint",
 );
+const saveDraftSource = builderRootSource.match(/async function saveDraft\(\)[\s\S]*?\n  }/)?.[0] ?? "";
+assert.match(saveDraftSource, /if \(!workspaceContextReady\)/,
+  "saveDraft must fail closed before creating a contextless cloud request");
+assert.ok(
+  saveDraftSource.indexOf("if (!workspaceContextReady)") < saveDraftSource.indexOf('workspaceFetch("/api/agent-definitions"'),
+  "the signed workspace-context guard must run before the draft request",
+);
 assert.equal(
   builderRootSource.includes("draftAgentId={agentId}"),
   true,
@@ -432,6 +439,11 @@ assert.equal(
   true,
   "WorkflowBuilderRoot must pass the fetched model catalog down into AgentConfigPanel",
 );
+const refreshAgentModelCatalogSource = pageSource.match(/async function refreshAgentModelCatalog\(\)[\s\S]*?\n  }/)?.[0] ?? "";
+assert.match(refreshAgentModelCatalogSource, /workspaceFetch\("\/api\/agent-models"\)/,
+  "the page model catalog must use the authority-waiting and one-replay workspace fetch path");
+assert.doesNotMatch(refreshAgentModelCatalogSource, /(?<!workspace)fetch\("\/api\/agent-models"\)/,
+  "the page model catalog must not bypass host-authority recovery with raw fetch");
 
 // -- DebugPreviewPane.svelte: sends draftAgentId ----------------------------
 

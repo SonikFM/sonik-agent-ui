@@ -62,10 +62,16 @@ assert.match(channelsRootSource, /data-agent-mode="channels"/);
 assert.match(channelsRootSource, /data-channel-id=\{channel\.channelId\}/);
 assert.match(channelsRootSource, /data-channel-status=\{channel\.provisioningState\}/);
 assert.match(channelsRootSource, /data-trigger-binding-id=\{binding\.bindingId\}/);
+assert.match(channelsRootSource, /projection\.workflows\.map\(\(workflow\) => workflow\.workflowId\)/,
+  "fixture workflow options come from the complete scoped workflow projection, not existing bindings");
 assert.equal((channelsRootSource.match(/min-h-11/g) ?? []).length >= 8, true, "all interactive controls meet the 44px target");
 assert.equal((channelsRootSource.match(/data-disabled-reason=/g) ?? []).length >= 3, true);
 assert.match(channelsRootSource, /aria-describedby=\{`channel-disabled-reason-/);
 assert.match(channelsRootSource, /aria-describedby=\{`trigger-disabled-reason-/);
+assert.match(channelsRootSource, /Unavailable: \{channel\.integrationAction\.disabledReason\}/,
+  "channel controls render the disabled reason supplied by the projection");
+assert.match(channelsRootSource, /Unavailable: \{binding\.disabledReason\}/,
+  "trigger controls render the disabled reason supplied by the projection");
 assert.match(channelsRootSource, /role="alert"/);
 assert.doesNotMatch(channelsRootSource, /gradient|bg-gradient|from-[a-z]|to-[a-z]/i);
 assert.match(channelsRootSource, /<form[\s\S]*?onsubmit=\{submitBinding\}[\s\S]*?<label[\s\S]*?<select[\s\S]*?<label[\s\S]*?<input/,

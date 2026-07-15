@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { tick } from "svelte";
   import type { AgentContextItem } from "@sonik-agent-ui/tool-contracts/run-context";
   import type { ComposerToolItem } from "../composer-context.js";
   import ContextChip from "./ContextChip.svelte";
@@ -61,13 +61,14 @@
     }
   }
 
-  onMount(() => {
-    if (!stagedItemsElement) return;
+  $effect(() => {
+    const element = stagedItemsElement;
+    if (!element || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
       if (entry) void updateCollapsedLimit(entry.contentRect.width);
     });
-    observer.observe(stagedItemsElement);
-    void updateCollapsedLimit(stagedItemsElement.getBoundingClientRect().width);
+    observer.observe(element);
+    void updateCollapsedLimit(element.getBoundingClientRect().width);
     return () => observer.disconnect();
   });
 </script>

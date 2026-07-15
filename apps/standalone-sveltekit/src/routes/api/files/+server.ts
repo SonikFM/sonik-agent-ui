@@ -13,14 +13,14 @@ import type { RequestHandler } from "./$types";
 export const POST: RequestHandler = async (event) => {
   try {
     if (!event.request.headers.get("content-type")?.toLowerCase().startsWith("multipart/form-data")) {
-      return failure(event, new AgentUiFileError(415, "multipart/form-data is required"));
+      return failure(event, new AgentUiFileError(415, "multipart/form-data is required", { code: "invalid_request", phase: "pre_write" }));
     }
     const form = await event.request.formData().catch(() => null);
-    if (!form) return failure(event, new AgentUiFileError(400, "Invalid multipart form data"));
+    if (!form) return failure(event, new AgentUiFileError(400, "Invalid multipart form data", { code: "invalid_request", phase: "pre_write" }));
     const file = form.get("file");
     const sessionId = form.get("session_id");
-    if (!(file instanceof File)) return failure(event, new AgentUiFileError(400, "Multipart file field is required"));
-    if (typeof sessionId !== "string" || !sessionId.trim()) return failure(event, new AgentUiFileError(400, "session_id is required"));
+    if (!(file instanceof File)) return failure(event, new AgentUiFileError(400, "Multipart file field is required", { code: "invalid_request", phase: "pre_write" }));
+    if (typeof sessionId !== "string" || !sessionId.trim()) return failure(event, new AgentUiFileError(400, "session_id is required", { code: "invalid_request", phase: "pre_write" }));
     const workspace = await resolveAgentUiWorkspaceSession(event, { sessionId, phase: "pre_write", safeToRetry: true });
     // Authentication and session ownership must be established before either
     // the file catalog or private object storage can be touched.

@@ -72,6 +72,7 @@ assert.equal(firstGet.status, 200);
 assert.equal(firstGet.headers.get("cache-control"), "private, no-store");
 const firstProjection = await firstGet.json();
 assert.equal(firstProjection.sessionId, sessionId);
+assert.deepEqual(firstProjection.workflows.map((workflow) => workflow.workflowId), ["booking.reservation.create", "amplify.campaign.create"]);
 assert.equal(firstProjection.channels.length, 8);
 assert.equal(firstProjection.triggerBindings.length, 2);
 
@@ -95,6 +96,33 @@ assert.equal(saved.projection.triggerBindings.at(-1).enabled, false);
 
 const persistedGet = await GET(eventFor({ sessionId }));
 assert.equal((await persistedGet.json()).triggerBindings.length, 3, "GET restores the latest display-only snapshot");
+
+const concurrentBodies = [
+  {
+    channelId: "fixture.slack.connected",
+    event: "app.mentioned",
+    workflowId: "amplify.campaign.create",
+    sourcePath: "/event/mention",
+    targetPath: "/input/request",
+  },
+  {
+    channelId: "fixture.whatsapp.connected",
+    event: "message.edited",
+    workflowId: "booking.reservation.create",
+    sourcePath: "/event/message",
+    targetPath: "/input/request",
+  },
+];
+const concurrentResponses = await Promise.all(concurrentBodies.map((body) => POST(eventFor({ sessionId, method: "POST", body }))));
+assert.deepEqual(concurrentResponses.map((response) => response.status), [200, 200]);
+const concurrentProjectionSizes = await Promise.all(concurrentResponses.map(async (response) => (await response.json()).projection.triggerBindings.length));
+assert.deepEqual(concurrentProjectionSizes.sort((left, right) => left - right), [4, 5], "concurrent saves serialize against the latest persisted envelope");
+const afterConcurrentSave = await GET(eventFor({ sessionId }));
+const concurrentProjection = await afterConcurrentSave.json();
+assert.equal(concurrentProjection.triggerBindings.length, 5, "neither concurrent fixture binding is lost");
+for (const body of concurrentBodies) {
+  assert.equal(concurrentProjection.triggerBindings.some((binding) => binding.event === body.event), true);
+}
 
 const tenantSpoof = await POST(eventFor({
   sessionId,

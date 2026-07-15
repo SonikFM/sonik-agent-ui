@@ -37,6 +37,8 @@ assert.doesNotMatch(stagedContextRow, /filesExpanded/, "overflow disclosure is n
 assert.match(stagedContextRow, /\.\.\.items\.map[\s\S]*\.\.\.pinnedTools\.map/, "context and pinned tools share one bounded presentation list");
 assert.match(stagedContextRow, /stagedPresentations\.slice\(0, collapsedLimit\)/, "collapsed rendering derives a visual subset without mutating source selection");
 assert.match(stagedContextRow, /new ResizeObserver/, "chip disclosure responds to its container width, including floated sidecars");
+assert.match(stagedContextRow, /\$effect\(\(\) => \{[\s\S]*const element = stagedItemsElement;[\s\S]*observer\.observe\(element\)/,
+  "the width observer reacts when the conditional staged-items element mounts after component mount");
 assert.match(stagedContextRow, /if \(width < 420\) return 1;[\s\S]*if \(width < 640\) return 2;[\s\S]*return 3;/, "collapsed chip capacity has deterministic narrow, sidecar, and wide bounds");
 assert.match(stagedContextRow, /aria-controls=\{stagedItemsId\}/);
 assert.match(stagedContextRow, /aria-expanded=\{expanded\}/);

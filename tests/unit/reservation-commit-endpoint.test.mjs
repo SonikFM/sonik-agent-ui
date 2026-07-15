@@ -49,7 +49,7 @@ function makeFetcher() {
   const calls = [];
   const fetcher = async (url, init = {}) => {
     const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
-    calls.push({ url: String(url), method: init.method, body });
+    calls.push({ url: String(url), method: init.method, headers: new Headers(init.headers), body });
     if (String(url).endsWith("/api/v1/booking/guests") && init.method === "POST") {
       if (body?.name === "force-guest-500") return Response.json({ error: "forced" }, { status: 500 });
       assert.equal("contactConfirmed" in body, false, "guest approval-only contactConfirmed is stripped before booking.create.guest");
@@ -69,6 +69,7 @@ function makeFetcher() {
 function baseContext(fetcher, approvedCommandIds = ["booking.create.guest", "booking.create.booking"]) {
   return {
     sessionId: SESSION_ID,
+    requestId: "reservation:preview-tool-call-1",
     pageContext,
     hostSession,
     approvedCommandIds,
@@ -121,6 +122,8 @@ assert.equal(extractCreatedGuestId(null), null, "extractCreatedGuestId tolerates
   assert.equal(bookingCall.body.userId, GUEST_ID, "booking is created against the server-resolved guest id, not a client-supplied one");
   assert.equal(bookingCall.body.contextId, CONTEXT_ID);
   assert.equal(bookingCall.body.partySize, 3);
+  assert.equal(guestCall.headers.get("x-sonik-idempotency-key"), "reservation:preview-tool-call-1:booking.create.guest", "the guest write must use the stable approval key across retries");
+  assert.equal(bookingCall.headers.get("x-sonik-idempotency-key"), booking.clientRequestId, "the booking write preserves its stable client request id");
 }
 
 // 2. A client-supplied userId is discarded in favor of the freshly created guest id.

@@ -5,8 +5,11 @@ const embedUrl = "/?embedMode=chat&agentUiHostOrigin=http%3A%2F%2Flocalhost%3A51
 
 test("embedded chat exposes Workflow Builder and refuses context-less builder cloud calls", async ({ page }) => {
   let modelCatalogRequests = 0;
+  let agentDefinitionRequests = 0;
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/agent-models") modelCatalogRequests += 1;
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/agent-models") modelCatalogRequests += 1;
+    if (path === "/api/agent-definitions") agentDefinitionRequests += 1;
   });
 
   await page.goto(embedUrl, { waitUntil: "networkidle" });
@@ -20,6 +23,9 @@ test("embedded chat exposes Workflow Builder and refuses context-less builder cl
   await expect(page.getByRole("alert")).toHaveText("Reconnect the embedded page with an authenticated workspace session to load cloud models.");
   await expect(page.getByRole("alert")).not.toContainText(/missing-host-context|host_auth_required|workspace_fetch/i);
   expect(modelCatalogRequests).toBe(requestsBeforeBuilderMount);
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await expect(page.getByText("Reconnect the embedded page with an authenticated workspace session to save agent drafts.")).toBeVisible();
+  expect(agentDefinitionRequests).toBe(0);
   await page.getByRole("button", { name: "Return to the chat workspace" }).click();
   await expect(page.locator('[data-agent-mode="workflow-builder"]')).toHaveCount(0);
 });

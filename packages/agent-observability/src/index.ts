@@ -55,11 +55,16 @@ export interface AgentUiTriggerBindingSnapshot {
   disabledReason: "integration_not_yet_available";
 }
 
+export interface AgentUiChannelWorkflowSnapshot {
+  workflowId: string;
+}
+
 export interface AgentUiChannelsStateSnapshot {
   schemaVersion: "sonik.agent_ui.channels_state.v1";
   fixtureOnly: true;
   sessionId: string | null;
   status: "idle" | "loading" | "ready" | "saving" | "error";
+  workflows: AgentUiChannelWorkflowSnapshot[];
   channels: AgentUiChannelSnapshot[];
   triggerBindings: AgentUiTriggerBindingSnapshot[];
   message?: string;

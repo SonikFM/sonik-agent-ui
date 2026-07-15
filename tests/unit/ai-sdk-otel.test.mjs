@@ -12,6 +12,7 @@ import {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const probe = path.join(root, "tests/unit/ai-sdk-otel-probe.mjs");
 const mainAgentProbe = path.join(root, "tests/unit/ai-sdk-otel-main-agent-probe.mjs");
+const registrationFailureProbe = path.join(root, "tests/unit/ai-sdk-otel-registration-failure-probe.mjs");
 const run = (scenario) => {
   const child = spawnSync(process.execPath, ["--experimental-strip-types", probe, scenario], {
     cwd: root,
@@ -36,6 +37,15 @@ assert.equal(disabled.events.length, 0, "per-call telemetry opt-out must emit ze
 const double = run("double");
 assert.deepEqual(double.registration, [true, false], "global registration must be idempotent");
 assert.equal(double.events.length, registered.events.length, "double registration must not duplicate spans");
+
+const registrationFailureChild = spawnSync(process.execPath, ["--experimental-strip-types", registrationFailureProbe], {
+  cwd: root,
+  encoding: "utf8",
+  maxBuffer: 4_000_000,
+});
+assert.equal(registrationFailureChild.status, 0, `registration failure probe failed:\n${registrationFailureChild.stderr}\n${registrationFailureChild.stdout}`);
+const registrationFailure = JSON.parse(registrationFailureChild.stdout.trim().split("\n").at(-1));
+assert.deepEqual(registrationFailure, { first: false, second: false, calls: 2 }, "telemetry boot failures remain non-fatal and do not mark registration complete");
 
 const failed = run("error");
 assert.ok(failed.events.some((event) => event.ok === false), "provider failures must produce a structural error status");
@@ -110,6 +120,7 @@ const configSource = readFileSync(path.join(root, "apps/standalone-sveltekit/sve
 const agentSource = readFileSync(path.join(root, "apps/standalone-sveltekit/src/lib/agent.ts"), "utf8");
 const searchSource = readFileSync(path.join(root, "apps/standalone-sveltekit/src/lib/tools/search.ts"), "utf8");
 const draftSource = readFileSync(path.join(root, "apps/standalone-sveltekit/src/lib/tools/drafting-agent.ts"), "utf8");
+const evidenceSource = readFileSync(path.join(root, "scripts/ai-sdk-otel-evidence.mjs"), "utf8");
 const assessmentSource = readFileSync(path.join(root, "docs/research/ai-sdk-7-assessment-2026-07-13.md"), "utf8");
 assert.match(instrumentationSource, /registerAiSdkTelemetry\(\)/);
 assert.match(configSource, /instrumentation:\s*\{\s*server:\s*true/);
@@ -117,6 +128,8 @@ assert.doesNotMatch(configSource, /tracing\s*:/, "SvelteKit framework tracing mu
 assert.match(agentSource, /createAiSdkTelemetryOptions\(AI_SDK_TELEMETRY_FUNCTION\.main/);
 assert.match(searchSource, /createAiSdkTelemetryOptions\(AI_SDK_TELEMETRY_FUNCTION\.search/);
 assert.match(draftSource, /createAiSdkTelemetryOptions\(AI_SDK_TELEMETRY_FUNCTION\.draftWorkflow/);
+assert.match(evidenceSource, /privacy:\s*summarizeTracePrivacy\(trace\.events\)/, "privacy evidence must be derived from the captured trace");
+assert.doesNotMatch(evidenceSource, /onlyStructuralFields:\s*true|inputsRecorded:\s*false|outputsRecorded:\s*false/, "privacy outcomes must not be hardcoded");
 assert.match(bridgeSource, /recordInputs:\s*false/);
 assert.match(bridgeSource, /recordOutputs:\s*false/);
 for (const option of ["usage", "providerMetadata", "embedding", "reranking", "runtimeContext", "headers", "toolChoice", "schema"]) {
@@ -125,6 +138,15 @@ for (const option of ["usage", "providerMetadata", "embedding", "reranking", "ru
 assert.doesNotMatch(readFileSync(path.join(root, "apps/standalone-sveltekit/package.json"), "utf8"), /"@opentelemetry\//, "G016 must add no OTel dependency");
 try {
   const benchmark = JSON.parse(readFileSync(path.join(root, ".omx/evidence/g016-ai-sdk-otel-benchmark.json"), "utf8"));
+  const traceEvents = readFileSync(path.join(root, ".omx/evidence/g016-ai-sdk-otel-local-trace.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  assert.equal(benchmark.privacy.traceEventCount, traceEvents.length, "privacy event count must match the captured trace");
+  assert.equal(benchmark.privacy.onlyStructuralFields, true);
+  assert.equal(benchmark.privacy.inputsRecorded, false);
+  assert.equal(benchmark.privacy.outputsRecorded, false);
   assert.match(assessmentSource, new RegExp(`\\+${benchmark.deltaMs.enabledMinusUnregisteredP50} ms p50`));
   assert.match(assessmentSource, new RegExp(`\\+${benchmark.deltaMs.enabledMinusUnregisteredP95} ms`));
 } catch (error) {

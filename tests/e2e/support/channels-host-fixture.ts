@@ -1,6 +1,7 @@
 import type { Page, Route } from "@playwright/test";
 import {
   channelDefinitionFixtures,
+  channelFixtureWorkflowReferences,
   triggerBindingFixtures,
 } from "../../../packages/tool-contracts/dist/channel-fixtures.js";
 
@@ -46,6 +47,7 @@ function channelProjection(triggerBindings: typeof triggerBindingFixtures) {
     fixtureOnly: true,
     sessionId: CHANNELS_FIXTURE_SESSION_ID,
     status: "ready",
+    workflows: channelFixtureWorkflowReferences.map((workflow) => ({ workflowId: workflow.workflowId })),
     channels: channelDefinitionFixtures.map((channel) => ({
       schemaVersion: channel.schemaVersion,
       channelId: channel.channelId,

@@ -1,7 +1,13 @@
 import { env } from "$env/dynamic/private";
 import { error, json } from "@sveltejs/kit";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
-import { getRequestWorkspaceCommitReceipt, getRequestWorkspacePersistence, recordRequestWorkspaceCommitReceipt } from "$lib/server/workspace-request-store";
+import {
+  claimRequestWorkspaceCommit,
+  getRequestWorkspaceCommitReceipt,
+  getRequestWorkspacePersistence,
+  recordRequestWorkspaceCommitReceipt,
+  releaseRequestWorkspaceCommitClaim,
+} from "$lib/server/workspace-request-store";
 import { commitLedgerFailureReason, runIdempotentCommit } from "$lib/server/commit-idempotency";
 import { AGENT_UI_HOST_CONTEXT_HEADER } from "$lib/server/workspace-services";
 import {
@@ -69,6 +75,7 @@ export const POST: RequestHandler = async (event) => {
   const commit = () => commitBookingContextIntakeCommand(
     {
       sessionId,
+      requestId: `intake:${idempotencyKey}`,
       persistence,
       hostSession,
       approvedCommandIds,
@@ -78,11 +85,22 @@ export const POST: RequestHandler = async (event) => {
     },
     artifactId,
   );
+  const claimToken = globalThis.crypto.randomUUID();
   const outcome = await runIdempotentCommit({
     getReceipt: async () => (await getRequestWorkspaceCommitReceipt<Awaited<ReturnType<typeof commit>>>(event, {
       kind: "intake",
       idempotency_key: idempotencyKey,
     }))?.receipt ?? null,
+    claim: async () => (await claimRequestWorkspaceCommit(event, {
+      kind: "intake",
+      idempotency_key: idempotencyKey,
+      claim_token: claimToken,
+    })).acquired,
+    releaseClaim: () => releaseRequestWorkspaceCommitClaim(event, {
+      kind: "intake",
+      idempotency_key: idempotencyKey,
+      claim_token: claimToken,
+    }),
     commit,
     recordReceipt: (receipt) => recordRequestWorkspaceCommitReceipt(event, {
       kind: "intake",
@@ -99,10 +117,16 @@ export const POST: RequestHandler = async (event) => {
     }),
   });
 
-  if (outcome.kind === "ledger_read_failed") {
+  if (outcome.kind === "ledger_read_failed" || outcome.kind === "ledger_claim_failed") {
     return json(
       { ok: false, error: "idempotency_unavailable", message: "The intake could not be safely retried because commit history is unavailable." },
       { status: 503 },
+    );
+  }
+  if (outcome.kind === "commit_in_progress") {
+    return json(
+      { ok: false, error: "commit_in_progress", safeToRetry: true, message: "This intake approval is already being committed." },
+      { status: 409 },
     );
   }
   if (outcome.kind === "replayed") await recordCommitTelemetry({ ok: true, artifactId, sessionId, reason: "idempotent_replay" });

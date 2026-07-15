@@ -490,7 +490,7 @@ export const POST: RequestHandler = async (event) => {
   const workspaceSessionId = trustedWorkspace?.sessionId ?? requestedWorkspaceSessionId;
   const requestPersistence = trustedWorkspace?.persistence ?? getRequestWorkspacePersistence(event);
   if (hasSelectedWorkspaceContext && !workspaceSessionId) {
-    throw new AgentUiFileError(400, "Selected file and document context requires a workspace session");
+    throw new AgentUiFileError(400, "Selected file and document context requires a workspace session", { code: "invalid_request", phase: "pre_stream" });
   }
   const activeDocument = await resolveActiveDocumentForRequest(event, body?.workspace?.activeDocument, hasSelectedWorkspaceContext ? workspaceSessionId : undefined);
   const telemetrySessionId = hasSelectedWorkspaceContext ? workspaceSessionId : activeDocument?.session_id ?? workspaceSessionId;
