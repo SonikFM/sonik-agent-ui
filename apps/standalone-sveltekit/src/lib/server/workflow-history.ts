@@ -29,7 +29,7 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
       ? deps.workflowRuns.getRun(deps.owner, query.workflowRunId).then((row) => row ? [row] : [])
       : deps.workflowRuns.listRuns(deps.owner),
     query.conversationRunId ? deps.workspace.getRun(query.conversationRunId) : Promise.resolve(null),
-    query.artifactId ? failSoft(() => deps.workspace.getArtifact(query.artifactId), null) : Promise.resolve(null),
+    query.artifactId ? failSoft(() => deps.workspace.getArtifact(query.artifactId!), null) : Promise.resolve(null),
   ]);
   const workflowMatches = workflowCandidates.filter((row) => matchesWorkflow(row, query));
   const sessionId = query.sessionId
