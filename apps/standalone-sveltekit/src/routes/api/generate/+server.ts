@@ -596,7 +596,8 @@ export const POST: RequestHandler = async (event) => {
       assertAgentDefinitionAuthorized(agentDefinitionAuthority, "start");
     } catch (error) {
       const message = error instanceof Error ? error.message : "agent_definition_authorization_failed";
-      throw new AgentUiFileError(message.endsWith("_forbidden") ? 403 : 401, message, { code: message, phase: "pre_stream" });
+      const forbidden = message.endsWith("_forbidden");
+      throw new AgentUiFileError(forbidden ? 403 : 401, message, { code: forbidden ? "invalid_request" : "host_auth_required", phase: "pre_stream" });
     }
   }
   const publishedAgentDefinition = publishedAgentId && agentDefinitionAuthority
