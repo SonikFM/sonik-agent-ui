@@ -17,6 +17,7 @@ import {
   resolveWorkflowRunBusyDisabledState,
   selectActiveWorkflowRun,
   resolveWorkflowDraftLifecycle,
+  hasUnsavedWorkflowChanges,
   workflowDefinitionToVNext,
   workflowVNextToDefinition,
 } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts";
@@ -115,12 +116,24 @@ const invalidWorkflowResult = validateWorkflowDefinition({ nodes: [{ nodeId: "n1
 assert.equal(invalidWorkflowResult.ok, false, "an invalid node type must fail workflowDefinitionSchema validation");
 assert.ok(Array.isArray(invalidWorkflowResult.issues) && invalidWorkflowResult.issues.length > 0);
 
-assert.equal(resolveWorkflowDraftLifecycle({ valid: false, saving: false, conflicted: false, dirty: false, draftRevision: null, publishedRevision: null }), "invalid");
-assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: true, conflicted: false, dirty: true, draftRevision: 1, publishedRevision: null }), "saving");
-assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: false, conflicted: true, dirty: false, draftRevision: 1, publishedRevision: null }), "conflicted");
-assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: false, conflicted: false, dirty: true, draftRevision: 1, publishedRevision: 1 }), "dirty");
-assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: false, conflicted: false, dirty: false, draftRevision: 2, publishedRevision: 1 }), "outdated");
-assert.equal(resolveWorkflowDraftLifecycle({ valid: true, saving: false, conflicted: false, dirty: false, draftRevision: 2, publishedRevision: 2 }), "published");
+const lifecycle = (overrides = {}) => resolveWorkflowDraftLifecycle({
+  valid: true, saving: false, publishing: false, conflicted: false, failed: false,
+  dirty: false, draftRevision: 1, publishedRevision: null, ...overrides,
+});
+assert.equal(lifecycle({ draftRevision: null }), "new");
+assert.equal(lifecycle({ dirty: true }), "dirty");
+assert.equal(lifecycle({ saving: true, dirty: true }), "saving");
+assert.equal(lifecycle(), "saved");
+assert.equal(lifecycle({ publishing: true }), "publishing");
+assert.equal(lifecycle({ conflicted: true }), "conflicted");
+assert.equal(lifecycle({ valid: false }), "invalid");
+assert.equal(lifecycle({ failed: true, dirty: true }), "failed");
+assert.equal(lifecycle({ draftRevision: 2, publishedRevision: 1 }), "outdated");
+assert.equal(lifecycle({ draftRevision: 2, publishedRevision: 2 }), "published");
+assert.equal(hasUnsavedWorkflowChanges({ dirty: false, saving: false, publishing: false }), false);
+assert.equal(hasUnsavedWorkflowChanges({ dirty: true, saving: false, publishing: false }), true);
+assert.equal(hasUnsavedWorkflowChanges({ dirty: false, saving: true, publishing: false }), true);
+assert.equal(hasUnsavedWorkflowChanges({ dirty: false, saving: false, publishing: true }), false, "publishing an already-saved revision is not unsaved work");
 
 const vNextWorkflow = workflowDefinitionToVNext(emptyWorkflow);
 assert.equal(vNextWorkflow.schemaVersion, "sonik.workflow.vnext.v1");
@@ -492,6 +505,15 @@ assert.equal(
 );
 assert.equal(canvasSource.includes("function addNode(): void {\n    if (locked) return;"), true, "locked (published/example) workflows must reject node mutation");
 assert.equal(canvasSource.includes("function removeEdge(edgeId: string): void {\n    if (locked) return;"), true, "locked workflows must reject edge mutation");
+assert.match(canvasSource, /function redo\(\): void/);
+assert.match(canvasSource, /data-workflow-port="input"/);
+assert.match(canvasSource, /data-workflow-port="output"/);
+assert.match(canvasSource, /function openInspector\(nodeId: string\): void/);
+assert.match(canvasSource, /Workflow is valid\.|Workflow is invalid:/, "canvas mutations announce validation recovery");
+assert.match(builderRootSource, /beforeunload/);
+assert.match(builderRootSource, /hasUnsavedWorkflowChanges/);
+assert.match(builderRootSource, /data-builder-action="publish"/);
+assert.match(builderRootSource, /focusBuilderAction/);
 
 // -- agent-definitions API: save_draft zod-validates, publish delegates ----
 

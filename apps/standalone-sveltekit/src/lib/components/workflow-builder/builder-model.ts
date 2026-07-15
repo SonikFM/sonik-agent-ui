@@ -27,7 +27,7 @@ import type { AgentUiApprovalStateSnapshot, AgentUiWorkflowPhase } from "@sonik-
 
 export type BuilderTab = "config" | "canvas" | "preview";
 export type WorkflowLockState = "draft" | "locked";
-export type WorkflowDraftLifecycle = "dirty" | "saving" | "saved" | "conflicted" | "published" | "outdated" | "invalid";
+export type WorkflowDraftLifecycle = "new" | "dirty" | "saving" | "saved" | "publishing" | "published" | "conflicted" | "outdated" | "invalid" | "failed";
 export type KnowledgeRef = AgentDefinition["knowledgeRefs"][number];
 export type ActiveWorkflowRunSelection = { workflowId: string; run: WorkflowRunState };
 export type WorkflowRunAction = "preview" | "approve" | "commit";
@@ -194,19 +194,28 @@ export interface WorkflowDefinitionValidation {
 export function resolveWorkflowDraftLifecycle(input: {
   valid: boolean;
   saving: boolean;
+  publishing: boolean;
   conflicted: boolean;
+  failed: boolean;
   dirty: boolean;
   draftRevision: number | null;
   publishedRevision: number | null;
 }): WorkflowDraftLifecycle {
   if (!input.valid) return "invalid";
+  if (input.publishing) return "publishing";
   if (input.saving) return "saving";
   if (input.conflicted) return "conflicted";
+  if (input.failed) return "failed";
   if (input.dirty) return "dirty";
+  if (input.draftRevision === null) return "new";
   if (input.publishedRevision !== null) {
     return input.publishedRevision === input.draftRevision ? "published" : "outdated";
   }
   return "saved";
+}
+
+export function hasUnsavedWorkflowChanges(input: { dirty: boolean; saving: boolean; publishing: boolean }): boolean {
+  return input.dirty || input.saving;
 }
 
 /** Minimal explicit bridge while the canvas still edits the deprecated marketplace shape. */
