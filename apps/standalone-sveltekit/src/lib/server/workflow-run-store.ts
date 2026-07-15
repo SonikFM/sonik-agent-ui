@@ -3,13 +3,14 @@ import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-r
 import {
   canTransitionEffectClaim,
   effectClaimSchema,
+  externalEffectIdempotencyKey,
   parseCanonicalWorkflowEvent,
   replayCanonicalWorkflowEvents,
   runLeaseSchema,
-  workflowEffectIdempotencyKey,
   workflowVNextRunStateSchema,
   workflowWaitpointSchema,
   type CanonicalWorkflowEvent,
+  type ExternalEffectIdentity,
   type WorkflowWaitpoint,
 } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { WorkspaceSqlExecutor, WorkspaceSqlTransaction } from "@sonik-agent-ui/workspace-session";
@@ -64,6 +65,7 @@ export interface ClaimWorkflowEffectInput {
   attemptId: string;
   idempotencyKey: string;
   providerSupportsIdempotency: boolean;
+  externalEffectIdentity: ExternalEffectIdentity;
 }
 
 export interface WorkflowRunJournalStore {
@@ -76,7 +78,7 @@ export interface WorkflowRunJournalStore {
   createWaitpoint(owner: WorkflowRunOwner, waitpoint: WorkflowWaitpoint): Promise<boolean>;
   resolveWaitpoint(owner: WorkflowRunOwner, runId: string, waitpointId: string): Promise<boolean>;
   claimEffect(owner: WorkflowRunOwner, input: ClaimWorkflowEffectInput): Promise<{ created: boolean; claim: WorkflowEffectClaim }>;
-  transitionEffectClaim(owner: WorkflowRunOwner, runId: string, logicalEffectId: string, from: WorkflowEffectClaim["status"], to: WorkflowEffectClaim["status"], result?: unknown): Promise<WorkflowEffectClaim | null>;
+  transitionEffectClaim(owner: WorkflowRunOwner, claimId: string, from: WorkflowEffectClaim["status"], to: WorkflowEffectClaim["status"], result?: unknown): Promise<WorkflowEffectClaim | null>;
 }
 
 export interface WorkflowRunStore {
@@ -142,6 +144,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
   const leases = new Map<string, WorkflowRunLease>();
   const waitpoints = new Map<string, WorkflowWaitpoint & { resolved: boolean }>();
   const claims = new Map<string, WorkflowEffectClaim>();
+  const claimIds = new Map<string, string>();
 
   return {
     async appendEventAndProject(ownerInput, input) {
@@ -205,17 +208,23 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       const owner = normalizeWorkflowRunOwner(ownerInput);
       if (!runStore.getRun(owner, input.runId)) throw new Error("workflow_run_not_found");
       validateEffectIdentity(input);
-      const key = effectClaimKey(owner, input.runId, input.logicalEffectId);
+      const key = effectClaimKey(owner, input.externalEffectIdentity);
       const current = claims.get(key);
-      if (current) return { created: false, claim: current };
+      if (current) {
+        assertSameExternalEffect(current.externalEffectIdentity, input.externalEffectIdentity);
+        return { created: false, claim: current };
+      }
       const now = new Date().toISOString();
       const claim = effectClaimSchema.parse({ ...input, status: "claimed", createdAt: now, updatedAt: now });
       claims.set(key, claim);
+      claimIds.set(effectClaimIdKey(owner, claim.claimId), key);
       return { created: true, claim };
     },
-    async transitionEffectClaim(ownerInput, runId, logicalEffectId, from, to, result) {
+    async transitionEffectClaim(ownerInput, claimId, from, to, result) {
       if (!canTransitionEffectClaim(from, to)) throw new Error("invalid_effect_claim_transition");
-      const key = effectClaimKey(normalizeWorkflowRunOwner(ownerInput), runId, logicalEffectId);
+      const owner = normalizeWorkflowRunOwner(ownerInput);
+      const key = claimIds.get(effectClaimIdKey(owner, claimId));
+      if (!key) return null;
       const current = claims.get(key);
       if (!current || current.status !== from) return null;
       const updated = { ...current, status: to, updatedAt: new Date().toISOString(), ...(result === undefined ? {} : { result }) };
@@ -351,6 +360,10 @@ type EffectClaimColumns = {
   claim_id: string;
   run_id: string;
   logical_effect_id: string;
+  effect_namespace: string;
+  external_effect_key_digest: string;
+  command_id: string;
+  resolved_input_hash: string;
   attempt_id: string;
   idempotency_key: string;
   provider_supports_idempotency: boolean;
@@ -508,23 +521,24 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
           with inserted as (
             insert into sonik_agent_ui.agent_workflow_effect_claims
               (organization_id, user_id, run_id, logical_effect_id, claim_id, attempt_id,
-               idempotency_key, provider_supports_idempotency, status, created_at, updated_at)
-            select $1, $2, $3, $4, $5, $6, $7, $8, 'claimed', now(), now()
+               idempotency_key, provider_supports_idempotency, effect_namespace,
+               external_effect_key_digest, command_id, resolved_input_hash, status, created_at, updated_at)
+            select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'claimed', now(), now()
             where exists (
               select 1 from sonik_agent_ui.agent_workflow_runs
               where organization_id = $1 and user_id = $2 and run_id = $3
             )
-            on conflict (organization_id, user_id, run_id, logical_effect_id) do nothing
+            on conflict (organization_id, effect_namespace, external_effect_key_digest) do nothing
             returning *, true as created
           )
-          select claim_id, run_id, logical_effect_id, attempt_id, idempotency_key,
+          select claim_id, run_id, logical_effect_id, effect_namespace, external_effect_key_digest, command_id, resolved_input_hash, attempt_id, idempotency_key,
                  provider_supports_idempotency, status, result, created_at, updated_at, created
           from inserted
           union all
-          select claim_id, run_id, logical_effect_id, attempt_id, idempotency_key,
+          select claim_id, run_id, logical_effect_id, effect_namespace, external_effect_key_digest, command_id, resolved_input_hash, attempt_id, idempotency_key,
                  provider_supports_idempotency, status, result, created_at, updated_at, false as created
           from sonik_agent_ui.agent_workflow_effect_claims
-          where organization_id = $1 and user_id = $2 and run_id = $3 and logical_effect_id = $4
+          where organization_id = $1 and effect_namespace = $9 and external_effect_key_digest = $10
             and not exists (select 1 from inserted)
           limit 1
         `, [
@@ -536,25 +550,28 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
           input.attemptId,
           input.idempotencyKey,
           input.providerSupportsIdempotency,
+          input.externalEffectIdentity.namespace,
+          input.externalEffectIdentity.keyDigest,
+          input.externalEffectIdentity.commandId,
+          input.externalEffectIdentity.resolvedInputHash,
         ]);
         const row = result.rows[0];
         if (!row) throw new Error("workflow_run_not_found");
         const claim = effectClaimFromColumns(row);
-        if (claim.idempotencyKey !== input.idempotencyKey) throw new Error("logical_effect_identity_conflict");
+        assertSameExternalEffect(claim.externalEffectIdentity, input.externalEffectIdentity);
         return { created: row.created === true, claim };
       });
     },
-    async transitionEffectClaim(ownerInput, runId, logicalEffectId, from, to, resultValue) {
+    async transitionEffectClaim(ownerInput, claimId, from, to, resultValue) {
       if (!canTransitionEffectClaim(from, to)) throw new Error("invalid_effect_claim_transition");
       return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
         const result = await tx.query<EffectClaimColumns>(`
           update sonik_agent_ui.agent_workflow_effect_claims
-          set status = $6, result = $7::jsonb, updated_at = now()
-          where organization_id = $1 and user_id = $2 and run_id = $3
-            and logical_effect_id = $4 and status = $5
-          returning claim_id, run_id, logical_effect_id, attempt_id, idempotency_key,
+          set status = $4, result = $5::jsonb, updated_at = now()
+          where organization_id = $1 and claim_id = $2 and status = $3
+          returning claim_id, run_id, logical_effect_id, effect_namespace, external_effect_key_digest, command_id, resolved_input_hash, attempt_id, idempotency_key,
                     provider_supports_idempotency, status, result, created_at, updated_at
-        `, [owner.organizationId, owner.userId, runId, logicalEffectId, from, to, JSON.stringify(resultValue ?? null)]);
+        `, [owner.organizationId, claimId, from, to, JSON.stringify(resultValue ?? null)]);
         return result.rows[0] ? effectClaimFromColumns(result.rows[0]) : null;
       });
     },
@@ -634,17 +651,25 @@ function validateJournalAppend(input: AppendWorkflowRunEventInput): CanonicalWor
 }
 
 function validateEffectIdentity(input: ClaimWorkflowEffectInput): void {
-  if (input.idempotencyKey !== workflowEffectIdempotencyKey(input.runId, input.logicalEffectId)) {
+  if (input.idempotencyKey !== externalEffectIdempotencyKey(input.externalEffectIdentity)) {
     throw new Error("invalid_effect_idempotency");
   }
+}
+
+function assertSameExternalEffect(existing: ExternalEffectIdentity, requested: ExternalEffectIdentity): void {
+  if (existing.commandId !== requested.commandId || existing.resolvedInputHash !== requested.resolvedInputHash) throw new Error("external_effect_identity_conflict");
 }
 
 function waitpointKey(owner: WorkflowRunOwner, runId: string, waitpointId: string): string {
   return JSON.stringify([owner.organizationId, owner.userId, runId, waitpointId]);
 }
 
-function effectClaimKey(owner: WorkflowRunOwner, runId: string, logicalEffectId: string): string {
-  return JSON.stringify([owner.organizationId, owner.userId, runId, logicalEffectId]);
+function effectClaimKey(owner: WorkflowRunOwner, identity: ExternalEffectIdentity): string {
+  return JSON.stringify([owner.organizationId, identity.namespace, identity.keyDigest]);
+}
+
+function effectClaimIdKey(owner: WorkflowRunOwner, claimId: string): string {
+  return JSON.stringify([owner.organizationId, claimId]);
 }
 
 function effectClaimFromColumns(row: EffectClaimColumns): WorkflowEffectClaim {
@@ -652,6 +677,12 @@ function effectClaimFromColumns(row: EffectClaimColumns): WorkflowEffectClaim {
     claimId: row.claim_id,
     runId: row.run_id,
     logicalEffectId: row.logical_effect_id,
+    externalEffectIdentity: {
+      namespace: row.effect_namespace,
+      keyDigest: row.external_effect_key_digest,
+      commandId: row.command_id,
+      resolvedInputHash: row.resolved_input_hash,
+    },
     attemptId: row.attempt_id,
     idempotencyKey: row.idempotency_key,
     providerSupportsIdempotency: row.provider_supports_idempotency,

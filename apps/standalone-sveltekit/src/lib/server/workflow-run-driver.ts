@@ -129,7 +129,7 @@ export class WorkflowRunDriver {
           if (claim.claim.status === "outcome_unknown" && this.deps.reconcileEffect) {
             const reconciled = await this.deps.reconcileEffect(node, claim.claim);
             if (reconciled.status === "succeeded" && reconciled.receipt) {
-              await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "outcome_unknown", "reconciled", reconciled);
+              await this.deps.journal.transitionEffectClaim(this.deps.owner, claim.claim.claimId, "outcome_unknown", "reconciled", reconciled);
               state = await this.complete(state, request, node, reconciled.output);
               completed += 1;
               continue;
@@ -137,7 +137,7 @@ export class WorkflowRunDriver {
           }
           return state;
         }
-        await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "claimed", "in_flight");
+        await this.deps.journal.transitionEffectClaim(this.deps.owner, claim.claim.claimId, "claimed", "in_flight");
       }
 
       let response: EngineResponse;
@@ -148,7 +148,7 @@ export class WorkflowRunDriver {
         try { response = await dispatchWorkflowNode(retryRequest, executionContext); }
         catch (error) {
           if (!logicalEffectId) throw error;
-          await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "outcome_unknown", { code: "provider_response_lost" });
+          await this.deps.journal.transitionEffectClaim(this.deps.owner, claim!.claim.claimId, "in_flight", "outcome_unknown", { code: "provider_response_lost" });
           return this.appendStatus(state, request, "waiting", "outcome_unknown");
         }
         const reasoningTimeExhausted = node.nodeType === "reasoning" && this.now() - reasoningStartedAt >= (node.reasoning?.budgets.maxWallTimeMs ?? 0);
@@ -161,18 +161,18 @@ export class WorkflowRunDriver {
       }
       if (response.status === "retryable_error") {
         if (logicalEffectId) {
-          await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "failed", response);
+          await this.deps.journal.transitionEffectClaim(this.deps.owner, claim!.claim.claimId, "in_flight", "failed", response);
           return this.appendStatus(state, request, "failed", "unsafe_write_retry_refused", { schedulerFrontier: [] });
         }
         return this.appendStatus(state, request, "failed", node.nodeType === "reasoning" ? "reasoning_budget_exhausted" : node.nodeType === "tool_preview" ? "safe_read_retry_exhausted" : "unsafe_retry_refused", { schedulerFrontier: [] });
       }
       if (response.status === "terminal_error") {
-        if (logicalEffectId) await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "failed", response);
+        if (logicalEffectId) await this.deps.journal.transitionEffectClaim(this.deps.owner, claim!.claim.claimId, "in_flight", "failed", response);
         return this.appendStatus(state, request, "failed", response.error.code, { schedulerFrontier: [] });
       }
       if (logicalEffectId) {
         if (!response.receipt) return this.appendStatus(state, request, "failed", "semantic_receipt_required", { schedulerFrontier: [] });
-        await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "succeeded", response);
+        await this.deps.journal.transitionEffectClaim(this.deps.owner, claim!.claim.claimId, "in_flight", "succeeded", response);
       }
       state = await this.complete(state, request, node, response.output);
       completed += 1;
