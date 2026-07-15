@@ -82,9 +82,8 @@ function normalizeQuery(input: WorkflowHistoryQuery): WorkflowHistoryQuery {
   }));
 }
 
-function matchesWorkflow(row: WorkflowRunRow, query: WorkflowHistoryQuery, sessionId?: string): boolean {
+function matchesWorkflow(row: WorkflowRunRow, query: WorkflowHistoryQuery): boolean {
   if (query.workflowRunId) return row.runId === query.workflowRunId;
-  if (!query.workflowRunId && sessionId && row.hostSessionId !== sessionId) return false;
   if (query.nodeId && !row.state.nodeStates[query.nodeId]) return false;
   if (query.approvalId && !projectApprovals(row).some((approval) => approval.approvalId === query.approvalId)) return false;
   if (query.artifactId && row.state.artifactId !== query.artifactId) return false;
