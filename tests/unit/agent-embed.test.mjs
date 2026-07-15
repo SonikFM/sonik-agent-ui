@@ -552,9 +552,10 @@ assert.equal(localEmbedSmokeSource.includes("evidence.sessionBootstrap"), true, 
 assert.equal(localEmbedSmokeSource.includes("usedManualLauncher: false"), true, "local embed smoke should prove artifact creation auto-opens canvas without the manual #open-canvas launcher");
 assert.equal(localEmbedSmokeSource.includes("Automatic canvas.open changed iframe src"), true, "local embed smoke should fail if automatic canvas opening reloads the iframe instead of moving it");
 assert.equal(localEmbedSmokeSource.includes("Automatic canvas.open did not preserve active stream state"), true, "local embed smoke should prove stream state is preserved while the iframe moves to canvas");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not render artifact above compact chat"), true, "local embed smoke should prove artifact renders above compact chat in canvas mode");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide duplicate AgentConversation header"), true, "local embed smoke should prove embedded canvas hides duplicate chat header");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide duplicate session rail/session switcher"), true, "local embed smoke should prove embedded canvas hides duplicate session chrome");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not preserve expected artifact/chat ordering"), true, "local embed smoke should prove the artifact never follows compact chat in canvas mode");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not keep the AgentConversation header visible"), true, "local embed smoke should prove embedded canvas keeps the conversation header visible");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide the session rail while keeping the chat-history switcher visible"), true, "local embed smoke should prove embedded canvas hides the session rail while keeping chat history available");
+assert.equal(localEmbedSmokeSource.includes("the conversation header and chat-history switcher visible, and the session rail hidden"), true, "local embed smoke PASS evidence should report all three canvas chrome facts");
 assert.equal(bookingContextSmokeSource.includes("usedDeterministicHostController"), true, "booking context release gate should report deterministic host-controller opening");
 assert.equal(bookingContextSmokeSource.includes("Booking embed did not open through window.__sonikAgentHost"), true, "booking context release gate should fail if host controller opening is unavailable");
 assert.equal(bookingReservationSmokeSource.includes("usedDeterministicHostController"), true, "booking reservation release gate should report deterministic host-controller opening");
