@@ -4,16 +4,19 @@ import {
   createCloudWorkflowRunJournalStore,
   createInMemoryWorkflowRunJournalStore,
 } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
-import { replayCanonicalWorkflowEvents, workflowEffectIdempotencyKey } from "../../packages/tool-contracts/dist/workflow-vnext.js";
+import { externalEffectIdempotencyKey, replayCanonicalWorkflowEvents } from "../../packages/tool-contracts/dist/workflow-vnext.js";
 import { train0CanonicalEvent, train0SelectedPathRunState } from "../../packages/tool-contracts/dist/workflow-vnext-fixtures.js";
 
 const owner = { organizationId: "org-1", userId: "user-1" };
+const sameOrgOwner = { organizationId: "org-1", userId: "user-2" };
 const otherOwner = { organizationId: "org-2", userId: "user-2" };
+const sameOrgRunId = "run-same-org";
+const otherOrgRunId = "run-other-org";
 const runStore = {
   getRun(candidate, runId) {
-    return candidate.organizationId === owner.organizationId
-      && candidate.userId === owner.userId
-      && runId === train0CanonicalEvent.workflowRunId ? {} : null;
+    return (candidate.organizationId === owner.organizationId && candidate.userId === owner.userId && runId === train0CanonicalEvent.workflowRunId)
+      || (candidate.organizationId === sameOrgOwner.organizationId && candidate.userId === sameOrgOwner.userId && runId === sameOrgRunId)
+      || (candidate.organizationId === otherOwner.organizationId && candidate.userId === otherOwner.userId && runId === otherOrgRunId) ? {} : null;
   },
 };
 const journal = createInMemoryWorkflowRunJournalStore(runStore);
@@ -62,16 +65,25 @@ const effectInput = {
   runId: train0CanonicalEvent.workflowRunId,
   logicalEffectId: "effect-1",
   attemptId: "attempt-1",
-  idempotencyKey: workflowEffectIdempotencyKey(train0CanonicalEvent.workflowRunId, "effect-1"),
+  externalEffectIdentity: { namespace: "booking:v1:create", keyDigest: `sha256:${"1".repeat(64)}`, commandId: "booking.create", resolvedInputHash: `sha256:${"2".repeat(64)}` },
   providerSupportsIdempotency: true,
 };
+effectInput.idempotencyKey = externalEffectIdempotencyKey(effectInput.externalEffectIdentity);
 assert.equal((await journal.claimEffect(owner, effectInput)).created, true);
 const retry = await journal.claimEffect(owner, { ...effectInput, claimId: "claim-2", attemptId: "attempt-2" });
 assert.equal(retry.created, false, "retries reuse the durable logical-effect claim");
 assert.equal(retry.claim.claimId, "claim-1");
-assert.equal((await journal.transitionEffectClaim(owner, effectInput.runId, effectInput.logicalEffectId, "claimed", "in_flight")).status, "in_flight");
-assert.equal((await journal.transitionEffectClaim(owner, effectInput.runId, effectInput.logicalEffectId, "in_flight", "outcome_unknown")).status, "outcome_unknown");
-const reconciled = await journal.transitionEffectClaim(owner, effectInput.runId, effectInput.logicalEffectId, "outcome_unknown", "reconciled", { receiptRef: "receipt-1" });
+const crossRun = await journal.claimEffect(sameOrgOwner, { ...effectInput, claimId: "claim-cross-run", runId: sameOrgRunId, attemptId: "attempt-cross-run" });
+assert.equal(crossRun.created, false, "the same trusted external key dedupes across runs and users in one organization");
+assert.equal(crossRun.claim.claimId, "claim-1");
+assert.equal((await journal.claimEffect(otherOwner, { ...effectInput, claimId: "claim-other-org", runId: otherOrgRunId, attemptId: "attempt-other-org" })).created, true, "the same external key remains isolated across organizations");
+await assert.rejects(() => journal.claimEffect(sameOrgOwner, { ...effectInput, claimId: "claim-conflict", runId: sameOrgRunId, attemptId: "attempt-conflict", externalEffectIdentity: { ...effectInput.externalEffectIdentity, commandId: "booking.cancel" } }), /external_effect_identity_conflict/);
+const distinctIdentity = { ...effectInput.externalEffectIdentity, keyDigest: `sha256:${"3".repeat(64)}` };
+assert.equal((await journal.claimEffect(sameOrgOwner, { ...effectInput, claimId: "claim-distinct", runId: sameOrgRunId, attemptId: "attempt-distinct", externalEffectIdentity: distinctIdentity, idempotencyKey: externalEffectIdempotencyKey(distinctIdentity) })).created, true, "distinct business keys may execute the same static workflow slot in separate runs");
+assert.equal((await journal.transitionEffectClaim(owner, effectInput.claimId, "claimed", "in_flight")).status, "in_flight");
+assert.equal(await journal.transitionEffectClaim(owner, effectInput.claimId, "claimed", "in_flight"), null, "effect claim transition is compare-and-swap");
+assert.equal((await journal.transitionEffectClaim(owner, effectInput.claimId, "in_flight", "outcome_unknown")).status, "outcome_unknown");
+const reconciled = await journal.transitionEffectClaim(owner, effectInput.claimId, "outcome_unknown", "reconciled", { receiptRef: "receipt-1" });
 assert.equal(reconciled.status, "reconciled");
 assert.deepEqual(reconciled.result, { receiptRef: "receipt-1" });
 await assert.rejects(
