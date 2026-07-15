@@ -383,14 +383,24 @@ export const approvalDecisionSchema = z.object({
 }).strict();
 export const publicApprovalDecisionRequestSchema = approvalDecisionSchema.omit({ hostSigned: true }).strict();
 export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>;
+export const approvalCommitContextSchema = z.object({
+  runId: z.string().min(1), organizationId: z.string().min(1), evaluatedAt: z.string().datetime(),
+}).strict();
+export type ApprovalCommitContext = z.infer<typeof approvalCommitContextSchema>;
 
 export function validateApprovalDecisionForCommit(
   decisionInput: unknown,
   definitionInput: unknown,
   commitNodeId: string,
+  expectedContextInput: unknown,
 ): ApprovalDecision {
   const decision = approvalDecisionSchema.parse(decisionInput);
+  const expectedContext = approvalCommitContextSchema.parse(expectedContextInput);
   const definition = workflowVNextDefinitionSchema.parse(definitionInput);
+  if (decision.runId !== expectedContext.runId || decision.organizationId !== expectedContext.organizationId) throw new Error("approval_context_mismatch");
+  const evaluatedAt = Date.parse(expectedContext.evaluatedAt);
+  if (evaluatedAt < Date.parse(decision.issuedAt)) throw new Error("approval_decision_not_yet_valid");
+  if (evaluatedAt >= Date.parse(decision.expiresAt)) throw new Error("approval_decision_expired");
   const commit = definition.nodes.find((node) => node.nodeId === commitNodeId && node.nodeType === "tool_commit");
   if (!commit?.effectBinding) throw new Error("commit_effect_binding_missing");
   const binding = commit.effectBinding;

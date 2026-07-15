@@ -123,7 +123,6 @@ export class NativeRunDriverSpike implements RunDriver {
         if (!claim.created) {
           if (claim.status === "succeeded" && claim.result?.kind === "completed") {
             state = this.completeNode(state, nodeId, claim.result, request);
-            this.store.setEffectStatus(state.workflowRunId, logicalEffectId, idempotencyKey!, "reconciled", claim.result);
             completedNodes += 1;
             continue;
           }
@@ -170,8 +169,7 @@ export class NativeRunDriverSpike implements RunDriver {
       if (logicalEffectId) this.store.setEffectStatus(state.workflowRunId, logicalEffectId, idempotencyKey!, "succeeded", result);
       else this.store.setNodeAttemptStatus(state.workflowRunId, nodeId, "succeeded", result);
       state = this.completeNode(state, nodeId, result, request);
-      if (logicalEffectId) this.store.setEffectStatus(state.workflowRunId, logicalEffectId, idempotencyKey!, "reconciled", result);
-      else this.store.setNodeAttemptStatus(state.workflowRunId, nodeId, "reconciled", result);
+      if (!logicalEffectId) this.store.setNodeAttemptStatus(state.workflowRunId, nodeId, "reconciled", result);
       completedNodes += 1;
     }
     return state.status === "succeeded" ? state : this.save(state, { ...state, status: "succeeded", compatibilityPhase: "committed" }, request);
