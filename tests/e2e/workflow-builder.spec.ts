@@ -277,21 +277,107 @@ test("the shipped reservation fixture renders LOCKED alongside an editable DRAFT
   await expect(page.getByText("DRAFT", { exact: true })).toBeVisible();
 });
 
-test("builder exposes honest lifecycle, isolated preview context, and keyboard canvas semantics", async ({ page }) => {
+test("draft lifecycle announces state and warns only for unsaved work", async ({ page }) => {
+  await installWorkflowBuilderDraftPersistenceFixture(page);
   await gotoFreshWorkspace(page, smokeUrl(null));
   await openWorkflowBuilder(page);
 
+  await expect(page.locator('[data-workflow-lifecycle="new"]')).toBeVisible();
+  await page.getByRole("tab", { name: "Canvas" }).click();
+  await page.getByLabel("Workflow title").first().fill("Governed author workflow");
   await expect(page.locator('[data-workflow-lifecycle="dirty"]')).toBeVisible();
-  await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
+
+  let dialogCount = 0;
+  page.on("dialog", async (dialog) => {
+    dialogCount += 1;
+    expect(dialog.message()).toBe("Discard unsaved workflow changes?");
+    await dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "Return to the chat workspace" }).click();
+  await expect(page.locator('[data-agent-mode="workflow-builder"]')).toBeVisible();
+  expect(dialogCount).toBe(1);
+
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await expect(page.locator('[data-workflow-lifecycle="saved"]')).toBeVisible();
+  await page.getByRole("button", { name: "Return to the chat workspace" }).click();
+  await expect(page.locator('[data-agent-mode="workflow-builder"]')).toHaveCount(0);
+  expect(dialogCount).toBe(1);
+});
+
+test("model catalog proves 35-row search, ten-row viewport, pointer and keyboard selection", async ({ page }) => {
+  await installModelCatalogFixture(page);
+  await gotoFreshWorkspace(page, smokeUrl(null));
+  await openWorkflowBuilder(page);
+
+  const listbox = page.getByRole("listbox", { name: "Model" });
+  await expect(page.getByRole("status").filter({ hasText: "35 model results available." })).toBeAttached();
+  const dimensions = await listbox.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+  expect(dimensions.clientHeight).toBe(800);
+  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
+
+  await page.getByLabel("Search models").fill("Fixture Model 35");
+  const finalModel = page.getByRole("option", { name: /Fixture Model 35/ });
+  await expect(finalModel).toContainText("Video");
+  await expect(finalModel).toContainText("Agent");
+  await expect(finalModel).toContainText("Audio");
+  await finalModel.click();
+  await expect(finalModel).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("status").filter({ hasText: "Selected model: Fixture Model 35." })).toBeAttached();
+
+  await page.getByLabel("Search models").fill("");
+  await listbox.focus();
+  await listbox.press("End");
+  await expect(page.getByRole("option", { name: /Fixture Model 35/ })).toBeFocused();
+  await page.keyboard.press("Home");
+  const firstModel = page.getByRole("option", { name: /Fixture Model 01/ });
+  await expect(firstModel).toBeFocused();
+  await firstModel.press("Enter");
+  await expect(firstModel).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "Expand catalog" }).click();
+  await expect(page.getByRole("button", { name: "Collapse catalog" })).toHaveAttribute("aria-expanded", "true");
+});
+
+test("capability readiness renders callable and actionable non-callable states", async ({ page }) => {
+  await installCapabilityReadinessFixture(page);
+  await gotoFreshWorkspace(page, smokeUrl(null));
+  await openWorkflowBuilder(page);
+
+  await page.getByText("amplify.campaign", { exact: true }).click();
+  await expect(page.getByText("amplify.campaign.preview", { exact: true })).toBeVisible();
+  await expect(page.getByText("callable", { exact: true })).toBeVisible();
+  await expect(page.getByText("amplify.campaign.create", { exact: true })).toBeVisible();
+  await expect(page.getByText("Restore the listed runtime prerequisites before enabling this capability.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Blocked: not_implemented, definition_incompatible, missing_context, missing_host_grant, kill_switched, version_not_pinned, preview_required, approval_required/)).toBeAttached();
+  await expect(page.getByLabel("amplify.campaign tool policy")).toHaveText("off");
+  await expect(page.getByText(/Not runnable: not_implemented/)).toBeVisible();
+});
+
+test("builder exposes isolated preview, full keyboard canvas semantics, and graph-free organizer", async ({ page }) => {
+  await installWorkflowBuilderDraftPersistenceFixture(page);
+  await gotoFreshWorkspace(page, smokeUrl(null));
+  await openWorkflowBuilder(page);
 
   await page.getByRole("tab", { name: "Canvas" }).click();
   await page.getByRole("button", { name: "Add node" }).first().click();
   const firstNode = page.locator('[data-workflow-node-index="0"]').first();
   await firstNode.focus();
+  await firstNode.press("ArrowRight");
+  await expect(firstNode.getByRole("button", { name: /output port/ })).toBeFocused();
+  await firstNode.getByRole("button", { name: /output port/ }).press("ArrowLeft");
+  await expect(firstNode.getByRole("button", { name: /input port/ })).toBeFocused();
+  await firstNode.focus();
+  await firstNode.press("Enter");
+  await expect(firstNode.getByLabel(/title$/)).toBeFocused();
+  await firstNode.focus();
   await firstNode.press("c");
   await expect(page.getByText(/Connected .* to .*/)).toBeAttached();
   await firstNode.press("Control+z");
   await expect(page.getByText("Undid the last canvas change.")).toBeAttached();
+  await page.getByRole("button", { name: "Redo" }).click();
+  await expect(page.getByText("Redid the last canvas change.")).toBeAttached();
+  await firstNode.focus();
+  await firstNode.press("d");
+  await expect(page.getByText(/Disconnected .* from .*/)).toBeAttached();
 
   await page.getByRole("tab", { name: "Debug & Preview" }).click();
   await expect(page.locator("[data-debug-preview-context]")).toContainText("Isolated preview context");
@@ -300,6 +386,59 @@ test("builder exposes honest lifecycle, isolated preview context, and keyboard c
   await page.getByRole("button", { name: "Organizer", exact: true }).click();
   await expect(page.locator("[data-organizer-panel]")).toBeVisible();
   await expect(page.locator('[data-agent-panel="workflow-builder-canvas"]')).toHaveCount(0);
+  for (const heading of ["Identity", "Instructions", "Knowledge", "Curated capabilities"]) {
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  await expect(page.getByText("Pending approval", { exact: true })).toBeVisible();
+  await expect(page.getByText("Recent run", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Test" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Publish" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Review approvals" })).toBeVisible();
+  await expect(page.getByText(/raw graph|MCP|model administration/i)).toHaveCount(0);
   await page.getByRole("button", { name: "History", exact: true }).click();
   await expect(page.locator("[data-run-history-panel]")).toBeVisible();
+});
+
+test("operator history visibly correlates the governed causal path", async ({ page }) => {
+  const query = {
+    sessionId: "session-e2e",
+    conversationRunId: "conversation-e2e",
+    workflowRunId: "workflow-run-e2e",
+    nodeId: "commit",
+    toolCallId: "tool-e2e",
+    approvalId: "approval-e2e",
+    artifactId: "artifact-e2e",
+    receiptId: "receipt-e2e",
+    requestId: "request-e2e",
+    traceId: "trace-e2e",
+  };
+  await page.route("**/api/workflow-history?*", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      ok: true,
+      history: {
+        query,
+        conversations: [{ conversationRunId: query.conversationRunId, sessionId: query.sessionId, requestId: query.requestId, traceId: query.traceId, startedAt: "2026-07-15T21:00:00.000Z", status: "completed" }],
+        workflows: [{ workflowRunId: query.workflowRunId, workflowId: "governed-author", workflowVersionId: "governed-author@1", sessionId: query.sessionId, createdAt: "2026-07-15T21:00:00.000Z", updatedAt: "2026-07-15T21:01:00.000Z", status: "completed" }],
+        nodes: [{ workflowRunId: query.workflowRunId, nodeId: query.nodeId, status: "succeeded" }],
+        toolCalls: [{ toolCallId: query.toolCallId, sessionId: query.sessionId, requestId: query.requestId, artifactId: query.artifactId, createdAt: "2026-07-15T21:00:10.000Z", status: "succeeded" }],
+        approvals: [{ approvalId: query.approvalId, workflowRunId: query.workflowRunId, nodeId: "approval", status: "approved" }],
+        artifacts: [{ artifactId: query.artifactId, workflowRunId: query.workflowRunId, nodeId: "evidence", status: "ready" }],
+        receipts: [{ receiptId: query.receiptId, workflowRunId: query.workflowRunId, nodeId: query.nodeId, status: "committed" }],
+        events: [{ eventId: "event-e2e", source: "workflow", timestamp: "2026-07-15T21:01:00.000Z", status: "completed", workflowRunId: query.workflowRunId, nodeId: query.nodeId, approvalId: query.approvalId, artifactId: query.artifactId }],
+      },
+    }),
+  }));
+  await gotoFreshWorkspace(page, smokeUrl(null));
+  await openWorkflowBuilder(page);
+  await page.getByRole("button", { name: "History", exact: true }).click();
+
+  for (const [key, value] of Object.entries(query)) {
+    await expect(page.getByText(`${key}: ${value}`, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByText("Events (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Approvals (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Artifacts (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Receipts (1)", { exact: true })).toBeVisible();
 });
