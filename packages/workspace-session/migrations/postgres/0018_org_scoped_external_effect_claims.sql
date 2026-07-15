@@ -6,7 +6,10 @@ alter table sonik_agent_ui.agent_workflow_effect_claims
 
 update sonik_agent_ui.agent_workflow_effect_claims
 set effect_namespace = coalesce(effect_namespace, 'workflow-run-v1'),
-    external_effect_key_digest = coalesce(external_effect_key_digest, 'sha256:' || encode(sha256(convert_to(idempotency_key, 'UTF8')), 'hex')),
+    external_effect_key_digest = coalesce(
+      external_effect_key_digest,
+      'sha256:' || encode(sha256(convert_to(user_id || E'\n' || run_id || E'\n' || idempotency_key || E'\n' || claim_id, 'UTF8')), 'hex')
+    ),
     command_id = coalesce(command_id, 'legacy:' || logical_effect_id),
     resolved_input_hash = coalesce(resolved_input_hash, 'sha256:' || encode(sha256(convert_to(idempotency_key, 'UTF8')), 'hex'));
 

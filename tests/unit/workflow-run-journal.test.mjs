@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   createCloudWorkflowRunJournalStore,
@@ -123,6 +124,11 @@ assert.match(externalEffectMigration, /resolved_input_hash text/i);
 assert.match(externalEffectMigration, /unique index[\s\S]*\(organization_id, effect_namespace, external_effect_key_digest\)/i, "external effect claims dedupe across runs and users within an organization");
 assert.match(externalEffectMigration, /using \(organization_id = sonik_agent_ui\.current_organization_id\(\)\)/i, "effect claim RLS permits org-internal dedupe without cross-org visibility");
 assert.doesNotMatch(externalEffectMigration, /external_effect_key\s+text/i, "raw business idempotency values are never stored");
+assert.match(externalEffectMigration, /user_id \|\| E'\\n' \|\| run_id \|\| E'\\n' \|\| idempotency_key \|\| E'\\n' \|\| claim_id/i, "legacy backfill includes stable provenance before installing org-wide uniqueness");
+const legacyDigest = ({ userId, runId, idempotencyKey, claimId }) => createHash("sha256").update(`${userId}\n${runId}\n${idempotencyKey}\n${claimId}`).digest("hex");
+const legacyA = legacyDigest({ userId: "user-a", runId: "run-shared", idempotencyKey: "workflow-run:run-shared:effect", claimId: "claim-a" });
+const legacyB = legacyDigest({ userId: "user-b", runId: "run-shared", idempotencyKey: "workflow-run:run-shared:effect", claimId: "claim-b" });
+assert.notEqual(legacyA, legacyB, "same-org legacy claims with the previously allowed duplicate run/idempotency tuple remain collision-free after backfill");
 assert.match(storeSource, /agent_workflow_run_leases\.lease_expires_at <= now\(\)/, "production lease takeover uses database time");
 assert.match(storeSource, /validateJournalAppend\(input\)/, "canonical envelopes and projections are validated before SQL");
 
