@@ -8,12 +8,18 @@ type SignedRequestKind = "agentModels" | "agentDefinitions" | "workflowDefinitio
 export interface WorkflowBuilderHostFixtureObservation {
   signedHostContextHeaders: Record<SignedRequestKind, string[]>;
   sessionId: string;
+  workflowDefinitionActions: string[];
+  workflowRunActions: string[];
+  workflowDefinitionBodies: Array<Record<string, unknown>>;
+  workflowRunBodies: Array<Record<string, unknown>>;
+  historyQueries: string[];
 }
 
 export interface WorkflowBuilderHostFixtureOptions {
   approvedCommandIds?: string[];
   previewPhase?: "preview_ready" | "approved";
   workflowRunDelayMs?: number;
+  waitOnStart?: boolean;
 }
 
 const SESSION_ID = "workflow-builder-host-fixture-session";
@@ -34,13 +40,13 @@ const sessionSummary = {
   last_message_at: null,
 };
 
-function workflowRun(phase: RunPhase) {
+function workflowRun(phase: RunPhase, waiting = false) {
   const approved = phase === "approved" || phase === "committed";
   return {
     runId: "workflow-builder-host-fixture-run",
     workflowId: AMPLIFY_CAMPAIGN_COMMAND_ID,
     workflowVersionId: "sonik.amplify.campaign.workflow@0.1.0",
-    artifactId: null,
+    artifactId: phase === "committed" ? "campaign-fixture-artifact" : null,
     phase,
     currentNodeId: phase === "intake" ? "trigger" : phase === "preview_ready" ? "preview" : "commit",
     facadeToolIds: [AMPLIFY_CAMPAIGN_COMMAND_ID],
@@ -67,6 +73,9 @@ function workflowRun(phase: RunPhase) {
     receipts: phase === "committed"
       ? [{ nodeId: "commit", commandId: AMPLIFY_CAMPAIGN_COMMAND_ID, receiptRef: "campaign-fixture-receipt", semanticStatus: "success" }]
       : [],
+    waits: waiting
+      ? [{ waitpointId: "campaign-fixture-wait", nodeId: "brief", logicalEffectId: "campaign-fixture-brief" }]
+      : [],
   };
 }
 
@@ -84,7 +93,16 @@ export async function installWorkflowBuilderHostFixture(
   const observation: WorkflowBuilderHostFixtureObservation = {
     signedHostContextHeaders: { agentModels: [], agentDefinitions: [], workflowDefinitions: [], workflowRuns: [] },
     sessionId: SESSION_ID,
+    workflowDefinitionActions: [],
+    workflowRunActions: [],
+    workflowDefinitionBodies: [],
+    workflowRunBodies: [],
+    historyQueries: [],
   };
+  let draftRevision = 0;
+  let definition: Record<string, unknown> | undefined;
+  let published = false;
+  const definitionDigest = `sha256:${"a".repeat(64)}`;
   const recordSignedHeader = (kind: SignedRequestKind, route: Route) => {
     observation.signedHostContextHeaders[kind].push(route.request().headers()["x-sonik-agent-ui-host-context"] ?? "");
   };
@@ -99,23 +117,45 @@ export async function installWorkflowBuilderHostFixture(
   });
   await page.route("**/api/workflow-definitions", (route) => {
     recordSignedHeader("workflowDefinitions", route);
-    const body = JSON.parse(route.request().postData() ?? "{}") as { action?: string; definition?: { workflowId?: string } };
-    if (body.action === "list") return fulfillJson(route, { ok: true, drafts: [] });
-    if (body.action === "versions") return fulfillJson(route, { ok: true, versions: [] });
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown> & { action?: string; definition?: Record<string, unknown> };
+    observation.workflowDefinitionActions.push(body.action ?? "unknown");
+    observation.workflowDefinitionBodies.push(body);
+    if (body.action === "list") return fulfillJson(route, { ok: true, drafts: definition ? [{ organizationId: "11111111-1111-4111-8111-111111111111", workflowId: definition.workflowId, draftRevision, definitionDigest, definition }] : [] });
+    if (body.action === "versions") return fulfillJson(route, { ok: true, versions: published ? [{ workflowVersionId: "amplify.campaign.create@0.1.0", sourceDraftRevision: draftRevision, publishedAt: now }] : [] });
+    if (body.action === "get") return fulfillJson(route, { ok: true, draft: { organizationId: "11111111-1111-4111-8111-111111111111", workflowId: definition?.workflowId, draftRevision, definitionDigest, definition } });
+    if (body.action === "publish") {
+      published = true;
+      return fulfillJson(route, { ok: true, version: { workflowVersionId: "amplify.campaign.create@0.1.0", sourceDraftRevision: draftRevision, definitionDigest, definition } });
+    }
+    if (body.definition) definition = body.definition;
+    if (body.action === "create" || body.action === "update" || body.action === "organizer_patch") draftRevision += 1;
+    if (body.action === "organizer_patch" && definition) {
+      const edits = ((body.patch as { edits?: Array<{ path: string; value: unknown }> } | undefined)?.edits ?? []);
+      const nodes = Array.isArray(definition.nodes) ? definition.nodes as Array<Record<string, unknown>> : [];
+      definition = {
+        ...definition,
+        nodes: nodes.map((node) => {
+          const edit = edits.find(({ path }) => path === `nodes.${node.nodeId}.config.title`);
+          return edit ? { ...node, config: { ...((node.config as Record<string, unknown> | undefined) ?? {}), title: edit.value } } : node;
+        }),
+      };
+    }
     return fulfillJson(route, {
       ok: true,
       draft: {
         organizationId: "11111111-1111-4111-8111-111111111111",
-        workflowId: body.definition?.workflowId,
-        draftRevision: 0,
-        definitionDigest: `sha256:${"a".repeat(64)}`,
-        definition: body.definition,
+        workflowId: definition?.workflowId,
+        draftRevision,
+        definitionDigest,
+        definition,
       },
     });
   });
   await page.route("**/api/workflow-runs", async (route) => {
     recordSignedHeader("workflowRuns", route);
-    const body = JSON.parse(route.request().postData() ?? "{}") as { action?: string };
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown> & { action?: string };
+    observation.workflowRunActions.push(body.action ?? "unknown");
+    observation.workflowRunBodies.push(body);
     if (options.workflowRunDelayMs) await new Promise((resolve) => setTimeout(resolve, options.workflowRunDelayMs));
     const phase: RunPhase = body.action === "preview"
       ? (options.previewPhase ?? "preview_ready")
@@ -124,7 +164,25 @@ export async function installWorkflowBuilderHostFixture(
         : body.action === "commit"
           ? "committed"
           : "intake";
-    await fulfillJson(route, { ok: true, run: workflowRun(phase) });
+    await fulfillJson(route, { ok: true, run: workflowRun(phase, Boolean(options.waitOnStart && body.action === "start")) });
+  });
+  await page.route("**/api/workflow-history?*", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    observation.historyQueries.push(query.toString());
+    return fulfillJson(route, {
+      ok: true,
+      history: {
+        query: Object.fromEntries(query),
+        conversations: [],
+        workflows: [{ workflowRunId: "workflow-builder-host-fixture-run", workflowId: AMPLIFY_CAMPAIGN_COMMAND_ID, workflowVersionId: "amplify.campaign.create@0.1.0", sessionId: SESSION_ID, createdAt: now, updatedAt: now, status: "completed" }],
+        nodes: [],
+        toolCalls: [],
+        approvals: [{ approvalId: "campaign-fixture-approval", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "confirm", status: "approved" }],
+        artifacts: [{ artifactId: "campaign-fixture-artifact", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "commit", status: "ready" }],
+        receipts: [{ receiptId: "campaign-fixture-receipt", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "commit", status: "committed" }],
+        events: [],
+      },
+    });
   });
   await page.route("**/api/session**", async (route) => {
     const url = new URL(route.request().url());
