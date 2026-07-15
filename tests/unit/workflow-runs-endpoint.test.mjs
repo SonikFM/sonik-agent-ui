@@ -10,16 +10,22 @@ import path from "node:path";
 // fixture (the one workflow this endpoint has real, reviewed callbacks for; booking stays
 // reads-only-by-construction here, unchanged from /api/reservation/commit).
 
-const [workflowRunsModule, workflowRunStoreModule, knowledgeStoreModule, campaignWorkflowModule] = await Promise.all([
+const [workflowRunsModule, workflowRunStoreModule, knowledgeStoreModule, campaignWorkflowModule, workflowDefinitionModule, publicWorkflowRunsModule, workflowFixturesModule] = await Promise.all([
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts"),
   import("../../apps/standalone-sveltekit/src/lib/knowledge/knowledge-store.ts"),
   import("../../apps/standalone-sveltekit/src/lib/agent-workflows/amplify-campaign-workflow.ts"),
+  import("../../apps/standalone-sveltekit/src/lib/server/workflow-definition-repository.ts"),
+  import("../../apps/standalone-sveltekit/src/lib/server/workflow-runs-public.ts"),
+  import("../../packages/tool-contracts/src/workflow-vnext-fixtures.ts"),
 ]);
 const { handleWorkflowRunsAction, workflowRunOwnerFromHostSession } = workflowRunsModule;
-const { createCloudWorkflowRunStore, createInMemoryWorkflowRunStore, wrapWorkflowRunStoreAsync } = workflowRunStoreModule;
+const { createCloudWorkflowRunStore, createInMemoryWorkflowRunJournalStore, createInMemoryWorkflowRunStore, wrapWorkflowRunStoreAsync } = workflowRunStoreModule;
 const { createKnowledgeStore } = knowledgeStoreModule;
 const { assembleAmplifyCampaignContent } = campaignWorkflowModule;
+const { createInMemoryWorkflowDefinitionRepository } = workflowDefinitionModule;
+const { handlePublicWorkflowDriverAction } = publicWorkflowRunsModule;
+const { train0SelectedPathRunState, train0WorkflowFixtures } = workflowFixturesModule;
 
 const brief = { productName: "Loyalty Weekend", audience: "returning_members", offer: "20% off", launchDate: "2026-08-01" };
 
@@ -322,8 +328,9 @@ try {
     assert.doesNotMatch(statement.sql, /host_session_id\s*=/i, "host session is provenance, never a visibility predicate");
   }
 
-  const [routeSource, storeSource, migrationSource, runnerSource] = await Promise.all([
+  const [routeSource, publicRouteSource, storeSource, migrationSource, runnerSource] = await Promise.all([
     readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/workflow-runs/+server.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../apps/standalone-sveltekit/src/lib/server/workflow-runs-public.ts", import.meta.url), "utf8"),
     readFile(new URL("../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts", import.meta.url), "utf8"),
     readFile(new URL("../../packages/workspace-session/migrations/postgres/0013_workflow_run_owner_scope.sql", import.meta.url), "utf8"),
     readFile(new URL("../../scripts/run-postgres-migrations.mjs", import.meta.url), "utf8"),
@@ -331,14 +338,15 @@ try {
   assert.match(routeSource, /createAgentHostSessionEnvelope\(event\)/);
   assert.match(routeSource, /workflowRunOwnerFromHostSession\(hostSession\)/);
   assert.match(routeSource, /status: 401/);
-  assert.match(routeSource, /store\.getRun\(owner, runId\)[\s\S]*repository\.getPublished\(owner, row\.workflowVersionId\)/, "public driver actions load the durable run before resolving its pinned version");
-  assert.match(routeSource, /runInput: row\.input/, "public driver recreation uses persisted input, not client input");
-  assert.match(routeSource, /publicResumeEventSchema\.safeParse/, "resume payloads cross a strict public DTO boundary");
-  assert.match(routeSource, /node\.nodeType === "ask_user"[\s\S]*answer: signedResumeEvent\.answer/, "validated answers reach ask-user execution");
-  assert.match(routeSource, /finally \{[\s\S]*releaseLease/, "server-owned leases are released after every public pump");
-  assert.match(routeSource, /cancel_run" && "lease" in \(body as Record<string, unknown>\)[\s\S]*public_lease_forbidden/, "cancel cannot accept a client-owned lease");
-  assert.match(routeSource, /action\.action !== "resume_run" && "resumeEvent" in publicRequest/, "only resume actions may carry a resume event");
-  assert.doesNotMatch(routeSource, /request\?\.runInput|request\?\.workflowVersionId/, "client version/input never recreate a persisted run");
+  assert.match(routeSource, /handlePublicWorkflowDriverAction/, "the HTTP route delegates driver actions to the executable public controller");
+  assert.match(publicRouteSource, /store\.getRun\(owner, runId\)[\s\S]*repository\.getPublished\(owner, row\.workflowVersionId\)/, "public driver actions load the durable run before resolving its pinned version");
+  assert.match(publicRouteSource, /runInput: row\.input/, "public driver recreation uses persisted input, not client input");
+  assert.match(publicRouteSource, /publicResumeEventSchema\.safeParse/, "resume payloads cross a strict public DTO boundary");
+  assert.match(publicRouteSource, /node\.nodeType === "ask_user"[\s\S]*answer: signedResumeEvent\.answer/, "validated answers reach ask-user execution");
+  assert.match(publicRouteSource, /finally \{[\s\S]*releaseLease/, "server-owned leases are released after every public pump");
+  assert.match(publicRouteSource, /cancel_run" && "lease" in action[\s\S]*public_lease_forbidden/, "cancel cannot accept a client-owned lease");
+  assert.match(publicRouteSource, /action\.action !== "resume_run" && "resumeEvent" in publicRequest/, "only resume actions may carry a resume event");
+  assert.doesNotMatch(publicRouteSource, /request\?\.runInput|request\?\.workflowVersionId/, "client version/input never recreate a persisted run");
   assert.match(storeSource, /set_request_context\(\$1, \$2\)/);
   assert.match(storeSource, /where organization_id = \$1 and user_id = \$2 and run_id = \$3/g);
   assert.match(migrationSource, /unique \(organization_id, user_id, run_id\)/i);
@@ -346,6 +354,99 @@ try {
   assert.match(migrationSource, /organization_id = sonik_agent_ui\.current_organization_id\(\)[\s\S]*user_id = sonik_agent_ui\.current_user_id\(\)/i);
   assert.match(migrationSource, /Rows created before this migration[\s\S]*intentionally invisible/i, "legacy unowned rows must fail closed");
   assert.match(runnerSource, /0013_workflow_run_owner_scope\.sql/);
+
+  async function publicDriverHarness(definition, runId, input) {
+    const baseStore = createInMemoryWorkflowRunStore();
+    const store = wrapWorkflowRunStoreAsync(baseStore);
+    const journal = createInMemoryWorkflowRunJournalStore(baseStore);
+    const repository = createInMemoryWorkflowDefinitionRepository();
+    const draft = await repository.createDraft(owner, definition, owner.userId);
+    assert.ok(draft);
+    const workflowVersionId = `${definition.workflowId}@1`;
+    const dependencyPins = {
+      ...structuredClone(train0SelectedPathRunState.dependencyPins),
+      organizationId: owner.organizationId,
+      workflowVersionId,
+      definitionDigest: draft.definitionDigest,
+    };
+    const published = await repository.publish(owner, {
+      workflowId: definition.workflowId,
+      expectedRevision: draft.draftRevision,
+      workflowVersionId,
+      definitionDigest: draft.definitionDigest,
+      dependencyPins,
+      actorId: owner.userId,
+    });
+    assert.ok(published);
+    baseStore.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, definition: {}, input, state: { runId } });
+    return { deps: { hostSession: authenticatedHostSession, store, journal, repository }, journal, published };
+  }
+
+  {
+    const runId = "public-ask-resume";
+    const { deps: publicDeps, journal } = await publicDriverHarness(train0WorkflowFixtures.askUser, runId, { persisted: true });
+    const waiting = await handlePublicWorkflowDriverAction({ action: "run_until_blocked", request: { workflowRunId: runId } }, publicDeps);
+    assert.equal(waiting.status, 200);
+    assert.equal(waiting.result.ok, true);
+    assert.equal(waiting.result.run.status, "waiting");
+    const waitpoint = waiting.result.run.waits[0];
+    const probeLease = { leaseId: "post-wait-probe", ownerId: "probe", expiresAt: new Date(Date.now() + 30_000).toISOString() };
+    assert.equal(await journal.acquireLease(owner, runId, probeLease), true, "the public pump releases its server lease before the next request");
+    assert.equal(await journal.releaseLease(owner, runId, probeLease.leaseId), true);
+    const resumed = await handlePublicWorkflowDriverAction({
+      action: "resume_run",
+      request: {
+        workflowRunId: runId,
+        resumeEvent: { kind: "answer", answer: { name: "Ada" }, eventId: "answer-1", waitpointId: waitpoint.waitpointId, workflowRunId: runId, nodeId: waitpoint.nodeId, runRevision: waiting.result.run.revision, issuedAt: new Date().toISOString() },
+      },
+    }, publicDeps);
+    assert.equal(resumed.result.ok, true);
+    assert.equal(resumed.result.run.status, "succeeded", "an immediate public resume advances after lease release");
+    assert.deepEqual(resumed.result.run.outputs.ask.value, { name: "Ada" }, "the validated public answer reaches ask_user execution");
+  }
+
+  {
+    const runId = "public-cancel";
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.linear, runId, null);
+    const cancelled = await handlePublicWorkflowDriverAction({ action: "cancel_run", runId }, publicDeps);
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.result.ok, true);
+    assert.equal(cancelled.result.run.status, "cancelled", "cancel loads the persisted run/version instead of requiring a client version");
+  }
+
+  {
+    const runId = "public-authority";
+    const persistedDefinition = structuredClone(train0WorkflowFixtures.linear);
+    persistedDefinition.workflowId = "train0.persisted-authority";
+    persistedDefinition.nodes[0].bindings = { payload: { source: "run_input", path: [] } };
+    const { deps: publicDeps, published } = await publicDriverHarness(persistedDefinition, runId, { source: "persisted" });
+    let resolvedVersionId;
+    const repository = {
+      ...publicDeps.repository,
+      getPublished: async (scope, versionId) => {
+        resolvedVersionId = versionId;
+        return publicDeps.repository.getPublished(scope, versionId);
+      },
+    };
+    const completed = await handlePublicWorkflowDriverAction({ action: "run_until_blocked", request: { workflowRunId: runId } }, { ...publicDeps, repository });
+    assert.equal(completed.result.ok, true);
+    assert.equal(resolvedVersionId, published.workflowVersionId, "the persisted version ID is the only repository lookup authority");
+    assert.deepEqual(completed.result.run.outputs.start.value, { payload: { source: "persisted" } }, "persisted input reaches execution");
+
+    for (const field of ["workflowVersionId", "runInput", "lease", "hostSigned"]) {
+      const rejected = await handlePublicWorkflowDriverAction({ action: "run_until_blocked", request: { workflowRunId: runId, [field]: field === "hostSigned" ? true : "attacker" } }, publicDeps);
+      assert.equal(rejected.status, 400);
+      assert.equal(rejected.result.reason, `public_${field}_forbidden`);
+    }
+    const cancelLease = await handlePublicWorkflowDriverAction({ action: "cancel_run", runId, lease: { leaseId: "attacker" } }, publicDeps);
+    assert.equal(cancelLease.result.reason, "public_lease_forbidden");
+    const resumeBase = { kind: "answer", answer: "Ada", eventId: "answer", waitpointId: "wait", workflowRunId: runId, nodeId: "ask", runRevision: 1, issuedAt: new Date().toISOString() };
+    for (const authority of [{ subjectId: "attacker" }, { organizationId: "attacker" }, { authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` }, { hostSigned: true }]) {
+      const rejected = await handlePublicWorkflowDriverAction({ action: "resume_run", request: { workflowRunId: runId, resumeEvent: { ...resumeBase, ...authority } } }, publicDeps);
+      assert.equal(rejected.status, 400);
+      assert.equal(rejected.result.reason, "invalid_resume_event");
+    }
+  }
 } finally {
   await rm(knowledgeRoot, { recursive: true, force: true });
 }
