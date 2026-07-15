@@ -84,6 +84,16 @@ function terminal(code: string, message: string): EngineResponse {
   return { status: "terminal_error", error: { code, message, retrySafe: false } };
 }
 
+function canonicalJson(value: JsonValue): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+export function hashWorkflowInput(value: JsonValue): string {
+  return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
+}
+
 function defaultExecutor(request: EngineRequest, context: WorkflowNodeExecutionContext): EngineResponse {
   switch (request.nodeType) {
     case "ask_user":
@@ -104,7 +114,7 @@ function defaultExecutor(request: EngineRequest, context: WorkflowNodeExecutionC
       return inline(request.input);
     }
     case "tool_preview": {
-      const stableInputHash = `sha256:${createHash("sha256").update(JSON.stringify(request.input)).digest("hex")}`;
+      const stableInputHash = hashWorkflowInput(request.input);
       return inline({ commandId: context.commandId ?? "unbound", stableInputHash, effect: "read", approvalRequired: false });
     }
     case "tool_commit":

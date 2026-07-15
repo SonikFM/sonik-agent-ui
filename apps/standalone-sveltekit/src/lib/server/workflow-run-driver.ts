@@ -17,7 +17,7 @@ import {
   type WorkflowVNextNode,
 } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import { requireCallableCapability } from "./capability-readiness.ts";
-import { dispatchWorkflowNode, type WorkflowNodeExecutionContext } from "./workflow-node-executors.ts";
+import { dispatchWorkflowNode, hashWorkflowInput, type WorkflowNodeExecutionContext } from "./workflow-node-executors.ts";
 import type { WorkflowRunJournalStore, WorkflowRunOwner, WorkflowRunSnapshot } from "./workflow-run-store.ts";
 
 type PumpRequest = ReturnType<typeof runDriverPumpRequestSchema.parse>;
@@ -111,7 +111,7 @@ export class WorkflowRunDriver {
 
       let claim: Awaited<ReturnType<WorkflowRunJournalStore["claimEffect"]>> | undefined;
       if (logicalEffectId) {
-        try { this.authorizeCommit(node, state); }
+        try { this.authorizeCommit(node, state, inputValue); }
         catch (error) { return this.appendStatus(state, request, "failed", error instanceof Error ? error.message : "commit_authorization_failed", { schedulerFrontier: [] }); }
         claim = await this.deps.journal.claimEffect(this.deps.owner, { claimId: randomUUID(), runId: state.workflowRunId, logicalEffectId, attemptId, idempotencyKey: engineRequest.idempotencyKey, providerSupportsIdempotency: true });
         if (!claim.created) {
@@ -187,9 +187,21 @@ export class WorkflowRunDriver {
     return this.appendStatus(state, request, "running", "saving", { waits: [] });
   }
 
-  private authorizeCommit(node: WorkflowVNextNode, state: WorkflowRunSnapshot): void {
+  private authorizeCommit(node: WorkflowVNextNode, state: WorkflowRunSnapshot, resolvedInput: JsonValue): void {
     const binding = node.effectBinding;
     if (!binding) throw new Error("commit_effect_binding_missing");
+    if (hashWorkflowInput(resolvedInput) !== binding.resolvedInputHash) throw new Error("resolved_input_hash_mismatch");
+    const preview = this.node(binding.previewNodeId);
+    const approval = this.node(binding.approvalNodeId);
+    const sameEffect = (effect?: { commandId: string; logicalEffectId: string; resolvedInputHash: string }): boolean => Boolean(effect
+      && effect.commandId === binding.commandId
+      && effect.logicalEffectId === binding.logicalEffectId
+      && effect.resolvedInputHash === binding.resolvedInputHash);
+    if (preview.nodeType !== "tool_preview" || !sameEffect(preview.previewEffect)) throw new Error("preview_effect_binding_mismatch");
+    if (approval.nodeType !== "approval" || !sameEffect(approval.approvalEffect) || approval.approvalEffect?.previewNodeId !== preview.nodeId || approval.approvalEffect.approvalNodeId !== approval.nodeId || approval.approvalEffect.commitNodeId !== node.nodeId) throw new Error("approval_effect_binding_mismatch");
+    const previewOutput = state.outputs[preview.nodeId];
+    const previewValue = previewOutput?.storage === "inline" && previewOutput.value && typeof previewOutput.value === "object" && !Array.isArray(previewOutput.value) ? previewOutput.value : undefined;
+    if (previewValue?.commandId !== binding.commandId || previewValue.stableInputHash !== binding.resolvedInputHash) throw new Error("preview_output_binding_mismatch");
     for (const key of node.requiredHostContext) if (this.deps.hostContext?.[key] == null) throw new Error(`missing_context:${key}`);
     requireCallableCapability(this.deps.resolveReadiness?.() ?? [], binding.commandId);
     const decision = this.deps.approvalDecision?.(node.nodeId);
