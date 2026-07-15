@@ -696,7 +696,7 @@ export const POST: RequestHandler = async (event) => {
   const contextSummary = summarizeWorkspaceContext({ activeDocument: effectiveActiveDocument });
   const includeStartupIndexes = !productTourIntent;
   const commandIndexSummary = includeStartupIndexes
-    ? createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSession: hostSession ?? undefined, hostSessionMode: hostSession ? undefined : "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth })
+    ? createStandaloneCommandIndexSummary({ includeApprovalRequired: true, includeHostRuntime: true, hostSession: hostSession ?? undefined, hostSessionMode: hostSession ? undefined : "standalone-demo", sessionId: telemetrySessionId, pageContext, bookingServiceBaseUrl, bookingRuntimeAuth, approvedCommandIds, toolPermissionModes: agentRuntimeSettings.toolPermissionModes })
     : "";
   const skillIndexSummary = includeStartupIndexes
     ? createRuntimeSkillIndexSummary({
