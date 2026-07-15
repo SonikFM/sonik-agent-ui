@@ -181,7 +181,8 @@ export class WorkflowRunDriver {
     if (!wait) return state;
     if (wait.kind === "budget_yield") return this.appendStatus(state, request, "running", "saving", { waits: [] });
     const event = authenticatedResumeEventSchema.parse(request.resumeEvent);
-    if (event.workflowRunId !== state.workflowRunId || event.organizationId !== state.organizationId || event.waitpointId !== wait.waitpointId || event.nodeId !== wait.nodeId || event.subjectId !== wait.subjectId || event.runRevision !== state.revision) throw new Error("resume_event_does_not_match_waitpoint");
+    const matchesWait = wait.kind === "approval" ? event.kind === "approval" && event.logicalEffectId === wait.logicalEffectId : event.kind === "answer";
+    if (!matchesWait || event.workflowRunId !== state.workflowRunId || event.organizationId !== state.organizationId || event.waitpointId !== wait.waitpointId || event.nodeId !== wait.nodeId || event.subjectId !== wait.subjectId || event.runRevision !== state.revision) throw new Error("resume_event_does_not_match_waitpoint");
     if (wait.expiresAt && this.now() >= Date.parse(wait.expiresAt)) throw new Error("waitpoint_expired");
     if (!await this.deps.journal.resolveWaitpoint(this.deps.owner, state.workflowRunId, wait.waitpointId)) throw new Error("waitpoint_already_resolved");
     return this.appendStatus(state, request, "running", "saving", { waits: [] });

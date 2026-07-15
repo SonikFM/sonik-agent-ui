@@ -198,6 +198,24 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
 
 {
   const definition = approvalDefinition();
+  let providerCalls = 0;
+  const { runId, driver, journal } = harness(definition, "signed-decision-mismatch", {
+    hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
+    resolveReadiness: () => [readiness("booking.create.booking")],
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { providerCalls += 1; throw new Error("must not dispatch"); } } } : {},
+  });
+  let claimCalls = 0;
+  const claimEffect = journal.claimEffect.bind(journal);
+  journal.claimEffect = (...args) => { claimCalls += 1; return claimEffect(...args); };
+  driver.deps.approvalDecision = () => ({ ...approvalDecision(runId, definition), logicalEffectId: "sibling-effect" });
+  const denied = await driver.start(request(runId, "signed-decision-mismatch-a"));
+  assert.equal(denied.compatibilityPhase, "approval_effect_binding_mismatch");
+  assert.equal(claimCalls, 0);
+  assert.equal(providerCalls, 0);
+}
+
+{
+  const definition = approvalDefinition();
   let commits = 0;
   const { runId, driver } = harness(definition, "unsafe-write-retry", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId }, resolveReadiness: () => [readiness("booking.create.booking")],
