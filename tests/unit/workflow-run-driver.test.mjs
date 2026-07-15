@@ -189,8 +189,9 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const waiting = await driver.start(request(runId, "approval-a"));
   assert.equal(waiting.waits[0].kind, "approval");
-  approved = true;
   const waitpoint = waiting.waits[0];
+  await assert.rejects(() => driver.resume({ ...request(runId, "approval-a"), resumeEvent: { kind: "approval", eventId: "wrong-effect", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}`, logicalEffectId: "sibling-effect" } }), /resume_event_does_not_match_waitpoint/, "approval resume must bind the persisted waitpoint effect before resolving it");
+  approved = true;
   const completed = await driver.resume({ ...request(runId, "approval-a"), resumeEvent: { kind: "approval", eventId: "approval-event", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}`, logicalEffectId: waitpoint.logicalEffectId } });
   assert.equal(completed.status, "succeeded");
 }
