@@ -38,7 +38,7 @@ import { createStandaloneCommandIndexSummary } from "$lib/server/tool-manifest";
 import { createRuntimeSkillIndexSummary } from "$lib/server/skill-registry";
 import { sanitizeAgentRuntimeSettings, summarizeAgentRuntimeSettings, type AgentRuntimeSettings } from "$lib/agent-settings";
 import { definitionToRuntimeSettings } from "$lib/agent-runtime-adapter";
-import { resolveAgentDefinitionStore } from "$lib/server/agent-definition-store";
+import { agentDefinitionAuthorityFromHostSession, assertAgentDefinitionAuthorized, resolveAgentDefinitionStore } from "$lib/server/agent-definition-store";
 import { resolveKnowledgeContext, formatKnowledgeContextSections } from "$lib/knowledge/resolve-knowledge-context";
 import { defaultKnowledgeRoot } from "$lib/knowledge/knowledge-store";
 import { isProductTourIntent, resolveImplicitWorkflowSkillSelection } from "$lib/runtime-skill-intent";
@@ -588,14 +588,28 @@ export const POST: RequestHandler = async (event) => {
   // configured, in-memory fallback otherwise -- see agent-definition-store.ts.
   const requestAgentDefinitionStore = resolveAgentDefinitionStore(event.platform?.env as Record<string, unknown> | undefined);
   const publishedAgentId = typeof body?.publishedAgentId === "string" ? body.publishedAgentId : null;
-  const publishedAgentDefinition = publishedAgentId ? await requestAgentDefinitionStore.resolvePublished(publishedAgentId) : null;
+  const draftAgentId = typeof body?.draftAgentId === "string" ? body.draftAgentId : null;
+  const requestedAgentDefinition = Boolean(publishedAgentId || draftAgentId);
+  const agentDefinitionAuthority = agentDefinitionAuthorityFromHostSession(hostSession);
+  if (requestedAgentDefinition) {
+    try {
+      assertAgentDefinitionAuthorized(agentDefinitionAuthority, "start");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "agent_definition_authorization_failed";
+      throw new AgentUiFileError(message.endsWith("_forbidden") ? 403 : 401, message, { code: message, phase: "pre_stream" });
+    }
+  }
+  const publishedAgentDefinition = publishedAgentId && agentDefinitionAuthority
+    ? await requestAgentDefinitionStore.resolvePublished(agentDefinitionAuthority, publishedAgentId, "start")
+    : null;
   // Phase 5 workflow-builder Debug & Preview: a narrow mirror of the
   // publishedAgentId path above, resolving an unpublished DRAFT definition by
   // id so the builder can test edits before publish. Same fallback-safe null
   // handling; absent `draftAgentId` (every non-builder request), this is a
   // no-op. publishedAgentId takes precedence if a request somehow sent both.
-  const draftAgentId = typeof body?.draftAgentId === "string" ? body.draftAgentId : null;
-  const draftAgentDefinition = !publishedAgentDefinition && draftAgentId ? (await requestAgentDefinitionStore.getDraft(draftAgentId))?.definition ?? null : null;
+  const draftAgentDefinition = !publishedAgentDefinition && draftAgentId && agentDefinitionAuthority
+    ? (await requestAgentDefinitionStore.getDraft(agentDefinitionAuthority, draftAgentId, "start"))?.definition ?? null
+    : null;
   const resolvedAgentDefinition = publishedAgentDefinition ?? draftAgentDefinition;
   const resolvedRuntimeSettings = resolvedAgentDefinition
     ? definitionToRuntimeSettings(resolvedAgentDefinition, (body?.agentSettings ?? body?.workspace?.agentSettings) as Partial<AgentRuntimeSettings> | undefined)
