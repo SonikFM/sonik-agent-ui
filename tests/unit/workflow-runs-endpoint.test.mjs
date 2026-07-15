@@ -331,6 +331,14 @@ try {
   assert.match(routeSource, /createAgentHostSessionEnvelope\(event\)/);
   assert.match(routeSource, /workflowRunOwnerFromHostSession\(hostSession\)/);
   assert.match(routeSource, /status: 401/);
+  assert.match(routeSource, /store\.getRun\(owner, runId\)[\s\S]*repository\.getPublished\(owner, row\.workflowVersionId\)/, "public driver actions load the durable run before resolving its pinned version");
+  assert.match(routeSource, /runInput: row\.input/, "public driver recreation uses persisted input, not client input");
+  assert.match(routeSource, /publicResumeEventSchema\.safeParse/, "resume payloads cross a strict public DTO boundary");
+  assert.match(routeSource, /node\.nodeType === "ask_user"[\s\S]*answer: signedResumeEvent\.answer/, "validated answers reach ask-user execution");
+  assert.match(routeSource, /finally \{[\s\S]*releaseLease/, "server-owned leases are released after every public pump");
+  assert.match(routeSource, /cancel_run" && "lease" in action[\s\S]*public_lease_forbidden/, "cancel cannot accept a client-owned lease");
+  assert.match(routeSource, /action\.action !== "resume_run" && "resumeEvent" in publicRequest/, "only resume actions may carry a resume event");
+  assert.doesNotMatch(routeSource, /request\?\.runInput|request\?\.workflowVersionId/, "client version/input never recreate a persisted run");
   assert.match(storeSource, /set_request_context\(\$1, \$2\)/);
   assert.match(storeSource, /where organization_id = \$1 and user_id = \$2 and run_id = \$3/g);
   assert.match(migrationSource, /unique \(organization_id, user_id, run_id\)/i);

@@ -456,8 +456,16 @@ const resumeEventBase = {
   nodeId: z.string().min(1), runRevision: z.number().int().nonnegative(), subjectId: z.string().min(1), issuedAt: z.string().datetime(),
   authenticationEvidenceDigest: sha256DigestSchema,
 } as const;
+const publicResumeEventBase = {
+  eventId: z.string().min(1), waitpointId: z.string().min(1), workflowRunId: z.string().min(1),
+  nodeId: z.string().min(1), runRevision: z.number().int().nonnegative(), issuedAt: z.string().datetime(),
+} as const;
+export const publicResumeEventSchema = z.discriminatedUnion("kind", [
+  z.object({ ...publicResumeEventBase, kind: z.literal("answer"), answer: jsonValueSchema }).strict(),
+  z.object({ ...publicResumeEventBase, kind: z.literal("approval"), logicalEffectId: z.string().min(1) }).strict(),
+]);
 export const authenticatedResumeEventSchema = z.discriminatedUnion("kind", [
-  z.object({ ...resumeEventBase, kind: z.literal("answer") }).strict(),
+  z.object({ ...resumeEventBase, kind: z.literal("answer"), answer: jsonValueSchema }).strict(),
   z.object({ ...resumeEventBase, kind: z.literal("approval"), logicalEffectId: z.string().min(1) }).strict(),
 ]);
 export const runDriverPumpRequestSchema = z.object({

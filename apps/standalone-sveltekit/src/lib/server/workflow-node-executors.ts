@@ -65,6 +65,9 @@ export interface WorkflowNodeExecutionContext {
   answer?: JsonValue;
   approvalDecision?: "approved" | "rejected";
   reasoning?: unknown;
+  reasoningUsage?: { steps: number; tokens: number };
+  inlineOutputByteLimit?: number;
+  now?: () => number;
   executors?: Partial<Record<WorkflowVNextNodeType, WorkflowNodeExecutor>>;
   onAttempt?: (event: WorkflowNodeAttemptEvent) => void;
 }
@@ -86,7 +89,7 @@ function terminal(code: string, message: string): EngineResponse {
 
 function canonicalJson(value: JsonValue): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
   return JSON.stringify(value);
 }
 
@@ -146,13 +149,28 @@ export async function dispatchWorkflowNode(
   });
   const executor = context.executors?.[request.nodeType];
   const reasoningContract = request.nodeType === "reasoning" ? reasoningExecutionContractSchema.safeParse(context.reasoning) : null;
-  const response = parseEngineResponseForRegistry(
+  const startedAt = (context.now ?? Date.now)();
+  let response = parseEngineResponseForRegistry(
     request,
     reasoningContract && !reasoningContract.success
       ? terminal("reasoning_contract_required", "Reasoning requires structured output and execution budgets with no governed nested writes")
       : executor ? await executor(request) : defaultExecutor(request, context),
     workflowNodeExecutorRuntimeRegistry,
   );
+  if (reasoningContract?.success && response.status === "succeeded") {
+    if (executor && !context.reasoningUsage) response = terminal("reasoning_usage_required", "Reasoning adapters must report step and token usage");
+    const usage = context.reasoningUsage ?? { steps: 1, tokens: 0 };
+    const elapsed = (context.now ?? Date.now)() - startedAt;
+    const inlineBytes = response.status === "succeeded" && response.output.storage === "inline" ? new TextEncoder().encode(JSON.stringify(response.output.value)).byteLength : 0;
+    if (usage.steps > reasoningContract.data.budgets.maxSteps || usage.tokens > reasoningContract.data.budgets.maxTokens || elapsed > reasoningContract.data.budgets.maxWallTimeMs) {
+      response = terminal("reasoning_budget_exhausted", "Reasoning exceeded its step, token, or wall-time budget");
+    }
+    if (response.status === "succeeded" && response.output.storage === "inline" && context.inlineOutputByteLimit === undefined) {
+      response = terminal("reasoning_output_budget_required", "Reasoning requires an inline output byte budget");
+    } else if (response.status === "succeeded" && inlineBytes > context.inlineOutputByteLimit!) {
+      response = terminal("reasoning_output_budget_exhausted", "Reasoning output exceeded its inline byte budget");
+    }
+  }
   context.onAttempt?.({
     phase: "finished",
     workflowRunId: request.workflowRunId,
