@@ -159,7 +159,7 @@ assert.equal(workflowOrganizerPatchSchema.safeParse({ expectedDraftRevision: 1, 
 for (const path of ["nodes.__proto__.config.x", "nodes.constructor.config.x", "nodes.commit.config.prototype.x"]) assert.equal(workflowOrganizerPatchSchema.safeParse({ expectedDraftRevision: 1, edits: [{ kind: "safe_patch", path, value: true }] }).success, false, `${path} is rejected`);
 
 assert.equal(bridgeLegacyWorkflowDefinitionToVNext({ workflowId: "legacy", title: "Legacy", triggerPhrases: [], nodes: [{ nodeId: "start", type: "trigger", title: "Start", effect: "none", approvalPolicy: "none", requiredHostContext: [] }], edges: [], requiredSkills: [], requiredCommands: [], facadeToolIds: [], version: "1.0.0" }).requiresCanonicalUpgrade, true);
-assert.throws(() => parseEngineRequestForRegistry({ workflowRunId: "r", workflowVersionId: "v", nodeId: "commit", nodeType: "tool_commit", typeVersion: 1, attempt: 1, attemptId: "a", logicalEffectId: "effect", input: {}, contextSnapshot: {}, capabilityPins: ["booking.create.booking"], idempotencyKey: "wrong" }, runtimeRegistry), /idempotencyKey|invalid_effect_idempotency/);
+assert.throws(() => parseEngineRequestForRegistry({ workflowRunId: "r", workflowVersionId: "v", nodeId: "commit", nodeType: "tool_commit", typeVersion: 1, attempt: 1, attemptId: "a", logicalEffectId: "effect", input: {}, contextSnapshot: {}, capabilityPins: ["booking.create.booking"], idempotencyKey: "effect" }, runtimeRegistry), /idempotencyKey|invalid_effect_idempotency/, "legacy unscoped effect keys are rejected");
 
 assert.equal(canonicalWorkflowEventSchema.safeParse({
   eventId: "event-1", schemaVersion: WORKFLOW_EVENT_SCHEMA_VERSION, eventVersion: 1, workflowRunId: "run-1", sequence: 1, revision: 1,
