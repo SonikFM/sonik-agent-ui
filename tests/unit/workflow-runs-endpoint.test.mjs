@@ -336,6 +336,8 @@ try {
   assert.match(routeSource, /publicResumeEventSchema\.safeParse/, "resume payloads cross a strict public DTO boundary");
   assert.match(routeSource, /node\.nodeType === "ask_user"[\s\S]*answer: signedResumeEvent\.answer/, "validated answers reach ask-user execution");
   assert.match(routeSource, /finally \{[\s\S]*releaseLease/, "server-owned leases are released after every public pump");
+  assert.match(routeSource, /cancel_run" && "lease" in action[\s\S]*public_lease_forbidden/, "cancel cannot accept a client-owned lease");
+  assert.match(routeSource, /action\.action !== "resume_run" && "resumeEvent" in publicRequest/, "only resume actions may carry a resume event");
   assert.doesNotMatch(routeSource, /request\?\.runInput|request\?\.workflowVersionId/, "client version/input never recreate a persisted run");
   assert.match(storeSource, /set_request_context\(\$1, \$2\)/);
   assert.match(storeSource, /where organization_id = \$1 and user_id = \$2 and run_id = \$3/g);

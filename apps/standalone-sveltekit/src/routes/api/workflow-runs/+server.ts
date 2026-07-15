@@ -34,12 +34,14 @@ export const POST: RequestHandler = async (event) => {
   let driverLease: { owner: NonNullable<ReturnType<typeof workflowRunOwnerFromHostSession>>; runId: string; leaseId: string } | undefined;
   if (action.action === "run_until_blocked" || action.action === "resume_run" || action.action === "cancel_run") {
     const owner = workflowRunOwnerFromHostSession(hostSession)!;
+    if (action.action === "cancel_run" && "lease" in action) return json({ ok: false, reason: "public_lease_forbidden" }, { status: 400 });
     const request = action.action === "cancel_run" ? {} : action.request;
     if (!request || typeof request !== "object" || Array.isArray(request)) return json({ ok: false, reason: "invalid_driver_request" }, { status: 400 });
     const publicRequest = request as Record<string, unknown>;
     for (const field of ["workflowVersionId", "runInput", "lease", "hostSigned"]) {
       if (field in publicRequest) return json({ ok: false, reason: `public_${field}_forbidden` }, { status: 400 });
     }
+    if (action.action !== "resume_run" && "resumeEvent" in publicRequest) return json({ ok: false, reason: "resume_event_not_allowed" }, { status: 400 });
     const runId = action.action === "cancel_run" ? action.runId : String(publicRequest.workflowRunId ?? "");
     if (!runId) return json({ ok: false, reason: "workflowRunId_required" }, { status: 400 });
     const row = await store.getRun(owner, runId);
