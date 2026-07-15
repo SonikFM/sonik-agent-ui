@@ -65,6 +65,9 @@ export interface WorkflowNodeExecutionContext {
   answer?: JsonValue;
   approvalDecision?: "approved" | "rejected";
   reasoning?: unknown;
+  reasoningUsage?: { steps: number; tokens: number };
+  inlineOutputByteLimit?: number;
+  now?: () => number;
   executors?: Partial<Record<WorkflowVNextNodeType, WorkflowNodeExecutor>>;
   onAttempt?: (event: WorkflowNodeAttemptEvent) => void;
 }
@@ -146,6 +149,7 @@ export async function dispatchWorkflowNode(
   });
   const executor = context.executors?.[request.nodeType];
   const reasoningContract = request.nodeType === "reasoning" ? reasoningExecutionContractSchema.safeParse(context.reasoning) : null;
+  const startedAt = (context.now ?? Date.now)();
   const response = parseEngineResponseForRegistry(
     request,
     reasoningContract && !reasoningContract.success
@@ -153,6 +157,17 @@ export async function dispatchWorkflowNode(
       : executor ? await executor(request) : defaultExecutor(request, context),
     workflowNodeExecutorRuntimeRegistry,
   );
+  if (reasoningContract?.success && response.status === "succeeded") {
+    const usage = context.reasoningUsage ?? { steps: 1, tokens: 0 };
+    const elapsed = (context.now ?? Date.now)() - startedAt;
+    const inlineBytes = response.output.storage === "inline" ? new TextEncoder().encode(JSON.stringify(response.output.value)).byteLength : 0;
+    if (usage.steps > reasoningContract.data.budgets.maxSteps || usage.tokens > reasoningContract.data.budgets.maxTokens || elapsed > reasoningContract.data.budgets.maxWallTimeMs) {
+      return terminal("reasoning_budget_exhausted", "Reasoning exceeded its step, token, or wall-time budget");
+    }
+    if (inlineBytes > (context.inlineOutputByteLimit ?? Number.MAX_SAFE_INTEGER)) {
+      return terminal("reasoning_output_budget_exhausted", "Reasoning output exceeded its inline byte budget");
+    }
+  }
   context.onAttempt?.({
     phase: "finished",
     workflowRunId: request.workflowRunId,

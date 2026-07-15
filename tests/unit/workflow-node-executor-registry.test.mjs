@@ -63,6 +63,37 @@ assert.equal(governed.status, "terminal_error");
 assert.equal(governed.error.code, "reasoning_contract_required");
 assert.equal(reasoningAdapterCalled, false, "nested governed writes fail before adapter invocation");
 
+const reasoningContract = {
+  structuredOutputSchema: { schemaId: "reasoning.output", version: 1, digest: `sha256:${"a".repeat(64)}` },
+  budgets: { maxSteps: 2, maxTokens: 10, maxWallTimeMs: 100 },
+  nestedCapabilityEffects: [],
+};
+const reasoningSuccess = { status: "succeeded", output: { storage: "inline", value: { answer: 42 }, byteLength: 13 } };
+for (const [name, context] of [
+  ["steps", { reasoningUsage: { steps: 3, tokens: 1 } }],
+  ["tokens", { reasoningUsage: { steps: 1, tokens: 11 } }],
+  ["wall-time", { reasoningUsage: { steps: 1, tokens: 1 }, now: (() => { let now = 0; return () => (now += 101); })() }],
+]) {
+  const exhausted = await dispatchWorkflowNode(request("reasoning"), { reasoning: reasoningContract, executors: { reasoning: () => reasoningSuccess }, ...context });
+  assert.equal(exhausted.status, "terminal_error", `${name} exhaustion is terminal`);
+  assert.equal(exhausted.error.code, "reasoning_budget_exhausted");
+}
+const oversized = await dispatchWorkflowNode(request("reasoning"), {
+  reasoning: reasoningContract,
+  reasoningUsage: { steps: 1, tokens: 1 },
+  inlineOutputByteLimit: 4,
+  executors: { reasoning: () => reasoningSuccess },
+});
+assert.equal(oversized.status, "terminal_error");
+assert.equal(oversized.error.code, "reasoning_output_budget_exhausted");
+const referenced = await dispatchWorkflowNode(request("reasoning"), {
+  reasoning: reasoningContract,
+  reasoningUsage: { steps: 1, tokens: 1 },
+  inlineOutputByteLimit: 1,
+  executors: { reasoning: () => ({ status: "succeeded", output: { storage: "artifact", artifactId: "artifact-1", version: 1, digest: `sha256:${"b".repeat(64)}`, byteLength: 100 } }) },
+});
+assert.equal(referenced.status, "succeeded", "artifact references remain valid when inline output would exceed budget");
+
 const logicalEffectId = "effect:generic";
 const committed = await dispatchWorkflowNode(request("tool_commit", {
   logicalEffectId,
