@@ -14,8 +14,16 @@ async function openWorkflowBuilder(page: Page): Promise<void> {
 
 async function installWorkflowBuilderDraftPersistenceFixture(page: Page): Promise<void> {
   await page.route("**/api/agent-definitions", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
+  let revision = 0;
+  let definition: Record<string, unknown> | undefined;
   await page.route("**/api/workflow-definitions", async (route) => {
-    const body = JSON.parse(route.request().postData() ?? "{}") as { action?: string; definition?: Record<string, unknown> };
+    const body = JSON.parse(route.request().postData() ?? "{}") as {
+      action?: string;
+      definition?: Record<string, unknown>;
+      patch?: { edits?: Array<{ path: string; value: unknown }> };
+    };
+    if (body.definition) definition = body.definition;
+    if (body.action === "organizer_patch") revision += 1;
     const response = body.action === "versions"
       ? { ok: true, versions: [] }
       : body.action === "list"
@@ -24,14 +32,78 @@ async function installWorkflowBuilderDraftPersistenceFixture(page: Page): Promis
             ok: true,
             draft: {
               organizationId: "workflow-builder-e2e",
-              workflowId: body.definition?.workflowId,
-              draftRevision: 0,
+              workflowId: definition?.workflowId,
+              draftRevision: revision,
               definitionDigest: `sha256:${"a".repeat(64)}`,
-              definition: body.definition,
+              definition,
             },
           };
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
   });
+}
+
+async function installModelCatalogFixture(page: Page): Promise<void> {
+  const models = Array.from({ length: 35 }, (_, index) => ({
+    id: `fixture/model-${String(index + 1).padStart(2, "0")}`,
+    label: `Fixture Model ${String(index + 1).padStart(2, "0")}`,
+    provider: "Fixture",
+    contextWindow: 128_000,
+    supportsTools: true,
+    supportsImages: index === 34,
+    supportsVideo: index === 34,
+    task: index === 34 ? "Agent" : "Text",
+    inputModalities: index === 34 ? ["audio"] : ["text"],
+    outputModalities: ["text"],
+  }));
+  await page.route("**/api/agent-models", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ source: "gateway", models }),
+  }));
+}
+
+async function installCapabilityReadinessFixture(page: Page): Promise<void> {
+  await page.route("**/api/capability-readiness", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      readiness: [{
+        capabilityId: "amplify.campaign.create",
+        effectMode: "write",
+        registered: true,
+        implemented: false,
+        authorable: true,
+        definitionCompatible: false,
+        mounted: true,
+        contextReady: false,
+        grantReady: false,
+        previewable: false,
+        committable: false,
+        killSwitched: true,
+        versionPinned: false,
+        callable: false,
+        reasonCodes: ["not_implemented", "definition_incompatible", "missing_context", "missing_host_grant", "kill_switched", "version_not_pinned", "preview_required", "approval_required"],
+        nextAction: "Restore the listed runtime prerequisites before enabling this capability.",
+      }, {
+        capabilityId: "amplify.campaign.preview",
+        effectMode: "preview",
+        registered: true,
+        implemented: true,
+        authorable: true,
+        definitionCompatible: true,
+        mounted: true,
+        contextReady: true,
+        grantReady: true,
+        previewable: true,
+        committable: false,
+        killSwitched: false,
+        versionPinned: true,
+        callable: true,
+        reasonCodes: [],
+        nextAction: null,
+      }],
+    }),
+  }));
 }
 
 async function installWorkflowDraftStreamFixture(page: Page): Promise<void> {
