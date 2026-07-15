@@ -16,7 +16,8 @@
   import { AGENT_MODEL_OPTIONS, DEFAULT_AGENT_MODEL_ID, MAX_AGENT_PROMPT_OVERRIDE_CHARS, type AgentModelOption, type AgentToolPermissionMode } from "$lib/agent-settings";
   import { AGENT_PROMPT_MODULES, CORE_MODULE_ID } from "$lib/agent-prompt";
   import { groupCapabilitiesByFamily, effectiveFamilyMode, type KnowledgeRef } from "./builder-model";
-  import { isModelIncompatible, formatModelContextWindow } from "./builder-model";
+  import { isModelIncompatible } from "./builder-model";
+  import { formatModelContextWindow } from "./builder-model";
   import { COLLAPSED_MODEL_ROW_LIMIT, modelCapabilityBadges, modelDisabledReason, type CatalogModelOption } from "./organizer-model";
   import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
   import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
