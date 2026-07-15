@@ -33,13 +33,15 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
   const sessionId = query.sessionId ?? exactConversation?.session_id ?? workflowCandidates.find((row) => row.hostSessionId)?.hostSessionId ?? undefined;
   const workflowRows = workflowCandidates.filter((row) => matchesWorkflow(row, query, sessionId));
   const exactWorkflowId = query.workflowRunId && workflowRows[0]?.runId === query.workflowRunId ? query.workflowRunId : undefined;
+  const conversationRunId = query.conversationRunId;
+  const artifactId = query.artifactId;
 
   const [conversationCandidates, conversationEvents, workflowEvents, toolCalls, artifact] = await Promise.all([
     exactConversation ? Promise.resolve([exactConversation]) : sessionId ? deps.workspace.listRuns(sessionId) : Promise.resolve([]),
-    query.conversationRunId ? failSoft(() => deps.workspace.listRunEvents(query.conversationRunId)) : Promise.resolve([]),
+    conversationRunId ? failSoft(() => deps.workspace.listRunEvents(conversationRunId), []) : Promise.resolve([]),
     exactWorkflowId ? deps.journal.listEvents(deps.owner, exactWorkflowId) : Promise.resolve([]),
-    sessionId ? failSoft(() => deps.workspace.listToolCalls(sessionId)) : Promise.resolve([]),
-    query.artifactId ? failSoft(() => deps.workspace.getArtifact(query.artifactId), null) : Promise.resolve(null),
+    sessionId ? failSoft(() => deps.workspace.listToolCalls(sessionId), []) : Promise.resolve([]),
+    artifactId ? failSoft(() => deps.workspace.getArtifact(artifactId), null) : Promise.resolve(null),
   ]);
   const conversations = conversationCandidates.filter((run) => matchesConversation(run, query));
   const filteredToolCalls = toolCalls.filter((call) => matchesToolCall(call, query));
@@ -165,6 +167,6 @@ function projectWorkflowEvent(event: CanonicalWorkflowEvent) {
   };
 }
 
-async function failSoft<T>(operation: () => Promise<T>, fallback: T extends object ? null : never = [] as never): Promise<T | null> {
+async function failSoft<T>(operation: () => Promise<T>, fallback: T): Promise<T> {
   try { return await operation(); } catch { return fallback; }
 }
