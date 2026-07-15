@@ -338,7 +338,8 @@ try {
   assert.match(routeSource, /createAgentHostSessionEnvelope\(event\)/);
   assert.match(routeSource, /workflowRunOwnerFromHostSession\(hostSession\)/);
   assert.match(routeSource, /status: 401/);
-  assert.match(routeSource, /handlePublicWorkflowDriverAction/, "the HTTP route delegates driver actions to the executable public controller");
+  assert.match(routeSource, /await handlePublicWorkflowDriverAction\(action as PublicWorkflowDriverAction, \{[\s\S]*journal: resolveWorkflowRunJournalStore\(env\)[\s\S]*repository: resolveWorkflowDefinitionRepository\(env\)/, "the HTTP route invokes the executable public controller with durable dependencies");
+  assert.doesNotMatch(routeSource, /new WorkflowRunDriver|publicResumeEventSchema|randomUUID|driverLease/, "the thin route cannot retain orphan inline driver logic");
   assert.match(publicRouteSource, /store\.getRun\(owner, runId\)[\s\S]*repository\.getPublished\(owner, row\.workflowVersionId\)/, "public driver actions load the durable run before resolving its pinned version");
   assert.match(publicRouteSource, /runInput: row\.input/, "public driver recreation uses persisted input, not client input");
   assert.match(publicRouteSource, /publicResumeEventSchema\.safeParse/, "resume payloads cross a strict public DTO boundary");

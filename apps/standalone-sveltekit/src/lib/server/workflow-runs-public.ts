@@ -74,11 +74,11 @@ export async function handlePublicWorkflowDriverAction(action: PublicWorkflowDri
       ...(node.nodeType === "ask_user" && signedResumeEvent?.kind === "answer" ? { answer: signedResumeEvent.answer } : {}),
       ...(node.nodeType === "approval" && signedResumeEvent?.kind === "approval" ? { approvalDecision: "approved" as const } : {}),
     }),
-    approvalDecision: (commitNodeId) => {
+    approvalDecision: (commitNodeId, externalEffectIdentity) => {
       if (signedResumeEvent?.kind !== "approval") return undefined;
       const commit = published.definition.nodes.find((node) => node.nodeId === commitNodeId && node.nodeType === "tool_commit");
       if (!commit?.effectBinding || signedResumeEvent.logicalEffectId !== commit.effectBinding.logicalEffectId) return undefined;
-      return { decisionId: signedResumeEvent.eventId, decision: "approved", runId, approvalNodeId: commit.effectBinding.approvalNodeId, previewNodeId: commit.effectBinding.previewNodeId, commitNodeId, commandId: commit.effectBinding.commandId, logicalEffectId: commit.effectBinding.logicalEffectId, organizationId: owner.organizationId, approverId: owner.userId, grantEvidenceDigest: digest(JSON.stringify(readiness())), resolvedInputHash: commit.effectBinding.resolvedInputHash, issuedAt: signedResumeEvent.issuedAt, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), hostSigned: true };
+      return { decisionId: signedResumeEvent.eventId, decision: "approved", runId, approvalNodeId: commit.effectBinding.approvalNodeId, previewNodeId: commit.effectBinding.previewNodeId, commitNodeId, commandId: commit.effectBinding.commandId, logicalEffectId: commit.effectBinding.logicalEffectId, organizationId: owner.organizationId, approverId: owner.userId, grantEvidenceDigest: digest(JSON.stringify(readiness())), resolvedInputHash: commit.effectBinding.resolvedInputHash, externalEffectIdentity, issuedAt: signedResumeEvent.issuedAt, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), hostSigned: true };
     },
   });
   try {
