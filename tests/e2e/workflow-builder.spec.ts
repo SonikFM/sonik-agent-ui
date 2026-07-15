@@ -391,10 +391,14 @@ test("builder exposes isolated preview, full keyboard canvas semantics, and grap
   }
   await expect(page.getByText("Pending approval", { exact: true })).toBeVisible();
   await expect(page.getByText("Recent run", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Test" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Publish" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Review approvals" })).toBeVisible();
+  const organizer = page.locator("[data-organizer-panel]");
+  await expect(organizer.getByRole("button", { name: "Test" })).toBeVisible();
+  await expect(organizer.getByRole("button", { name: "Publish" })).toBeVisible();
+  await expect(organizer.getByRole("button", { name: "Review approvals" })).toBeVisible();
   await expect(page.getByText(/raw graph|MCP|model administration/i)).toHaveCount(0);
+  const accessibilityTree = await page.locator('[data-agent-mode="workflow-builder"]').ariaSnapshot();
+  expect(accessibilityTree).toContain('button "Save configuration"');
+  expect(accessibilityTree).toContain('button "Review approvals"');
   await page.getByRole("button", { name: "History", exact: true }).click();
   await expect(page.locator("[data-run-history-panel]")).toBeVisible();
 });
