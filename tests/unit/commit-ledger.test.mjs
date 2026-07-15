@@ -224,6 +224,8 @@ assert.match(runner, /version: "0012"[\s\S]*name: "commit_ledger"[\s\S]*0012_com
 assert.match(runner, /version: "0012"[\s\S]*to_regclass\('sonik_agent_ui\.agent_workspace_commit_ledger'\)/, "the runner must baseline/version an already-applied 0012 table");
 assert.match(runner, /version: "0014"[\s\S]*name: "commit_claim_leases"[\s\S]*0014_commit_claim_leases\.sql/);
 assert.doesNotMatch(reservationRoute, /createRequestWorkspaceArtifact|getRequestWorkspaceArtifact|as unknown as/);
+assert.match(reservationRoute, /requestId: `reservation:\$\{previewToolCallId\}`/, "reservation writes must derive a stable downstream request id from the approval key");
+assert.match(intakeRoute, /requestId: `intake:\$\{idempotencyKey\}`/, "intake writes must derive a stable downstream request id from the versioned ledger key");
 for (const [name, route] of [["reservation", reservationRoute], ["intake", intakeRoute]]) {
   assert.match(route, /runIdempotentCommit/, `${name} commit must use the shared replay guard`);
   assert.match(route, /claimRequestWorkspaceCommit/, `${name} commit must claim a durable lease before the external write`);
