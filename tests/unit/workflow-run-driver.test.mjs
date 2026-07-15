@@ -106,17 +106,60 @@ function externalEffectIdentity(runId, definition) {
   return { namespace: "workflow-run-v1", keyDigest: hashWorkflowInput({ workflowRunId: runId, logicalEffectId: binding.logicalEffectId }), commandId: binding.commandId, resolvedInputHash: binding.resolvedInputHash };
 }
 
-function approvalDecision(runId, definition, identity = externalEffectIdentity(runId, definition)) {
+function approvalDecision(runId, definition, identity = externalEffectIdentity(runId, definition), decisionOwner = owner) {
   const commit = definition.nodes.find((node) => node.nodeType === "tool_commit");
   const binding = commit.effectBinding;
   return {
     decisionId: "decision-1", decision: "approved", runId, approvalNodeId: binding.approvalNodeId,
     previewNodeId: binding.previewNodeId, commitNodeId: commit.nodeId, commandId: binding.commandId,
-    logicalEffectId: binding.logicalEffectId, organizationId: owner.organizationId, approverId: owner.userId,
+    logicalEffectId: binding.logicalEffectId, organizationId: decisionOwner.organizationId, approverId: decisionOwner.userId,
     grantEvidenceDigest: `sha256:${"a".repeat(64)}`, resolvedInputHash: binding.resolvedInputHash,
     externalEffectIdentity: identity,
     issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: future(), hostSigned: true,
   };
+}
+
+{
+  const definition = approvalDefinition();
+  const owners = [
+    { organizationId: "org-dedupe", userId: "user-a" },
+    { organizationId: "org-dedupe", userId: "user-b" },
+    { organizationId: "org-isolated", userId: "user-c" },
+  ];
+  const runIds = ["run-dedupe-a", "run-dedupe-b", "run-isolated"];
+  const knownRuns = new Set(owners.map((candidate, index) => JSON.stringify([candidate.organizationId, candidate.userId, runIds[index]])));
+  const journal = createInMemoryWorkflowRunJournalStore({ getRun: (candidate, runId) => knownRuns.has(JSON.stringify([candidate.organizationId, candidate.userId, runId])) ? {} : null });
+  const keyDigest = `sha256:${"7".repeat(64)}`;
+  let providerCalls = 0;
+  const makeDriver = (decisionOwner, runId) => {
+    const binding = definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding;
+    const identity = { namespace: "booking:v1:create", keyDigest, commandId: binding.commandId, resolvedInputHash: binding.resolvedInputHash };
+    const initialState = {
+      ...structuredClone(train0SelectedPathRunState), workflowRunId: runId, organizationId: decisionOwner.organizationId,
+      source: { kind: "published", organizationId: decisionOwner.organizationId, workflowVersionId: `${definition.workflowId}@1`, definitionDigest: `sha256:${"e".repeat(64)}` },
+      status: "ready", revision: 0, eventSequence: 0, selectedPath: [], schedulerFrontier: [definition.entryNodeId], outputs: {}, outputRefs: {}, waits: [], compatibilityPhase: "ready",
+    };
+    return new WorkflowRunDriver({
+      journal, owner: decisionOwner, definition, initialState,
+      hostContext: { organizationId: decisionOwner.organizationId, principalId: decisionOwner.userId },
+      resolveReadiness: () => [readiness("booking.create.booking")],
+      executionContext: (node) => ({
+        externalEffectIdentity: { namespace: identity.namespace, keyDigest: identity.keyDigest },
+        ...(node.nodeType === "tool_preview" ? { commandId: binding.commandId } : {}),
+        ...(node.nodeType === "approval" ? { approvalDecision: "approved" } : {}),
+        ...(node.nodeType === "tool_commit" ? { executors: { tool_commit: () => {
+          providerCalls += 1;
+          return { status: "succeeded", output: { storage: "inline", value: { ok: true }, byteLength: 11 }, receipt: { receiptId: `receipt-${providerCalls}`, semanticStatus: "success" } };
+        } } } : {}),
+      }),
+      approvalDecision: () => approvalDecision(runId, definition, identity, decisionOwner),
+    });
+  };
+  await makeDriver(owners[0], runIds[0]).start(request(runIds[0], "dedupe-a"));
+  await makeDriver(owners[1], runIds[1]).start(request(runIds[1], "dedupe-b"));
+  assert.equal(providerCalls, 1, "the same trusted external key across runs and users in one organization produces one provider effect");
+  await makeDriver(owners[2], runIds[2]).start(request(runIds[2], "isolated"));
+  assert.equal(providerCalls, 2, "the same external key in a different organization remains isolated");
 }
 
 function approvalDefinition() {
