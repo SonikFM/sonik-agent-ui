@@ -2076,5 +2076,6 @@ export {
   parseEngineRequestForRegistry,
   parseEngineResponseForRegistry,
   validateWorkflowForPublish,
+  workflowEffectIdempotencyKey,
   workflowVNextDefinitionSchema,
 } from "./workflow-vnext.ts";

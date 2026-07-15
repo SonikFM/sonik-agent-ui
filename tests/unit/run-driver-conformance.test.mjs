@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { NativeRunDriverSpike, NATIVE_RUN_DRIVER_DELAYED_RETRY_PUBLISHABLE } from "../../packages/tool-contracts/dist/run-driver-spike.js";
+import { workflowEffectIdempotencyKey } from "../../packages/tool-contracts/dist/workflow-vnext.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const BASE_TIME = Date.now();
@@ -191,7 +192,7 @@ class FakeStore {
   const stillBlocked = await driver.resume(request("unknown", lease("l1", "w1", 10_000)));
   assert.equal(calls, 1, "outcome-unknown effects are never replayed automatically");
   assert.equal(stillBlocked.compatibilityPhase, "outcome_unknown");
-  assert.equal(store.effectKeys.get("unknown:effect-1"), "unknown:effect-1");
+  assert.equal(store.effectKeys.get("unknown:effect-1"), workflowEffectIdempotencyKey("unknown", "effect-1"));
 }
 
 {

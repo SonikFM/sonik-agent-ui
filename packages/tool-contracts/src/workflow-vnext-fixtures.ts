@@ -7,6 +7,7 @@ import {
   jsonValueSchema,
   parseEngineRequestForRegistry,
   parseEngineResponseForRegistry,
+  workflowEffectIdempotencyKey,
   workflowSchemaRefKey,
   type EngineRequest,
   type EngineResponse,
@@ -154,7 +155,7 @@ export const train0EngineRequest: EngineRequest = {
   input: { guestName: "Ada" },
   contextSnapshot: { organizationId: "org-1" },
   capabilityPins: [commandId],
-  idempotencyKey: "effect:approval",
+  idempotencyKey: workflowEffectIdempotencyKey("run-1", "effect:approval"),
 };
 
 export const train0EngineResponses: EngineResponse[] = [

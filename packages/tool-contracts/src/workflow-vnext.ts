@@ -323,13 +323,16 @@ export const workflowWaitpointSchema = z.discriminatedUnion("kind", [
 export type WorkflowWaitpoint = z.infer<typeof workflowWaitpointSchema>;
 
 export const workflowErrorSchema = z.object({ code: z.string().min(1), message: z.string().min(1), retrySafe: z.boolean() }).strict();
+export function workflowEffectIdempotencyKey(workflowRunId: string, logicalEffectId: string): string {
+  return `${workflowRunId}:${logicalEffectId}`;
+}
 export const engineRequestSchema = z.object({
   workflowRunId: z.string().min(1), workflowVersionId: z.string().min(1), nodeId: z.string().min(1),
   nodeType: workflowVNextNodeTypeSchema, typeVersion: z.number().int().positive(), attempt: z.number().int().positive(),
   attemptId: z.string().min(1), logicalEffectId: z.string().min(1).optional(), input: jsonValueSchema,
   contextSnapshot: z.record(z.string(), jsonValueSchema), capabilityPins: z.array(capabilityIdSchema), idempotencyKey: z.string().min(1),
 }).strict().superRefine((request, ctx) => {
-  if (request.logicalEffectId && request.idempotencyKey !== request.logicalEffectId) ctx.addIssue({ code: "custom", path: ["idempotencyKey"], message: "Effect idempotencyKey must equal logicalEffectId" });
+  if (request.logicalEffectId && request.idempotencyKey !== workflowEffectIdempotencyKey(request.workflowRunId, request.logicalEffectId)) ctx.addIssue({ code: "custom", path: ["idempotencyKey"], message: "Effect idempotencyKey must be scoped to the run and logical effect" });
 });
 export const engineResponseSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("succeeded"), output: boundedNodeOutputSchema, receipt: z.object({ receiptId: z.string().min(1), semanticStatus: z.literal("success") }).strict().optional() }).strict(),
@@ -352,7 +355,7 @@ export function parseEngineRequestForRegistry(input: unknown, registry: Workflow
   const inputSchema = resolveWorkflowSchema(registry.schemas, descriptor.inputSchema);
   if (!inputSchema) throw new Error(`descriptor_schema_missing:${workflowSchemaRefKey(descriptor.inputSchema)}`);
   inputSchema.parse(request.input);
-  if (MUTATING_EFFECTS.has(descriptor.effect) && (!request.logicalEffectId || request.idempotencyKey !== request.logicalEffectId)) throw new Error("invalid_effect_idempotency");
+  if (MUTATING_EFFECTS.has(descriptor.effect) && (!request.logicalEffectId || request.idempotencyKey !== workflowEffectIdempotencyKey(request.workflowRunId, request.logicalEffectId))) throw new Error("invalid_effect_idempotency");
   if (!MUTATING_EFFECTS.has(descriptor.effect) && request.logicalEffectId) throw new Error("logical_effect_on_non_mutating_node");
   return request;
 }
