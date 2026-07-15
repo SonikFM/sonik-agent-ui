@@ -142,3 +142,24 @@ test("the shipped reservation fixture renders LOCKED alongside an editable DRAFT
   await expect(reservationCard.getByText("LOCKED", { exact: true })).toBeVisible();
   await expect(page.getByText("DRAFT", { exact: true })).toBeVisible();
 });
+
+test("builder exposes honest lifecycle, isolated preview context, and keyboard canvas semantics", async ({ page }) => {
+  await gotoFreshWorkspace(page, smokeUrl(null));
+  await openWorkflowBuilder(page);
+
+  await expect(page.locator('[data-workflow-lifecycle="dirty"]')).toBeVisible();
+  await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
+
+  await page.getByRole("tab", { name: "Canvas" }).click();
+  await page.getByRole("button", { name: "Add node" }).first().click();
+  const firstNode = page.locator('[data-workflow-node-index="0"]').first();
+  await firstNode.focus();
+  await firstNode.press("c");
+  await expect(page.getByText(/Connected .* to .*/)).toBeAttached();
+  await firstNode.press("Control+z");
+  await expect(page.getByText("Undid the last canvas change.")).toBeAttached();
+
+  await page.getByRole("tab", { name: "Debug & Preview" }).click();
+  await expect(page.locator("[data-debug-preview-context]")).toContainText("Isolated preview context");
+  await expect(page.locator("[data-debug-preview-context]")).toContainText("read/preview only");
+});

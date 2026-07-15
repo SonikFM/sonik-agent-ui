@@ -8,6 +8,7 @@
     saveMessage: string;
     definitionValid: boolean;
     workflowValid: boolean;
+    workflowLifecycle: import("./builder-model").WorkflowDraftLifecycle;
   };
 
   export interface WorkflowBuilderController {
@@ -16,6 +17,7 @@
     setTab(tab: WorkflowBuilderSnapshot["tab"]): void;
     saveDraft(): Promise<{ ok: boolean; message: string }>;
     newAgent(): void;
+    publishWorkflow(): Promise<{ ok: boolean; message: string }>;
   }
 </script>
 
@@ -43,26 +45,31 @@
     validateWorkflowDefinition,
     createWorkflowBuilderApprovalState,
     selectActiveWorkflowRun,
+    resolveWorkflowDraftLifecycle,
+    workflowDefinitionToVNext,
+    workflowVNextToDefinition,
     type ActiveWorkflowRunSelection,
     type WorkflowLockState,
+    type WorkflowDraftLifecycle,
   } from "./builder-model";
   import { bookingReservationWorkflowManifest, amplifyCampaignWorkflowManifest } from "@sonik-agent-ui/tool-contracts/marketplace-fixtures";
   import type { AgentDefinition, WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
   import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
-  import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+  import type { CapabilityReadiness, WorkflowDependencyPins, WorkflowVNextDefinition } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
   import { AGENT_MODEL_OPTIONS, type AgentModelOption } from "$lib/agent-settings";
 
   interface Props {
     workspaceFetch: typeof fetch;
     workspaceContextReady?: boolean;
     signedHostApprovedCommandIds?: string[];
+    workflowPublishPins?: WorkflowDependencyPins;
     onController?: (controller: WorkflowBuilderController | null) => void;
     /** Return to the chat workspace. The mode toggle lives in WorkspaceRoot's
      *  toolbar, which unmounts in builder mode — without this the builder is a
      *  one-way door (Lane D e2e finding, prod slice 2026-07-13). */
     onExit?: () => void;
   }
-  let { workspaceFetch, workspaceContextReady = true, signedHostApprovedCommandIds = [], onController, onExit }: Props = $props();
+  let { workspaceFetch, workspaceContextReady = true, signedHostApprovedCommandIds = [], workflowPublishPins, onController, onExit }: Props = $props();
 
   function freshAgentId(): string {
     return `agent_${Math.random().toString(36).slice(2, 10)}`;
@@ -86,9 +93,26 @@
   let draftWorkflow = $state<WorkflowDefinition>(createEmptyWorkflowDefinition(`${initialAgentId}.workflow`));
   let draftLockState = $state<WorkflowLockState>("draft");
   let activeRunSelection = $state<ActiveWorkflowRunSelection | null>(null);
+  type DraftRecord = { organizationId: string; workflowId: string; draftRevision: number; definitionDigest: string; definition: WorkflowVNextDefinition };
+  type VersionRecord = { workflowVersionId: string; sourceDraftRevision: number; publishedAt: string };
+  let persistedDrafts = $state<DraftRecord[]>([]);
+  let workflowDraft = $state<DraftRecord | null>(null);
+  let workflowVersions = $state<VersionRecord[]>([]);
+  let workflowDirty = $state(true);
+  let workflowSaving = $state(false);
+  let workflowConflicted = $state(false);
+  let publishedRevision = $state<number | null>(null);
 
   const definitionValidation = $derived(validateAgentDefinition(definition));
   const workflowValidation = $derived(validateWorkflowDefinition(draftWorkflow));
+  const workflowLifecycle = $derived<WorkflowDraftLifecycle>(resolveWorkflowDraftLifecycle({
+    valid: workflowValidation.ok,
+    saving: workflowSaving,
+    conflicted: workflowConflicted,
+    dirty: workflowDirty,
+    draftRevision: workflowDraft?.draftRevision ?? null,
+    publishedRevision,
+  }));
 
   // Model catalog: fetched here (not in AgentConfigPanel) so the config panel
   // stays network-free -- same /api/agent-models route + fallback shape the
@@ -154,6 +178,8 @@
         saveMessage = body?.error ?? `Save failed (${response.status})`;
         return { ok: false, message: saveMessage };
       }
+      const workflowResult = await saveWorkflowDraft();
+      if (!workflowResult.ok) return workflowResult;
       saveStatus = "saved";
       saveMessage = "Draft saved.";
       return { ok: true, message: saveMessage };
@@ -164,6 +190,92 @@
     }
   }
 
+  async function workflowDefinitions(body: Record<string, unknown>): Promise<Record<string, any>> {
+    const response = await workspaceFetch("/api/workflow-definitions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json().catch(() => null) as Record<string, any> | null;
+    if (!response.ok || result?.ok !== true) throw new Error(result?.reason ?? `Workflow request failed (${response.status})`);
+    return result;
+  }
+
+  async function saveWorkflowDraft(): Promise<{ ok: boolean; message: string }> {
+    if (!workflowValidation.ok) {
+      saveStatus = "error";
+      saveMessage = workflowValidation.issues?.[0] ?? "Workflow failed validation.";
+      return { ok: false, message: saveMessage };
+    }
+    workflowSaving = true;
+    workflowConflicted = false;
+    try {
+      const next = workflowDefinitionToVNext(workflowValidation.workflow!);
+      const result = await workflowDefinitions(workflowDraft
+        ? { action: "update", workflowId: next.workflowId, expectedRevision: workflowDraft.draftRevision, definition: next }
+        : { action: "create", definition: next });
+      workflowDraft = result.draft as DraftRecord;
+      workflowDirty = false;
+      await refreshWorkflowVersions();
+      return { ok: true, message: "Workflow draft saved." };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workflow save failed.";
+      workflowConflicted = message.includes("conflict");
+      saveStatus = "error";
+      saveMessage = message;
+      return { ok: false, message };
+    } finally { workflowSaving = false; }
+  }
+
+  async function refreshPersistedWorkflows(): Promise<void> {
+    if (!workspaceContextReady) return;
+    try { persistedDrafts = (await workflowDefinitions({ action: "list" })).drafts ?? []; }
+    catch { persistedDrafts = []; }
+  }
+
+  async function loadWorkflow(workflowId: string): Promise<void> {
+    const result = await workflowDefinitions({ action: "get", workflowId });
+    if (!result.draft) return;
+    workflowDraft = result.draft as DraftRecord;
+    draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
+    workflowDirty = false;
+    workflowConflicted = false;
+    await refreshWorkflowVersions();
+  }
+
+  async function refreshWorkflowVersions(): Promise<void> {
+    if (!workflowDraft) { workflowVersions = []; publishedRevision = null; return; }
+    const result = await workflowDefinitions({ action: "versions", workflowId: workflowDraft.workflowId });
+    workflowVersions = result.versions ?? [];
+    publishedRevision = workflowVersions.at(-1)?.sourceDraftRevision ?? null;
+  }
+
+  async function publishWorkflow(): Promise<{ ok: boolean; message: string }> {
+    if (!workflowDraft || !workflowPublishPins) return { ok: false, message: "Authoritative publish dependency pins are required." };
+    try {
+      await workflowDefinitions({ action: "publish", workflowId: workflowDraft.workflowId, expectedRevision: workflowDraft.draftRevision, workflowVersionId: workflowPublishPins.workflowVersionId, dependencyPins: workflowPublishPins });
+      publishedRevision = workflowDraft.draftRevision;
+      await refreshWorkflowVersions();
+      saveMessage = "Workflow published.";
+      return { ok: true, message: saveMessage };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Publish failed.";
+      saveMessage = message;
+      return { ok: false, message };
+    }
+  }
+
+  async function cloneWorkflow(): Promise<void> {
+    if (!workflowDraft) return;
+    const targetWorkflowId = `${workflowDraft.workflowId}.copy.${Date.now().toString(36)}`;
+    const result = await workflowDefinitions({ action: "clone", source: { kind: "draft", workflowId: workflowDraft.workflowId, draftRevision: workflowDraft.draftRevision, definitionDigest: workflowDraft.definitionDigest }, targetWorkflowId });
+    workflowDraft = result.draft as DraftRecord;
+    draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
+    workflowDirty = false;
+    workflowVersions = [];
+    publishedRevision = null;
+  }
+
   function newAgent(): void {
     agentId = freshAgentId();
     definition = createEmptyAgentDefinition(agentId);
@@ -172,6 +284,11 @@
     saveMessage = "";
     tab = "config";
     activeRunSelection = null;
+    workflowDraft = null;
+    workflowVersions = [];
+    workflowDirty = true;
+    workflowConflicted = false;
+    publishedRevision = null;
   }
 
   function setTab(next: WorkflowBuilderSnapshot["tab"]): void {
@@ -190,11 +307,13 @@
       saveMessage,
       definitionValid: definitionValidation.ok,
       workflowValid: workflowValidation.ok,
+      workflowLifecycle,
     }),
     approvalState: () => createWorkflowBuilderApprovalState(activeRunSelection?.run ?? null, signedHostApprovedCommandIds),
     setTab,
     saveDraft,
     newAgent,
+    publishWorkflow,
   };
 
   $effect(() => {
@@ -205,6 +324,7 @@
   $effect(() => {
     void refreshModelCatalog();
     void refreshCapabilityReadiness();
+    void refreshPersistedWorkflows();
   });
 </script>
 
@@ -213,6 +333,7 @@
     <div class="flex items-center gap-2">
       <h1 class="text-lg font-semibold">Workflow Builder</h1>
       <Badge variant="outline">{agentId}</Badge>
+      <Badge variant={workflowLifecycle === "invalid" || workflowLifecycle === "conflicted" ? "destructive" : "secondary"} data-workflow-lifecycle={workflowLifecycle}>{workflowLifecycle}</Badge>
       {#if !definitionValidation.ok}
         <Badge variant="destructive">invalid definition</Badge>
       {/if}
@@ -222,6 +343,8 @@
         <Button variant="ghost" onclick={() => onExit?.()} aria-label="Return to the chat workspace">Back to chat</Button>
       {/if}
       <Button variant="outline" onclick={newAgent}>New agent</Button>
+      <Button variant="outline" onclick={() => void cloneWorkflow()} disabled={!workflowDraft}>Clone workflow</Button>
+      <Button variant="outline" onclick={() => void publishWorkflow()} disabled={!workflowDraft || !workflowPublishPins || workflowLifecycle === "dirty" || workflowLifecycle === "invalid" || workflowLifecycle === "saving"} title={workflowPublishPins ? "Publish this saved revision" : "Authoritative dependency pins are required to publish"}>Publish</Button>
       <Button onclick={() => void saveDraft()} disabled={saveStatus === "saving"}>
         {saveStatus === "saving" ? "Saving…" : "Save draft"}
       </Button>
@@ -229,6 +352,18 @@
   </div>
   {#if saveMessage}
     <p class="text-sm {saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground'}">{saveMessage}</p>
+  {/if}
+  {#if persistedDrafts.length > 0}
+    <label class="flex items-center gap-2 text-sm">
+      <span>Saved workflows</span>
+      <select class="rounded-md border border-input bg-background px-2 py-1" onchange={(event) => void loadWorkflow((event.currentTarget as HTMLSelectElement).value)}>
+        <option value="">Select a draft</option>
+        {#each persistedDrafts as draft}
+          <option value={draft.workflowId}>{draft.workflowId} · r{draft.draftRevision}</option>
+        {/each}
+      </select>
+      {#if workflowVersions.length}<span>{workflowVersions.length} published version{workflowVersions.length === 1 ? "" : "s"}</span>{/if}
+    </label>
   {/if}
 
   <Tabs.Root value={tab} onValueChange={(value) => setTab((value ?? "config") as WorkflowBuilderSnapshot["tab"])}>
@@ -258,7 +393,7 @@
             <Card.Description>Editable. Schema-validated against workflowDefinitionSchema on every change. Describe one in Debug &amp; Preview and it loads here; Run drives it through the controller.</Card.Description>
           </Card.Header>
           <Card.Content class="flex flex-col gap-4">
-            <WorkflowCanvas bind:workflow={draftWorkflow} lockState={draftLockState} />
+            <WorkflowCanvas bind:workflow={draftWorkflow} lockState={draftLockState} onMutation={() => { workflowDirty = true; workflowConflicted = false; }} />
             <WorkflowRunPanel
               workflow={draftWorkflow}
               {workspaceFetch}
@@ -306,6 +441,7 @@
           // to inspect and Run.
           draftWorkflow = drafted;
           draftLockState = "draft";
+          workflowDirty = true;
           setTab("canvas");
         }}
       />
