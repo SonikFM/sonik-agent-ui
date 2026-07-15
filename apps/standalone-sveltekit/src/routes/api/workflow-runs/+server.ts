@@ -21,7 +21,7 @@ export const POST: RequestHandler = async (event) => {
   }
 
   const hostSession = createAgentHostSessionEnvelope(event);
-  if (!workflowRunOwnerFromHostSession(hostSession)) {
+  if (!hostSession || !workflowRunOwnerFromHostSession(hostSession)) {
     return json({ ok: false, reason: "authenticated_workspace_owner_required" }, { status: 401 });
   }
   const env = event.platform?.env as Record<string, unknown> | undefined;
