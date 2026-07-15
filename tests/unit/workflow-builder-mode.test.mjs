@@ -494,12 +494,12 @@ assert.equal(
   "save_draft must return structured validation issues instead of a bare failure",
 );
 assert.equal(
-  agentDefinitionsRouteSource.includes("agentDefinitionStore.saveDraft(parsed.data)"),
+  agentDefinitionsRouteSource.includes("agentDefinitionStore.saveDraft(authority, parsed.data)"),
   true,
   "save_draft must pass only the zod-parsed data into the store, never the raw request body",
 );
 assert.equal(
-  agentDefinitionsRouteSource.includes("agentDefinitionStore.publish({"),
+  agentDefinitionsRouteSource.includes("agentDefinitionStore.publish(authority, {"),
   true,
   "publish action must delegate to the store's publish (immutable packageVersionId, D002) -- no inline envelope construction in the route",
 );
