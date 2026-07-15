@@ -3,6 +3,7 @@ import {
   MAX_INLINE_OUTPUT_BYTES,
   WORKFLOW_EVENT_SCHEMA_VERSION,
   WORKFLOW_VNEXT_SCHEMA_VERSION,
+  approvalCommitContextSchema,
   approvalDecisionSchema,
   bridgeLegacyWorkflowDefinitionToVNext,
   boundedNodeOutputSchema,
@@ -118,13 +119,20 @@ const approval = {
   commitNodeId: "commit", commandId: "booking.create.booking", logicalEffectId: "booking.create.booking:input-a", organizationId: "org-1", approverId: "user-1",
   grantEvidenceDigest: digest, resolvedInputHash: digest, issuedAt: "2026-07-15T12:00:00.000Z", expiresAt: "2026-07-15T12:05:00.000Z", hostSigned: true,
 };
+const approvalContext = { runId: "run-1", organizationId: "org-1", evaluatedAt: "2026-07-15T12:01:00.000Z" };
 assert.equal(approvalDecisionSchema.safeParse(approval).success, true);
 assert.equal(publicApprovalDecisionRequestSchema.safeParse(approval).success, false, "public DTO rejects hostSigned");
-assert.equal(validateApprovalDecisionForCommit(approval, definition, "commit").decision, "approved");
-assert.throws(() => validateApprovalDecisionForCommit({ ...approval, logicalEffectId: "sibling" }, definition, "commit"), /approval_effect_binding_mismatch/);
+assert.equal(validateApprovalDecisionForCommit(approval, definition, "commit", approvalContext).decision, "approved");
+assert.throws(() => validateApprovalDecisionForCommit({ ...approval, logicalEffectId: "sibling" }, definition, "commit", approvalContext), /approval_effect_binding_mismatch/);
 const swappedCommand = structuredClone(definition);
 swappedCommand.nodes[3].effectBinding.commandId = "booking.cancel.booking";
-assert.throws(() => validateApprovalDecisionForCommit(approval, swappedCommand, "commit"), /approval_effect_binding_mismatch/, "approval is invalid after the workflow command changes");
+assert.throws(() => validateApprovalDecisionForCommit(approval, swappedCommand, "commit", approvalContext), /approval_effect_binding_mismatch/, "approval is invalid after the workflow command changes");
+assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "commit", { ...approvalContext, runId: "other-run" }), /approval_context_mismatch/);
+assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "commit", { ...approvalContext, organizationId: "other-org" }), /approval_context_mismatch/);
+assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "commit", { ...approvalContext, evaluatedAt: approval.expiresAt }), /approval_decision_expired/);
+assert.throws(() => validateApprovalDecisionForCommit(approval, definition, "commit", { ...approvalContext, evaluatedAt: "2026-07-15T11:59:59.999Z" }), /approval_decision_not_yet_valid/);
+assert.throws(() => validateApprovalDecisionForCommit({ ...approval, runId: "attacker-run", organizationId: "other-org", issuedAt: "2020-01-01T00:00:00.000Z", expiresAt: "2020-01-01T00:05:00.000Z" }, definition, "commit", approvalContext), /approval_context_mismatch/, "cross-run cross-org expired approvals cannot be replayed");
+assert.equal(approvalCommitContextSchema.safeParse({ ...approvalContext, extra: true }).success, false, "expected approval context is strict");
 const { hostSigned: _hostSigned, ...publicApproval } = approval;
 assert.equal(publicApprovalDecisionRequestSchema.safeParse(publicApproval).success, true, "server derives hostSigned after public DTO validation");
 for (const field of [
