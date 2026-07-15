@@ -125,7 +125,7 @@ function approvalDefinition() {
 {
   const definition = approvalDefinition();
   let commits = 0;
-  const { runId, driver } = harness(definition, "commit", {
+  const { runId, driver, journal } = harness(definition, "commit", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
     executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => {
