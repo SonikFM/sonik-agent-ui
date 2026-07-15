@@ -94,8 +94,9 @@ assert.equal(await cloud.appendEventAndProject(owner, { expectedRevision: 0, lea
 const appendSql = statements.find((sql) => sql.startsWith("with projected as"));
 assert.match(appendSql, /update sonik_agent_ui\.agent_workflow_runs[\s\S]*journal_revision = \$8[\s\S]*lease_id = \$12[\s\S]*insert into sonik_agent_ui\.agent_workflow_run_events/, "lease-fenced projection CAS and event insert share one SQL statement");
 
-const [migration, storeSource] = await Promise.all([
+const [migration, externalEffectMigration, storeSource] = await Promise.all([
   readFile("packages/workspace-session/migrations/postgres/0017_workflow_run_journal.sql", "utf8"),
+  readFile("packages/workspace-session/migrations/postgres/0018_org_scoped_external_effect_claims.sql", "utf8"),
   readFile("apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts", "utf8"),
 ]);
 for (const table of ["agent_workflow_run_events", "agent_workflow_run_leases", "agent_workflow_run_waitpoints", "agent_workflow_effect_claims"]) {
@@ -103,6 +104,13 @@ for (const table of ["agent_workflow_run_events", "agent_workflow_run_leases", "
 }
 assert.match(migration, /foreign key \(organization_id, user_id, run_id\)[\s\S]*references sonik_agent_ui\.agent_workflow_runs/g);
 assert.match(migration, /unique \(organization_id, user_id, run_id, idempotency_key\)/i);
+assert.match(externalEffectMigration, /effect_namespace text/i);
+assert.match(externalEffectMigration, /external_effect_key_digest text/i);
+assert.match(externalEffectMigration, /command_id text/i);
+assert.match(externalEffectMigration, /resolved_input_hash text/i);
+assert.match(externalEffectMigration, /unique index[\s\S]*\(organization_id, effect_namespace, external_effect_key_digest\)/i, "external effect claims dedupe across runs and users within an organization");
+assert.match(externalEffectMigration, /using \(organization_id = sonik_agent_ui\.current_organization_id\(\)\)/i, "effect claim RLS permits org-internal dedupe without cross-org visibility");
+assert.doesNotMatch(externalEffectMigration, /external_effect_key\s+text/i, "raw business idempotency values are never stored");
 assert.match(storeSource, /agent_workflow_run_leases\.lease_expires_at <= now\(\)/, "production lease takeover uses database time");
 assert.match(storeSource, /validateJournalAppend\(input\)/, "canonical envelopes and projections are validated before SQL");
 

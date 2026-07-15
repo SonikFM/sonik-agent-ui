@@ -114,6 +114,14 @@ export const exactEffectBindingSchema = z.object({
 }).strict();
 export type ExactEffectBinding = z.infer<typeof exactEffectBindingSchema>;
 
+export const externalEffectIdentitySchema = z.object({
+  namespace: z.string().min(1),
+  keyDigest: sha256DigestSchema,
+  commandId: z.string().min(1),
+  resolvedInputHash: sha256DigestSchema,
+}).strict();
+export type ExternalEffectIdentity = z.infer<typeof externalEffectIdentitySchema>;
+
 export const previewEffectIdentitySchema = exactEffectBindingSchema.pick({
   commandId: true,
   logicalEffectId: true,
@@ -326,13 +334,18 @@ export const workflowErrorSchema = z.object({ code: z.string().min(1), message: 
 export function workflowEffectIdempotencyKey(workflowRunId: string, logicalEffectId: string): string {
   return `${workflowRunId}:${logicalEffectId}`;
 }
+export function externalEffectIdempotencyKey(identity: ExternalEffectIdentity): string {
+  return `${identity.namespace}:${identity.keyDigest}`;
+}
 export const engineRequestSchema = z.object({
   workflowRunId: z.string().min(1), workflowVersionId: z.string().min(1), nodeId: z.string().min(1),
   nodeType: workflowVNextNodeTypeSchema, typeVersion: z.number().int().positive(), attempt: z.number().int().positive(),
   attemptId: z.string().min(1), logicalEffectId: z.string().min(1).optional(), input: jsonValueSchema,
   contextSnapshot: z.record(z.string(), jsonValueSchema), capabilityPins: z.array(capabilityIdSchema), idempotencyKey: z.string().min(1),
+  externalEffectIdentity: externalEffectIdentitySchema.optional(),
 }).strict().superRefine((request, ctx) => {
-  if (request.logicalEffectId && request.idempotencyKey !== workflowEffectIdempotencyKey(request.workflowRunId, request.logicalEffectId)) ctx.addIssue({ code: "custom", path: ["idempotencyKey"], message: "Effect idempotencyKey must be scoped to the run and logical effect" });
+  const expected = request.externalEffectIdentity ? externalEffectIdempotencyKey(request.externalEffectIdentity) : request.logicalEffectId ? workflowEffectIdempotencyKey(request.workflowRunId, request.logicalEffectId) : undefined;
+  if (expected && request.idempotencyKey !== expected) ctx.addIssue({ code: "custom", path: ["idempotencyKey"], message: "Effect idempotencyKey must match its trusted effect identity" });
 });
 export const engineResponseSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("succeeded"), output: boundedNodeOutputSchema, receipt: z.object({ receiptId: z.string().min(1), semanticStatus: z.literal("success") }).strict().optional() }).strict(),
@@ -355,7 +368,7 @@ export function parseEngineRequestForRegistry(input: unknown, registry: Workflow
   const inputSchema = resolveWorkflowSchema(registry.schemas, descriptor.inputSchema);
   if (!inputSchema) throw new Error(`descriptor_schema_missing:${workflowSchemaRefKey(descriptor.inputSchema)}`);
   inputSchema.parse(request.input);
-  if (MUTATING_EFFECTS.has(descriptor.effect) && (!request.logicalEffectId || request.idempotencyKey !== workflowEffectIdempotencyKey(request.workflowRunId, request.logicalEffectId))) throw new Error("invalid_effect_idempotency");
+  if (MUTATING_EFFECTS.has(descriptor.effect) && !request.logicalEffectId) throw new Error("invalid_effect_idempotency");
   if (!MUTATING_EFFECTS.has(descriptor.effect) && request.logicalEffectId) throw new Error("logical_effect_on_non_mutating_node");
   return request;
 }
@@ -379,12 +392,13 @@ export const approvalDecisionSchema = z.object({
   decisionId: z.string().min(1), decision: z.enum(["approved", "rejected"]), runId: z.string().min(1), approvalNodeId: z.string().min(1),
   previewNodeId: z.string().min(1), commitNodeId: z.string().min(1), commandId: z.string().min(1), logicalEffectId: z.string().min(1), organizationId: z.string().min(1),
   approverId: z.string().min(1), grantEvidenceDigest: sha256DigestSchema, resolvedInputHash: sha256DigestSchema,
+  externalEffectIdentity: externalEffectIdentitySchema,
   issuedAt: z.string().datetime(), expiresAt: z.string().datetime(), hostSigned: z.literal(true),
 }).strict();
-export const publicApprovalDecisionRequestSchema = approvalDecisionSchema.omit({ hostSigned: true }).strict();
+export const publicApprovalDecisionRequestSchema = approvalDecisionSchema.omit({ hostSigned: true, externalEffectIdentity: true }).strict();
 export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>;
 export const approvalCommitContextSchema = z.object({
-  runId: z.string().min(1), organizationId: z.string().min(1), evaluatedAt: z.string().datetime(),
+  runId: z.string().min(1), organizationId: z.string().min(1), evaluatedAt: z.string().datetime(), externalEffectIdentity: externalEffectIdentitySchema,
 }).strict();
 export type ApprovalCommitContext = z.infer<typeof approvalCommitContextSchema>;
 
@@ -407,13 +421,14 @@ export function validateApprovalDecisionForCommit(
   if (decision.decision !== "approved" || decision.commitNodeId !== commit.nodeId || decision.approvalNodeId !== binding.approvalNodeId || decision.previewNodeId !== binding.previewNodeId || decision.commandId !== binding.commandId || decision.logicalEffectId !== binding.logicalEffectId || decision.resolvedInputHash !== binding.resolvedInputHash) {
     throw new Error("approval_effect_binding_mismatch");
   }
+  if (JSON.stringify(decision.externalEffectIdentity) !== JSON.stringify(expectedContext.externalEffectIdentity)) throw new Error("approval_external_effect_identity_mismatch");
   return decision;
 }
 
 export const effectClaimStatusSchema = z.enum(["claimed", "in_flight", "succeeded", "failed", "outcome_unknown", "reconciled"]);
 export const effectClaimSchema = z.object({
   claimId: z.string().min(1), runId: z.string().min(1), logicalEffectId: z.string().min(1), attemptId: z.string().min(1),
-  idempotencyKey: z.string().min(1), providerSupportsIdempotency: z.boolean(), status: effectClaimStatusSchema,
+  idempotencyKey: z.string().min(1), providerSupportsIdempotency: z.boolean(), externalEffectIdentity: externalEffectIdentitySchema, status: effectClaimStatusSchema,
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 }).strict();
 const EFFECT_CLAIM_TRANSITIONS: Record<z.infer<typeof effectClaimStatusSchema>, readonly z.infer<typeof effectClaimStatusSchema>[]> = {
