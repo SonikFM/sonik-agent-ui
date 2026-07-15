@@ -6,7 +6,7 @@ import type { RequestHandler } from "./$types";
 import { resolveStandaloneCapabilityReadiness } from "$lib/server/standalone-capability-readiness";
 import { approvedCommandIdsFromHostSession } from "$lib/server/host-command-runtime";
 
-const ACTIONS = new Set(["create", "update", "get", "list", "publish", "versions", "archive", "clone", "resolve"]);
+const ACTIONS = new Set(["create", "update", "organizer_patch", "get", "list", "publish", "versions", "archive", "clone", "resolve"]);
 
 export const POST: RequestHandler = async (event) => {
   const body = await event.request.json().catch(() => null);

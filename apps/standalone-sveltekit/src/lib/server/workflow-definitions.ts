@@ -1,10 +1,18 @@
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
-import { workflowDependencyPinsSchema, workflowVNextDefinitionSchema, type CapabilityReadiness, type WorkflowVNextDefinition } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import {
+  workflowDependencyPinsSchema,
+  workflowOrganizerPatchSchema,
+  workflowVNextDefinitionSchema,
+  type CapabilityReadiness,
+  type JsonValue,
+  type WorkflowVNextDefinition,
+} from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import { type WorkflowDefinitionOwner, type WorkflowDefinitionPin, type WorkflowDefinitionRepository } from "./workflow-definition-repository.ts";
 
 export type WorkflowDefinitionsAction =
   | { action: "create"; definition: unknown }
   | { action: "update"; workflowId: string; expectedRevision: number; definition: unknown }
+  | { action: "organizer_patch"; workflowId: string; patch: unknown }
   | { action: "get"; workflowId: string }
   | { action: "list"; includeArchived?: boolean }
   | { action: "publish"; workflowId: string; expectedRevision: number; workflowVersionId: string; dependencyPins: unknown }
@@ -34,6 +42,19 @@ export async function handleWorkflowDefinitionsAction(action: WorkflowDefinition
         const definition = parseDefinition(action.definition, action.workflowId);
         const draft = await deps.repository.updateDraft(owner, action.workflowId, revision(action.expectedRevision), definition, actorId);
         return draft ? { ok: true as const, draft } : { ok: false as const, reason: "revision_conflict_or_archived" };
+      }
+      case "organizer_patch": {
+        const workflowId = required(action.workflowId, "workflowId");
+        const patch = workflowOrganizerPatchSchema.parse(action.patch);
+        const draft = await deps.repository.getDraft(owner, workflowId);
+        if (!draft || draft.archivedAt || draft.draftRevision !== patch.expectedDraftRevision) {
+          return { ok: false as const, reason: "revision_conflict_or_archived" };
+        }
+        const definition = applyOrganizerPatch(draft.definition, patch.edits);
+        const updated = await deps.repository.updateDraft(owner, workflowId, patch.expectedDraftRevision, definition, actorId);
+        return updated
+          ? { ok: true as const, draft: updated, appliedPaths: patch.edits.map((edit) => edit.path) }
+          : { ok: false as const, reason: "revision_conflict_or_archived" };
       }
       case "get": return { ok: true as const, draft: await deps.repository.getDraft(owner, required(action.workflowId, "workflowId")) };
       case "list": return { ok: true as const, drafts: await deps.repository.listDrafts(owner, action.includeArchived === true) };
@@ -67,6 +88,42 @@ export async function handleWorkflowDefinitionsAction(action: WorkflowDefinition
   } catch (error) {
     return { ok: false as const, reason: error instanceof Error ? error.message : "invalid_workflow_definition_request" };
   }
+}
+
+const ORGANIZER_SAFE_CONFIG_ROOTS = new Set(["capabilities", "capabilityIds", "description", "instructions", "knowledge", "label", "parameters", "settings", "title"]);
+const ORGANIZER_FORBIDDEN_CONFIG_SEGMENTS = new Set(["approvalEffect", "bindings", "commandId", "effectBinding", "executor", "nodeType", "previewEffect", "requiredHostContext", "runtime"]);
+
+function applyOrganizerPatch(definition: WorkflowVNextDefinition, edits: ReturnType<typeof workflowOrganizerPatchSchema.parse>["edits"]): WorkflowVNextDefinition {
+  const next = structuredClone(definition);
+  for (const edit of edits) {
+    const segments = edit.path.split(".");
+    const nodeId = edit.kind === "parameter_edit" ? segments[1] : segments[1];
+    const configPath = edit.kind === "parameter_edit" ? ["parameters", ...segments.slice(2)] : segments.slice(3);
+    if (!nodeId || configPath.length < 2 && edit.kind === "parameter_edit") throw new Error("organizer_parameter_not_declared");
+    if (!configPath.length || !ORGANIZER_SAFE_CONFIG_ROOTS.has(configPath[0]!) || configPath.some((segment) => ORGANIZER_FORBIDDEN_CONFIG_SEGMENTS.has(segment))) {
+      throw new Error("organizer_patch_path_not_allowlisted");
+    }
+    const node = next.nodes.find((candidate) => candidate.nodeId === nodeId);
+    if (!node) throw new Error("organizer_patch_node_not_found");
+    setDeclaredJsonPath(node.config, configPath, edit.value);
+  }
+  return workflowVNextDefinitionSchema.parse(next);
+}
+
+function setDeclaredJsonPath(root: JsonValue, path: string[], value: JsonValue): void {
+  let target = jsonObject(root);
+  for (const segment of path.slice(0, -1)) {
+    if (!Object.hasOwn(target, segment)) throw new Error("organizer_parameter_not_declared");
+    target = jsonObject(target[segment]);
+  }
+  const leaf = path.at(-1)!;
+  if (!Object.hasOwn(target, leaf)) throw new Error("organizer_parameter_not_declared");
+  target[leaf] = value;
+}
+
+function jsonObject(value: JsonValue | undefined): Record<string, JsonValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("organizer_parameter_not_declared");
+  return value;
 }
 
 function parseDefinition(input: unknown, expectedWorkflowId?: string): WorkflowVNextDefinition {

@@ -19,6 +19,43 @@ assert.equal(created.draft.draftRevision, 0);
 assert.equal(created.draft.definitionDigest, workflowDefinitionDigest(definition));
 assert.deepEqual(await call({ action: "get", workflowId: definition.workflowId }, otherUser), { ok: true, draft: null }, "drafts are owner scoped");
 
+const organizerRepository = createInMemoryWorkflowDefinitionRepository();
+const organizerCall = (action) => handleWorkflowDefinitionsAction(action, { hostSession: host, repository: organizerRepository });
+const organizerDefinition = structuredClone(definition);
+organizerDefinition.nodes[0].config = { label: "Start", parameters: { timezone: "UTC" }, executor: { handler: "hidden" } };
+assert.equal((await organizerCall({ action: "create", definition: organizerDefinition })).ok, true);
+const organizerPatched = await organizerCall({
+  action: "organizer_patch",
+  workflowId: organizerDefinition.workflowId,
+  patch: {
+    expectedDraftRevision: 0,
+    edits: [
+      { kind: "parameter_edit", path: `parameters.${organizerDefinition.nodes[0].nodeId}.timezone`, value: "America/New_York" },
+      { kind: "safe_patch", path: `nodes.${organizerDefinition.nodes[0].nodeId}.config.label`, value: "Begin" },
+    ],
+  },
+});
+assert.equal(organizerPatched.ok, true);
+assert.equal(organizerPatched.draft.draftRevision, 1);
+assert.deepEqual(organizerPatched.appliedPaths, [`parameters.${organizerDefinition.nodes[0].nodeId}.timezone`, `nodes.${organizerDefinition.nodes[0].nodeId}.config.label`]);
+assert.equal(organizerPatched.draft.definition.nodes[0].config.parameters.timezone, "America/New_York");
+assert.equal(organizerPatched.draft.definition.nodes[0].config.label, "Begin");
+assert.deepEqual(organizerPatched.draft.definition.nodes[0].config.executor, { handler: "hidden" }, "hidden config is preserved, not exposed to organizer edits");
+assert.equal((await organizerCall({ action: "organizer_patch", workflowId: organizerDefinition.workflowId, patch: { expectedDraftRevision: 0, edits: [{ kind: "safe_patch", path: `nodes.${organizerDefinition.nodes[0].nodeId}.config.label`, value: "stale" }] } })).reason, "revision_conflict_or_archived");
+for (const [path, reason] of [
+  [`parameters.${organizerDefinition.nodes[0].nodeId}.undeclared`, "organizer_parameter_not_declared"],
+  [`nodes.${organizerDefinition.nodes[0].nodeId}.config.executor.handler`, "organizer_patch_path_not_allowlisted"],
+  [`nodes.${organizerDefinition.nodes[0].nodeId}.config.bindings.hidden`, "organizer_patch_path_not_allowlisted"],
+]) {
+  const rejected = await organizerCall({ action: "organizer_patch", workflowId: organizerDefinition.workflowId, patch: { expectedDraftRevision: 1, edits: [{ kind: path.startsWith("parameters.") ? "parameter_edit" : "safe_patch", path, value: "mutated" }] } });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, reason);
+}
+const organizerAfterRejections = await organizerCall({ action: "get", workflowId: organizerDefinition.workflowId });
+assert.equal(organizerAfterRejections.draft.draftRevision, 1, "rejected organizer patches never advance the draft");
+assert.equal(organizerAfterRejections.draft.definition.entryNodeId, organizerDefinition.entryNodeId);
+assert.deepEqual(organizerAfterRejections.draft.definition.edges, organizerDefinition.edges);
+
 const edited = { ...definition, title: "Linear edited", definitionVersion: 2 };
 const [winner, loser] = await Promise.all([
   call({ action: "update", workflowId: definition.workflowId, expectedRevision: 0, definition: edited }),
@@ -82,5 +119,6 @@ assert.match(repositorySource, /draft_revision = draft_revision \+ 1[\s\S]*draft
 assert.match(repositorySource, /insert into sonik_agent_ui\.workflow_definition_published_versions[\s\S]*select[\s\S]*draft_revision = \$4[\s\S]*definition_digest = \$6/i, "cloud publish atomically snapshots the expected draft");
 assert.match(route, /createAgentHostSessionEnvelope\(event\)/);
 assert.match(route, /status: 401/);
+assert.match(route, /organizer_patch/);
 
 console.log("workflow-definition-lifecycle.test.mjs passed");
