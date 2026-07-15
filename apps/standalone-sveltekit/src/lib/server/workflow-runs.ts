@@ -157,7 +157,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
       // No published version for an in-flight draft -- version the run against its own workflowId,
       // matching how a never-published draft has no packageVersionId to pin to (D002 only applies
       // once something is actually published).
-      workflowVersionId = `${definition.workflowId}@draft`;
+      workflowVersionId = `${definition.workflowId}@0.0.0-draft`;
     } else {
       return { ok: false, reason: "unknown_workflowId_or_workflow_required" };
     }
