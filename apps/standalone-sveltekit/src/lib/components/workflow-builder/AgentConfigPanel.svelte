@@ -55,7 +55,7 @@
 
   function handleModelListKeydown(event: KeyboardEvent): void {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]:not([aria-disabled="true"])')];
+    const options = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="option"]:not([aria-disabled="true"])')];
     if (options.length === 0) return;
     event.preventDefault();
     const current = options.indexOf(document.activeElement as HTMLButtonElement);
@@ -211,6 +211,7 @@
         class="flex flex-col divide-y divide-border overflow-y-auto rounded-md border border-border {modelCatalogExpanded ? 'max-h-none' : 'max-h-[50rem]'}"
         role="listbox"
         aria-label="Model"
+        tabindex="0"
         onkeydown={handleModelListKeydown}
       >
         {#each filteredModelOptions as option (option.id)}

@@ -1,6 +1,6 @@
-import type { AgentModelOption } from "$lib/agent-settings";
+import type { AgentModelOption } from "../../agent-settings.ts";
 import type { AgentDefinition, WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
-import { isModelIncompatible } from "./builder-model";
+import { isModelIncompatible } from "./builder-model.ts";
 
 export const COLLAPSED_MODEL_ROW_LIMIT = 10;
 
@@ -8,6 +8,7 @@ export type OrganizerParameterType = "text" | "textarea" | "number" | "boolean";
 
 export interface OrganizerParameter {
   path: string;
+  kind: string;
   label: string;
   type: OrganizerParameterType;
   value: string | number | boolean;
@@ -15,12 +16,34 @@ export interface OrganizerParameter {
 }
 
 export interface OrganizerPatchRequest {
+  action: "organizer_patch";
   workflowId: string;
-  expectedRevision: number;
-  patch: Record<string, string | number | boolean>;
+  patch: {
+    expectedDraftRevision: number;
+    edits: Array<{ kind: string; path: string; value: string | number | boolean }>;
+  };
 }
 
 export type OrganizerAction = "test" | "publish" | "approve";
+
+export interface OperatorHistoryItem {
+  id: string;
+  type: string;
+  label: string;
+  status?: string;
+  reference?: string;
+}
+
+export interface OperatorRunProjection {
+  runId: string;
+  correlationId: string;
+  occurredAt: string;
+  status: string;
+  events: OperatorHistoryItem[];
+  approvals: OperatorHistoryItem[];
+  artifacts: OperatorHistoryItem[];
+  receipts: OperatorHistoryItem[];
+}
 
 export type CatalogModelOption = AgentModelOption & {
   supportsVideo?: boolean;
@@ -37,12 +60,22 @@ export function createOrganizerPatchRequest(
   safePatchPaths: readonly string[],
   values: Readonly<Record<string, string | number | boolean>>,
 ): OrganizerPatchRequest {
-  const declared = new Set(parameters.map((parameter) => parameter.path));
+  const declared = new Map(parameters.map((parameter) => [parameter.path, parameter]));
   const allowed = new Set(safePatchPaths);
+  const edits = Object.entries(values).flatMap(([path, value]) => {
+    const parameter = declared.get(path);
+    if (!parameter || !allowed.has(path)) return [];
+    const valid = parameter.type === "boolean"
+      ? typeof value === "boolean"
+      : parameter.type === "number"
+        ? typeof value === "number" && Number.isFinite(value)
+        : typeof value === "string";
+    return valid ? [{ kind: parameter.kind, path, value }] : [];
+  });
   return {
+    action: "organizer_patch",
     workflowId: workflow.workflowId,
-    expectedRevision,
-    patch: Object.fromEntries(Object.entries(values).filter(([path]) => declared.has(path) && allowed.has(path))),
+    patch: { expectedDraftRevision: expectedRevision, edits },
   };
 }
 

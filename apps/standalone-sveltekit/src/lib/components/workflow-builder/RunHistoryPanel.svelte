@@ -1,25 +1,7 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import * as Card from "$lib/components/ui/card";
-
-  export interface OperatorHistoryItem {
-    id: string;
-    type: string;
-    label: string;
-    status?: string;
-    reference?: string;
-  }
-
-  export interface OperatorRunProjection {
-    runId: string;
-    correlationId: string;
-    occurredAt: string;
-    status: string;
-    events: OperatorHistoryItem[];
-    approvals: OperatorHistoryItem[];
-    artifacts: OperatorHistoryItem[];
-    receipts: OperatorHistoryItem[];
-  }
+  import type { OperatorHistoryItem, OperatorRunProjection } from "./organizer-model";
 
   interface Props {
     runs?: OperatorRunProjection[];
@@ -29,6 +11,10 @@
   let { runs = [], onInspect }: Props = $props();
 
   const sections = ["events", "approvals", "artifacts", "receipts"] as const;
+
+  function inspect(section: typeof sections[number], item: OperatorHistoryItem, run: OperatorRunProjection): void {
+    onInspect?.(section.slice(0, -1) as "event" | "approval" | "artifact" | "receipt", item, run);
+  }
 </script>
 
 <section class="flex flex-col gap-4" aria-labelledby="operator-history-title" data-run-history-panel>
@@ -56,7 +42,7 @@
                     <button
                       type="button"
                       class="w-full rounded-md border border-border p-2 text-left text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onclick={() => onInspect?.(section.slice(0, -1) as "event" | "approval" | "artifact" | "receipt", item, run)}
+                      onclick={() => inspect(section, item, run)}
                     >
                       <span class="font-medium">{item.type}: {item.label}</span>
                       {#if item.status}<span class="ml-2 text-muted-foreground">{item.status}</span>{/if}
