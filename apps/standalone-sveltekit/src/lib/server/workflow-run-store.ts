@@ -227,6 +227,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
 
 /** Module-level local/test store. Every operation still requires a stable owner scope. */
 export const workflowRunStore: WorkflowRunStore = createInMemoryWorkflowRunStore();
+const workflowRunJournalStore = createInMemoryWorkflowRunJournalStore(workflowRunStore);
 
 export interface AsyncWorkflowRunStore {
   createRun(owner: WorkflowRunOwner, input: CreateWorkflowRunInput): Promise<WorkflowRunRow>;
@@ -579,6 +580,11 @@ function readWorkflowRunDatabaseUrl(env?: Record<string, unknown> | null): strin
 export function resolveWorkflowRunStore(env?: Record<string, unknown> | null): AsyncWorkflowRunStore {
   const databaseUrl = readWorkflowRunDatabaseUrl(env);
   return databaseUrl ? createNeonWorkflowRunStore(databaseUrl) : wrapWorkflowRunStoreAsync(workflowRunStore);
+}
+
+export function resolveWorkflowRunJournalStore(env?: Record<string, unknown> | null): WorkflowRunJournalStore {
+  const databaseUrl = readWorkflowRunDatabaseUrl(env);
+  return databaseUrl ? createNeonWorkflowRunJournalStore(databaseUrl) : workflowRunJournalStore;
 }
 
 async function withWorkflowRunOwner<T>(
