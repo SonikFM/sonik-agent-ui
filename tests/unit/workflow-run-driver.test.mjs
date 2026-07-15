@@ -4,6 +4,7 @@ import { createInMemoryWorkflowRunJournalStore } from "../../apps/standalone-sve
 import { WorkflowRunDriver } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-driver.ts";
 import { hashWorkflowInput } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
 import { handleWorkflowRunsAction } from "../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts";
+import { externalEffectIdempotencyKey } from "../../packages/tool-contracts/src/workflow-vnext.ts";
 import { train0SelectedPathRunState, train0WorkflowFixtures } from "../../packages/tool-contracts/src/workflow-vnext-fixtures.ts";
 
 const owner = { organizationId: "org-1", userId: "user-1" };
@@ -100,7 +101,12 @@ function readiness(capabilityId, callable = true) {
   return { capabilityId, callable, reasonCodes: callable ? [] : ["kill_switched"] };
 }
 
-function approvalDecision(runId, definition) {
+function externalEffectIdentity(runId, definition) {
+  const binding = definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding;
+  return { namespace: "workflow-run-v1", keyDigest: hashWorkflowInput({ workflowRunId: runId, logicalEffectId: binding.logicalEffectId }), commandId: binding.commandId, resolvedInputHash: binding.resolvedInputHash };
+}
+
+function approvalDecision(runId, definition, identity = externalEffectIdentity(runId, definition)) {
   const commit = definition.nodes.find((node) => node.nodeType === "tool_commit");
   const binding = commit.effectBinding;
   return {
@@ -108,6 +114,7 @@ function approvalDecision(runId, definition) {
     previewNodeId: binding.previewNodeId, commitNodeId: commit.nodeId, commandId: binding.commandId,
     logicalEffectId: binding.logicalEffectId, organizationId: owner.organizationId, approverId: owner.userId,
     grantEvidenceDigest: `sha256:${"a".repeat(64)}`, resolvedInputHash: binding.resolvedInputHash,
+    externalEffectIdentity: identity,
     issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: future(), hostSigned: true,
   };
 }
@@ -141,9 +148,10 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
   assert.equal(completed.status, "succeeded");
   assert.equal(commits, 1);
   const binding = definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding;
+  const identity = externalEffectIdentity(runId, definition);
   const persisted = await journal.claimEffect(owner, {
     claimId: "ignored", runId, logicalEffectId: binding.logicalEffectId, attemptId: "ignored",
-    idempotencyKey: `${runId}:${binding.logicalEffectId}`, providerSupportsIdempotency: true,
+    idempotencyKey: externalEffectIdempotencyKey(identity), providerSupportsIdempotency: true, externalEffectIdentity: identity,
   });
   assert.deepEqual(persisted.claim.result, {
     status: "succeeded",
@@ -164,11 +172,12 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
   });
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const binding = definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding;
-  const effect = { claimId: "reconciled", runId, logicalEffectId: binding.logicalEffectId, attemptId: "lost", idempotencyKey: `${runId}:${binding.logicalEffectId}`, providerSupportsIdempotency: true };
+  const identity = externalEffectIdentity(runId, definition);
+  const effect = { claimId: "reconciled", runId, logicalEffectId: binding.logicalEffectId, attemptId: "lost", idempotencyKey: externalEffectIdempotencyKey(identity), providerSupportsIdempotency: true, externalEffectIdentity: identity };
   await journal.claimEffect(owner, effect);
-  await journal.transitionEffectClaim(owner, runId, binding.logicalEffectId, "claimed", "in_flight");
-  await journal.transitionEffectClaim(owner, runId, binding.logicalEffectId, "in_flight", "outcome_unknown");
-  await journal.transitionEffectClaim(owner, runId, binding.logicalEffectId, "outcome_unknown", "reconciled", {
+  await journal.transitionEffectClaim(owner, effect.claimId, "claimed", "in_flight");
+  await journal.transitionEffectClaim(owner, effect.claimId, "in_flight", "outcome_unknown");
+  await journal.transitionEffectClaim(owner, effect.claimId, "outcome_unknown", "reconciled", {
     status: "succeeded",
     output: { storage: "inline", value: { ok: true }, byteLength: 11 },
     receipt: { receiptId: "receipt-reconciled", semanticStatus: "success" },
