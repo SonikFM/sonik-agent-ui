@@ -192,9 +192,63 @@ const migrations = [
 			)::text
 		`,
 	},
-	// NOTE for the next lane appending here: this is the ONE shared migrations
-	// manifest (per prod-slice-plan.md) -- add new entries after 0014, don't
-	// reorder/renumber existing ones.
+	{
+		version: "0015",
+		name: "agent_definition_tenant_authority",
+		file: "packages/workspace-session/migrations/postgres/0015_agent_definition_tenant_authority.sql",
+		baselineCheck: `
+			select (
+				exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_definition_drafts'
+						and column_name = 'organization_id'
+				)
+				and exists (
+					select 1 from pg_class
+					where oid = to_regclass('sonik_agent_ui.agent_definition_drafts')
+						and relrowsecurity
+						and relforcerowsecurity
+				)
+			)::text
+		`,
+	},
+	{
+		version: "0016",
+		name: "workflow_definitions",
+		file: "packages/workspace-session/migrations/postgres/0016_workflow_definitions.sql",
+		baselineCheck: `
+			select (
+				to_regclass('sonik_agent_ui.workflow_definition_drafts') is not null
+				and to_regclass('sonik_agent_ui.workflow_definition_published_versions') is not null
+				and exists (
+					select 1 from pg_class
+					where oid = to_regclass('sonik_agent_ui.workflow_definition_drafts')
+						and relrowsecurity
+						and relforcerowsecurity
+				)
+			)::text
+		`,
+	},
+	{
+		version: "0017",
+		name: "workflow_run_journal",
+		file: "packages/workspace-session/migrations/postgres/0017_workflow_run_journal.sql",
+		baselineCheck: `
+			select (
+				exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_runs'
+						and column_name = 'journal_revision'
+				)
+				and to_regclass('sonik_agent_ui.agent_workflow_run_events') is not null
+				and to_regclass('sonik_agent_ui.agent_workflow_run_leases') is not null
+				and to_regclass('sonik_agent_ui.agent_workflow_run_waitpoints') is not null
+				and to_regclass('sonik_agent_ui.agent_workflow_effect_claims') is not null
+			)::text
+		`,
+	},
 ];
 
 if (!databaseUrl) {
