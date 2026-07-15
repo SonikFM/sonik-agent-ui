@@ -49,6 +49,7 @@
     createWorkflowBuilderApprovalState,
     selectActiveWorkflowRun,
     resolveWorkflowDraftLifecycle,
+    hasUnsavedWorkflowChanges,
     workflowDefinitionToVNext,
     workflowVNextToDefinition,
     type ActiveWorkflowRunSelection,
@@ -102,9 +103,11 @@
   let persistedDrafts = $state<DraftRecord[]>([]);
   let workflowDraft = $state<DraftRecord | null>(null);
   let workflowVersions = $state<VersionRecord[]>([]);
-  let workflowDirty = $state(true);
+  let workflowDirty = $state(false);
   let workflowSaving = $state(false);
+  let workflowPublishing = $state(false);
   let workflowConflicted = $state(false);
+  let workflowFailed = $state(false);
   let publishedRevision = $state<number | null>(null);
   let audience = $state<"builder" | "organizer" | "history">("builder");
   let organizerBusy = $state(false);
@@ -115,8 +118,10 @@
   const workflowValidation = $derived(validateWorkflowDefinition(draftWorkflow));
   const workflowLifecycle = $derived<WorkflowDraftLifecycle>(resolveWorkflowDraftLifecycle({
     valid: workflowValidation.ok,
-    saving: workflowSaving,
+    saving: workflowSaving || saveStatus === "saving",
+    publishing: workflowPublishing,
     conflicted: workflowConflicted,
+    failed: workflowFailed,
     dirty: workflowDirty,
     draftRevision: workflowDraft?.draftRevision ?? null,
     publishedRevision,
@@ -229,6 +234,7 @@
     }
     workflowSaving = true;
     workflowConflicted = false;
+    workflowFailed = false;
     try {
       const next = workflowDefinitionToVNext(workflowValidation.workflow!);
       const result = await workflowDefinitions(workflowDraft
@@ -236,11 +242,13 @@
         : { action: "create", definition: next });
       workflowDraft = result.draft as DraftRecord;
       workflowDirty = false;
+      workflowFailed = false;
       await refreshWorkflowVersions();
       return { ok: true, message: "Workflow draft saved." };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Workflow save failed.";
       workflowConflicted = message.includes("conflict");
+      workflowFailed = !workflowConflicted;
       saveStatus = "error";
       saveMessage = message;
       return { ok: false, message };
@@ -254,12 +262,14 @@
   }
 
   async function loadWorkflow(workflowId: string): Promise<void> {
+    if (!workflowId || !confirmDiscardUnsavedWorkflow()) return;
     const result = await workflowDefinitions({ action: "get", workflowId });
     if (!result.draft) return;
     workflowDraft = result.draft as DraftRecord;
     draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
     workflowDirty = false;
     workflowConflicted = false;
+    workflowFailed = false;
     await refreshWorkflowVersions();
   }
 
@@ -272,6 +282,8 @@
 
   async function publishWorkflow(): Promise<{ ok: boolean; message: string }> {
     if (!workflowDraft || !workflowPublishPins) return { ok: false, message: "Authoritative publish dependency pins are required." };
+    workflowPublishing = true;
+    workflowFailed = false;
     try {
       await workflowDefinitions({ action: "publish", workflowId: workflowDraft.workflowId, expectedRevision: workflowDraft.draftRevision, workflowVersionId: workflowPublishPins.workflowVersionId, dependencyPins: workflowPublishPins });
       publishedRevision = workflowDraft.draftRevision;
@@ -280,18 +292,20 @@
       return { ok: true, message: saveMessage };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Publish failed.";
+      workflowFailed = true;
       saveMessage = message;
       return { ok: false, message };
-    }
+    } finally { workflowPublishing = false; }
   }
 
   async function cloneWorkflow(): Promise<void> {
-    if (!workflowDraft) return;
+    if (!workflowDraft || !confirmDiscardUnsavedWorkflow()) return;
     const targetWorkflowId = `${workflowDraft.workflowId}.copy.${Date.now().toString(36)}`;
     const result = await workflowDefinitions({ action: "clone", source: { kind: "draft", workflowId: workflowDraft.workflowId, draftRevision: workflowDraft.draftRevision, definitionDigest: workflowDraft.definitionDigest }, targetWorkflowId });
     workflowDraft = result.draft as DraftRecord;
     draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
     workflowDirty = false;
+    workflowFailed = false;
     workflowVersions = [];
     publishedRevision = null;
   }
@@ -304,12 +318,14 @@
       draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
       workflowDirty = false;
       workflowConflicted = false;
+      workflowFailed = false;
       saveStatus = "saved";
       saveMessage = `Organizer configuration saved at revision ${workflowDraft.draftRevision}.`;
       await refreshWorkflowVersions();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Organizer configuration failed.";
       workflowConflicted = message.includes("conflict");
+      workflowFailed = !workflowConflicted;
       saveStatus = "error";
       saveMessage = message;
     } finally { organizerBusy = false; }
@@ -339,6 +355,7 @@
   }
 
   function newAgent(): void {
+    if (!confirmDiscardUnsavedWorkflow()) return;
     agentId = freshAgentId();
     definition = createEmptyAgentDefinition(agentId);
     draftWorkflow = createEmptyWorkflowDefinition(`${agentId}.workflow`);
@@ -348,13 +365,47 @@
     activeRunSelection = null;
     workflowDraft = null;
     workflowVersions = [];
-    workflowDirty = true;
+    workflowDirty = false;
+    workflowSaving = false;
+    workflowPublishing = false;
     workflowConflicted = false;
+    workflowFailed = false;
     publishedRevision = null;
   }
 
   function setTab(next: WorkflowBuilderSnapshot["tab"]): void {
     tab = next;
+  }
+
+  function confirmDiscardUnsavedWorkflow(): boolean {
+    return !hasUnsavedWorkflowChanges({ dirty: workflowDirty, saving: workflowSaving || saveStatus === "saving", publishing: workflowPublishing })
+      || window.confirm("Discard unsaved workflow changes?");
+  }
+
+  function exitBuilder(): void {
+    if (confirmDiscardUnsavedWorkflow()) onExit?.();
+  }
+
+  type BuilderAction = "publish" | "start" | "trace" | "resume";
+  function focusBuilderAction(action: BuilderAction): void {
+    const selectors: Record<BuilderAction, string> = {
+      publish: '[data-builder-action="publish"]',
+      start: '[data-workflow-run-panel] button',
+      trace: '[data-workflow-run-trace] summary',
+      resume: '[data-workflow-run-waitpoint] button',
+    };
+    const target = document.querySelector<HTMLElement>(selectors[action]);
+    target?.focus();
+    builderAnnouncement = target ? `${action} control focused.` : `${action} control is not available.`;
+  }
+
+  let builderAnnouncement = $state("");
+  function handleBuilderShortcut(event: KeyboardEvent): void {
+    if (!event.altKey || !event.shiftKey) return;
+    const action = ({ p: "publish", r: "start", t: "trace", m: "resume" } as const)[event.key.toLowerCase() as "p" | "r" | "t" | "m"];
+    if (!action) return;
+    event.preventDefault();
+    focusBuilderAction(action);
   }
 
   function handleRunStateChange(workflowId: string, nextRun: WorkflowRunState | null): void {
@@ -389,6 +440,19 @@
     void refreshCapabilityReadiness();
     void refreshPersistedWorkflows();
   });
+
+  $effect(() => {
+    const beforeunload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedWorkflowChanges({ dirty: workflowDirty, saving: workflowSaving || saveStatus === "saving", publishing: workflowPublishing })) return;
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", beforeunload);
+    window.addEventListener("keydown", handleBuilderShortcut);
+    return () => {
+      window.removeEventListener("beforeunload", beforeunload);
+      window.removeEventListener("keydown", handleBuilderShortcut);
+    };
+  });
 </script>
 
 <div class="flex h-full flex-col gap-4 p-4" data-agent-mode="workflow-builder">
@@ -396,23 +460,24 @@
     <div class="flex items-center gap-2">
       <h1 class="text-lg font-semibold">Workflow Builder</h1>
       <Badge variant="outline">{agentId}</Badge>
-      <Badge variant={workflowLifecycle === "invalid" || workflowLifecycle === "conflicted" ? "destructive" : "secondary"} data-workflow-lifecycle={workflowLifecycle}>{workflowLifecycle}</Badge>
+      <Badge variant={workflowLifecycle === "invalid" || workflowLifecycle === "conflicted" || workflowLifecycle === "failed" ? "destructive" : "secondary"} data-workflow-lifecycle={workflowLifecycle} aria-live="polite">{workflowLifecycle}</Badge>
       {#if !definitionValidation.ok}
         <Badge variant="destructive">invalid definition</Badge>
       {/if}
     </div>
     <div class="flex items-center gap-2">
       {#if onExit}
-        <Button variant="ghost" onclick={() => onExit?.()} aria-label="Return to the chat workspace">Back to chat</Button>
+        <Button variant="ghost" onclick={exitBuilder} aria-label="Return to the chat workspace">Back to chat</Button>
       {/if}
       <Button variant="outline" onclick={newAgent}>New agent</Button>
       <Button variant="outline" onclick={() => void cloneWorkflow()} disabled={!workflowDraft}>Clone workflow</Button>
-      <Button variant="outline" onclick={() => void publishWorkflow()} disabled={!workflowDraft || !workflowPublishPins || workflowLifecycle === "dirty" || workflowLifecycle === "invalid" || workflowLifecycle === "saving"} title={workflowPublishPins ? "Publish this saved revision" : "Authoritative dependency pins are required to publish"}>Publish</Button>
+      <Button data-builder-action="publish" variant="outline" onclick={() => void publishWorkflow()} disabled={!workflowDraft || !workflowPublishPins || workflowLifecycle === "dirty" || workflowLifecycle === "invalid" || workflowLifecycle === "saving" || workflowLifecycle === "publishing"} title={workflowPublishPins ? "Publish this saved revision" : "Authoritative dependency pins are required to publish"}>{workflowPublishing ? "Publishing…" : "Publish"}</Button>
       <Button onclick={() => void saveDraft()} disabled={saveStatus === "saving"}>
         {saveStatus === "saving" ? "Saving…" : "Save draft"}
       </Button>
     </div>
   </div>
+  <p class="sr-only" aria-live="polite">{builderAnnouncement}</p>
   {#if saveMessage}
     <p class="text-sm {saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground'}">{saveMessage}</p>
   {/if}
@@ -463,7 +528,7 @@
             <Card.Description>Editable. Schema-validated against workflowDefinitionSchema on every change. Describe one in Debug &amp; Preview and it loads here; Run drives it through the controller.</Card.Description>
           </Card.Header>
           <Card.Content class="flex flex-col gap-4">
-            <WorkflowCanvas bind:workflow={draftWorkflow} lockState={draftLockState} onMutation={() => { workflowDirty = true; workflowConflicted = false; }} />
+            <WorkflowCanvas bind:workflow={draftWorkflow} lockState={draftLockState} onMutation={() => { workflowDirty = true; workflowConflicted = false; workflowFailed = false; }} />
             <WorkflowRunPanel
               workflow={draftWorkflow}
               {workspaceFetch}

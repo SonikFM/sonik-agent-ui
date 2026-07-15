@@ -152,6 +152,7 @@
   }
 
   function handlePortKey(event: KeyboardEvent, index: number, port: "input" | "output"): void {
+    event.stopPropagation();
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
       focusPort(index, port === "input" ? "output" : "input");
