@@ -192,6 +192,8 @@ export type AgentEmbedController = {
 
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
+const MAX_HOST_AUTHORITY_HEADER_LENGTH = 8_192;
+const MAX_HOST_AUTHORITY_JSON_BYTE_LENGTH = MAX_HOST_AUTHORITY_HEADER_LENGTH * 3 / 4;
 const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
 const MAX_HOST_UI_TARGETS = MAX_LIST_ITEMS * 4;
 const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds"]);
@@ -357,10 +359,54 @@ export function sanitizeAgentHostAuthorityDonation(value: unknown): AgentHostAut
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   const { header, revision, expiresAt } = record;
-  if (typeof header !== "string" || header.length < 1 || header.length > 8_192 || !/^[A-Za-z0-9_-]+$/.test(header)) return undefined;
+  if (typeof header !== "string" || header.length < 1 || header.length > MAX_HOST_AUTHORITY_HEADER_LENGTH || !/^[A-Za-z0-9_-]+$/.test(header)) return undefined;
   if (!Number.isSafeInteger(revision) || Number(revision) < 0) return undefined;
   if (typeof expiresAt !== "string" || expiresAt.length > MAX_SAFE_TEXT_LENGTH || !Number.isFinite(Date.parse(expiresAt))) return undefined;
   return { header, revision: Number(revision), expiresAt };
+}
+
+/**
+ * Bridges hosts that still donate the signed trusted context inside the legacy
+ * page-context payload. The result remains untrusted until the server verifies
+ * the HMAC; this helper only restores the opaque transport envelope.
+ */
+export function createAgentHostAuthorityDonationFromLegacyPayload(value: unknown): AgentHostAuthorityDonation | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const { authenticated, organizationId, scopes, hostSession, purpose, signatureVersion, issuedAt, expiresAt, signature } = record;
+  if (authenticated !== undefined && typeof authenticated !== "boolean") return undefined;
+  if (organizationId !== undefined && organizationId !== null && (typeof organizationId !== "string" || !organizationId || organizationId.length > MAX_SAFE_TEXT_LENGTH)) return undefined;
+  if (scopes !== undefined && (!Array.isArray(scopes) || scopes.length > 32 || scopes.some((scope) => typeof scope !== "string" || !scope || scope.length > MAX_SAFE_TEXT_LENGTH))) return undefined;
+  if (!hostSession || typeof hostSession !== "object" || Array.isArray(hostSession)) return undefined;
+  if (purpose !== undefined && (typeof purpose !== "string" || !purpose || purpose.length > MAX_SAFE_TEXT_LENGTH)) return undefined;
+  if (typeof signatureVersion !== "string" || !signatureVersion || signatureVersion.length > MAX_SAFE_TEXT_LENGTH) return undefined;
+  if (typeof issuedAt !== "string" || !issuedAt || issuedAt.length > MAX_SAFE_TEXT_LENGTH) return undefined;
+  if (typeof expiresAt !== "string" || !expiresAt || expiresAt.length > MAX_SAFE_TEXT_LENGTH) return undefined;
+  if (typeof signature !== "string" || !signature || signature.length > MAX_SAFE_TEXT_LENGTH || !/^[A-Za-z0-9_-]+$/.test(signature)) return undefined;
+  const revision = Date.parse(issuedAt);
+  if (!Number.isSafeInteger(revision) || revision < 0 || !Number.isFinite(Date.parse(expiresAt))) return undefined;
+
+  try {
+    const trustedContext = {
+      ...(authenticated !== undefined ? { authenticated } : {}),
+      ...(organizationId !== undefined ? { organizationId } : {}),
+      ...(scopes !== undefined ? { scopes } : {}),
+      hostSession,
+      ...(purpose !== undefined ? { purpose } : {}),
+      signatureVersion,
+      issuedAt,
+      expiresAt,
+      signature,
+    };
+    const json = JSON.stringify(trustedContext);
+    if (json.length > MAX_HOST_AUTHORITY_JSON_BYTE_LENGTH) return undefined;
+    const bytes = new TextEncoder().encode(json);
+    if (bytes.byteLength > MAX_HOST_AUTHORITY_JSON_BYTE_LENGTH) return undefined;
+    const header = btoa(String.fromCharCode(...bytes)).replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+    return sanitizeAgentHostAuthorityDonation({ header, revision, expiresAt });
+  } catch {
+    return undefined;
+  }
 }
 
 export function isAgentHostActionRequestMessage(value: unknown): value is HostActionRequest {

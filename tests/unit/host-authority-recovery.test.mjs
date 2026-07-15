@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  createAgentHostAuthorityDonationFromLegacyPayload,
   createAgentHostPageContextMessage,
   isAgentHostPageContextMessage,
   sanitizeAgentHostAuthorityDonation,
@@ -55,6 +56,37 @@ assert.equal(JSON.stringify(message.payload).includes(header), false, "opaque au
 assert.equal(JSON.stringify(sanitizeAgentHostPageContext({ ...message.payload, authority })).includes(header), false, "page-context sanitizer never admits the authority header");
 assert.equal("signature" in message.payload, false, "display context does not carry reconstructable signed fields");
 
+const legacyPayload = {
+  route: "/bookings",
+  surface: "booking-console",
+  title: "Legacy host display context",
+  ...signed,
+};
+const legacyAuthority = createAgentHostAuthorityDonationFromLegacyPayload(legacyPayload);
+assert.ok(legacyAuthority, "a deployed host's signed legacy payload converts to an opaque authority donation");
+assert.equal(legacyAuthority.header, header, "legacy compatibility preserves the signer-owned trusted context exactly");
+assert.equal(legacyAuthority.revision, issuedAt.getTime(), "legacy authority revision is monotonic from the signed issuedAt");
+const legacyDisplayContext = sanitizeAgentHostPageContext(legacyPayload);
+assert.equal("signature" in legacyDisplayContext, false, "display sanitization drops the legacy signature");
+assert.equal("signatureVersion" in legacyDisplayContext, false, "display sanitization drops the legacy signature version");
+assert.equal("issuedAt" in legacyDisplayContext, false, "display sanitization drops the legacy issuance time");
+assert.equal("expiresAt" in legacyDisplayContext, false, "display sanitization drops the legacy authority expiry");
+const legacyServer = resolveTrustedHostSessionSnapshot({
+  request: new Request("https://agent.example/api/files", { headers: { [AGENT_UI_HOST_CONTEXT_HEADER]: legacyAuthority.header } }),
+  platform: { env: { SONIK_AGENT_UI_HOST_CONTEXT_SECRET: "g018-real-signer-secret" } },
+});
+assert.equal(legacyServer.authenticated, true, "the server authenticates the recovered legacy authority only after HMAC verification");
+assert.equal(legacyServer.organizationId, signed.organizationId, "recovered legacy authority resolves the signed organization");
+assert.equal(legacyServer.userId, signed.hostSession.userId, "recovered legacy authority resolves the signed user");
+const tamperedLegacyAuthority = createAgentHostAuthorityDonationFromLegacyPayload({ ...legacyPayload, signature: `${signed.signature}A` });
+assert.ok(tamperedLegacyAuthority, "the compatibility helper transports rather than verifies the signed payload");
+const tamperedLegacyServer = resolveTrustedHostSessionSnapshot({
+  request: new Request("https://agent.example/api/files", { headers: { [AGENT_UI_HOST_CONTEXT_HEADER]: tamperedLegacyAuthority.header } }),
+  platform: { env: { SONIK_AGENT_UI_HOST_CONTEXT_SECRET: "g018-real-signer-secret" } },
+});
+assert.equal(tamperedLegacyServer.authenticated, false, "server HMAC verification rejects tampered legacy authority");
+assert.equal(createAgentHostAuthorityDonationFromLegacyPayload({ ...legacyPayload, signature: undefined }), undefined, "all signed fields are required");
+
 const selected = selectOpaqueHostAuthority({ current: authority, cached: null, nowMs: issuedAt.getTime() + 1 });
 assert.equal(selected?.header, header, "client selection forwards the exact opaque header");
 const server = resolveTrustedHostSessionSnapshot({
@@ -95,6 +127,8 @@ assert.match(pageSource, /event\.source !== window\.parent/, "page-context donat
 assert.match(pageSource, /hostAuthorityWaiters\.add\(waiter\)[\s\S]*requestHostPageContext\(reason\)/, "refresh waiter registers before requesting a donation");
 assert.match(pageSource, /5_000/, "newer-authority wait is bounded to five seconds");
 assert.doesNotMatch(pageSource, /encodeWorkspaceHostContextHeader|createSignedWorkspaceHostSession/, "client never reconstructs the HMAC-covered header");
+assert.match(pageSource, /const nextAuthority = event\.data\.authority \?\? createAgentHostAuthorityDonationFromLegacyPayload\(event\.data\.payload\)/, "an explicit opaque authority donation remains preferred over legacy compatibility");
+assert.doesNotMatch(pageSource, /btoa\(|JSON\.stringify\(event\.data\.payload/, "the page delegates legacy compatibility to the shared fail-closed helper");
 assert.match(pageSource, /typedFailure \? humanMessageForAgentUiFailure\(typedFailure\) : "Generation failed\. Please try again\."/, "transport never projects a raw JSON error body into chat");
 const smokeSigner = await readFile("apps/standalone-sveltekit/src/routes/api/dev/smoke-host-context/+server.ts", "utf8");
 assert.match(smokeSigner, /createSmokeHostAuthority\(signed\)/);

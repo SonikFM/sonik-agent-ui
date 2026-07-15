@@ -47,6 +47,7 @@
   import { createTelemetryCorrelation, sanitizeDeploymentSnapshot, sanitizeTurnCorrelationSnapshot, type AgentUiActionDescriptor, type AgentUiActionRegistrySnapshot, type AgentUiApprovalStateSnapshot, type AgentUiChannelsStateSnapshot, type AgentUiDeploymentSnapshot, type AgentUiPageAssertions, type AgentUiPageContextSnapshot, type AgentUiPageControl, type AgentUiSemanticActionResult, type AgentUiTargetRegistrySnapshot, type AgentUiTurnCorrelationSnapshot, type AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
   import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
+    createAgentHostAuthorityDonationFromLegacyPayload,
     isAgentHostPageContextMessage,
     mergeAgentHostPageContext,
     normalizeAgentEmbedIntent,
@@ -1841,9 +1842,10 @@
       embedMode = nextContext.mode;
     }
     hostPageContext = nextContext;
-    if (event.data.authority) {
+    const nextAuthority = event.data.authority ?? createAgentHostAuthorityDonationFromLegacyPayload(event.data.payload);
+    if (nextAuthority) {
       const previous = hostAuthority;
-      const accepted = acceptNewerOpaqueHostAuthority({ current: previous, next: event.data.authority });
+      const accepted = acceptNewerOpaqueHostAuthority({ current: previous, next: nextAuthority });
       if (accepted && accepted.revision > (previous?.revision ?? -1)) {
         hostAuthority = accepted;
         notifyHostAuthorityWaiters(accepted);
