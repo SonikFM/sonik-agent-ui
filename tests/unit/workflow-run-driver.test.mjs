@@ -125,8 +125,42 @@ function approvalDecision(runId, definition) {
   const completed = await driver.start(request(runId, "commit-a"));
   assert.equal(completed.status, "succeeded");
   assert.equal(commits, 1);
+  const binding = definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding;
+  const persisted = await journal.claimEffect(owner, {
+    claimId: "ignored", runId, logicalEffectId: binding.logicalEffectId, attemptId: "ignored",
+    idempotencyKey: `${runId}:${binding.logicalEffectId}`, providerSupportsIdempotency: true,
+  });
+  assert.deepEqual(persisted.claim.result, {
+    status: "succeeded",
+    output: { storage: "inline", value: { ok: true }, byteLength: 11 },
+    receipt: { receiptId: "receipt-1", semanticStatus: "success" },
+  }, "the canonical durable effect result retains its semantic receipt");
   await driver.start(request(runId, "commit-b"));
   assert.equal(commits, 1, "lost-response retry replays durable success without a second provider effect");
+}
+
+{
+  const definition = train0WorkflowFixtures.approval;
+  let commits = 0;
+  const { runId, driver, journal } = harness(definition, "reconciled-replay", {
+    hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
+    resolveReadiness: () => [readiness("booking.create.booking")],
+    executionContext: (node) => node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { commits += 1; throw new Error("must not redispatch"); } } } : {},
+  });
+  driver.deps.approvalDecision = () => approvalDecision(runId, definition);
+  const binding = definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding;
+  const effect = { claimId: "reconciled", runId, logicalEffectId: binding.logicalEffectId, attemptId: "lost", idempotencyKey: `${runId}:${binding.logicalEffectId}`, providerSupportsIdempotency: true };
+  await journal.claimEffect(owner, effect);
+  await journal.transitionEffectClaim(owner, runId, binding.logicalEffectId, "claimed", "in_flight");
+  await journal.transitionEffectClaim(owner, runId, binding.logicalEffectId, "in_flight", "outcome_unknown");
+  await journal.transitionEffectClaim(owner, runId, binding.logicalEffectId, "outcome_unknown", "reconciled", {
+    status: "succeeded",
+    output: { storage: "inline", value: { ok: true }, byteLength: 11 },
+    receipt: { receiptId: "receipt-reconciled", semanticStatus: "success" },
+  });
+  const completed = await driver.start(request(runId, "reconciled-a"));
+  assert.equal(completed.status, "succeeded");
+  assert.equal(commits, 0, "a reconciled canonical receipt replays without a second provider effect");
 }
 
 {
