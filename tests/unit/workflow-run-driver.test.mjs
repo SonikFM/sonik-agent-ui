@@ -182,14 +182,16 @@ function approvalDecision(runId, definition) {
 
 {
   const definition = train0WorkflowFixtures.approval;
+  let commits = 0;
   const { runId, driver } = harness(definition, "unsafe-write-retry", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId }, resolveReadiness: () => [readiness("booking.create.booking")],
-    executionContext: (node) => node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => ({ status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }) } } : {},
+    executionContext: (node) => node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { commits += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {},
   });
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const failed = await driver.start(request(runId, "unsafe-a"));
   assert.equal(failed.status, "failed");
   assert.equal(failed.compatibilityPhase, "unsafe_write_retry_refused");
+  assert.equal(commits, 1, "unsafe writes are never retried");
 }
 
 {
@@ -235,12 +237,30 @@ function approvalDecision(runId, definition) {
 }
 
 {
-  const { runId, driver } = harness(train0WorkflowFixtures.linear, "retry", {
-    executionContext: (node) => node.nodeType === "skill" ? { executors: { skill: () => ({ status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }) } } : {},
+  const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].nodeType = "tool_preview";
+  let attempts = 0;
+  const { runId, driver } = harness(definition, "retry", {
+    executionContext: (node) => node.nodeType === "tool_preview" ? { executors: { tool_preview: (engineRequest) => {
+      attempts += 1;
+      return attempts < 3 ? { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } } : { status: "succeeded", output: { storage: "inline", value: engineRequest.input, byteLength: 2 } };
+    } } } : {},
   });
-  const waiting = await driver.start(request(runId, "retry-a"));
-  assert.equal(waiting.status, "waiting");
-  assert.equal(waiting.compatibilityPhase, "retry_pending");
+  const completed = await driver.start(request(runId, "retry-a"));
+  assert.equal(completed.status, "succeeded");
+  assert.equal(attempts, 3, "safe reads retry only within the fixed attempt bound");
+}
+
+{
+  const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].nodeType = "reasoning";
+  definition.nodes[1].reasoning = { structuredOutputSchema: { schemaId: "reasoning.output", version: 1, digest: `sha256:${"a".repeat(64)}` }, budgets: { maxSteps: 2, maxTokens: 10, maxWallTimeMs: 100 }, nestedCapabilityEffects: [] };
+  let attempts = 0;
+  const { runId, driver } = harness(definition, "reasoning-budget", { executionContext: (node) => node.nodeType === "reasoning" ? { reasoning: node.reasoning, executors: { reasoning: () => { attempts += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {} });
+  const failed = await driver.start(request(runId, "reasoning-budget-a"));
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.compatibilityPhase, "reasoning_budget_exhausted");
+  assert.equal(attempts, 2, "reasoning maxSteps is an execution bound, not advisory metadata");
 }
 
 {

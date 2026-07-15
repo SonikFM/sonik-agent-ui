@@ -136,11 +136,20 @@ export class WorkflowRunDriver {
       }
 
       let response: EngineResponse;
-      try { response = await dispatchWorkflowNode(engineRequest, this.deps.executionContext?.(node)); }
-      catch (error) {
-        if (!logicalEffectId) throw error;
-        await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "outcome_unknown", { code: "provider_response_lost" });
-        return this.appendStatus(state, request, "waiting", "outcome_unknown");
+      const executionContext = this.deps.executionContext?.(node);
+      const maxAttempts = node.nodeType === "tool_preview" ? 3 : node.nodeType === "reasoning" ? node.reasoning?.budgets.maxSteps ?? 1 : 1;
+      const reasoningStartedAt = this.now();
+      for (let retry = 0; ; retry += 1) {
+        const retryRequest = retry === 0 ? engineRequest : { ...engineRequest, attempt: attempt + retry, attemptId: `${state.workflowRunId}:${node.nodeId}:${attempt + retry}`, idempotencyKey: `${state.workflowRunId}:${node.nodeId}:${attempt + retry}` };
+        try { response = await dispatchWorkflowNode(retryRequest, executionContext); }
+        catch (error) {
+          if (!logicalEffectId) throw error;
+          await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "outcome_unknown", { code: "provider_response_lost" });
+          return this.appendStatus(state, request, "waiting", "outcome_unknown");
+        }
+        const reasoningTimeExhausted = node.nodeType === "reasoning" && this.now() - reasoningStartedAt >= (node.reasoning?.budgets.maxWallTimeMs ?? 0);
+        if (reasoningTimeExhausted) return this.appendStatus(state, request, "failed", "reasoning_budget_exhausted", { schedulerFrontier: [] });
+        if (response.status !== "retryable_error" || logicalEffectId || retry + 1 >= maxAttempts) break;
       }
       if (response.status === "waiting") {
         await this.deps.journal.createWaitpoint(this.deps.owner, response.waitpoint);
@@ -151,7 +160,7 @@ export class WorkflowRunDriver {
           await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "failed", response);
           return this.appendStatus(state, request, "failed", "unsafe_write_retry_refused", { schedulerFrontier: [] });
         }
-        return this.appendStatus(state, request, "waiting", "retry_pending");
+        return this.appendStatus(state, request, "failed", node.nodeType === "reasoning" ? "reasoning_budget_exhausted" : node.nodeType === "tool_preview" ? "safe_read_retry_exhausted" : "unsafe_retry_refused", { schedulerFrontier: [] });
       }
       if (response.status === "terminal_error") {
         if (logicalEffectId) await this.deps.journal.transitionEffectClaim(this.deps.owner, state.workflowRunId, logicalEffectId, "in_flight", "failed", response);
