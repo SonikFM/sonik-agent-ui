@@ -20,6 +20,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
   import type { WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
+  import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 
   interface Props {
     draftAgentId: string;
@@ -28,8 +29,9 @@
     /** Fired when the drafting agent returns a validated workflow, so the shell
      *  can load it onto the canvas (describe -> draft -> canvas). */
     onWorkflowDrafted?: (workflow: WorkflowDefinition) => void;
+    capabilityReadiness?: CapabilityReadiness[];
   }
-  let { draftAgentId, workspaceFetch, prepareDraft, onWorkflowDrafted }: Props = $props();
+  let { draftAgentId, workspaceFetch, prepareDraft, onWorkflowDrafted, capabilityReadiness = [] }: Props = $props();
 
   let input = $state("");
   let preparationMessage = $state("");
@@ -72,6 +74,7 @@
   });
 
   const isStreaming = $derived(preview.status === "streaming" || preview.status === "submitted");
+  const callableCapabilityCount = $derived(capabilityReadiness.filter((entry) => entry.callable).length);
 
   async function submit(): Promise<void> {
     const trimmed = input.trim();
@@ -102,7 +105,10 @@
 <div class="flex h-full flex-col gap-3" data-agent-panel="workflow-builder-preview">
   <div class="flex items-center justify-between">
     <span class="text-sm font-medium">Debug &amp; Preview</span>
-    <Badge variant={isStreaming ? "default" : "secondary"}>{isStreaming ? "streaming" : "idle"}</Badge>
+    <span class="flex items-center gap-2">
+      <Badge variant="outline">{callableCapabilityCount} callable</Badge>
+      <Badge variant={isStreaming ? "default" : "secondary"}>{isStreaming ? "streaming" : "idle"}</Badge>
+    </span>
   </div>
   <div class="flex-1 overflow-y-auto rounded-md border border-border p-3">
     {#if preview.messages.length === 0}

@@ -18,6 +18,7 @@
   import { groupCapabilitiesByFamily, effectiveFamilyMode, type KnowledgeRef } from "./builder-model";
   import { isModelIncompatible, formatModelContextWindow } from "./builder-model";
   import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
+  import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 
   interface Props {
     definition: AgentDefinition;
@@ -26,6 +27,7 @@
     modelCatalogStatus?: "idle" | "loading" | "ready" | "fallback" | "error";
     modelCatalogMessage?: string | null;
     onModelCatalogRefresh?: () => void;
+    capabilityReadiness?: CapabilityReadiness[];
   }
   let {
     definition = $bindable(),
@@ -34,10 +36,12 @@
     modelCatalogStatus = "idle",
     modelCatalogMessage = null,
     onModelCatalogRefresh,
+    capabilityReadiness = [],
   }: Props = $props();
 
   const TOOL_MODES: AgentToolPermissionMode[] = ["off", "ask", "allow"];
   const capabilityFamilies = groupCapabilitiesByFamily();
+  const readinessById = $derived(new Map(capabilityReadiness.map((entry) => [entry.capabilityId, entry])));
 
   let expandedFamilyIds = $state<string[]>([]);
   let modelQuery = $state("");
@@ -283,10 +287,14 @@
                 <Separator />
                 <div class="flex flex-col gap-1">
                   {#each family.capabilities as capability (capability.capabilityId)}
+                    {@const readiness = readinessById.get(capability.capabilityId)}
                     <div class="flex items-center justify-between gap-2 text-sm">
                       <span class="font-mono text-xs text-muted-foreground">{capability.capabilityId}</span>
                       <span class="flex items-center gap-2">
                         <Badge variant="outline">{capability.effect}</Badge>
+                        <Badge variant={readiness?.callable ? "default" : "secondary"} title={readiness?.reasonCodes.join(", ") ?? "Server readiness unavailable"}>
+                          {readiness?.callable ? "callable" : readiness?.nextAction ?? "unavailable"}
+                        </Badge>
                         <span class="text-xs text-muted-foreground">inherits {effectiveFamilyMode(definition, family.familyId)}</span>
                       </span>
                     </div>

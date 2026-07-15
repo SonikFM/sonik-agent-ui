@@ -49,6 +49,7 @@
   import { bookingReservationWorkflowManifest, amplifyCampaignWorkflowManifest } from "@sonik-agent-ui/tool-contracts/marketplace-fixtures";
   import type { AgentDefinition, WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
   import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
+  import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
   import { AGENT_MODEL_OPTIONS, type AgentModelOption } from "$lib/agent-settings";
 
   interface Props {
@@ -95,6 +96,7 @@
   let modelOptions = $state<AgentModelOption[]>(AGENT_MODEL_OPTIONS);
   let modelCatalogStatus = $state<"idle" | "loading" | "ready" | "fallback" | "error">("idle");
   let modelCatalogMessage = $state<string | null>(null);
+  let capabilityReadiness = $state<CapabilityReadiness[]>([]);
 
   async function refreshModelCatalog(): Promise<void> {
     if (!workspaceContextReady) {
@@ -118,6 +120,13 @@
       modelCatalogStatus = "error";
       modelCatalogMessage = error instanceof Error ? error.message : "Model catalog fetch failed.";
     }
+  }
+
+  async function refreshCapabilityReadiness(): Promise<void> {
+    if (!workspaceContextReady) { capabilityReadiness = []; return; }
+    const response = await workspaceFetch("/api/capability-readiness");
+    const body = await response.json().catch(() => null) as { readiness?: CapabilityReadiness[] } | null;
+    capabilityReadiness = response.ok && Array.isArray(body?.readiness) ? body.readiness : [];
   }
 
   async function saveDraft(): Promise<{ ok: boolean; message: string }> {
@@ -195,6 +204,7 @@
 
   $effect(() => {
     void refreshModelCatalog();
+    void refreshCapabilityReadiness();
   });
 </script>
 
@@ -232,6 +242,7 @@
       <AgentConfigPanel
         bind:definition
         validationIssues={definitionValidation.issues ?? []}
+        {capabilityReadiness}
         {modelOptions}
         {modelCatalogStatus}
         {modelCatalogMessage}
@@ -287,6 +298,7 @@
       <DebugPreviewPane
         draftAgentId={agentId}
         {workspaceFetch}
+        {capabilityReadiness}
         prepareDraft={saveDraft}
         onWorkflowDrafted={(drafted) => {
           // Describe -> draft -> canvas: the drafting agent's validated workflow

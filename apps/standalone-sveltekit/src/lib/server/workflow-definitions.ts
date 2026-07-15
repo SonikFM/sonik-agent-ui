@@ -1,5 +1,5 @@
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
-import { workflowDependencyPinsSchema, workflowVNextDefinitionSchema, type WorkflowVNextDefinition } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import { workflowDependencyPinsSchema, workflowVNextDefinitionSchema, type CapabilityReadiness, type WorkflowVNextDefinition } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import { type WorkflowDefinitionOwner, type WorkflowDefinitionPin, type WorkflowDefinitionRepository } from "./workflow-definition-repository.ts";
 
 export type WorkflowDefinitionsAction =
@@ -19,7 +19,7 @@ export function workflowDefinitionOwnerFromHostSession(hostSession: HostSessionE
   return hostSession?.authenticated && organizationId && userId ? { organizationId, userId } : null;
 }
 
-export async function handleWorkflowDefinitionsAction(action: WorkflowDefinitionsAction, deps: { hostSession: HostSessionEnvelope | null; repository: WorkflowDefinitionRepository }) {
+export async function handleWorkflowDefinitionsAction(action: WorkflowDefinitionsAction, deps: { hostSession: HostSessionEnvelope | null; repository: WorkflowDefinitionRepository; capabilityReadiness?: readonly CapabilityReadiness[] }) {
   const owner = workflowDefinitionOwnerFromHostSession(deps.hostSession);
   if (!owner) return { ok: false as const, reason: "authenticated_workspace_owner_required" };
   const actorId = owner.userId;
@@ -46,6 +46,7 @@ export async function handleWorkflowDefinitionsAction(action: WorkflowDefinition
         if (!draft || draft.archivedAt || draft.draftRevision !== revision(action.expectedRevision)) return { ok: false as const, reason: "revision_conflict_or_archived" };
         const dependencyPins = workflowDependencyPinsSchema.parse(action.dependencyPins);
         if (dependencyPins.organizationId !== owner.organizationId || dependencyPins.workflowVersionId !== workflowVersionId || dependencyPins.definitionDigest !== draft.definitionDigest) throw new Error("dependency_pins_mismatch");
+        if (deps.capabilityReadiness) assertPublishableCapabilities(draft.definition, deps.capabilityReadiness);
         const version = await deps.repository.publish(owner, { workflowId, expectedRevision: action.expectedRevision, workflowVersionId, definitionDigest: draft.definitionDigest, dependencyPins, actorId });
         return version ? { ok: true as const, version } : { ok: false as const, reason: "revision_conflict_or_version_exists" };
       }
@@ -75,3 +76,12 @@ function parseDefinition(input: unknown, expectedWorkflowId?: string): WorkflowV
 }
 function required(value: string, name: string): string { const normalized = typeof value === "string" ? value.trim() : ""; if (!normalized) throw new Error(`${name}_required`); return normalized; }
 function revision(value: number): number { if (!Number.isSafeInteger(value) || value < 0) throw new Error("expected_revision_invalid"); return value; }
+function assertPublishableCapabilities(definition: WorkflowVNextDefinition, readiness: readonly CapabilityReadiness[]): void {
+  const byId = new Map(readiness.map((entry) => [entry.capabilityId, entry]));
+  for (const capabilityId of new Set([...definition.facadeToolIds, ...definition.nodes.flatMap((node) => node.capabilityPins)])) {
+    const state = byId.get(capabilityId);
+    if (!state?.registered || !state.implemented || !state.authorable || !state.definitionCompatible) {
+      throw new Error(`capability_not_publishable:${capabilityId}:${state?.nextAction ?? "not_registered"}`);
+    }
+  }
+}
