@@ -28,9 +28,12 @@
   const commitNodeId = $derived(workflow.nodes.find((node) => node.type === "tool_commit")?.nodeId ?? null);
   const needsCampaignBrief = $derived(workflow.workflowId === "amplify.campaign.create");
 
-  let workflowInput = $state(workflow.workflowId === "amplify.campaign.create"
-    ? JSON.stringify({ productName: "Loyalty Weekend", audience: "returning_members", offer: "20% off", launchDate: "2026-08-01" }, null, 2)
-    : "{}");
+  function initialWorkflowInput(): string {
+    return workflow.workflowId === "amplify.campaign.create"
+      ? JSON.stringify({ productName: "Loyalty Weekend", audience: "returning_members", offer: "20% off", launchDate: "2026-08-01" }, null, 2)
+      : "{}";
+  }
+  let workflowInput = $state(initialWorkflowInput());
   let resumeAnswer = $state("");
   let runId = $state<string | null>(null);
   let run = $state<WorkflowRunState | null>(null);
