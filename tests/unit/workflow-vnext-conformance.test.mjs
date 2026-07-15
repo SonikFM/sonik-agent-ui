@@ -14,6 +14,7 @@ import {
   replayCanonicalWorkflowEvents,
   validateWorkflowForPublish,
   workflowDefinitionRecordSchema,
+  workflowEffectIdempotencyKey,
   workflowRunSourceSchema,
   workflowVNextRunStateSchema,
   workflowWaitpointSchema,
@@ -79,7 +80,8 @@ assert.equal(engineRequestSchema.safeParse(train0EngineRequest).success, true);
 assert.deepEqual(parseEngineRequestForRegistry(train0EngineRequest, train0WorkflowRuntimeRegistry), train0EngineRequest);
 for (const response of train0EngineResponses) assert.equal(engineResponseSchema.safeParse(response).success, true, response.status);
 assert.equal(parseEngineResponseForRegistry(train0EngineRequest, train0EngineResponses[0], train0WorkflowRuntimeRegistry).status, "succeeded");
-assert.equal(train0EngineRequest.idempotencyKey, train0EngineRequest.logicalEffectId, "logical-effect key is stable across attempts");
+assert.equal(train0EngineRequest.idempotencyKey, workflowEffectIdempotencyKey(train0EngineRequest.workflowRunId, train0EngineRequest.logicalEffectId), "logical-effect key is stable across attempts and scoped to its run");
+assert.notEqual(workflowEffectIdempotencyKey("run-1", "effect"), workflowEffectIdempotencyKey("run-2", "effect"), "the same logical effect in different runs cannot collide");
 assert.notEqual(train0EngineRequest.attemptId, train0EngineRequest.logicalEffectId, "attempt identity remains separate");
 
 assert.equal(canonicalWorkflowEventSchema.safeParse(train0CanonicalEvent).success, true, "canonical event envelope is versioned and correlated");

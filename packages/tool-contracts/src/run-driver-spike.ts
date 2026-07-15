@@ -1,6 +1,7 @@
 import {
   authenticatedResumeEventSchema,
   runDriverPumpRequestSchema,
+  workflowEffectIdempotencyKey,
   type BoundedNodeOutput,
   type RunDriver,
   type WorkflowWaitpoint,
@@ -116,7 +117,7 @@ export class NativeRunDriverSpike implements RunDriver {
 
       const nodeId = state.schedulerFrontier[0]!;
       const logicalEffectId = this.logicalEffectIdFor(state, nodeId);
-      const idempotencyKey = logicalEffectId ? `${state.workflowRunId}:${logicalEffectId}` : undefined;
+      const idempotencyKey = logicalEffectId ? workflowEffectIdempotencyKey(state.workflowRunId, logicalEffectId) : undefined;
       if (logicalEffectId) {
         const claim = this.store.claimEffect(state.workflowRunId, logicalEffectId, idempotencyKey!);
         if (!claim.created) {
