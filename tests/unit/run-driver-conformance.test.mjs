@@ -68,7 +68,7 @@ class FakeStore {
     ? { kind: "waiting", waitpoint: { kind: "answer", waitpointId: "question-1", runId: "answer", nodeId: "ask", subjectId: "user-1" } }
     : { kind: "completed" }, undefined, undefined, () => BASE_TIME, () => true);
   await driver.start(request("answer", lease("l1", "w1", 10_000)));
-  const resumed = await driver.resume(request("answer", lease("l1", "w1", 10_000), undefined, { eventId: "answer-1", waitpointId: "question-1", workflowRunId: "answer", organizationId: "org-1", nodeId: "ask", runRevision: 1, subjectId: "user-1", kind: "answer", issuedAt: new Date(BASE_TIME + 1_000).toISOString(), authenticationEvidenceDigest: digest }));
+  const resumed = await driver.resume(request("answer", lease("l1", "w1", 10_000), undefined, { eventId: "answer-1", answer: "Ada", waitpointId: "question-1", workflowRunId: "answer", organizationId: "org-1", nodeId: "ask", runRevision: 1, subjectId: "user-1", kind: "answer", issuedAt: new Date(BASE_TIME + 1_000).toISOString(), authenticationEvidenceDigest: digest }));
   assert.equal(resumed.status, "succeeded");
 }
 
@@ -146,7 +146,7 @@ class FakeStore {
     const store = new FakeStore(state("resume-check", ["ask"]));
     const driver = new NativeRunDriverSpike(store, () => ({ kind: "waiting", waitpoint: { kind: "answer", waitpointId: "wait", runId: "resume-check", nodeId: "ask", subjectId: "user-1", expiresAt: new Date(BASE_TIME + 10_000).toISOString() } }));
     await driver.start(request("resume-check", lease("l1", "w1", 20_000)));
-    const event = { eventId: "answer", waitpointId: "wait", workflowRunId: "resume-check", organizationId: "org-1", nodeId: "ask", runRevision: 1, subjectId: "user-1", kind: "answer", issuedAt: new Date(BASE_TIME + 1_000).toISOString(), authenticationEvidenceDigest: digest };
+    const event = { eventId: "answer", answer: "Ada", waitpointId: "wait", workflowRunId: "resume-check", organizationId: "org-1", nodeId: "ask", runRevision: 1, subjectId: "user-1", kind: "answer", issuedAt: new Date(BASE_TIME + 1_000).toISOString(), authenticationEvidenceDigest: digest };
     await assert.rejects(() => driver.resume(request("resume-check", lease("l1", "w1", 20_000), undefined, mutate(event))), /resume_event_does_not_match_waitpoint/);
   }
 }
@@ -159,7 +159,7 @@ class FakeStore {
     ? { kind: "waiting", waitpoint: { kind: "answer", waitpointId: "trusted-wait", runId: "trusted-resume", nodeId: "ask", subjectId: "user-1" } }
     : { kind: "completed" }, undefined, undefined, () => BASE_TIME, () => trusted);
   await driver.start(request("trusted-resume", lease("l1", "w1", 10_000)));
-  const event = { eventId: "answer", waitpointId: "trusted-wait", workflowRunId: "trusted-resume", organizationId: "org-1", nodeId: "ask", runRevision: 1, subjectId: "user-1", kind: "answer", issuedAt: new Date(BASE_TIME + 1_000).toISOString(), authenticationEvidenceDigest: digest };
+  const event = { eventId: "answer", answer: "Ada", waitpointId: "trusted-wait", workflowRunId: "trusted-resume", organizationId: "org-1", nodeId: "ask", runRevision: 1, subjectId: "user-1", kind: "answer", issuedAt: new Date(BASE_TIME + 1_000).toISOString(), authenticationEvidenceDigest: digest };
   await assert.rejects(() => driver.resume(request("trusted-resume", lease("l1", "w1", 10_000), undefined, event)), /resume_event_not_authorized/);
   assert.equal(store.load("trusted-resume").status, "waiting", "denied resume cannot mutate canonical state");
   assert.equal(calls, 1, "denied resume cannot dispatch");
@@ -171,7 +171,7 @@ class FakeStore {
   const store = new FakeStore(state("expired-wait", ["ask"]));
   const driver = new NativeRunDriverSpike(store, () => ({ kind: "waiting", waitpoint: { kind: "answer", waitpointId: "wait", runId: "expired-wait", nodeId: "ask", subjectId: "user-1", expiresAt: new Date(BASE_TIME - 1).toISOString() } }));
   await driver.start(request("expired-wait", lease("l1", "w1", 20_000)));
-  await assert.rejects(() => driver.resume(request("expired-wait", lease("l1", "w1", 20_000), undefined, { eventId: "answer", waitpointId: "wait", workflowRunId: "expired-wait", organizationId: "org-1", nodeId: "ask", runRevision: 1, subjectId: "user-1", kind: "answer", issuedAt: new Date(BASE_TIME).toISOString(), authenticationEvidenceDigest: digest })), /waitpoint_expired/);
+  await assert.rejects(() => driver.resume(request("expired-wait", lease("l1", "w1", 20_000), undefined, { eventId: "answer", answer: "Ada", waitpointId: "wait", workflowRunId: "expired-wait", organizationId: "org-1", nodeId: "ask", runRevision: 1, subjectId: "user-1", kind: "answer", issuedAt: new Date(BASE_TIME).toISOString(), authenticationEvidenceDigest: digest })), /waitpoint_expired/);
 }
 
 {
