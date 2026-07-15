@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { NativeRunDriverSpike, NATIVE_RUN_DRIVER_DELAYED_RETRY_PUBLISHABLE } from "../../packages/tool-contracts/dist/run-driver-spike.js";
-import { workflowEffectIdempotencyKey } from "../../packages/tool-contracts/dist/workflow-vnext.js";
+import { canTransitionEffectClaim, workflowEffectIdempotencyKey } from "../../packages/tool-contracts/dist/workflow-vnext.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const BASE_TIME = Date.now();
@@ -19,7 +19,7 @@ class FakeStore {
   claimNodeAttempt(runId, nodeId) { const id = `${runId}:${nodeId}`; const status = this.nodeAttempts.get(id); if (status) return { created: false, status, result: this.nodeResults.get(id) }; this.setNodeAttemptStatus(runId, nodeId, "claimed"); return { created: true, status: "claimed" }; }
   setNodeAttemptStatus(runId, nodeId, status, result) { const id = `${runId}:${nodeId}`; this.nodeAttempts.set(id, status); this.nodeHistory.set(id, [...(this.nodeHistory.get(id) ?? []), status]); if (result) this.nodeResults.set(id, structuredClone(result)); }
   claimEffect(runId, effectId, key) { const id = `${runId}:${effectId}`; const status = this.effects.get(id); if (status) return { created: false, status, result: this.effectResults.get(id) }; this.setEffectStatus(runId, effectId, key, "claimed"); return { created: true, status: "claimed" }; }
-  setEffectStatus(runId, effectId, key, status, result) { const id = `${runId}:${effectId}`; this.effects.set(id, status); this.effectHistory.set(id, [...(this.effectHistory.get(id) ?? []), status]); const previous = this.effectKeys.get(id); assert.ok(!previous || previous === key, "logical effect idempotency key stays stable"); this.effectKeys.set(id, key); if (result) this.effectResults.set(id, structuredClone(result)); }
+  setEffectStatus(runId, effectId, key, status, result) { const id = `${runId}:${effectId}`; const previousStatus = this.effects.get(id); if (previousStatus) assert.equal(canTransitionEffectClaim(previousStatus, status), true, `driver transition ${previousStatus} -> ${status} is allowed`); this.effects.set(id, status); this.effectHistory.set(id, [...(this.effectHistory.get(id) ?? []), status]); const previous = this.effectKeys.get(id); assert.ok(!previous || previous === key, "logical effect idempotency key stays stable"); this.effectKeys.set(id, key); if (result) this.effectResults.set(id, structuredClone(result)); }
 }
 
 {
@@ -215,9 +215,9 @@ class FakeStore {
   const reconciled = await driver.start(request("succeeded-cas", lease("l1", "w1", 10_000)));
   assert.equal(reconciled.status, "succeeded");
   assert.deepEqual(reconciled.selectedPath, ["commit"]);
-  assert.equal(store.effects.get("succeeded-cas:effect-1"), "reconciled");
+  assert.equal(store.effects.get("succeeded-cas:effect-1"), "succeeded");
   assert.equal(calls, 1, "succeeded claim reconciliation never replays the provider");
-  assert.deepEqual(store.effectHistory.get("succeeded-cas:effect-1"), ["claimed", "in_flight", "succeeded", "reconciled"]);
+  assert.deepEqual(store.effectHistory.get("succeeded-cas:effect-1"), ["claimed", "in_flight", "succeeded"]);
 }
 
 {
@@ -227,6 +227,7 @@ class FakeStore {
   const driver = new NativeRunDriverSpike(store, () => { calls += 1; return { kind: "completed" }; }, undefined, () => "effect-1");
   await driver.start(request("already-succeeded", lease("l1", "w1", 10_000)));
   assert.equal(calls, 0, "succeeded effects are never dispatched again");
+  assert.equal(store.effects.get("already-succeeded:effect-1"), "succeeded");
 }
 
 {
