@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createInMemoryWorkflowRunJournalStore } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
 import { WorkflowRunDriver } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-driver.ts";
 import { handleWorkflowRunsAction } from "../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts";
@@ -110,13 +111,24 @@ function approvalDecision(runId, definition) {
   };
 }
 
+function approvalDefinition() {
+  const definition = structuredClone(train0WorkflowFixtures.approval);
+  const resolvedInputHash = `sha256:${createHash("sha256").update("{}").digest("hex")}`;
+  for (const node of definition.nodes) {
+    if (node.previewEffect) node.previewEffect.resolvedInputHash = resolvedInputHash;
+    if (node.approvalEffect) node.approvalEffect.resolvedInputHash = resolvedInputHash;
+    if (node.effectBinding) node.effectBinding.resolvedInputHash = resolvedInputHash;
+  }
+  return definition;
+}
+
 {
-  const definition = train0WorkflowFixtures.approval;
+  const definition = approvalDefinition();
   let commits = 0;
   const { runId, driver } = harness(definition, "commit", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
-    executionContext: (node) => node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => {
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => {
       commits += 1;
       return { status: "succeeded", output: { storage: "inline", value: { ok: true }, byteLength: 11 }, receipt: { receiptId: "receipt-1", semanticStatus: "success" } };
     } } } : {},
@@ -130,12 +142,12 @@ function approvalDecision(runId, definition) {
 }
 
 {
-  const definition = train0WorkflowFixtures.approval;
+  const definition = approvalDefinition();
   let approved = false;
   const { runId, driver } = harness(definition, "approval-wait", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
-    executionContext: (node) => node.nodeType === "approval" ? { subjectId: owner.userId, ...(approved ? { approvalDecision: "approved" } : {}) } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => ({ status: "succeeded", output: { storage: "inline", value: { ok: true }, byteLength: 11 }, receipt: { receiptId: "receipt-approval", semanticStatus: "success" } }) } } : {},
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { subjectId: owner.userId, ...(approved ? { approvalDecision: "approved" } : {}) } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => ({ status: "succeeded", output: { storage: "inline", value: { ok: true }, byteLength: 11 }, receipt: { receiptId: "receipt-approval", semanticStatus: "success" } }) } } : {},
   });
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const waiting = await driver.start(request(runId, "approval-a"));
@@ -147,10 +159,10 @@ function approvalDecision(runId, definition) {
 }
 
 {
-  const definition = train0WorkflowFixtures.approval;
+  const definition = approvalDefinition();
   const { runId, driver } = harness(definition, "unsafe-write-retry", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId }, resolveReadiness: () => [readiness("booking.create.booking")],
-    executionContext: (node) => node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => ({ status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }) } } : {},
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => ({ status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }) } } : {},
   });
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const failed = await driver.start(request(runId, "unsafe-a"));
@@ -169,12 +181,12 @@ function approvalDecision(runId, definition) {
 }
 
 {
-  const definition = train0WorkflowFixtures.approval;
+  const definition = approvalDefinition();
   let commits = 0;
   const { runId, driver } = harness(definition, "revoked", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking", false)],
-    executionContext: (node) => node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { commits += 1; throw new Error("must not dispatch"); } } } : {},
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { commits += 1; throw new Error("must not dispatch"); } } } : {},
   });
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const denied = await driver.start(request(runId, "revoked-a"));
@@ -210,12 +222,12 @@ function approvalDecision(runId, definition) {
 }
 
 {
-  const definition = train0WorkflowFixtures.approval;
+  const definition = approvalDefinition();
   let providerCalls = 0;
   const { runId, driver } = harness(definition, "lost-response", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
-    executionContext: (node) => node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { providerCalls += 1; throw new Error("response lost after acceptance"); } } } : {},
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { providerCalls += 1; throw new Error("response lost after acceptance"); } } } : {},
     reconcileEffect: () => ({ status: "succeeded", output: { storage: "inline", value: { ok: true }, byteLength: 11 }, receipt: { receiptId: "receipt-reconciled", semanticStatus: "success" } }),
   });
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
@@ -226,6 +238,21 @@ function approvalDecision(runId, definition) {
   const reconciled = await driver.runUntilBlocked(request(runId, "lost-a"));
   assert.equal(reconciled.status, "succeeded");
   assert.equal(providerCalls, 1, "reconciliation never replays an accepted provider effect");
+}
+
+{
+  const definition = approvalDefinition();
+  definition.nodes.find((node) => node.nodeType === "tool_commit").bindings = { changed: { source: "constant", value: true } };
+  let providerCalls = 0;
+  const { runId, driver } = harness(definition, "commit-input-mismatch", {
+    hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
+    resolveReadiness: () => [readiness("booking.create.booking")],
+    executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { providerCalls += 1; throw new Error("must not dispatch"); } } } : {},
+  });
+  driver.deps.approvalDecision = () => approvalDecision(runId, definition);
+  const denied = await driver.start(request(runId, "commit-input-mismatch-a"));
+  assert.equal(denied.compatibilityPhase, "resolved_input_hash_mismatch");
+  assert.equal(providerCalls, 0, "changed commit input is rejected before effect claim and provider dispatch");
 }
 
 {
