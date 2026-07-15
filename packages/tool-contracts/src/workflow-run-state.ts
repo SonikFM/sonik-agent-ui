@@ -1,7 +1,6 @@
-// Workflow run state contract — the single authoritative state machine for a
-// workflow run (consensus plan .omc/plans/workflow-state-machine-consensus-2026-07-10.md,
-// Phase 1). One interpreter walks workflowDefinitionSchema graphs; this module
-// is that interpreter's state + pure reducer. No I/O — node execution is
+// Legacy workflow run compatibility contract. New definitions and engine work
+// target workflow-vnext.ts; this reducer remains only for existing Phase 1
+// callers until they cross the explicit legacy-to-vNext bridge. No I/O — node execution is
 // injected by the controller (Phase 3a), never performed here.
 //
 // Trust doctrine enforced structurally, not by convention:
