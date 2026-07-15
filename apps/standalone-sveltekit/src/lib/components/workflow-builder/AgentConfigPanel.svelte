@@ -131,7 +131,7 @@
   {#if validationIssues.length > 0}
     <Card.Root class="border-destructive/50">
       <Card.Content class="flex flex-col gap-1 pt-4 text-sm text-destructive">
-        {#each validationIssues as issue}
+        {#each validationIssues as issue (issue)}
           <span>{issue}</span>
         {/each}
       </Card.Content>
@@ -168,7 +168,9 @@
     <Card.Content class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge variant="outline">Catalog: {modelCatalogStatus}</Badge>
-        {#if modelCatalogMessage}<span>{modelCatalogMessage}</span>{/if}
+        {#if modelCatalogMessage}
+          <span role={modelCatalogStatus === "error" ? "alert" : "status"}>{modelCatalogMessage}</span>
+        {/if}
         <Button variant="ghost" size="sm" onclick={() => onModelCatalogRefresh?.()}>
           {modelCatalogStatus === "loading" ? "Refreshing…" : "Refresh"}
         </Button>
@@ -239,7 +241,7 @@
         <Select.Root type="single" value="" onValueChange={(value) => addPromptModule(value ?? "")}>
           <Select.Trigger aria-label="Add prompt module">Add module&hellip;</Select.Trigger>
           <Select.Content>
-            {#each availableModuleIds as moduleId}
+            {#each availableModuleIds as moduleId (moduleId)}
               <Select.Item value={moduleId}>{moduleTitle(moduleId)}</Select.Item>
             {/each}
           </Select.Content>
@@ -273,7 +275,7 @@
                 <Select.Root type="single" value={effectiveFamilyMode(definition, family.familyId)} onValueChange={(value) => setFamilyMode(family.familyId, (value ?? "off") as AgentToolPermissionMode)}>
                   <Select.Trigger aria-label="{family.familyId} tool policy">{effectiveFamilyMode(definition, family.familyId)}</Select.Trigger>
                   <Select.Content>
-                    {#each TOOL_MODES as mode}
+                    {#each TOOL_MODES as mode (mode)}
                       <Select.Item value={mode}>{mode}</Select.Item>
                     {/each}
                   </Select.Content>

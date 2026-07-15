@@ -17,10 +17,90 @@ import {
   type CapabilityDescriptor,
   type CapabilityRegistry,
 } from "@sonik-agent-ui/tool-contracts/capability-registry";
+import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
+import type { AgentUiApprovalStateSnapshot, AgentUiWorkflowPhase } from "@sonik-agent-ui/agent-observability";
 
 export type BuilderTab = "config" | "canvas" | "preview";
 export type WorkflowLockState = "draft" | "locked";
 export type KnowledgeRef = AgentDefinition["knowledgeRefs"][number];
+export type ActiveWorkflowRunSelection = { workflowId: string; run: WorkflowRunState };
+export type WorkflowRunAction = "preview" | "approve" | "commit";
+export type WorkflowRunActionDisabledCode =
+  | "workflow_action_busy"
+  | "workflow_run_not_started"
+  | "workflow_preview_node_missing"
+  | "workflow_commit_node_missing"
+  | "workflow_preview_not_ready"
+  | "trusted_host_approval_required"
+  | "workflow_run_already_approved"
+  | "run_approval_required"
+  | "run_approval_does_not_cover_command"
+  | "workflow_run_committed";
+
+export interface WorkflowRunActionDisabledState {
+  code: WorkflowRunActionDisabledCode;
+  message: string;
+}
+
+const WORKFLOW_RUN_ACTION_DISABLED_MESSAGES: Record<WorkflowRunActionDisabledCode, string> = {
+  workflow_action_busy: "Wait for the current workflow action to finish.",
+  workflow_run_not_started: "Start this workflow run before using this action.",
+  workflow_preview_node_missing: "This workflow has no preview step to run.",
+  workflow_commit_node_missing: "This workflow has no trusted commit step.",
+  workflow_preview_not_ready: "Create a workflow preview before approving this run.",
+  trusted_host_approval_required: "Reconnect with a trusted host grant for this command before approving or committing.",
+  workflow_run_already_approved: "This workflow run is already approved.",
+  run_approval_required: "Approve this workflow run before committing it.",
+  run_approval_does_not_cover_command: "The run approval does not cover this commit command. Preview and approve it again.",
+  workflow_run_committed: "This workflow run is already committed.",
+};
+
+export function resolveWorkflowRunBusyDisabledState(busy: boolean): WorkflowRunActionDisabledState | null {
+  return busy
+    ? { code: "workflow_action_busy", message: WORKFLOW_RUN_ACTION_DISABLED_MESSAGES.workflow_action_busy }
+    : null;
+}
+
+/** One typed source for the actual Preview/Approve/Commit button state and its
+ * human/AT-readable explanation. Authority checks intentionally precede
+ * lifecycle checks on approve/commit: a stale approved run never masks that
+ * the currently signed host context no longer grants the command. */
+export function resolveWorkflowRunActionDisabledState(input: {
+  action: WorkflowRunAction;
+  busy: boolean;
+  hasRun: boolean;
+  hasPreviewNode: boolean;
+  hasCommitNode: boolean;
+  phase: WorkflowRunState["phase"] | null;
+  approvalStatus: WorkflowRunState["approvalState"]["status"] | null;
+  signedHostGrantCoversCommit: boolean;
+  runApprovalCoversCommit: boolean;
+}): WorkflowRunActionDisabledState | null {
+  const disabled = (code: WorkflowRunActionDisabledCode): WorkflowRunActionDisabledState => ({
+    code,
+    message: WORKFLOW_RUN_ACTION_DISABLED_MESSAGES[code],
+  });
+  if (input.busy) return resolveWorkflowRunBusyDisabledState(true);
+  if (!input.hasRun) return disabled("workflow_run_not_started");
+
+  if (input.action === "preview") {
+    return input.hasPreviewNode ? null : disabled("workflow_preview_node_missing");
+  }
+
+  if (!input.hasCommitNode) return disabled("workflow_commit_node_missing");
+  if (!input.signedHostGrantCoversCommit) return disabled("trusted_host_approval_required");
+
+  if (input.action === "approve") {
+    if (input.approvalStatus === "approved") return disabled("workflow_run_already_approved");
+    if (input.phase !== "preview_ready") return disabled("workflow_preview_not_ready");
+    return null;
+  }
+
+  if (input.phase === "committed") return disabled("workflow_run_committed");
+  if (input.approvalStatus !== "approved") return disabled("run_approval_required");
+  if (!input.runApprovalCoversCommit) return disabled("run_approval_does_not_cover_command");
+  return null;
+}
 
 export function createEmptyAgentDefinition(agentId: string): AgentDefinition {
   return agentDefinitionSchema.parse({ agentId, title: "Untitled agent" });
@@ -130,4 +210,84 @@ export function formatModelContextWindow(value: number | undefined): string {
   if (value >= 1_000_000) return `${Math.round(value / 1_000_000)}M context`;
   if (value >= 1_000) return `${Math.round(value / 1_000)}K context`;
   return `${value} context`;
+}
+
+function workflowRunPhaseForApprovalState(phase: WorkflowRunState["phase"]): AgentUiWorkflowPhase {
+  return phase === "cancelled" ? "idle" : phase;
+}
+
+/**
+ * Projects the active builder run into the existing page-control approval API.
+ * Approval readiness comes from the controller run, while authority comes only
+ * from command ids carried by the currently signed host context. Chat text and
+ * standalone mode never manufacture a grant.
+ */
+export function createWorkflowBuilderApprovalState(
+  run: WorkflowRunState | null,
+  signedHostApprovedCommandIds: readonly string[],
+): AgentUiApprovalStateSnapshot {
+  if (!run) {
+    return {
+      schemaVersion: "sonik.agent_ui.approval_state.v1",
+      phase: "idle",
+      activeArtifactId: null,
+      canRequestApproval: false,
+      canApproveAndRun: false,
+      disabledReasons: ["workflow_run_not_started"],
+      commandPreview: null,
+    };
+  }
+
+  const previewNode = Object.values(run.nodeStates).find((node) => node.type === "tool_preview");
+  const commitNode = Object.values(run.nodeStates).find((node) => node.type === "tool_commit");
+  const commandId = commitNode?.commandId ?? previewNode?.commandId ?? null;
+  const signedGrantCoversCommand = Boolean(commandId && signedHostApprovedCommandIds.includes(commandId));
+  const runApprovalCoversCommand = Boolean(
+    commandId
+      && run.approvalState.status === "approved"
+      && run.approvalState.hostSigned
+      && run.approvalState.approvedCommandIds.includes(commandId),
+  );
+  const canRequestApproval = run.phase === "preview_ready";
+  const disabledReasons: string[] = [];
+
+  if (run.phase === "cancelled") disabledReasons.push("workflow_run_cancelled");
+  else if (run.phase === "error") disabledReasons.push(previewNode?.error?.code ?? "workflow_run_error");
+  else if (run.phase === "committed") disabledReasons.push("workflow_run_committed");
+  else if (!previewNode?.preview) disabledReasons.push("workflow_preview_not_ready");
+  else if (!commandId) disabledReasons.push("workflow_commit_command_missing");
+  else if (!signedGrantCoversCommand) disabledReasons.push("trusted_host_approval_required");
+  else if (run.approvalState.status === "approved" && !runApprovalCoversCommand) {
+    disabledReasons.push("run_approval_does_not_cover_command");
+  }
+
+  return {
+    schemaVersion: "sonik.agent_ui.approval_state.v1",
+    phase: workflowRunPhaseForApprovalState(run.phase),
+    activeArtifactId: run.artifactId,
+    canRequestApproval,
+    canApproveAndRun: canRequestApproval && signedGrantCoversCommand,
+    disabledReasons,
+    commandPreview: previewNode?.preview
+      ? {
+          commandId: previewNode.preview.commandId,
+          stableInputHash: previewNode.preview.stableInputHash,
+          effect: previewNode.preview.effect === "read" || previewNode.preview.effect === "write" || previewNode.preview.effect === "destructive"
+            ? previewNode.preview.effect
+            : "write",
+          approvalRequired: previewNode.preview.approvalRequired,
+        }
+      : null,
+  };
+}
+
+/** Last-interacted panel wins. Reset only clears the run owned by that panel,
+ * so resetting an inactive example cannot erase the active approval card. */
+export function selectActiveWorkflowRun(
+  current: ActiveWorkflowRunSelection | null,
+  workflowId: string,
+  run: WorkflowRunState | null,
+): ActiveWorkflowRunSelection | null {
+  if (run) return { workflowId, run };
+  return current?.workflowId === workflowId ? null : current;
 }

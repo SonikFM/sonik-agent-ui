@@ -23,13 +23,17 @@
 
   interface Props {
     draftAgentId: string;
+    workspaceFetch: typeof fetch;
+    prepareDraft: () => Promise<{ ok: boolean; message: string }>;
     /** Fired when the drafting agent returns a validated workflow, so the shell
      *  can load it onto the canvas (describe -> draft -> canvas). */
     onWorkflowDrafted?: (workflow: WorkflowDefinition) => void;
   }
-  let { draftAgentId, onWorkflowDrafted }: Props = $props();
+  let { draftAgentId, workspaceFetch, prepareDraft, onWorkflowDrafted }: Props = $props();
 
   let input = $state("");
+  let preparationMessage = $state("");
+  let preparing = $state(false);
   let lastDraftedSignature = "";
 
   // Scan the chat for the draftWorkflow tool's validated output and surface it
@@ -60,6 +64,7 @@
   const preview = new Chat({
     transport: new DefaultChatTransport({
       api: "/api/generate",
+      fetch: (input, init) => workspaceFetch(input, init),
       prepareSendMessagesRequest({ messages, id, trigger, messageId, body }) {
         return { body: { ...body, id, trigger, messageId, messages, draftAgentId } };
       },
@@ -68,11 +73,25 @@
 
   const isStreaming = $derived(preview.status === "streaming" || preview.status === "submitted");
 
-  function submit(): void {
+  async function submit(): Promise<void> {
     const trimmed = input.trim();
-    if (!trimmed || isStreaming) return;
-    preview.sendMessage({ text: trimmed });
-    input = "";
+    if (!trimmed || isStreaming || preparing) return;
+    preparing = true;
+    preparationMessage = "Saving the current draft before preview…";
+    try {
+      const prepared = await prepareDraft();
+      if (!prepared.ok) {
+        preparationMessage = prepared.message;
+        return;
+      }
+      preparationMessage = "";
+      await preview.sendMessage({ text: trimmed });
+      input = "";
+    } catch (error) {
+      preparationMessage = error instanceof Error ? error.message : "Draft preview could not start.";
+    } finally {
+      preparing = false;
+    }
   }
 
   function clearPreview(): void {
@@ -104,13 +123,16 @@
       onkeydown={(event) => {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
-          submit();
+          void submit();
         }
       }}
     ></textarea>
     <div class="flex flex-col gap-2">
-      <Button onclick={submit} disabled={isStreaming || !input.trim()}>Send</Button>
+      <Button onclick={() => void submit()} disabled={isStreaming || preparing || !input.trim()}>{preparing ? "Preparing…" : "Send"}</Button>
       <Button variant="outline" onclick={clearPreview} disabled={preview.messages.length === 0}>Clear</Button>
     </div>
   </div>
+  {#if preparationMessage}
+    <p class="text-sm text-destructive" data-workflow-preview-status>{preparationMessage}</p>
+  {/if}
 </div>

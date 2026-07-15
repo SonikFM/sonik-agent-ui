@@ -23,6 +23,7 @@ export const ARTIFACT_INPUT_SCENARIO = "artifact-input-stream";
 export const TOOL_FAILURE_SCENARIO = "tool-failure-stream";
 export const DOCUMENT_INTENT_SCENARIO = "document-intent-stream";
 export const DOCUMENT_FAILURE_SCENARIO = "document-failure-stream";
+export const WORKFLOW_DRAFT_SCENARIO = "workflow-draft-stream";
 
 /** `scenario` omitted (or null) selects the default text-only dev-smoke stream
  *  (dev-smoke-stream.ts's fallback branch -- three text-delta chunks, no tool call). */

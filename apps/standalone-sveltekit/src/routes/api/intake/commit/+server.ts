@@ -1,7 +1,8 @@
 import { env } from "$env/dynamic/private";
 import { error, json } from "@sveltejs/kit";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
-import { getRequestWorkspacePersistence } from "$lib/server/workspace-request-store";
+import { getRequestWorkspaceCommitReceipt, getRequestWorkspacePersistence, recordRequestWorkspaceCommitReceipt } from "$lib/server/workspace-request-store";
+import { commitLedgerFailureReason, runIdempotentCommit } from "$lib/server/commit-idempotency";
 import { AGENT_UI_HOST_CONTEXT_HEADER } from "$lib/server/workspace-services";
 import {
   createAgentHostSessionEnvelope,
@@ -46,8 +47,26 @@ export const POST: RequestHandler = async (event) => {
   });
   const bookingRuntimeFetcher = createRequestBookingRuntimeFetcher(event);
   const persistence = getRequestWorkspacePersistence(event);
+  let artifactVersion: number | null;
+  try {
+    artifactVersion = (await persistence.getArtifact(artifactId))?.version ?? null;
+  } catch {
+    await recordCommitTelemetry({
+      ok: false,
+      artifactId,
+      sessionId,
+      reason: commitLedgerFailureReason("read"),
+    });
+    return json(
+      { ok: false, error: "idempotency_unavailable", message: "The intake could not be safely retried because its committed version is unavailable." },
+      { status: 503 },
+    );
+  }
 
-  const result = await commitBookingContextIntakeCommand(
+  // Server-resolved versions let a newly edited artifact commit again. Missing
+  // artifacts use their requested id only; the failed commit is never recorded.
+  const idempotencyKey = artifactVersion === null ? artifactId : `${artifactId}:v${artifactVersion}`;
+  const commit = () => commitBookingContextIntakeCommand(
     {
       sessionId,
       persistence,
@@ -59,12 +78,40 @@ export const POST: RequestHandler = async (event) => {
     },
     artifactId,
   );
+  const outcome = await runIdempotentCommit({
+    getReceipt: async () => (await getRequestWorkspaceCommitReceipt<Awaited<ReturnType<typeof commit>>>(event, {
+      kind: "intake",
+      idempotency_key: idempotencyKey,
+    }))?.receipt ?? null,
+    commit,
+    recordReceipt: (receipt) => recordRequestWorkspaceCommitReceipt(event, {
+      kind: "intake",
+      idempotency_key: idempotencyKey,
+      session_id: sessionId ?? null,
+      resource_id: artifactId,
+      receipt,
+    }),
+    onLedgerFailure: (stage) => recordCommitTelemetry({
+      ok: false,
+      artifactId,
+      sessionId,
+      reason: commitLedgerFailureReason(stage),
+    }),
+  });
+
+  if (outcome.kind === "ledger_read_failed") {
+    return json(
+      { ok: false, error: "idempotency_unavailable", message: "The intake could not be safely retried because commit history is unavailable." },
+      { status: 503 },
+    );
+  }
+  if (outcome.kind === "replayed") await recordCommitTelemetry({ ok: true, artifactId, sessionId, reason: "idempotent_replay" });
 
   // commitBookingContextIntakeCommand already emits commit.human_approved
   // telemetry for every artifact-load/validation/runtime outcome it reaches;
   // this endpoint only needs to cover the request-shape and trust-boundary
   // failures above that never reach that function.
-  return json(result, { status: 200 });
+  return json(outcome.receipt, { status: 200 });
 };
 
 async function parseCommitBody(request: Request): Promise<Record<string, unknown>> {

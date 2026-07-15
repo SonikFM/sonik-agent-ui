@@ -88,7 +88,7 @@ the workspace **artifact store** (`reservation-commit-ledger-*` ids, kind
 `apps/standalone-sveltekit/src/routes/api/reservation/commit/+server.ts`.
 `/api/intake/commit` has **no** idempotency at all.
 
-**In scope:** migration `0008_commit_ledger` in
+**In scope:** migration `0012_commit_ledger` in
 `packages/workspace-session/migrations/postgres/` (idempotent,
 version-tracked like 0001–0007); a typed store method pair
 (get/record) threaded through the same per-request `platform.env` resolver
@@ -100,7 +100,7 @@ switch the reservation endpoint to it; add the same guard to
 entries (leave them; they expire with the sessions).
 
 **Acceptance criteria:**
-1. `pnpm db:migrate` applies `0008` idempotently (safe to re-run) and
+1. `pnpm db:migrate` applies `0012` idempotently (safe to re-run) and
    `db:migrate:dry-run` lists it.
 2. Repeat POST with the same `previewToolCallId` returns the stored receipt
    with `replayed: true` and performs **zero** booking-service calls

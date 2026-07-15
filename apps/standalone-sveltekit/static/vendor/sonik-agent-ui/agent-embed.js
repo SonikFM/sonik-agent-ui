@@ -16,7 +16,7 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "route", "surface", "pageType", "title", "theme", "mode", "activeSessionId",
   "activeArtifactId", "activeDocumentId", "artifactType", "conversationStatus", "messageCount",
   "visibleActions", "visibleWarnings", "visibleErrors", "commandFamilies", "skillFamilies", "activeEntity",
-  "authenticated", "organizationId", "scopes", "hostSession", "signatureVersion", "issuedAt", "expiresAt", "signature", "at",
+  "authenticated", "organizationId", "scopes", "hostSession", "at",
 ]);
 const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
 
@@ -57,11 +57,13 @@ function isAgentHostActionRequestMessage(value) {
     && typeof value.actionKey === "string";
 }
 
-export function createAgentHostPageContextMessage(payload) {
+export function createAgentHostPageContextMessage(payload, authority) {
+  const safeAuthority = sanitizeAgentHostAuthorityDonation(authority);
   return {
     source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
     type: SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
     payload,
+    ...(safeAuthority ? { authority: safeAuthority } : {}),
     sentAt: new Date().toISOString(),
   };
 }
@@ -104,14 +106,18 @@ export function mountSonikAgentUI(options) {
 
   const postContext = async () => {
     try {
+      const donated = await getPageContext();
+      const donation = donated && typeof donated === "object" && !Array.isArray(donated) && "pageContext" in donated
+        ? donated
+        : { pageContext: donated };
       const payload = {
-        ...(sanitizeAgentHostPageContext(await getPageContext()) ?? {}),
+        ...(sanitizeAgentHostPageContext(donation.pageContext) ?? {}),
         ...(activeMode ? { mode: activeMode } : {}),
       };
       const targetOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
       if (!targetOrigin) return;
       iframe.contentWindow?.postMessage(
-        createAgentHostPageContextMessage(payload),
+        createAgentHostPageContextMessage(payload, donation.authority),
         targetOrigin,
       );
     } catch (error) {
@@ -338,6 +344,15 @@ function annotateHostElement(element, control) {
   if (!element) return;
   element.dataset.sonikAgentUiControl = control;
   if (!element.getAttribute("data-testid")) element.setAttribute("data-testid", `sonik-agent-ui-${control}`);
+}
+
+function sanitizeAgentHostAuthorityDonation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { header, revision, expiresAt } = value;
+  if (typeof header !== "string" || header.length < 1 || header.length > 8192 || !/^[A-Za-z0-9_-]+$/.test(header)) return undefined;
+  if (!Number.isSafeInteger(revision) || revision < 0) return undefined;
+  if (typeof expiresAt !== "string" || expiresAt.length > MAX_SAFE_TEXT_LENGTH || !Number.isFinite(Date.parse(expiresAt))) return undefined;
+  return { header, revision, expiresAt };
 }
 
 function sanitizeAgentHostPageContext(value) {

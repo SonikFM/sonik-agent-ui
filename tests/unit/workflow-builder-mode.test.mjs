@@ -12,6 +12,10 @@ import {
   agentRequiresToolUse,
   isModelIncompatible,
   formatModelContextWindow,
+  createWorkflowBuilderApprovalState,
+  resolveWorkflowRunActionDisabledState,
+  resolveWorkflowRunBusyDisabledState,
+  selectActiveWorkflowRun,
 } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts";
 
 // Phase 5 (agent-creation-tool-plan-2026-07-13.md, Decision 3): the missing
@@ -119,6 +123,144 @@ const uncommittedTrustNode = validateWorkflowDefinition({
 });
 assert.equal(uncommittedTrustNode.ok, false, "a tool_commit node must require preview_then_trusted_approval");
 
+// -- builder approval projection: controller state + signed host grant only --
+
+const previewReadyRun = {
+  runId: "run_builder_preview",
+  workflowId: "amplify.campaign.create",
+  workflowVersionId: "sonik.amplify.campaign.workflow@0.1.0",
+  artifactId: null,
+  phase: "preview_ready",
+  currentNodeId: "preview",
+  facadeToolIds: [],
+  nodeStates: {
+    preview: {
+      nodeId: "preview",
+      type: "tool_preview",
+      status: "preview_ready",
+      commandId: "amplify.campaign.create",
+      effect: "external",
+      required: false,
+      preview: {
+        commandId: "amplify.campaign.create",
+        stableInputHash: "campaign-hash",
+        effect: "external",
+        approvalRequired: true,
+      },
+    },
+    commit: {
+      nodeId: "commit",
+      type: "tool_commit",
+      status: "pending",
+      commandId: "amplify.campaign.create",
+      effect: "write",
+      required: false,
+    },
+  },
+  approvalState: { status: "none", hostSigned: false, approvedCommandIds: [], approvedInputHashes: {} },
+  receipts: [],
+};
+
+assert.deepEqual(createWorkflowBuilderApprovalState(null, []), {
+  schemaVersion: "sonik.agent_ui.approval_state.v1",
+  phase: "idle",
+  activeArtifactId: null,
+  canRequestApproval: false,
+  canApproveAndRun: false,
+  disabledReasons: ["workflow_run_not_started"],
+  commandPreview: null,
+});
+
+const unsignedBuilderApproval = createWorkflowBuilderApprovalState(previewReadyRun, []);
+assert.equal(unsignedBuilderApproval.canRequestApproval, true, "a controller preview should be readable through the existing approval-state API");
+assert.equal(unsignedBuilderApproval.canApproveAndRun, false, "preview readiness alone must never manufacture host approval");
+assert.deepEqual(unsignedBuilderApproval.disabledReasons, ["trusted_host_approval_required"]);
+assert.deepEqual(unsignedBuilderApproval.commandPreview, {
+  commandId: "amplify.campaign.create",
+  stableInputHash: "campaign-hash",
+  effect: "write",
+  approvalRequired: true,
+}, "unsupported external effects normalize to the existing approval API's write effect");
+
+const signedBuilderApproval = createWorkflowBuilderApprovalState(previewReadyRun, ["amplify.campaign.create"]);
+assert.equal(signedBuilderApproval.canApproveAndRun, true, "the signed host's exact approved command id unlocks the host approval action");
+assert.deepEqual(signedBuilderApproval.disabledReasons, []);
+assert.equal(
+  createWorkflowBuilderApprovalState(previewReadyRun, ["booking.create.booking"]).canApproveAndRun,
+  false,
+  "a signed grant for another command must fail closed",
+);
+
+const approvedRun = {
+  ...previewReadyRun,
+  phase: "approved",
+  approvalState: {
+    status: "approved",
+    hostSigned: true,
+    approvedCommandIds: ["amplify.campaign.create"],
+    approvedInputHashes: { "amplify.campaign.create": "campaign-hash" },
+  },
+};
+assert.deepEqual(
+  createWorkflowBuilderApprovalState(approvedRun, ["amplify.campaign.create"]).disabledReasons,
+  [],
+  "an approved run remains readable only when both current signed context and run approval cover the command",
+);
+assert.deepEqual(
+  createWorkflowBuilderApprovalState({ ...approvedRun, approvalState: { ...approvedRun.approvalState, approvedCommandIds: [] } }, ["amplify.campaign.create"]).disabledReasons,
+  ["run_approval_does_not_cover_command"],
+  "a hostSigned boolean without command coverage is not sufficient",
+);
+
+const actionStateInput = (overrides = {}) => ({
+  action: "approve",
+  busy: false,
+  hasRun: true,
+  hasPreviewNode: true,
+  hasCommitNode: true,
+  phase: "preview_ready",
+  approvalStatus: "none",
+  signedHostGrantCoversCommit: true,
+  runApprovalCoversCommit: false,
+  ...overrides,
+});
+assert.equal(resolveWorkflowRunActionDisabledState(actionStateInput()), null, "a ready, signed approval action is enabled");
+assert.deepEqual(resolveWorkflowRunActionDisabledState(actionStateInput({ action: "preview", busy: true })), {
+  code: "workflow_action_busy",
+  message: "Wait for the current workflow action to finish.",
+});
+assert.deepEqual(resolveWorkflowRunBusyDisabledState(true), {
+  code: "workflow_action_busy",
+  message: "Wait for the current workflow action to finish.",
+});
+assert.equal(resolveWorkflowRunBusyDisabledState(false), null);
+assert.equal(resolveWorkflowRunActionDisabledState(actionStateInput({ action: "preview" })), null);
+assert.equal(resolveWorkflowRunActionDisabledState(actionStateInput({ action: "commit", approvalStatus: "approved", runApprovalCoversCommit: true })), null);
+for (const [overrides, code] of [
+  [{ hasRun: false }, "workflow_run_not_started"],
+  [{ action: "preview", hasPreviewNode: false }, "workflow_preview_node_missing"],
+  [{ hasCommitNode: false }, "workflow_commit_node_missing"],
+  [{ signedHostGrantCoversCommit: false }, "trusted_host_approval_required"],
+  [{ approvalStatus: "approved" }, "workflow_run_already_approved"],
+  [{ phase: "intake" }, "workflow_preview_not_ready"],
+  [{ action: "commit", phase: "committed", approvalStatus: "approved", runApprovalCoversCommit: true }, "workflow_run_committed"],
+  [{ action: "commit" }, "run_approval_required"],
+  [{ action: "commit", approvalStatus: "approved" }, "run_approval_does_not_cover_command"],
+]) {
+  const disabled = resolveWorkflowRunActionDisabledState(actionStateInput(overrides));
+  assert.equal(disabled?.code, code, `${code} is a typed workflow action disabled reason`);
+  assert.ok(disabled?.message && !disabled.message.includes("_"), `${code} has visible human-readable copy`);
+}
+
+const otherRun = { ...previewReadyRun, runId: "run_other", workflowId: "other.workflow" };
+let activeSelection = selectActiveWorkflowRun(null, previewReadyRun.workflowId, previewReadyRun);
+activeSelection = selectActiveWorkflowRun(activeSelection, otherRun.workflowId, otherRun);
+assert.equal(activeSelection?.run.runId, "run_other", "the most recently interacted run panel must own the shared approval projection");
+activeSelection = selectActiveWorkflowRun(activeSelection, previewReadyRun.workflowId, null);
+assert.equal(activeSelection?.run.runId, "run_other", "resetting an inactive panel must not clear the active run");
+activeSelection = selectActiveWorkflowRun(activeSelection, otherRun.workflowId, null);
+assert.equal(activeSelection, null, "resetting the active panel must clear the shared approval projection");
+
 // -- +page.svelte: workflow-builder mode wiring ------------------------------
 
 const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
@@ -129,9 +271,9 @@ assert.equal(
   "app shell should import the workflow-builder root component",
 );
 assert.equal(
-  pageSource.includes('let workspaceMode = $state<"workspace" | "workflow-builder">("workspace")'),
+  pageSource.includes('let workspaceMode = $state<"workspace" | "workflow-builder" | "channels">("workspace")'),
   true,
-  "app shell should track the third workspace mode alongside the default chat workspace",
+  "app shell should preserve workflow builder as a local mode alongside the default and channels workspaces",
 );
 assert.equal(
   pageSource.includes('{#if workspaceMode === "workflow-builder"}'),
@@ -139,7 +281,7 @@ assert.equal(
   "app shell should conditionally mount the workflow builder instead of the chat workspace",
 );
 assert.equal(
-  pageSource.includes('<WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} onExit={() => { workspaceMode = "workspace"; }} />'),
+  pageSource.includes("signedHostApprovedCommandIds={getSignedWorkspaceApprovedCommandIds()}") && pageSource.includes("{workspaceFetch}"),
   true,
   "app shell should mount WorkflowBuilderRoot, capture its controller, and pass an onExit that returns to chat (the builder toolbar toggle unmounts in builder mode)",
 );
@@ -175,6 +317,19 @@ const builderRootSource = await readFile(
   "apps/standalone-sveltekit/src/lib/components/workflow-builder/WorkflowBuilderRoot.svelte",
   "utf8",
 );
+const workflowRunPanelSource = await readFile(
+  "apps/standalone-sveltekit/src/lib/components/workflow-builder/WorkflowRunPanel.svelte",
+  "utf8",
+);
+assert.match(workflowRunPanelSource, /resolveWorkflowRunActionDisabledState/, "run controls derive disabled state from the typed helper");
+assert.match(workflowRunPanelSource, /data-disabled-reason=\{previewDisabledState\?\.code\}/);
+assert.match(workflowRunPanelSource, /data-disabled-reason=\{approveDisabledState\?\.code\}/);
+assert.match(workflowRunPanelSource, /data-disabled-reason=\{commitDisabledState\?\.code\}/);
+assert.equal((workflowRunPanelSource.match(/data-disabled-reason=\{busyDisabledState\?\.code\}/g) ?? []).length, 2, "Run and Reset expose the shared typed busy reason");
+assert.equal((workflowRunPanelSource.match(/aria-describedby=\{busyDisabledState \? `\$\{disabledReasonIdBase\}-busy-disabled` : undefined\}/g) ?? []).length, 2, "Run and Reset describe the shared visible busy copy");
+assert.match(workflowRunPanelSource, /data-workflow-run-disabled-reason=\{runId \? "reset" : "run"\}[\s\S]*\{busyDisabledState\.message\}/, "Run and Reset expose the typed busy state as visible human copy");
+assert.match(workflowRunPanelSource, /aria-describedby=\{previewDisabledState[\s\S]*aria-describedby=\{approveDisabledState[\s\S]*aria-describedby=\{commitDisabledState/);
+assert.match(workflowRunPanelSource, /data-workflow-run-disabled-reason="preview"[\s\S]*data-workflow-run-disabled-reason="approve"[\s\S]*data-workflow-run-disabled-reason="commit"/, "each disabled control owns visible described-by copy");
 assert.equal(
   builderRootSource.includes("snapshot(): WorkflowBuilderSnapshot;"),
   true,
@@ -196,7 +351,7 @@ assert.equal(
   "saveDraft must call the agent-definitions API with POST",
 );
 assert.equal(
-  builderRootSource.includes('fetch("/api/agent-definitions"'),
+  builderRootSource.includes('workspaceFetch("/api/agent-definitions"'),
   true,
   "saveDraft must call the Phase 4 agent-definitions endpoint",
 );
@@ -211,7 +366,7 @@ assert.equal(
   "Debug & Preview drafts must load onto the canvas (describe -> draft -> canvas)",
 );
 assert.equal(
-  builderRootSource.includes("<WorkflowRunPanel workflow={draftWorkflow} />"),
+  builderRootSource.includes("workflow={draftWorkflow}") && builderRootSource.includes("onRunStateChange={handleRunStateChange}"),
   true,
   "the user's own draft workflow must be runnable, not only the shipped fixtures",
 );
@@ -268,7 +423,7 @@ assert.equal(
 // separation -- AgentConfigPanel above asserts it never calls fetch itself) --
 
 assert.equal(
-  builderRootSource.includes('fetch("/api/agent-models")'),
+  builderRootSource.includes('workspaceFetch("/api/agent-models")'),
   true,
   "WorkflowBuilderRoot must fetch the live model catalog itself since AgentConfigPanel is not allowed to call the network",
 );

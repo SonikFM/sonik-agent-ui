@@ -217,7 +217,7 @@ function resolveLocalWorkspaceRuntime(event: WorkspaceRuntimeRequest | null, rea
   if (!hostSession.authenticated || !hostSession.organizationId || !hostSession.userId) {
     return { ...localWorkspaceRuntime, reason };
   }
-  const scope = JSON.stringify([hostSession.organizationId, hostSession.userId, hostSession.sessionId]);
+  const scope = JSON.stringify([hostSession.organizationId, hostSession.userId]);
   let persistence = scopedLocalWorkspacePersistence.get(scope);
   if (!persistence) {
     persistence = createInMemoryWorkspacePersistence();
@@ -408,7 +408,7 @@ function normalizeHostSessionSnapshot(
   const organizationId = cleanRuntimeString(hostSession.organizationId) ?? cleanRuntimeString(context?.organizationId) ?? null;
   const sessionId = cleanRuntimeString(hostSession.sessionId) ?? null;
   const userId = cleanRuntimeString(hostSession.userId) ?? cleanRuntimeString(hostSession.principalId) ?? null;
-  const principalId = cleanRuntimeString(hostSession.principalId) ?? userId;
+  const principalId = hostSession.principalId === null ? null : cleanRuntimeString(hostSession.principalId) ?? userId;
   const scopes = normalizeScopes(hostSession.scopes ?? context?.scopes ?? []);
   return {
     source: cleanRuntimeString(hostSession.source) ?? "embedded-host",

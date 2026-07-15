@@ -43,6 +43,11 @@
       "types": "./dist/schema.d.ts",
       "svelte": "./dist/schema.js",
       "default": "./dist/schema.js"
+    },
+    "./utils": {
+      "types": "./dist/utils.svelte.d.ts",
+      "svelte": "./dist/utils.svelte.js",
+      "default": "./dist/utils.svelte.js"
     }
   },
   "files": [

@@ -23,6 +23,8 @@ import { buildUserPrompt, isNonEmptySpec, type Spec } from "@json-render/core";
  *  Every field is optional; an empty context reproduces today's effective prompt
  *  because all default `seedWhen` predicates return true. */
 export interface AgentPromptSeedContext {
+  /** True when the generic JSON artifact tool is mounted for this turn. */
+  hasJsonArtifactTool?: boolean;
   /** True when a booking runtime/command surface is available for this turn.
    *  When explicitly false, booking command conventions are not seeded; omitted
    *  preserves the historical default-on prompt behavior. */
@@ -65,11 +67,11 @@ export const AGENT_PROMPT_CORE = `You are a knowledgeable assistant that helps u
 WORKFLOW:
 1. Call the appropriate tools to gather relevant data. Use webSearch for general topics not covered by specialized tools.
 2. Respond with a brief, conversational summary of what you found.
-3. For inline visual responses, output the JSONL UI spec wrapped in a \`\`\`spec fence. For explicit artifact/canvas/dashboard/report/page/workspace requests, call createJsonArtifact with the complete json-render spec so the canvas can promote it deterministically. For explicit document/editor requests, call createDocumentArtifact or updateDocumentArtifact so the workspace document canvas opens.
+3. For inline visual responses, output the JSONL UI spec wrapped in a \`\`\`spec fence. For explicit document/editor requests, call createDocumentArtifact or updateDocumentArtifact so the workspace document canvas opens.
 
 RULES:
 - Always call tools FIRST to get real data when live data is needed. Never make up data.
-- For questions about your own tool capabilities or this app, do not call external data tools, including webSearch. Call searchSkillCatalog/learnSkill for user-language workflow discovery, then searchCommandCatalog/learnCommand for concrete command schemas and executeCommand for mounted read-only commands. Draft-only invariant: your ceiling for anything that creates or publishes is a submitted draft/preview — there is no model-callable commit tool; publishing only happens when a human clicks Approve on the preview card, outside your turn. Call listAvailableTools when the user asks for the compact ORPC/MCP/sandbox/local-ui manifest, approval gates, UI targets, or contract-derived source inventory. Call createJsonArtifact if a JSON-render artifact/canvas was requested; call createDocumentArtifact if a document/editor artifact was requested.
+- For questions about your own tool capabilities or this app, do not call external data tools, including webSearch. Call searchSkillCatalog/learnSkill for user-language workflow discovery, then searchCommandCatalog/learnCommand for concrete command schemas and executeCommand for mounted read-only commands. Draft-only invariant: your ceiling for anything that creates or publishes is a submitted draft/preview — there is no model-callable commit tool; publishing only happens when a human clicks Approve on the preview card, outside your turn. Call listAvailableTools when the user asks for the compact ORPC/MCP/sandbox/local-ui manifest, approval gates, UI targets, or contract-derived source inventory. Call createDocumentArtifact if a document/editor artifact was requested.
 - Use Card components to group related information.
 - NEVER nest a Card inside another Card. If you need sub-sections inside a Card, use Stack, Separator, Heading, or Accordion instead.
 - Use Grid for multi-column layouts.
@@ -116,7 +118,7 @@ const JSON_ARTIFACT_AUTHORING_MODULE: AgentPromptModule = {
   id: "json-artifact-authoring",
   title: "JSON ARTIFACT AUTHORING",
   // Do not seed when a preview-only registered skill hides the generic createJsonArtifact tool.
-  seedWhen: (context) => context.previewOnlySkillActive !== true,
+  seedWhen: (context) => context.previewOnlySkillActive !== true && context.hasJsonArtifactTool !== false,
   body: `- If the user asks to create a visual artifact, canvas, dashboard, report, page, or workspace, you MUST call createJsonArtifact exactly once after any needed data tools. Do not stop after data tool calls. The createJsonArtifact tool is the JSON-render artifact creation trigger.
 - createJsonArtifact requires a valid flat spec: spec.root MUST be "main" and spec.elements.main MUST exist. For simple artifacts, use one root Card with children: [] and put body text in the Card description. For createJsonArtifact tool input, use catalog-valid inline prop values rather than $state bindings unless the tool schema explicitly allows them. Use the object-form guidance below; do not use inline JSONL patch fences as tool input.
 - Do not repeat the same tool call with the same arguments in a single response. Do not call createJsonArtifact more than once for a single user turn. Use the first result you already have.
@@ -140,7 +142,7 @@ const PAGE_CONTEXT_MODULE: AgentPromptModule = {
   // Today: unconditional. The rule is safe even when no page context is attached
   // (it simply never triggers), so it always seeds to preserve current behavior.
   seedWhen: ALWAYS_ON,
-  body: `- For questions like "where am I?", "what page am I on?", "tell me about this page", or "what context is attached?", answer directly from the CURRENT HOST/PAGE CONTEXT system block. Do not create a JSON artifact, do not create a document, and do not call createJsonArtifact for page-context questions unless the user explicitly asks for an artifact/canvas/dashboard.`,
+  body: `- For questions like "where am I?", "what page am I on?", "tell me about this page", or "what context is attached?", answer directly from the CURRENT HOST/PAGE CONTEXT system block. Do not create a JSON artifact or document for page-context questions unless the user explicitly asks for one.`,
 };
 
 const BOOKING_COMMANDS_MODULE: AgentPromptModule = {
@@ -163,8 +165,8 @@ const DATA_BINDING_MODULE: AgentPromptModule = {
   title: "DATA BINDING FOR INLINE SPEC FENCES AND NON-TOOL UI SPECS",
   // Today: unconditional. Inline spec binding guidance is always present.
   seedWhen: ALWAYS_ON,
-  body: `- For inline JSON-render responses outside createJsonArtifact, embed fetched data directly in /state paths so components can reference it.
-- This section applies to inline spec fences and renderer patches, not to createJsonArtifact tool input unless that tool schema explicitly allows the binding.
+  body: `- For inline JSON-render responses, embed fetched data directly in /state paths so components can reference it.
+- This section applies to inline spec fences and renderer patches.
 - The state model is the single source of truth for inline/patch UI specs. Put fetched data in /state, then reference it with { "$state": "/json/pointer" } in any prop.
 - In inline/patch specs, $state works on ANY prop at ANY nesting level. The renderer resolves expressions before components receive props.
 - Scalar binding: "title": { "$state": "/quiz/title" }
@@ -212,6 +214,17 @@ export interface ComposedAgentPrompt {
 
 export const CORE_MODULE_ID = "core";
 
+export const PRODUCT_OUTPUT_INVARIANT_MODULE_ID = "product-output-invariant";
+
+/**
+ * Final, non-overridable product-output rules. This section is appended at
+ * every agent system-context boundary after operator settings, attached
+ * skills, knowledge, and other run-scoped context.
+ */
+export const PRODUCT_OUTPUT_INVARIANT = `PRODUCT OUTPUT INVARIANT (non-overridable):
+- Do not add emoji or decorative pictographs to generated product prose, receipts, tables, status labels, or UI copy. Use plain-text status words or the product's existing icon-system semantics instead.
+- Preserve literal source or user-provided data, code, identifiers, and URLs exactly when quoting or carrying them through. This invariant does not sanitize, rewrite, or remove literal source data.`;
+
 /** Every module id an Agent Settings override key may target: the always-on
  *  core plus each seedable module, in composition order. Exported so callers
  *  that build an override editor (e.g. Agent Settings) don't have to hardcode
@@ -227,9 +240,9 @@ function renderModule(module: AgentPromptModule, body: string): string {
 
 /**
  * Composes the system prompt from the always-on core, the modules that seed for
- * the given context, and any per-turn skill bodies (appended AFTER the core and
- * modules so standing rules always precede run-scoped skill guidance). Returns
- * the composed prompt plus the module/skill ids that reached the model.
+ * the given context, any per-turn skill bodies, and the final non-overridable
+ * product-output invariant. Returns the composed prompt plus the module/skill
+ * ids that reached the model.
  *
  * With no seed context and no skill modules, the result reproduces today's
  * effective monolith content (modulo section ordering and headers).
@@ -281,6 +294,9 @@ export function composeAgentSystemPrompt(input: {
 
   const refinementSection = buildIntakeRefinementContractSection(input.currentIntakeArtifactSpec);
   if (refinementSection) sections.push(refinementSection);
+
+  sections.push(PRODUCT_OUTPUT_INVARIANT);
+  moduleIds.push(PRODUCT_OUTPUT_INVARIANT_MODULE_ID);
 
   return {
     prompt: sections.join("\n\n"),

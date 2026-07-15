@@ -42,6 +42,15 @@
   import ComposerToolSelector from "./ComposerToolSelector.svelte";
   import StagedContextRow from "./StagedContextRow.svelte";
   import { filterComposerSuggestions, findComposerTrigger, replaceComposerTrigger } from "../composer-context.js";
+  import {
+    createComposerFileUpload,
+    executeComposerFileUpload,
+    failComposerFileUpload,
+    retryComposerFileUpload,
+    type ComposerFileFailedState,
+    type ComposerFileUploadState,
+    type ComposerFileUploadingState,
+  } from "../file-upload-state.js";
 
   let {
     value = $bindable(""),
@@ -83,7 +92,7 @@
   const pinnedTools = $derived(tools.filter((tool) => pinnedToolIds.includes(tool.id)));
   let activeSuggestion = $state(0);
   let dragging = $state(false);
-  let uploads = $state<Array<{ id: string; label: string; controller: AbortController; error?: string }>>([]);
+  let uploads = $state<ComposerFileUploadState[]>([]);
 
   function handleSubmit(message: { text: string }): void {
     const text = message.text.trim();
@@ -137,28 +146,38 @@
   async function uploadFiles(files: File[]): Promise<void> {
     if (!onUploadFile) return;
     for (const file of files) {
-      const id = crypto.randomUUID();
-      const controller = new AbortController();
+      const upload = createComposerFileUpload(file);
       const error = fileUploadError(file);
       if (error) {
-        uploads = [...uploads, { id, label: file.name, controller, error }];
+        uploads = [...uploads, failComposerFileUpload(upload, new Error(error))];
         continue;
       }
-      uploads = [...uploads, { id, label: file.name, controller }];
-      void onUploadFile(file, controller.signal)
-        .then((item) => { if (!controller.signal.aborted) onAttachContext?.(item); })
-        .catch((error) => {
-          if (controller.signal.aborted) return;
-          uploads = uploads.map((upload) => upload.id === id ? { ...upload, error: error instanceof Error ? error.message : "Upload failed" } : upload);
-        })
-        .finally(() => {
-          if (!uploads.find((upload) => upload.id === id)?.error) uploads = uploads.filter((upload) => upload.id !== id);
-        });
+      uploads = [...uploads, upload];
+      void startUpload(upload);
     }
   }
 
-  function cancelUpload(id: string): void {
-    uploads.find((upload) => upload.id === id)?.controller.abort();
+  async function startUpload(upload: ComposerFileUploadingState): Promise<void> {
+    if (!onUploadFile) return;
+    const failure = await executeComposerFileUpload({ upload, onUploadFile, onAttachContext });
+    const current = uploads.find((candidate) => candidate.id === upload.id);
+    if (current?.status !== "uploading" || current.controller !== upload.controller) return;
+    uploads = failure
+      ? uploads.map((candidate) => candidate.id === upload.id ? failure : candidate)
+      : uploads.filter((candidate) => candidate.id !== upload.id);
+  }
+
+  function retryUpload(id: string): void {
+    const failed = uploads.find((upload): upload is ComposerFileFailedState => upload.id === id && upload.status === "failed");
+    if (!failed) return;
+    const retry = retryComposerFileUpload(failed);
+    uploads = uploads.map((upload) => upload.id === id ? retry : upload);
+    void startUpload(retry);
+  }
+
+  function removeUpload(id: string): void {
+    const upload = uploads.find((candidate) => candidate.id === id);
+    if (upload?.status === "uploading") upload.controller.abort();
     uploads = uploads.filter((upload) => upload.id !== id);
   }
 </script>
@@ -179,11 +198,12 @@
         <StagedContextRow
           items={contextItems}
           {pinnedTools}
-          uploads={uploads.map(({ id, label, error }) => ({ id, label, error }))}
+          uploads={uploads.map((upload) => ({ id: upload.id, label: upload.label, status: upload.status, ...(upload.status === "failed" ? { error: upload.error } : {}) }))}
           onOpen={onOpenContext}
           onRemove={onRemoveContext}
           onUnpin={(id) => onPinToolChange?.(id, false)}
-          onCancelUpload={cancelUpload}
+          onRetryUpload={retryUpload}
+          onRemoveUpload={removeUpload}
         />
       {/if}
       <PromptInput.Body>

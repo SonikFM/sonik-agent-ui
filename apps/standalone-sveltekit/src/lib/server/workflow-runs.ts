@@ -35,7 +35,7 @@ import {
 } from "../agent-workflows/amplify-campaign-workflow.ts";
 import { createKnowledgeStore, defaultKnowledgeRoot, type KnowledgeStore } from "../knowledge/knowledge-store.ts";
 import { approvedCommandIdsFromHostSession } from "./host-command-runtime.ts";
-import { workflowRunStore, wrapWorkflowRunStoreAsync, type AsyncWorkflowRunStore } from "./workflow-run-store.ts";
+import { workflowRunStore, wrapWorkflowRunStoreAsync, type AsyncWorkflowRunStore, type WorkflowRunOwner } from "./workflow-run-store.ts";
 
 const AMPLIFY_CAMPAIGN_KNOWLEDGE_STORE_ID = "sonik.knowledge.campaign-artifacts";
 
@@ -60,6 +60,17 @@ export interface WorkflowRunsDeps {
    *  writeArtifactFile actually durably persists on Workers. Ignored when
    *  knowledgeStore is passed directly (tests/callers that override it). */
   env?: Record<string, unknown> | null;
+}
+
+export function workflowRunOwnerFromHostSession(hostSession: HostSessionEnvelope | null): WorkflowRunOwner | null {
+  const organizationId = hostSession?.organizationId?.trim();
+  const userId = (hostSession?.userId ?? hostSession?.principalId)?.trim();
+  if (!hostSession?.authenticated || !organizationId || !userId) return null;
+  return {
+    organizationId,
+    userId,
+    hostSessionId: typeof hostSession.sessionId === "string" && hostSession.sessionId.trim() ? hostSession.sessionId.trim() : null,
+  };
 }
 
 /** Registered node-callback factories, keyed by the workflow's own workflowId (not packageVersionId
@@ -105,9 +116,9 @@ function nodeById(definition: WorkflowDefinition, nodeId: string) {
   return definition.nodes.find((node) => node.nodeId === nodeId);
 }
 
-// P3: `action.runId` on "start" is client-supplied (used to resume/pin a specific run id);
-// a colliding value hits agent_workflow_runs's `run_id text primary key` and throws a
-// Postgres unique_violation, which would otherwise surface as an unhandled 500.
+// P3: `action.runId` on "start" is client-supplied (used to resume/pin a specific run id).
+// The persistence key is scoped by organization + user; a collision for that owner throws a
+// Postgres unique_violation, while another owner may safely use the same opaque client run id.
 function isRunIdConflictError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   if ((error as { code?: unknown }).code === "23505") return true;
@@ -116,6 +127,8 @@ function isRunIdConflictError(error: unknown): boolean {
 }
 
 export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps: WorkflowRunsDeps): Promise<WorkflowRunsResult> {
+  const owner = workflowRunOwnerFromHostSession(deps.hostSession);
+  if (!owner) return { ok: false, reason: "authenticated_workspace_owner_required" };
   const store = deps.store ?? wrapWorkflowRunStoreAsync(workflowRunStore);
 
   if (action.action === "start") {
@@ -149,12 +162,12 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
 
     const runId = action.runId ?? randomUUID();
     if (action.runId) {
-      const existingRun = await store.getRun(runId);
+      const existingRun = await store.getRun(owner, runId);
       if (existingRun) return { ok: false, reason: "run_id_conflict" };
     }
     const state = startControllerRun(definition, { runId, workflowVersionId, artifactId: action.artifactId ?? null });
     try {
-      await store.createRun({ workflowId: definition.workflowId, workflowVersionId, definition, input: runInput, state });
+      await store.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, definition, input: runInput, state });
     } catch (error) {
       // Race past the getRun check above straight into the store's run_id primary key --
       // surface that as a clean conflict result too, not an unhandled 500.
@@ -164,7 +177,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     return { ok: true, run: state };
   }
 
-  const row = await store.getRun(action.runId);
+  const row = await store.getRun(owner, action.runId);
   if (!row) return { ok: false, reason: "run_not_found" };
 
   if (action.action === "preview") {
@@ -173,7 +186,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     if (node.type !== "tool_preview") return { ok: false, reason: "node_is_not_tool_preview", run: row.state };
     const callbacks = resolveCallbacks(row.workflowId, row.input, deps.knowledgeStore, deps.env);
     const result = await runWorkflowNode(row.state, row.definition, action.nodeId, callbacks);
-    const updated = (await store.updateRunState(action.runId, result.state)) ?? row;
+    const updated = (await store.updateRunState(owner, action.runId, result.state)) ?? row;
     return result.ok ? { ok: true, run: updated.state } : { ok: false, reason: result.reason, run: updated.state };
   }
 
@@ -185,19 +198,18 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     // Host-signed doctrine, enforced here rather than trusted from the request body: hostSigned is
     // derived ONLY from the resolved trusted host session (deps.hostSession), which the +server.ts
     // route resolves via createAgentHostSessionEnvelope -- the same seam /api/reservation/commit
-    // already uses. An unauthenticated caller (deps.hostSession === null) still reaches the
-    // reducer's own model_supplied_approval_is_not_trusted refusal instead of a bespoke 401, keeping
-    // the "chat text / model output is never approval" check in exactly one place.
+    // already uses. Unauthenticated callers fail before the first persistence read at the handler
+    // boundary, so they can neither discover a run nor reach this reducer/callback path.
     const hostSigned = Boolean(deps.hostSession?.authenticated && deps.hostSession.organizationId);
     const approvedCommandIds = hostSigned ? approvedCommandIdsFromHostSession(deps.hostSession) : [];
 
     const requested = applyWorkflowRunEvent(row.state, { type: "request_approval", nodeId: action.nodeId });
     if (!requested.ok) {
-      await store.updateRunState(action.runId, requested.state);
+      await store.updateRunState(owner, action.runId, requested.state);
       return { ok: false, reason: requested.reason, run: requested.state };
     }
     const approved = applyWorkflowRunEvent(requested.state, { type: "approve", hostSigned, approvedCommandIds });
-    const updated = (await store.updateRunState(action.runId, approved.state)) ?? row;
+    const updated = (await store.updateRunState(owner, action.runId, approved.state)) ?? row;
     return approved.ok ? { ok: true, run: updated.state } : { ok: false, reason: approved.reason, run: updated.state };
   }
 
@@ -207,7 +219,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
   if (node.type !== "tool_commit") return { ok: false, reason: "node_is_not_tool_commit", run: row.state };
   const callbacks = resolveCallbacks(row.workflowId, row.input, deps.knowledgeStore, deps.env);
   const result = await runWorkflowNode(row.state, row.definition, action.nodeId, callbacks);
-  const updated = (await store.updateRunState(action.runId, result.state)) ?? row;
+  const updated = (await store.updateRunState(owner, action.runId, result.state)) ?? row;
   return result.ok ? { ok: true, run: updated.state } : { ok: false, reason: result.reason, run: updated.state };
 }
 

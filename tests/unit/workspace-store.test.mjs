@@ -14,6 +14,7 @@ import {
   listWorkspaceDocumentVersions,
   listWorkspaceDocuments,
   listWorkspaceLayoutSnapshots,
+  listWorkspacePageContextSnapshots,
   listWorkspaceSessions,
   patchWorkspaceSession,
   restoreWorkspaceDocumentVersion,
@@ -26,6 +27,7 @@ import {
   localWorkspaceAuthAdapter,
   recordWorkspaceTelemetryEvent,
   recordWorkspaceLayoutSnapshot,
+  recordWorkspacePageContextSnapshot,
   recordWorkspaceToolCall,
   updateWorkspaceArtifact,
   workspaceProcedures,
@@ -123,6 +125,18 @@ const persistedTelemetry = recordWorkspaceTelemetryEvent({
   ok: true,
 });
 assert.equal(listWorkspaceTelemetryEvents(session.id).some((event) => event.id === persistedTelemetry.id), true, "telemetry events should be queryable by session");
+const persistedPageContext = recordWorkspacePageContextSnapshot({
+  session_id: session.id,
+  source: "browser-page-context",
+  authority: "display-only",
+  route: "/",
+  surface: "channels",
+  page_type: "standalone-agent-workspace",
+  context: { fixtureOnly: true, bindingCount: 2 },
+});
+assert.deepEqual(listWorkspacePageContextSnapshots(session.id)[0]?.context, { fixtureOnly: true, bindingCount: 2 }, "sync workspace-store wrapper preserves generic page-context payloads");
+assert.equal(workspaceProcedures["workspace.pageContextSnapshot.record"], recordWorkspacePageContextSnapshot);
+assert.equal(persistedPageContext.authority, "display-only");
 
 const { writeAgentTelemetry } = await import("../../apps/standalone-sveltekit/src/lib/server/agent-telemetry.ts");
 await writeAgentTelemetry({
@@ -171,6 +185,7 @@ const disposableArtifact = createWorkspaceArtifact({ session_id: disposableSessi
 appendWorkspaceMessage({ session_id: disposableSession.id, id: "delete-message", role: "user", content: "remove me" });
 recordWorkspaceToolCall({ session_id: disposableSession.id, tool_name: "delete-test", status: "completed", input: {}, output: {} });
 recordWorkspaceLayoutSnapshot({ session_id: disposableSession.id, layout: { root: "delete" }, source: "user" });
+recordWorkspacePageContextSnapshot({ session_id: disposableSession.id, source: "browser-page-context", authority: "display-only", context: { remove: true } });
 recordWorkspaceTelemetryEvent({ session_id: disposableSession.id, source: "client", event: "delete-test", ok: true });
 assert.equal(deleteWorkspaceSession(disposableSession.id), true, "session deletion should report a removed session");
 assert.equal(getWorkspaceSession(disposableSession.id), null, "deleted sessions should no longer resolve");
@@ -179,6 +194,7 @@ assert.equal(getWorkspaceArtifact(disposableArtifact.id), null, "deleted session
 assert.equal(listWorkspaceMessages(disposableSession.id).length, 0, "deleted sessions should drop local message history");
 assert.equal(listWorkspaceToolCalls(disposableSession.id).length, 0, "deleted sessions should drop local tool-call receipts");
 assert.equal(listWorkspaceLayoutSnapshots(disposableSession.id).length, 0, "deleted sessions should drop local layout snapshots");
+assert.equal(listWorkspacePageContextSnapshots(disposableSession.id).length, 0, "deleted sessions should drop local page-context snapshots");
 assert.equal(listWorkspaceTelemetryEvents(disposableSession.id).length, 0, "deleted sessions should drop local telemetry events");
 
 console.log("workspace-store tests passed");

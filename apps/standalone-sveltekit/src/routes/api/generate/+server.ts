@@ -1,5 +1,6 @@
 import { env } from "$env/dynamic/private";
 import { createAgent, hasBookingContextIntakeSkill, resolveAgentPromptComposition, resolveCommandFamilyMountDecision } from "$lib/agent";
+import { PRODUCT_OUTPUT_INVARIANT } from "$lib/agent-prompt";
 import { minuteRateLimit, dailyRateLimit } from "$lib/rate-limit";
 import {
   convertToModelMessages,
@@ -354,6 +355,7 @@ class MalformedJsonRequestError extends Error {
 
 function resolveGenerateFailureStatus(error: unknown): number {
   if (error instanceof MalformedJsonRequestError) return 400;
+  if (error instanceof AgentUiFileError) return error.status;
   if ((typeof error === "object" || typeof error === "function") && error !== null && "status" in error) {
     const status = (error as { status?: unknown }).status;
     if ([400, 413].includes(Number(status))) return Number(status);
@@ -371,8 +373,19 @@ function createGenerateFailureResponse(input: {
   runRecorder?: RunRecorder | null;
 }): Response {
   const status = resolveGenerateFailureStatus(input.error);
+  const typed = input.error instanceof AgentUiFileError ? input.error : null;
+  const requestId = input.responseHeaders["x-sonik-request-id"];
+  const traceId = input.responseHeaders["x-sonik-trace-id"];
   return new Response(
-    JSON.stringify({ error: resolveGenerateFailureMessage(status) }),
+    JSON.stringify({
+      ok: false,
+      error: typed?.message ?? resolveGenerateFailureMessage(status),
+      code: typed?.code ?? (status === 500 ? "generation_failed" : "invalid_request"),
+      phase: typed?.phase ?? (status === 500 ? "post_write" : "pre_stream"),
+      safeToRetry: typed?.safeToRetry ?? false,
+      ...(requestId ? { requestId } : {}),
+      ...(traceId ? { traceId } : {}),
+    }),
     {
       status,
       headers: {
@@ -402,7 +415,7 @@ function appendFilePartsToLatestUserMessage(messages: ModelMessage[], fileParts:
 }
 
 function resolveDirectGoogleModelId(modelId: string | undefined): string {
-  if (!modelId?.startsWith("google/")) throw new AgentUiFileError(400, "Selected files require a direct Google model");
+  if (!modelId?.startsWith("google/")) throw new AgentUiFileError(400, "Selected files require a direct Google model", { code: "selected_files_require_google", phase: "pre_stream" });
   return modelId.slice("google/".length);
 }
 
@@ -430,28 +443,25 @@ export const POST: RequestHandler = async (event) => {
     throw new MalformedJsonRequestError(error);
   });
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return new Response(JSON.stringify({ error: "request body object is required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", ...responseHeaders },
-    });
+    return createGenerateFailureResponse({ error: new AgentUiFileError(400, "Request body object is required", { code: "invalid_request", phase: "pre_stream" }), responseHeaders });
   }
   const rawRunContextSelection = body?.contextSelection ?? body?.workspace?.contextSelection;
   const parsedRunContextSelection = parseAgentRunContextSelection(rawRunContextSelection);
   const selectionResolution = resolveAgentContextSelection(parsedRunContextSelection);
   if (hasInvalidExplicitDocumentContext(rawRunContextSelection) || selectionResolution.invalidDocumentSelection) {
-    return new Response(JSON.stringify({ error: "Invalid document context selection" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", ...responseHeaders },
-    });
+    return createGenerateFailureResponse({ error: new AgentUiFileError(400, "Invalid document context selection", { code: "invalid_request", phase: "pre_stream" }), responseHeaders });
   }
   const requestedWorkspaceSessionId = routeString(body?.workspace?.sessionId, "workspace.sessionId", WORKSPACE_SESSION_ID_MAX_CHARS, "") || undefined;
   const uiMessages = body.messages as UIMessage[];
   if (!Array.isArray(uiMessages) || uiMessages.length === 0) {
-    return new Response(JSON.stringify({ error: "messages array is required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", ...responseHeaders },
-    });
+    return createGenerateFailureResponse({ error: new AgentUiFileError(400, "Messages array is required", { code: "invalid_request", phase: "pre_stream" }), responseHeaders });
   }
+  const hasSelectedWorkspaceContext = selectionResolution.fileIds.length > 0 || selectionResolution.documentIds.length > 0;
+  const trustedWorkspace = requestedWorkspaceSessionId && hasSelectedWorkspaceContext
+    ? await resolveAgentUiWorkspaceSession(event, { sessionId: requestedWorkspaceSessionId, phase: "pre_stream", safeToRetry: true })
+    : null;
+  // Host authority is checked before the rate-limit mutation so the one
+  // classified pre-stream replay cannot consume a second quota entry.
   const [minuteResult, dailyResult] = await Promise.all([
     minuteRateLimit.limit(ip),
     dailyRateLimit.limit(ip),
@@ -460,7 +470,13 @@ export const POST: RequestHandler = async (event) => {
     const isMinuteLimit = !minuteResult.success;
     return new Response(
       JSON.stringify({
+        ok: false,
         error: "Rate limit exceeded",
+        code: "rate_limit_exceeded",
+        phase: "pre_stream",
+        safeToRetry: false,
+        requestId,
+        traceId,
         message: isMinuteLimit
           ? "Too many requests. Please wait a moment before trying again."
           : "Daily limit reached. Please try again tomorrow.",
@@ -471,10 +487,6 @@ export const POST: RequestHandler = async (event) => {
       },
     );
   }
-  const hasSelectedWorkspaceContext = selectionResolution.fileIds.length > 0 || selectionResolution.documentIds.length > 0;
-  const trustedWorkspace = requestedWorkspaceSessionId && hasSelectedWorkspaceContext
-    ? await resolveAgentUiWorkspaceSession(event, { sessionId: requestedWorkspaceSessionId })
-    : null;
   const workspaceSessionId = trustedWorkspace?.sessionId ?? requestedWorkspaceSessionId;
   const requestPersistence = trustedWorkspace?.persistence ?? getRequestWorkspacePersistence(event);
   if (hasSelectedWorkspaceContext && !workspaceSessionId) {
@@ -607,7 +619,7 @@ export const POST: RequestHandler = async (event) => {
   // already-active artifact, expose its current spec so the composed prompt can tell the model
   // to refine it via submitIntakeAnswer instead of regenerating it via createBookingIntakeArtifact.
   const currentIntakeArtifactSpec = hasBookingContextIntakeSkill(skillIds) ? activeIntakeArtifactSpec : null;
-  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, productTourIntent });
+  const promptComposition = resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, workspaceDocumentIntent, productTourIntent });
   const fallbackConversationTitle = firstUserMessage ? deriveWorkspaceSessionTitle(firstUserMessage) : "";
   const titleSession = workspaceSessionId ? await requestPersistence.getSession(workspaceSessionId).catch(() => null) : null;
   const titleGenerationEnabled = Boolean(
@@ -636,10 +648,10 @@ export const POST: RequestHandler = async (event) => {
   const modelMessages = await convertToModelMessages(uiMessages);
   const selectedFileIds = authorizedSelectionResolution.fileIds;
   if (selectedFileIds.length > 0 && agentRuntimeSettings.requireZdr) {
-    throw new AgentUiFileError(400, "Selected files are incompatible with Gateway zero-data-retention mode");
+    throw new AgentUiFileError(400, "Selected files are incompatible with Gateway zero-data-retention mode", { code: "selected_files_zdr_incompatible", phase: "pre_stream" });
   }
   if (selectedFileIds.length > 0 && !env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    throw new AgentUiFileError(503, "Google file processing is unavailable");
+    throw new AgentUiFileError(503, "Google file processing is unavailable", { code: "file_processing_failed", phase: "pre_stream" });
   }
   const directGoogleModelId = selectedFileIds.length > 0 ? resolveDirectGoogleModelId(agentRuntimeSettings.modelId) : null;
   const googleDeadlineAt = selectedFileIds.length > 0 ? Date.now() + AGENT_UI_GOOGLE_PREPROCESSING_BUDGET_MS : undefined;
@@ -694,7 +706,7 @@ export const POST: RequestHandler = async (event) => {
   const knowledgeContext = resolvedAgentDefinition?.knowledgeRefs?.length
     ? formatKnowledgeContextSections(await resolveKnowledgeContext(resolvedAgentDefinition.knowledgeRefs, { rootDir: defaultKnowledgeRoot(), env: event.platform?.env as Record<string, unknown> | undefined }))
     : "";
-  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, knowledgeContext, conversationTitlePrompt, ...startupIndexContext].filter(Boolean).join("\n\n");
+  const systemContext = [contextSummary, pageContextSummary, agentSettingsSummary, knowledgeContext, conversationTitlePrompt, ...startupIndexContext, PRODUCT_OUTPUT_INVARIANT].filter(Boolean).join("\n\n");
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...messagesWithFiles]
     : messagesWithFiles;
@@ -813,7 +825,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent, model: google && directGoogleModelId ? google(directGoogleModelId) : undefined });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent, model: google && directGoogleModelId ? google(directGoogleModelId) : undefined, aiTelemetry: { requestId, traceId, traceparent, sessionId: telemetrySessionId, runId: runRecorder?.runId ?? smokeRunId } });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });

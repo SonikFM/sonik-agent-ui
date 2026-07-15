@@ -95,4 +95,12 @@ const oldIntakeBlocked = oldIntakeApprovalAffordance(blockedReadiness, "My Draft
 const newIntakeBlocked = createApprovalAffordanceFromWorkflowRun(deriveActiveIntakeWorkflowRunState(blockedReadiness), intakePresentation);
 assert.deepStrictEqual(newIntakeBlocked, oldIntakeBlocked, "intake affordance (blocked) must match the pre-Phase-2 ad hoc builder output");
 
+const builderTrustBlocked = createApprovalAffordanceFromWorkflowRun(deriveActiveIntakeWorkflowRunState(readyReadiness), {
+  ...intakePresentation,
+  disabledReason: "trusted_host_approval_required",
+});
+assert.equal(builderTrustBlocked.status, "approval_required", "a ready preview remains visibly an approval affordance");
+assert.equal(builderTrustBlocked.disabled, true, "the shared producer must carry the caller's trusted-host block onto the card/button state");
+assert.equal(builderTrustBlocked.disabledReason, "trusted_host_approval_required");
+
 console.log(JSON.stringify({ ok: true, checked: "approval-affordance-convergence" }));

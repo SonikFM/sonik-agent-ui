@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoFreshWorkspace, smokeUrl } from "./support/dev-smoke";
+import { gotoFreshWorkspace, smokeUrl, submitPrompt, WORKFLOW_DRAFT_SCENARIO } from "./support/dev-smoke";
 
 // Slice D (production-readiness-agent-creation-2026-07-13.md P1 #7): the
 // workflow-builder mode's missing browser lane. Drives the real dev server
@@ -25,6 +25,35 @@ test("workflow builder mode toggle mounts the builder", async ({ page }) => {
   await expect(backToChat).toBeVisible();
   await backToChat.click();
   await expect(page.locator('[data-agent-mode="workflow-builder"]')).toHaveCount(0);
+});
+
+test("builder and chat round-trip preserves the active conversation without reloading", async ({ page }) => {
+  await gotoFreshWorkspace(page, smokeUrl(null));
+  await submitPrompt(page, "Keep this conversation while I edit a workflow");
+  await expect(page.getByText("I can expose tool and session state for regression testing.")).toBeVisible();
+
+  const before = await page.evaluate(() => {
+    (window as Window & { __workflowBuilderRoundTripSentinel?: string }).__workflowBuilderRoundTripSentinel = "still-mounted";
+    const control = (window as Window & { __sonikAgentUI?: { getPageContext?: () => { activeSessionId?: string | null } } }).__sonikAgentUI;
+    return { href: window.location.href, activeSessionId: control?.getPageContext?.().activeSessionId ?? null };
+  });
+
+  await openWorkflowBuilder(page);
+  await page.getByRole("button", { name: "Return to the chat workspace" }).click();
+
+  await expect(page.getByText("Keep this conversation while I edit a workflow")).toBeVisible();
+  const after = await page.evaluate(() => {
+    const target = window as Window & {
+      __workflowBuilderRoundTripSentinel?: string;
+      __sonikAgentUI?: { getPageContext?: () => { activeSessionId?: string | null } };
+    };
+    return {
+      href: window.location.href,
+      activeSessionId: target.__sonikAgentUI?.getPageContext?.().activeSessionId ?? null,
+      sentinel: target.__workflowBuilderRoundTripSentinel,
+    };
+  });
+  expect(after).toEqual({ ...before, sentinel: "still-mounted" });
 });
 
 test("Config, Canvas, and Debug & Preview tabs switch panels", async ({ page }) => {
@@ -82,6 +111,20 @@ test("Debug & Preview sends draftAgentId with every generate request", async ({ 
   expect(typeof requestBody.draftAgentId).toBe("string");
   expect(requestBody.draftAgentId.length).toBeGreaterThan(0);
   if (agentId) expect(requestBody.draftAgentId).toBe(agentId.trim());
+});
+
+test("describe, draft, and canvas uses the current saved draft through the deterministic smoke stream", async ({ page }) => {
+  await gotoFreshWorkspace(page, smokeUrl(WORKFLOW_DRAFT_SCENARIO));
+  await openWorkflowBuilder(page);
+  await page.getByRole("tab", { name: "Debug & Preview" }).click();
+
+  const previewPanel = page.locator('[data-agent-panel="workflow-builder-preview"]');
+  await previewPanel.locator("textarea").fill("Draft a campaign workflow");
+  await previewPanel.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByRole("tab", { name: "Canvas", selected: true })).toBeVisible();
+  const draftCard = page.locator('[data-slot="card"]').filter({ hasText: "Your workflow (draft)" }).first();
+  await expect(draftCard.getByText("Create an Amplify campaign", { exact: true })).toBeVisible();
 });
 
 test("the shipped reservation fixture renders LOCKED alongside an editable DRAFT workflow", async ({ page }) => {

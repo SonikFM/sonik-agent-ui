@@ -155,10 +155,10 @@ const signedTrustedSession = sanitizeAgentHostPageContext({
     scopes: ["workspace:read"],
   },
 });
-assert.equal(signedTrustedSession?.signatureVersion, "sonik.agent_ui.host_context.hmac.v1", "signed host-context signature version must survive the embed sanitizer");
-assert.equal(signedTrustedSession?.signature, "abc123_signature", "signed host-context signature must survive postMessage donation");
-assert.equal(signedTrustedSession?.issuedAt, "2026-06-24T22:00:00.000Z", "signed host-context issuedAt must survive postMessage donation");
-assert.equal(signedTrustedSession?.expiresAt, "2026-06-24T22:10:00.000Z", "signed host-context expiresAt must survive postMessage donation");
+assert.equal(signedTrustedSession?.signatureVersion, undefined, "display page context must drop reconstructable signature fields");
+assert.equal(signedTrustedSession?.signature, undefined, "display page context never carries the opaque authority signature");
+assert.equal(signedTrustedSession?.issuedAt, undefined, "display page context never carries authority issuance metadata");
+assert.equal(signedTrustedSession?.expiresAt, undefined, "display page context never carries authority expiry metadata");
 assert.equal(signedTrustedSession?.hostSession?.theme, undefined, "signed host-context sanitizer must not materialize display-only theme when the host did not sign it");
 
 const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
@@ -213,12 +213,12 @@ assert.deepEqual(
     sessionMode: "production",
     approvedCommandIds: ["booking.create.hold", "booking.release.hold"],
   },
-  "signed host-context metadata, including command-id arrays, must survive unchanged when it is part of the HMAC payload",
+  "sanitized host-session metadata remains available only as a display/readiness hint",
 );
 assert.deepEqual(
   signedTrustedSessionWithFullCommandMetadata?.hostSession?.metadata?.approvedCommandIds,
   approvedCommandGrantList,
-  "full signed approvedCommandIds grants must not be truncated before the Agent UI re-encodes the HMAC-covered host context",
+  "full approvedCommandIds hints remain available without reconstructing the opaque authority header",
 );
 
 assert.deepEqual(
@@ -348,7 +348,10 @@ const controller = mountSonikAgentUI({
   theme: "lemonade",
   smokeMockStream: "1",
   smokeRunId: "mount-test",
-  getPageContext: () => ({ surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], signatureVersion: "sonik.agent_ui.host_context.hmac.v1", issuedAt: "2026-06-24T22:00:00.000Z", expiresAt: "2026-06-24T22:10:00.000Z", signature: "abc123_signature", activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } }),
+  getPageContext: () => ({
+    pageContext: { surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } },
+    authority: { header: "opaque_signed_header_ABC123", revision: 7, expiresAt: "2099-06-24T22:10:00.000Z" },
+  }),
   elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas", launcher: "#launcher", openChat: "#open-chat", openCanvas: "#open-canvas" },
   window: fakeWindow,
   document: fakeDocument,
@@ -380,7 +383,8 @@ await controller.postContext();
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.mode, "chat", "chat postContext should donate the current active mode");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.organizationId, "forged-org", "browser postMessage payload should carry sanitized host-asserted organization context");
 assert.deepEqual(fakeIframe.contentWindow.messages.at(-1).message.payload.scopes, ["admin:*"], "browser postMessage payload should carry sanitized host-asserted scopes");
-assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.signature, "abc123_signature", "browser postMessage payload should preserve signed host-context fields for the cloud runtime header");
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.signature, undefined, "browser display payload must not carry reconstructable signed fields");
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.authority.header, "opaque_signed_header_ABC123", "browser postMessage donates the opaque authority byte-for-byte outside display context");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).targetOrigin, "https://agent.sonik.local", "cross-origin embeds should post page context to the agent iframe origin, not the host origin");
 fakeWindow.__sonikAgentHost.openCanvas();
 assert.equal(fakeIframe.parentElement, fakeCanvasSlot, "host controller should move iframe into canvas slot");

@@ -16,13 +16,17 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Input } from "$lib/components/ui/input";
   import { createApprovalAffordanceFromWorkflowRun } from "../../agent-workflows/approval-affordance";
+  import { resolveWorkflowRunActionDisabledState, resolveWorkflowRunBusyDisabledState } from "./builder-model";
   import type { WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
   import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
 
   interface Props {
     workflow: WorkflowDefinition;
+    workspaceFetch: typeof fetch;
+    signedHostApprovedCommandIds?: string[];
+    onRunStateChange?: (workflowId: string, run: WorkflowRunState | null) => void;
   }
-  let { workflow }: Props = $props();
+  let { workflow, workspaceFetch, signedHostApprovedCommandIds = [], onRunStateChange }: Props = $props();
 
   const previewNodeId = $derived(workflow.nodes.find((node) => node.type === "tool_preview")?.nodeId ?? null);
   const commitNodeId = $derived(workflow.nodes.find((node) => node.type === "tool_commit")?.nodeId ?? null);
@@ -35,13 +39,81 @@
   let busy = $state(false);
   let receiptRef = $state<string | null>(null);
 
+  const commitCommandId = $derived(
+    commitNodeId ? (run?.nodeStates[commitNodeId]?.commandId ?? null) : null,
+  );
+  const signedHostGrantCoversCommit = $derived(Boolean(
+    commitCommandId && signedHostApprovedCommandIds.includes(commitCommandId),
+  ));
+  const runApprovalCoversCommit = $derived(Boolean(
+    commitCommandId
+      && run?.approvalState.status === "approved"
+      && run.approvalState.hostSigned
+      && run.approvalState.approvedCommandIds.includes(commitCommandId),
+  ));
+  const disabledReasonIdBase = $derived(`workflow-run-${workflow.workflowId.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
+  const busyDisabledState = $derived(resolveWorkflowRunBusyDisabledState(busy));
+  const previewDisabledState = $derived(resolveWorkflowRunActionDisabledState({
+    action: "preview",
+    busy,
+    hasRun: Boolean(runId && run),
+    hasPreviewNode: Boolean(previewNodeId),
+    hasCommitNode: Boolean(commitNodeId && commitCommandId),
+    phase: run?.phase ?? null,
+    approvalStatus: run?.approvalState.status ?? null,
+    signedHostGrantCoversCommit,
+    runApprovalCoversCommit,
+  }));
+  const approveDisabledState = $derived(resolveWorkflowRunActionDisabledState({
+    action: "approve",
+    busy,
+    hasRun: Boolean(runId && run),
+    hasPreviewNode: Boolean(previewNodeId),
+    hasCommitNode: Boolean(commitNodeId && commitCommandId),
+    phase: run?.phase ?? null,
+    approvalStatus: run?.approvalState.status ?? null,
+    signedHostGrantCoversCommit,
+    runApprovalCoversCommit,
+  }));
+  const commitDisabledState = $derived(resolveWorkflowRunActionDisabledState({
+    action: "commit",
+    busy,
+    hasRun: Boolean(runId && run),
+    hasPreviewNode: Boolean(previewNodeId),
+    hasCommitNode: Boolean(commitNodeId && commitCommandId),
+    phase: run?.phase ?? null,
+    approvalStatus: run?.approvalState.status ?? null,
+    signedHostGrantCoversCommit,
+    runApprovalCoversCommit,
+  }));
+
+  function updateRun(nextRun: WorkflowRunState | null): void {
+    run = nextRun;
+    onRunStateChange?.(workflow.workflowId, nextRun);
+  }
+
   async function callEndpoint(body: Record<string, unknown>): Promise<{ ok: boolean; reason?: string; run?: WorkflowRunState }> {
-    const response = await fetch("/api/workflow-runs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return response.json();
+    try {
+      const response = await workspaceFetch("/api/workflow-runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json().catch(() => null) as { ok?: boolean; reason?: string; run?: WorkflowRunState } | null;
+      return {
+        ok: response.ok && result?.ok === true,
+        ...(result?.reason ? { reason: result.reason } : {}),
+        ...(result?.run ? { run: result.run } : {}),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      return {
+        ok: false,
+        reason: message.includes("missing-host-context")
+          ? "missing_signed_host_context"
+          : "workflow_run_request_failed",
+      };
+    }
   }
 
   async function start(): Promise<void> {
@@ -56,11 +128,11 @@
       });
       if (!result.ok || !result.run) {
         statusMessage = result.reason ?? "Run could not be started.";
-        run = null;
+        updateRun(null);
         runId = null;
         return;
       }
-      run = result.run;
+      updateRun(result.run);
       runId = result.run.runId;
       statusMessage = "Run started.";
     } finally {
@@ -69,11 +141,11 @@
   }
 
   async function preview(): Promise<void> {
-    if (!runId || !previewNodeId) return;
+    if (!runId || !previewNodeId || previewDisabledState) return;
     busy = true;
     try {
       const result = await callEndpoint({ action: "preview", runId, nodeId: previewNodeId });
-      run = result.run ?? run;
+      updateRun(result.run ?? run);
       statusMessage = result.ok ? "Preview ready." : (result.reason ?? "Preview failed.");
     } finally {
       busy = false;
@@ -81,11 +153,11 @@
   }
 
   async function approve(): Promise<void> {
-    if (!runId || !commitNodeId) return;
+    if (!runId || !commitNodeId || approveDisabledState) return;
     busy = true;
     try {
       const result = await callEndpoint({ action: "approve", runId, nodeId: commitNodeId });
-      run = result.run ?? run;
+      updateRun(result.run ?? run);
       statusMessage = result.ok ? "Approved." : (result.reason ?? "Approval failed.");
     } finally {
       busy = false;
@@ -93,11 +165,11 @@
   }
 
   async function commit(): Promise<void> {
-    if (!runId || !commitNodeId) return;
+    if (!runId || !commitNodeId || commitDisabledState) return;
     busy = true;
     try {
       const result = await callEndpoint({ action: "commit", runId, nodeId: commitNodeId });
-      run = result.run ?? run;
+      updateRun(result.run ?? run);
       statusMessage = result.ok ? "Committed." : (result.reason ?? "Commit failed.");
       receiptRef = result.ok ? (result.run?.receipts.at(-1)?.receiptRef ?? null) : null;
     } finally {
@@ -107,7 +179,7 @@
 
   function reset(): void {
     runId = null;
-    run = null;
+    updateRun(null);
     statusMessage = "";
     receiptRef = null;
   }
@@ -120,6 +192,9 @@
           onRequestPreview: () => void preview(),
           onApprove: () => void approve(),
           onCancel: reset,
+          ...(run.phase === "preview_ready" && !signedHostGrantCoversCommit
+            ? { disabledReason: "trusted_host_approval_required" }
+            : {}),
         })
       : null,
   );
@@ -142,12 +217,34 @@
 
     <div class="flex items-center gap-2">
       {#if !runId}
-        <Button onclick={() => void start()} disabled={busy}>Run</Button>
+        <Button
+          onclick={() => void start()}
+          disabled={Boolean(busyDisabledState)}
+          data-disabled-reason={busyDisabledState?.code}
+          aria-describedby={busyDisabledState ? `${disabledReasonIdBase}-busy-disabled` : undefined}
+        >Run</Button>
       {:else}
         <Badge variant="outline">{run?.phase}</Badge>
-        <Button variant="outline" onclick={reset} disabled={busy}>Reset</Button>
+        <Button
+          variant="outline"
+          onclick={reset}
+          disabled={Boolean(busyDisabledState)}
+          data-disabled-reason={busyDisabledState?.code}
+          aria-describedby={busyDisabledState ? `${disabledReasonIdBase}-busy-disabled` : undefined}
+        >Reset</Button>
       {/if}
     </div>
+
+    {#if busyDisabledState}
+      <p
+        id={`${disabledReasonIdBase}-busy-disabled`}
+        class="text-xs text-muted-foreground"
+        aria-live="polite"
+        data-workflow-run-disabled-reason={runId ? "reset" : "run"}
+      >
+        {busyDisabledState.message}
+      </p>
+    {/if}
 
     {#if statusMessage}
       <p class="text-sm text-muted-foreground" data-workflow-run-status>{statusMessage}</p>
@@ -160,15 +257,55 @@
           <Badge variant={affordance.status === "approval_required" ? "default" : "secondary"}>{affordance.status}</Badge>
         </div>
         <p class="text-sm text-muted-foreground">{affordance.description}</p>
-        {#if affordance.disabled && affordance.disabledReason}
-          <p class="text-xs font-medium text-destructive">{affordance.disabledReason}</p>
+        {#if affordance.disabled && affordance.disabledReason && affordance.disabledReason !== "trusted_host_approval_required"}
+          <p class="text-xs font-medium text-destructive" data-approval-disabled-reason>{affordance.disabledReason}</p>
         {/if}
         <div class="mt-2 flex gap-2">
-          <Button size="sm" onclick={affordance.onApprove} disabled={busy || affordance.disabled || run?.approvalState.status === "approved"}>
+          {#if run?.phase !== "preview_ready" && run?.approvalState.status !== "approved" && run?.phase !== "committed"}
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={affordance.onRequestPreview}
+              disabled={Boolean(previewDisabledState)}
+              data-disabled-reason={previewDisabledState?.code}
+              aria-describedby={previewDisabledState ? `${disabledReasonIdBase}-preview-disabled` : undefined}
+            >Preview</Button>
+          {/if}
+          <Button
+            size="sm"
+            onclick={affordance.onApprove}
+            disabled={Boolean(approveDisabledState)}
+            data-disabled-reason={approveDisabledState?.code}
+            aria-describedby={approveDisabledState ? `${disabledReasonIdBase}-approve-disabled` : undefined}
+          >
             {run?.approvalState.status === "approved" ? "Approved" : "Approve"}
           </Button>
           {#if run?.approvalState.status === "approved" && run.phase !== "committed"}
-            <Button size="sm" variant="outline" onclick={() => void commit()} disabled={busy}>Commit</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={() => void commit()}
+              disabled={Boolean(commitDisabledState)}
+              data-disabled-reason={commitDisabledState?.code}
+              aria-describedby={commitDisabledState ? `${disabledReasonIdBase}-commit-disabled` : undefined}
+            >Commit</Button>
+          {/if}
+        </div>
+        <div class="mt-2 grid gap-1" aria-live="polite">
+          {#if run?.phase !== "preview_ready" && run?.approvalState.status !== "approved" && run?.phase !== "committed" && previewDisabledState}
+            <p id={`${disabledReasonIdBase}-preview-disabled`} class="text-xs text-muted-foreground" data-workflow-run-disabled-reason="preview">
+              {previewDisabledState.message}
+            </p>
+          {/if}
+          {#if approveDisabledState}
+            <p id={`${disabledReasonIdBase}-approve-disabled`} class="text-xs text-muted-foreground" data-workflow-run-disabled-reason="approve">
+              {approveDisabledState.message}
+            </p>
+          {/if}
+          {#if run?.approvalState.status === "approved" && run.phase !== "committed" && commitDisabledState}
+            <p id={`${disabledReasonIdBase}-commit-disabled`} class="text-xs text-muted-foreground" data-workflow-run-disabled-reason="commit">
+              {commitDisabledState.message}
+            </p>
           {/if}
         </div>
       </div>

@@ -8,6 +8,8 @@ import {
   type WorkspaceLayoutSnapshotRecord,
   type WorkspaceMessageRecord,
   type WorkspaceMode,
+  type WorkspacePageContextSnapshotInput,
+  type WorkspacePageContextSnapshotRecord,
   type WorkspacePersistenceAdapter,
   type WorkspaceRunContextSelection,
   type WorkspaceRunEventRecord,
@@ -27,6 +29,8 @@ export type {
   WorkspaceLayoutSnapshotRecord,
   WorkspaceMessageRecord,
   WorkspaceMode,
+  WorkspacePageContextSnapshotInput,
+  WorkspacePageContextSnapshotRecord,
   WorkspacePersistenceAdapter,
   WorkspaceRunEventRecord,
   WorkspaceRunRecord,
@@ -269,6 +273,14 @@ export function listWorkspaceLayoutSnapshots<TLayout = unknown>(sessionId: strin
   return workspacePersistence.listLayoutSnapshots(sessionId);
 }
 
+export function recordWorkspacePageContextSnapshot<TContext = unknown>(input: WorkspacePageContextSnapshotInput<TContext>): WorkspacePageContextSnapshotRecord<TContext> {
+  return workspacePersistence.recordPageContextSnapshot<TContext>(input);
+}
+
+export function listWorkspacePageContextSnapshots<TContext = unknown>(sessionId: string): WorkspacePageContextSnapshotRecord<TContext>[] {
+  return workspacePersistence.listPageContextSnapshots<TContext>(sessionId);
+}
+
 export function recordWorkspaceTelemetryEvent<TPayload = unknown>(input: {
   session_id?: string | null;
   request_id?: string | null;
@@ -336,6 +348,8 @@ export const workspaceProcedures = {
   "workspace.toolCall.list": listWorkspaceToolCalls,
   "workspace.layoutSnapshot.record": recordWorkspaceLayoutSnapshot,
   "workspace.layoutSnapshot.list": listWorkspaceLayoutSnapshots,
+  "workspace.pageContextSnapshot.record": recordWorkspacePageContextSnapshot,
+  "workspace.pageContextSnapshot.list": listWorkspacePageContextSnapshots,
   "workspace.telemetry.record": recordWorkspaceTelemetryEvent,
   "workspace.telemetry.list": listWorkspaceTelemetryEvents,
 } as const;

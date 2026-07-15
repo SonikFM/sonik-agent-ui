@@ -26,6 +26,13 @@ assert.equal(pageSource.includes("return snapshotPageContext().workflow"), false
 assert.equal(observabilitySource.includes("interface AgentUiTargetRegistrySnapshot"), true, "target registry getter should expose a versioned typed snapshot shape");
 assert.equal(observabilitySource.includes('schemaVersion: "sonik.agent_ui.actions.v1"'), true, "actions snapshot should be versioned");
 assert.equal(observabilitySource.includes('schemaVersion: "sonik.agent_ui.approval_state.v1"'), true, "approval state snapshot should be versioned");
+assert.equal(observabilitySource.includes("getCanvasControls?: () => AgentUiCanvasControlStateMap"), true, "page-control type must expose the optional typed canvas-control snapshot");
+assert.equal(pageSource.includes("getCanvasControls: snapshotCanvasControls"), true, "standalone page control must expose the canvas-control snapshot getter");
+assert.equal(driverSource.includes(".getCanvasControls"), true, "agent eval driver must expose the optional canvas-control snapshot getter");
+assert.equal(pageSource.includes("const canvasControlStates = $derived(deriveCanvasControlStates({"), true, "canvas controls must derive from one presentation-only state source");
+assert.equal(pageSource.includes("enabled: canvasControlStates.clear.enabled"), true, "clear action descriptor must reuse the shared control map");
+assert.equal(pageSource.includes("const clearControl = canvasControlStates.clear"), true, "clear callable guard must reuse the shared control map");
+assert.equal(pageSource.includes("if (!clearControl.enabled)"), true, "clear page-control action must fail closed when the shared state disables it");
 assert.equal(pageSource.includes('policyMode: "ask"'), true, "approval descriptors must preserve ask/approval semantics");
 assert.equal(pageSource.includes('target_registry_unavailable'), true, "host target actions must report registry availability instead of forcing DOM scraping");
 assert.equal(pageSource.includes('hostTargetDisabledReason'), true, "tour target actions must distinguish missing host channel from missing target registry");
@@ -79,6 +86,12 @@ const mockControl = {
     disabledReasons: ["missing_active_artifact"],
     commandPreview: null,
   }),
+  getCanvasControls: () => ({
+    preview: { id: "preview", label: "Preview", enabled: false, active: true, disabledReason: "missing_active_artifact" },
+    document: { id: "document", label: "Document", enabled: false, active: false, disabledReason: "missing_active_document" },
+    fullscreen: { id: "fullscreen", label: "Fullscreen", enabled: false, active: false, disabledReason: "missing_workspace_content" },
+    clear: { id: "clear", label: "Clear", enabled: false, active: false, disabledReason: "missing_active_artifact" },
+  }),
   actions: mockActions,
 };
 
@@ -115,8 +128,15 @@ assert.equal(actionsSnapshot.actions.find((action) => action.name === "highlight
 assert.equal(actionsSnapshot.actions.find((action) => action.name === "focusTarget")?.actionKey, "tour.focusTarget");
 assert.equal(actionsSnapshot.actions.find((action) => action.name === "focusTarget")?.requiresTarget, true);
 assert.equal(await client.getTargetRegistry(), null);
-assert.equal((await client.getApprovalState()).canApproveAndRun, false, "approval state should not inherit host page-context workflow approval");
+const approvalStateSnapshot = await client.getApprovalState();
+assert.equal(approvalStateSnapshot.canApproveAndRun, false, "approval state should not inherit host page-context workflow approval");
+assert.equal(approvalStateSnapshot.disabledReasons.every((reason) => typeof reason === "string" && reason.trim().length > 0), true, "disabled approval snapshots must expose semantic non-empty machine-readable reasons");
+const disabledApprovalDescriptor = actionsSnapshot.actions.find((action) => action.name === "approveAndRun");
+assert.equal(typeof disabledApprovalDescriptor?.disabledReason === "string" && disabledApprovalDescriptor.disabledReason.trim().length > 0, true, "disabled approval action descriptors must preserve a non-empty reason for page-control parity");
 assert.equal((await client.getActiveWorkflowState()).canRequestApproval, false);
+const canvasControls = await client.getCanvasControls();
+assert.equal(canvasControls.fullscreen.disabledReason, "missing_workspace_content");
+assert.equal(canvasControls.clear.active, false, "Clear must never expose a pressed state");
 const actionResult = await client.callAction("requestApproval", { dryRun: true });
 assert.deepEqual(actionResult, { ok: true, action: "requestApproval", input: { dryRun: true } });
 assert.deepEqual(actionCallLog.at(-1), { name: "requestApproval", input: { dryRun: true } });

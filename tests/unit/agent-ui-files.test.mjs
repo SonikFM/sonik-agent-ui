@@ -31,6 +31,7 @@ registerHooks({
   },
 });
 const { GET: getFileRoute, DELETE: deleteFileRoute } = await import("../../apps/standalone-sveltekit/src/routes/api/files/[id]/+server.ts");
+const { POST: postFileRoute } = await import("../../apps/standalone-sveltekit/src/routes/api/files/+server.ts");
 
 const auth = {
   authenticated: true,
@@ -49,6 +50,7 @@ class FakeBucket {
   puts = [];
   gets = [];
   deletes = [];
+  getError = null;
   deleteError = null;
 
   async put(key, value) {
@@ -58,6 +60,7 @@ class FakeBucket {
 
   async get(key) {
     this.gets.push(key);
+    if (this.getError) throw this.getError;
     const value = this.objects.get(key);
     return value ? { body: value.slice(0) } : null;
   }
@@ -71,11 +74,95 @@ class FakeBucket {
 
 {
   const bucket = new FakeBucket();
+  const form = new FormData();
+  form.append("file", new File(["private"], "private.txt", { type: "text/plain" }));
+  form.append("session_id", "missing-auth-session");
+  const requestId = "req-file-auth-zero-write";
+  const traceId = "0123456789abcdef0123456789abcdef";
+  const response = await postFileRoute({
+    request: new Request("http://localhost/api/files", {
+      method: "POST",
+      headers: { "x-sonik-request-id": requestId, "x-sonik-trace-id": traceId },
+      body: form,
+    }),
+    platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "memory", AGENT_UI_FILES_BUCKET: bucket } },
+    locals: {},
+  });
+  assert.equal(response.status, 401);
+  const failureBody = await response.json();
+  assert.deepEqual(failureBody, {
+    ok: false,
+    error: "Authenticated host session required",
+    code: "host_auth_required",
+    phase: "pre_write",
+    safeToRetry: true,
+    requestId,
+    traceId,
+  });
+  assert.equal(response.headers.get("x-sonik-request-id"), requestId);
+  assert.equal(response.headers.get("x-sonik-trace-id"), traceId);
+  assert.equal(bucket.puts.length, 0, "typed auth failure performs zero private-storage writes");
+  assert.equal(JSON.stringify(failureBody).includes("private.txt"), false, "typed public failure never leaks the private filename or bytes");
+}
+
+{
+  const privateFilename = "private-upload-sentinel.txt";
+  const privateProviderDetail = "private-storage-key=agent-ui/credential-sentinel";
+  const bucket = new FakeBucket();
+  bucket.put = async () => {
+    throw new Error(`${privateProviderDetail}; filename=${privateFilename}`);
+  };
+  const platform = { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "memory", AGENT_UI_FILES_BUCKET: bucket } };
+  const locals = { agentUiHostSession: auth };
+  const setupEvent = { request: new Request("http://localhost/api/files"), platform, locals };
+  await getRequestWorkspacePersistence(setupEvent).createSession({ id: "unexpected-upload-session" });
+  const form = new FormData();
+  form.append("file", new File(["private upload body sentinel"], privateFilename, { type: "text/plain" }));
+  form.append("session_id", "unexpected-upload-session");
+  const requestId = "req-file-unexpected-log";
+  const traceId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const logs = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => logs.push(args);
+  let response;
+  try {
+    response = await postFileRoute({
+      request: new Request("http://localhost/api/files", {
+        method: "POST",
+        headers: { "x-sonik-request-id": requestId, "x-sonik-trace-id": traceId },
+        body: form,
+      }),
+      platform,
+      locals,
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.equal(response.status, 500);
+  const failureBody = await response.json();
+  assert.deepEqual(failureBody, {
+    ok: false,
+    error: "File upload failed",
+    code: "file_upload_failed",
+    phase: "post_write",
+    safeToRetry: false,
+    requestId,
+    traceId,
+  });
+  assert.deepEqual(logs, [["Agent UI file upload failed", { category: "upload_unexpected" }]], "unexpected upload logging is category-only");
+  const publicAndLoggedText = JSON.stringify({ failureBody, logs });
+  for (const sentinel of [privateFilename, privateProviderDetail, "private upload body sentinel", "credential-sentinel"]) {
+    assert.equal(publicAndLoggedText.includes(sentinel), false, `unexpected upload failure must not log or return private sentinel: ${sentinel}`);
+  }
+}
+
+{
+  const bucket = new FakeBucket();
   const secret = "route-workspace-context-secret";
-  const eventFor = (workspaceSessionContext, agentUiHostSession = auth) => ({
+  const eventFor = (workspaceSessionContext, agentUiHostSession = auth, requestHeaders = {}) => ({
     params: { id: "route-file" },
     request: new Request("http://localhost/api/files/route-file?session_id=session-a", {
-      headers: workspaceSessionContext ? { [AGENT_UI_WORKSPACE_SESSION_CONTEXT_HEADER]: workspaceSessionContext } : {},
+      headers: { ...(workspaceSessionContext ? { [AGENT_UI_WORKSPACE_SESSION_CONTEXT_HEADER]: workspaceSessionContext } : {}), ...requestHeaders },
     }),
     platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "memory", SONIK_AGENT_UI_HOST_CONTEXT_SECRET: secret, AGENT_UI_FILES_BUCKET: bucket } },
     locals: { agentUiHostSession },
@@ -113,12 +200,12 @@ class FakeBucket {
 
   const mismatchedGet = await getFileRoute(eventFor(sessionBContext));
   assert.equal(mismatchedGet.status, 404, "direct GET rejects a same-user file from another active workspace session");
-  assert.deepEqual(await mismatchedGet.json(), { error: "File not found" });
+  assert.equal((await mismatchedGet.json()).code, "file_not_found");
   assert.equal(bucket.gets.length, 0, "cross-session route GET never reaches R2");
 
   const mismatchedDelete = await deleteFileRoute(eventFor(sessionBContext));
   assert.equal(mismatchedDelete.status, 404, "direct DELETE rejects a same-user file from another active workspace session");
-  assert.deepEqual(await mismatchedDelete.json(), { error: "File not found" });
+  assert.equal((await mismatchedDelete.json()).code, "file_not_found");
   assert.equal(bucket.deletes.length, 0, "cross-session route DELETE never reaches R2");
   assert.equal((await persistence.getFile("route-file"))?.status, "ready", "rejected route DELETE does not mutate lifecycle state");
 
@@ -127,10 +214,39 @@ class FakeBucket {
   assert.equal((await getFileRoute(eventFor(sessionAContext, { ...auth, organizationId: "org-b" }))).status, 404, "workspace context cannot cross tenants");
   assert.equal((await getFileRoute(eventFor(sessionAContext, { ...auth, userId: "user-b" }))).status, 404, "workspace context cannot cross users");
   assert.equal((await getFileRoute(eventFor(sessionAContext, { ...auth, sessionId: "host-session-b" }))).status, 404, "workspace context cannot cross host sessions");
+
+  const requestId = "req-file-route-failure";
+  const traceId = "fedcba9876543210fedcba9876543210";
+  const correlatedEvent = () => eventFor(sessionAContext, auth, { "x-sonik-request-id": requestId, "x-sonik-trace-id": traceId });
+  bucket.getError = new Error("private read provider detail for route.txt");
+  const failedGet = await getFileRoute(correlatedEvent());
+  assert.equal(failedGet.status, 500);
+  const failedGetBody = await failedGet.json();
+  assert.deepEqual(failedGetBody, { ok: false, error: "File read failed", code: "file_read_failed", phase: "read", safeToRetry: false, requestId, traceId });
+  assert.equal(failedGet.headers.get("cache-control"), "private, no-store");
+  assert.equal(failedGet.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(failedGet.headers.get("x-sonik-request-id"), requestId);
+  assert.equal(failedGet.headers.get("x-sonik-trace-id"), traceId);
+  assert.equal(JSON.stringify(failedGetBody).includes("route.txt"), false, "unexpected read failures do not leak private filenames or provider errors");
+  bucket.getError = null;
+
   const authorizedGet = await getFileRoute(eventFor(sessionAContext));
   assert.equal(await authorizedGet.text(), "route");
   assert.equal(authorizedGet.headers.get("cache-control"), "private, no-store");
   assert.equal(authorizedGet.headers.get("x-content-type-options"), "nosniff");
+
+  bucket.deleteError = new Error("private delete provider detail for route.txt");
+  const failedDelete = await deleteFileRoute(correlatedEvent());
+  assert.equal(failedDelete.status, 500);
+  const failedDeleteBody = await failedDelete.json();
+  assert.deepEqual(failedDeleteBody, { ok: false, error: "File deletion failed", code: "file_delete_failed", phase: "post_write", safeToRetry: false, requestId, traceId });
+  assert.equal(failedDelete.headers.get("cache-control"), "private, no-store");
+  assert.equal(failedDelete.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(failedDelete.headers.get("x-sonik-request-id"), requestId);
+  assert.equal(failedDelete.headers.get("x-sonik-trace-id"), traceId);
+  assert.equal(JSON.stringify(failedDeleteBody).includes("route.txt"), false, "unexpected delete failures do not leak private filenames or provider errors");
+  bucket.deleteError = null;
+
   const authorizedDelete = await deleteFileRoute(eventFor(sessionAContext));
   assert.equal(authorizedDelete.status, 200);
   assert.deepEqual(await authorizedDelete.json(), { id: "route-file", deleted: true });
@@ -148,10 +264,10 @@ class FakeBucket {
   const persistence = getRequestWorkspacePersistence(event);
   await persistence.createSession({ id: "trusted-workspace" });
   assert.equal((await resolveAgentUiWorkspaceSession(event, { sessionId: "trusted-workspace" })).sessionId, "trusted-workspace", "request ids become trusted only after host-scoped lookup");
-  await assert.rejects(
-    () => resolveAgentUiWorkspaceSession(eventFor("host-b"), { sessionId: "trusted-workspace" }),
-    /Session not found/,
-    "the same org/user cannot reuse another host session's workspace id",
+  assert.equal(
+    (await resolveAgentUiWorkspaceSession(eventFor("host-b"), { sessionId: "trusted-workspace" })).sessionId,
+    "trusted-workspace",
+    "the same org/user retains workspace ownership when the host session rotates",
   );
 }
 
@@ -447,7 +563,7 @@ assert.match(postRoute, /retry_file_id/, "upload failures may expose only the op
 assert.doesNotMatch(postRoute, /storage_key|provider_references/, "upload failure responses never expose storage or provider metadata");
 
 const generateRoute = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/generate/+server.ts", import.meta.url), "utf8");
-assert.match(generateRoute, /requestedWorkspaceSessionId && hasSelectedWorkspaceContext[\s\S]*resolveAgentUiWorkspaceSession\(event, \{ sessionId: requestedWorkspaceSessionId \}\)/, "generate resolves selected workspace context once through trusted host scope");
+assert.match(generateRoute, /requestedWorkspaceSessionId && hasSelectedWorkspaceContext[\s\S]*resolveAgentUiWorkspaceSession\(event, \{ sessionId: requestedWorkspaceSessionId, phase: "pre_stream", safeToRetry: true \}\)/, "generate resolves selected workspace context once through typed pre-stream trusted host scope");
 assert.match(generateRoute, /trustedWorkspace\?\.sessionId \?\? requestedWorkspaceSessionId/, "ordinary session-backed turns preserve existing persistence without requiring file-context authentication");
 assert.match(generateRoute, /resolveAgentUiFileContextSelection\(\{ selection: parsedRunContextSelection, sessionId: workspaceSessionId/, "generate file selection uses the canonical trusted workspace");
 

@@ -11,20 +11,9 @@ import {
 import { commitBookingReservationCommand } from "$lib/server/booking-workflows/reservation-commit";
 import { routeString, WORKSPACE_SESSION_ID_MAX_CHARS } from "$lib/server/workspace-route-limits";
 import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-transport";
-import { createRequestWorkspaceArtifact, getRequestWorkspaceArtifact } from "$lib/server/workspace-request-store";
+import { getRequestWorkspaceCommitReceipt, recordRequestWorkspaceCommitReceipt } from "$lib/server/workspace-request-store";
+import { commitLedgerFailureReason, runIdempotentCommit } from "$lib/server/commit-idempotency";
 import type { RequestHandler } from "./$types";
-
-// Idempotency ledger (2026-07-13: a resurrected Approve card could re-POST the
-// same preview and double-book). Successful commits are recorded under a
-// deterministic artifact id keyed on the preview's toolCallId; a repeat POST
-// for the same preview replays the stored receipt instead of re-running the
-// booking writes. ponytail: reuses the workspace artifact store as the ledger;
-// upgrade path is a dedicated commit-ledger table when migrations next open.
-const COMMIT_LEDGER_PREFIX = "reservation-commit-ledger-";
-
-function commitLedgerId(previewToolCallId: string): string {
-  return `${COMMIT_LEDGER_PREFIX}${previewToolCallId.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 120)}`;
-}
 
 // A2 reservation-commit (2026-07-08): the ONLY code path that commits a reservation
 // (booking.create.guest -> booking.create.booking). Invoked directly by the human clicking Approve
@@ -51,17 +40,6 @@ export const POST: RequestHandler = async (event) => {
     );
   }
 
-  // Idempotency replay: a commit already recorded for this preview returns the
-  // stored receipt without re-running the booking writes. Checked only after
-  // the trust boundary above — an unauthenticated caller can't probe the ledger.
-  if (previewToolCallId) {
-    const prior = await getRequestWorkspaceArtifact(event, commitLedgerId(previewToolCallId)).catch(() => null);
-    if (prior?.content) {
-      await recordCommitTelemetry({ ok: true, sessionId, reason: "idempotent_replay" });
-      return json({ ...(prior.content as unknown as Record<string, unknown>), replayed: true }, { status: 200 });
-    }
-  }
-
   const approvedCommandIds = approvedCommandIdsFromHostSession(hostSession);
   const bookingServiceBaseUrl = env.SONIK_BOOKING_API_BASE_URL ?? env.BOOKING_SERVICE_BASE_URL ?? null;
   const bookingRuntimeAuth = createBookingRuntimeAuthContextFromTrustedHostHeader({
@@ -70,7 +48,7 @@ export const POST: RequestHandler = async (event) => {
   });
   const bookingRuntimeFetcher = createRequestBookingRuntimeFetcher(event);
 
-  const result = await commitBookingReservationCommand(
+  const commit = () => commitBookingReservationCommand(
     {
       sessionId,
       hostSession,
@@ -82,28 +60,39 @@ export const POST: RequestHandler = async (event) => {
     { guest, booking: bookingInput },
   );
 
-  // Record successful commits in the ledger; failures stay unrecorded so a
-  // legitimate retry can run. Ledger write errors must never mask a completed
-  // booking — the receipt still returns.
-  if (previewToolCallId && (result as { ok?: unknown }).ok === true) {
-    await createRequestWorkspaceArtifact(event, {
+  if (!previewToolCallId) return json(await commit(), { status: 200 });
+
+  const outcome = await runIdempotentCommit({
+    getReceipt: async () => (await getRequestWorkspaceCommitReceipt<Awaited<ReturnType<typeof commit>>>(event, {
+      kind: "reservation",
+      idempotency_key: previewToolCallId,
+    }))?.receipt ?? null,
+    commit,
+    recordReceipt: (receipt) => recordRequestWorkspaceCommitReceipt(event, {
+      kind: "reservation",
+      idempotency_key: previewToolCallId,
       session_id: sessionId ?? null,
-      id: commitLedgerId(previewToolCallId),
-      kind: "json-render",
-      title: "Reservation commit receipt",
-      // The request-store wrapper types content as Spec | WorkspaceDocumentRecord;
-      // the underlying store is generic, and this ledger entry is plain JSON.
-      content: result as unknown as import("@json-render/core").Spec,
-      summary: "Idempotency ledger entry for a human-approved reservation commit.",
-    }).catch(async (ledgerError: unknown) => {
-      await recordCommitTelemetry({ ok: false, sessionId, reason: `ledger_write_failed: ${ledgerError instanceof Error ? ledgerError.message : String(ledgerError)}` });
-      return null;
-    });
+      resource_id: previewToolCallId,
+      receipt,
+    }),
+    onLedgerFailure: (stage) => recordCommitTelemetry({
+      ok: false,
+      sessionId,
+      reason: commitLedgerFailureReason(stage),
+    }),
+  });
+
+  if (outcome.kind === "ledger_read_failed") {
+    return json(
+      { ok: false, error: "idempotency_unavailable", message: "The reservation could not be safely retried because commit history is unavailable." },
+      { status: 503 },
+    );
   }
+  if (outcome.kind === "replayed") await recordCommitTelemetry({ ok: true, sessionId, reason: "idempotent_replay" });
 
   // commitBookingReservationCommand emits commit.human_approved telemetry per write command; this
   // endpoint only covers the request-shape / trust-boundary failures above that never reach it.
-  return json(result, { status: 200 });
+  return json(outcome.receipt, { status: 200 });
 };
 
 async function parseCommitBody(request: Request): Promise<Record<string, unknown>> {

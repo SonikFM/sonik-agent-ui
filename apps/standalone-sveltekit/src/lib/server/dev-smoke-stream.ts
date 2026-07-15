@@ -4,6 +4,7 @@ import type { UIMessageChunk } from "ai";
 import { pipeUiMessageStreamSafety } from "@json-render/core";
 import { instrumentGenerateStream } from "$lib/server/stream-telemetry";
 import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
+import { amplifyCampaignWorkflowManifest } from "@sonik-agent-ui/tool-contracts/marketplace-fixtures";
 
 export const DEV_SMOKE_STREAM_HEADER = "x-sonik-agent-ui-smoke-stream";
 export const DEV_SMOKE_RUN_ID_HEADER = "x-sonik-agent-ui-smoke-run-id";
@@ -20,6 +21,10 @@ export const DEV_SMOKE_ARTIFACT_INPUT_SCENARIO = "artifact-input-stream";
 export const DEV_SMOKE_TOOL_FAILURE_SCENARIO = "tool-failure-stream";
 export const DEV_SMOKE_DOCUMENT_INTENT_SCENARIO = "document-intent-stream";
 export const DEV_SMOKE_DOCUMENT_FAILURE_SCENARIO = "document-failure-stream";
+/** Dev-only drafting-agent result used by the builder's describe -> draft ->
+ * canvas browser lane. It emits a validated shipped workflow, never a model
+ * call or deployed-service dependency. */
+export const DEV_SMOKE_WORKFLOW_DRAFT_SCENARIO = "workflow-draft-stream";
 
 export interface DevSmokeStreamInput {
   requestId: string;
@@ -91,6 +96,8 @@ export function createDevSmokeStream(input: DevSmokeStreamInput): ReadableStream
     ? createDevSmokeDocumentIntentStream()
     : input.scenario === DEV_SMOKE_DOCUMENT_FAILURE_SCENARIO
     ? createDevSmokeDocumentFailureStream()
+    : input.scenario === DEV_SMOKE_WORKFLOW_DRAFT_SCENARIO
+    ? createDevSmokeWorkflowDraftStream()
     : createUIMessageStream({
         execute: async ({ writer }) => {
           const id = "smoke-text";
@@ -139,6 +146,19 @@ export function createDevSmokeStream(input: DevSmokeStreamInput): ReadableStream
     messageId: input.messageId,
     runId: input.runId,
     startedAt: input.startedAt,
+  });
+}
+
+function createDevSmokeWorkflowDraftStream(): ReadableStream<UIMessageChunk> {
+  const toolCallId = "smoke-workflow-draft-1";
+  const workflow = amplifyCampaignWorkflowManifest.payload.workflow;
+  return createUIMessageStream({
+    execute: async ({ writer }) => {
+      writer.write({ type: "tool-input-start", toolCallId, toolName: "draftWorkflow" });
+      writer.write({ type: "tool-input-available", toolCallId, toolName: "draftWorkflow", input: { description: "Create an Amplify campaign" } });
+      writer.write({ type: "tool-output-available", toolCallId, output: { kind: "workflow-draft", ok: true, workflow } });
+    },
+    onError: (error) => error instanceof Error ? error.message : String(error),
   });
 }
 

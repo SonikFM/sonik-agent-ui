@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
   import type { Artifact } from "@sonik-agent-ui/artifact-model";
   import type { CanvasPanel } from "./CanvasToolbar.svelte";
+  import type { CanvasControlStateMap } from "../state/canvas-controls.js";
   import type { ResizeEdge } from "../lib/window-geometry.js";
 
   export interface CanvasViewportProps {
@@ -21,6 +22,9 @@
     activeArtifactVersion?: number | null;
     onArtifactVersionChange?: (version: number) => void;
     showDeveloperPanels?: boolean;
+    panel?: CanvasPanel;
+    isFullscreen?: boolean;
+    controlStates: CanvasControlStateMap;
     /** Pointer-drag reposition + edge/corner resize for the standalone canvas window. Off in embedded host contexts (the host owns window chrome there). */
     windowControlsEnabled?: boolean;
   }
@@ -58,10 +62,10 @@
     onArtifactVersionChange,
     showDeveloperPanels = true,
     windowControlsEnabled = true,
+    panel = $bindable("canvas"),
+    isFullscreen = $bindable(false),
+    controlStates,
   }: CanvasViewportProps = $props();
-
-  let panel = $state<CanvasPanel>("canvas");
-  let isFullscreen = $state(false);
 
   const windowController = createCanvasWindowController({
     storageKey: "sonik-agent-ui:canvas-window:v1",
@@ -131,6 +135,7 @@
     {hasArtifact}
     {documentAvailable}
     {isFullscreen}
+    {controlStates}
     {artifactVersions}
     {activeArtifactVersion}
     {onArtifactVersionChange}

@@ -145,8 +145,45 @@ const migrations = [
 			)::text
 		`,
 	},
+	{
+		version: "0012",
+		name: "commit_ledger",
+		file: "packages/workspace-session/migrations/postgres/0012_commit_ledger.sql",
+		baselineCheck: `
+			select (
+				to_regclass('sonik_agent_ui.agent_workspace_commit_ledger') is not null
+			)::text
+		`,
+	},
+	{
+		version: "0013",
+		name: "workflow_run_owner_scope",
+		file: "packages/workspace-session/migrations/postgres/0013_workflow_run_owner_scope.sql",
+		baselineCheck: `
+			select (
+				exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_runs'
+						and column_name = 'organization_id'
+				)
+				and exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_runs'
+						and column_name = 'user_id'
+				)
+				and exists (
+					select 1 from pg_class
+					where oid = to_regclass('sonik_agent_ui.agent_workflow_runs')
+						and relrowsecurity
+						and relforcerowsecurity
+				)
+			)::text
+		`,
+	},
 	// NOTE for the next lane appending here: this is the ONE shared migrations
-	// manifest (per prod-slice-plan.md) -- add new entries after 0011, don't
+	// manifest (per prod-slice-plan.md) -- add new entries after 0013, don't
 	// reorder/renumber existing ones.
 ];
 

@@ -8,7 +8,7 @@ import { getWeather } from "./tools/weather";
 // import { getGitHubRepo, getGitHubPullRequests } from "./tools/github";
 // import { getCryptoPrice, getCryptoPriceHistory } from "./tools/crypto";
 // import { getHackerNewsTop } from "./tools/hackernews";
-import { webSearch } from "./tools/search";
+import { createWebSearch } from "./tools/search";
 import { createJsonArtifact } from "./tools/artifact";
 import { createBookingIntakeArtifactTool, createSubmitIntakeAnswerTool } from "./tools/intake-artifact";
 import { composeAgentSystemPrompt, type ComposedAgentPrompt } from "./agent-prompt";
@@ -19,7 +19,7 @@ import { createCommandCatalogTools } from "./tools/command-catalog";
 import { createArtifactStateTools } from "./tools/artifact-state";
 import { createSkillCatalogTools } from "./tools/skill-catalog";
 import { createMarketplaceWorkflowTools } from "./tools/marketplace-workflows";
-import { draftWorkflow } from "./tools/drafting-agent";
+import { createDraftWorkflow } from "./tools/drafting-agent";
 import { shouldMountJsonArtifactTool, type WorkspaceDocumentIntent } from "./document-intent";
 import { gateway, resolveGatewayModelId } from "./ai-gateway";
 import type { AgentRuntimeSettings } from "./agent-settings";
@@ -35,13 +35,19 @@ import {
   hasPreviewOnlyRuntimeSkill,
   resolveCommandFamilyMountDecision,
 } from "./command-family-mount";
+import {
+  AI_SDK_TELEMETRY_FUNCTION,
+  createAiSdkTelemetryOptions,
+  createAiSdkTelemetryRuntimeContext,
+  type AiSdkTelemetryCorrelation,
+} from "./server/ai-sdk-telemetry";
 
 // Re-exported for existing `$lib/agent` importers; the logic lives in the dependency-free
 // leaf module so it stays unit-testable (agent.ts itself can only be type-imported in plain node).
 export { hasBookingContextIntakeSkill, resolveCommandFamilyMountDecision } from "./command-family-mount";
 export type { CommandFamilyMountDecision } from "./command-family-mount";
 
-export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean; model?: LanguageModel;
+export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPageContext; hostSession?: HostSessionEnvelope | null; approvedCommandIds?: string[]; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; skillIds?: string[]; agentSettings?: AgentRuntimeSettings; currentIntakeArtifactSpec?: Spec | null; toolsetContinuitySkillIds?: string[]; workspaceDocumentIntent?: WorkspaceDocumentIntent; productTourIntent?: boolean; model?: LanguageModel; aiTelemetry?: Partial<AiSdkTelemetryCorrelation>;
 };
 
 /**
@@ -55,6 +61,7 @@ export type AgentRuntimeContext = DocumentToolContext & { pageContext?: AgentPag
 export function resolveAgentPromptComposition(context: AgentRuntimeContext = {}): ComposedAgentPrompt {
   return composeAgentSystemPrompt({
     context: {
+      hasJsonArtifactTool: shouldMountJsonArtifactTool(context.workspaceDocumentIntent ?? "none"),
       hasBookingRuntime: !context.productTourIntent && Boolean(context.bookingRuntimeAuth || context.bookingServiceBaseUrl),
       hasDocumentTools: true,
       hasPageContext: Boolean(context.pageContext),
@@ -78,6 +85,9 @@ function createAgentInstructions(context: AgentRuntimeContext): string {
 }
 
 export function createAgent(context: AgentRuntimeContext = {}) {
+  const telemetryRuntimeContext = createAiSdkTelemetryRuntimeContext(context.aiTelemetry, AI_SDK_TELEMETRY_FUNCTION.main);
+  const webSearch = createWebSearch(context.aiTelemetry);
+  const draftWorkflow = createDraftWorkflow(context.aiTelemetry);
   const documentTools = createDocumentTools(context);
   const toolManifestTools = createToolManifestTools();
   const bookingContextIntakeActive = hasBookingContextIntakeSkill(context.skillIds);
@@ -120,6 +130,8 @@ export function createAgent(context: AgentRuntimeContext = {}) {
     // AI_InvalidPromptError, which 503'd every real embedded turn
     // (2026-07-13 live-embed outage).
     allowSystemInMessages: true,
+    runtimeContext: telemetryRuntimeContext,
+    telemetry: createAiSdkTelemetryOptions(AI_SDK_TELEMETRY_FUNCTION.main, Boolean(telemetryRuntimeContext.requestId)),
     stopWhen: isStepCount(12),
     // AI SDK 7 wall-clock bounds (we previously had only the step cap): a stalled
     // provider stream or a hung tool now aborts instead of holding the request open.

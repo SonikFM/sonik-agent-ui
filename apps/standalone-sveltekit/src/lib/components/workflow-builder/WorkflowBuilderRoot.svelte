@@ -12,6 +12,7 @@
 
   export interface WorkflowBuilderController {
     snapshot(): WorkflowBuilderSnapshot;
+    approvalState(): import("@sonik-agent-ui/agent-observability").AgentUiApprovalStateSnapshot;
     setTab(tab: WorkflowBuilderSnapshot["tab"]): void;
     saveDraft(): Promise<{ ok: boolean; message: string }>;
     newAgent(): void;
@@ -40,20 +41,27 @@
     createEmptyWorkflowDefinition,
     validateAgentDefinition,
     validateWorkflowDefinition,
+    createWorkflowBuilderApprovalState,
+    selectActiveWorkflowRun,
+    type ActiveWorkflowRunSelection,
     type WorkflowLockState,
   } from "./builder-model";
   import { bookingReservationWorkflowManifest, amplifyCampaignWorkflowManifest } from "@sonik-agent-ui/tool-contracts/marketplace-fixtures";
   import type { AgentDefinition, WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
+  import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
   import { AGENT_MODEL_OPTIONS, type AgentModelOption } from "$lib/agent-settings";
 
   interface Props {
+    workspaceFetch: typeof fetch;
+    workspaceContextReady?: boolean;
+    signedHostApprovedCommandIds?: string[];
     onController?: (controller: WorkflowBuilderController | null) => void;
     /** Return to the chat workspace. The mode toggle lives in WorkspaceRoot's
      *  toolbar, which unmounts in builder mode — without this the builder is a
      *  one-way door (Lane D e2e finding, prod slice 2026-07-13). */
     onExit?: () => void;
   }
-  let { onController, onExit }: Props = $props();
+  let { workspaceFetch, workspaceContextReady = true, signedHostApprovedCommandIds = [], onController, onExit }: Props = $props();
 
   function freshAgentId(): string {
     return `agent_${Math.random().toString(36).slice(2, 10)}`;
@@ -76,6 +84,7 @@
   const runnableExampleWorkflow = amplifyCampaignWorkflowManifest.payload.workflow as WorkflowDefinition;
   let draftWorkflow = $state<WorkflowDefinition>(createEmptyWorkflowDefinition(`${initialAgentId}.workflow`));
   let draftLockState = $state<WorkflowLockState>("draft");
+  let activeRunSelection = $state<ActiveWorkflowRunSelection | null>(null);
 
   const definitionValidation = $derived(validateAgentDefinition(definition));
   const workflowValidation = $derived(validateWorkflowDefinition(draftWorkflow));
@@ -88,10 +97,16 @@
   let modelCatalogMessage = $state<string | null>(null);
 
   async function refreshModelCatalog(): Promise<void> {
+    if (!workspaceContextReady) {
+      modelOptions = AGENT_MODEL_OPTIONS;
+      modelCatalogStatus = "error";
+      modelCatalogMessage = "Reconnect the embedded page with an authenticated workspace session to load cloud models.";
+      return;
+    }
     modelCatalogStatus = "loading";
     modelCatalogMessage = null;
     try {
-      const response = await fetch("/api/agent-models");
+      const response = await workspaceFetch("/api/agent-models");
       if (!response.ok) throw new Error(`model_catalog_http_${response.status}`);
       const catalog = await response.json() as { models?: AgentModelOption[]; source?: string; error?: string };
       const models = Array.isArray(catalog.models) && catalog.models.length > 0 ? catalog.models : AGENT_MODEL_OPTIONS;
@@ -114,7 +129,7 @@
     }
     saveStatus = "saving";
     try {
-      const response = await fetch("/api/agent-definitions", {
+      const response = await workspaceFetch("/api/agent-definitions", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "save_draft", definition: validation.definition }),
@@ -142,10 +157,15 @@
     saveStatus = "idle";
     saveMessage = "";
     tab = "config";
+    activeRunSelection = null;
   }
 
   function setTab(next: WorkflowBuilderSnapshot["tab"]): void {
     tab = next;
+  }
+
+  function handleRunStateChange(workflowId: string, nextRun: WorkflowRunState | null): void {
+    activeRunSelection = selectActiveWorkflowRun(activeRunSelection, workflowId, nextRun);
   }
 
   const controller: WorkflowBuilderController = {
@@ -157,6 +177,7 @@
       definitionValid: definitionValidation.ok,
       workflowValid: workflowValidation.ok,
     }),
+    approvalState: () => createWorkflowBuilderApprovalState(activeRunSelection?.run ?? null, signedHostApprovedCommandIds),
     setTab,
     saveDraft,
     newAgent,
@@ -222,7 +243,12 @@
           </Card.Header>
           <Card.Content class="flex flex-col gap-4">
             <WorkflowCanvas bind:workflow={draftWorkflow} lockState={draftLockState} />
-            <WorkflowRunPanel workflow={draftWorkflow} />
+            <WorkflowRunPanel
+              workflow={draftWorkflow}
+              {workspaceFetch}
+              {signedHostApprovedCommandIds}
+              onRunStateChange={handleRunStateChange}
+            />
           </Card.Content>
         </Card.Root>
         <Card.Root>
@@ -241,7 +267,12 @@
           </Card.Header>
           <Card.Content class="flex flex-col gap-4">
             <WorkflowCanvas workflow={runnableExampleWorkflow} lockState="locked" />
-            <WorkflowRunPanel workflow={runnableExampleWorkflow} />
+            <WorkflowRunPanel
+              workflow={runnableExampleWorkflow}
+              {workspaceFetch}
+              {signedHostApprovedCommandIds}
+              onRunStateChange={handleRunStateChange}
+            />
           </Card.Content>
         </Card.Root>
       </div>
@@ -250,6 +281,8 @@
     <Tabs.Content value="preview">
       <DebugPreviewPane
         draftAgentId={agentId}
+        {workspaceFetch}
+        prepareDraft={saveDraft}
         onWorkflowDrafted={(drafted) => {
           // Describe -> draft -> canvas: the drafting agent's validated workflow
           // loads into the editable draft and jumps to the canvas so it's ready

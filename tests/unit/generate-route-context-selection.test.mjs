@@ -24,12 +24,12 @@ registerHooks({
 const { POST } = await import("../../apps/standalone-sveltekit/src/routes/api/generate/+server.ts");
 const message = { id: "message-1", role: "user", parts: [{ type: "text", text: "Hello" }] };
 
-async function post(contextSelection) {
+async function post(contextSelection, workspace) {
   return POST({
     request: new Request("http://localhost/api/generate", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ messages: [message], ...(contextSelection === undefined ? {} : { contextSelection }) }),
+      headers: { "content-type": "application/json", "x-sonik-request-id": "req-generate-auth", "x-sonik-trace-id": "a".repeat(32) },
+      body: JSON.stringify({ messages: [message], ...(contextSelection === undefined ? {} : { contextSelection }), ...(workspace ? { workspace } : {}) }),
     }),
     getClientAddress: () => "127.0.0.1",
   });
@@ -38,6 +38,28 @@ async function post(contextSelection) {
 const invalid = await post({ items: [{ id: "document:missing", kind: "document", label: "Missing ref", source: "manual" }], dismissedAutoSeedIds: [] });
 assert.equal(invalid.status, 400);
 assert.deepEqual(globalThis.__generateRouteEffects, { rateLimit: 0, workspace: 0, telemetry: 0, message: 0, run: 0, provider: 0, model: 0 }, "invalid document context terminates with zero downstream effects");
+
+const beforeAuthFailure = { ...globalThis.__generateRouteEffects };
+const authFailure = await post({
+  items: [{ id: "file:file-1", kind: "file", label: "Private file", source: "manual", ref: "file-1" }],
+  dismissedAutoSeedIds: [],
+}, { sessionId: "session-private" });
+assert.equal(authFailure.status, 401);
+assert.deepEqual(await authFailure.json(), {
+  ok: false,
+  error: "Authenticated host session required",
+  code: "host_auth_required",
+  phase: "pre_stream",
+  safeToRetry: true,
+  requestId: "req-generate-auth",
+  traceId: "a".repeat(32),
+});
+assert.equal(globalThis.__generateRouteEffects.rateLimit, beforeAuthFailure.rateLimit, "pre-stream auth failure consumes no rate-limit entries before its one classified replay");
+assert.equal(globalThis.__generateRouteEffects.workspace, beforeAuthFailure.workspace, "pre-stream auth failure performs no workspace lookup");
+assert.equal(globalThis.__generateRouteEffects.message, beforeAuthFailure.message, "pre-stream auth failure persists no message");
+assert.equal(globalThis.__generateRouteEffects.run, beforeAuthFailure.run, "pre-stream auth failure starts no run");
+assert.equal(globalThis.__generateRouteEffects.provider, beforeAuthFailure.provider, "pre-stream auth failure reaches no provider");
+assert.equal(globalThis.__generateRouteEffects.model, beforeAuthFailure.model, "pre-stream auth failure constructs no model");
 
 for (const selection of [
   undefined,

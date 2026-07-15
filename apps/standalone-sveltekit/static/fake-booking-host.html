@@ -340,6 +340,7 @@
           }
         : null;
       let signedFixtureContext = null;
+      let signedFixtureAuthority = null;
       let smokeBookingContext = null;
       let smokeBookingContextWarning = null;
       if (fixtureHostSession) {
@@ -353,6 +354,7 @@
           if (response.ok) {
             const body = await response.json();
             signedFixtureContext = body?.context ?? null;
+            signedFixtureAuthority = body?.authority ?? null;
             smokeBookingContext = body?.bookingContext ?? null;
             smokeBookingContextWarning = body?.warning ?? null;
           } else {
@@ -378,10 +380,6 @@
         authenticated: signedFixtureContext?.authenticated ?? fixtureHostSession?.authenticated,
         scopes: signedFixtureContext?.scopes ?? fixtureHostSession?.scopes,
         hostSession: signedFixtureContext?.hostSession ?? fixtureHostSession,
-        signatureVersion: signedFixtureContext?.signatureVersion,
-        issuedAt: signedFixtureContext?.issuedAt,
-        expiresAt: signedFixtureContext?.expiresAt,
-        signature: signedFixtureContext?.signature,
         commandFamilies: ["booking", "event"],
         skillFamilies: ["booking-ops"],
         visibleActions: ["viewBooking", "listResources", "assignResource", "createReservation"],
@@ -395,7 +393,10 @@
         smokeMockStream: url.searchParams.get("smokeMockStream") !== "0" ? (url.searchParams.get("smokeMockStream") ?? "1") : null,
         smokeRunId,
         initialMode: ["chat", "canvas"].includes(url.searchParams.get("autoOpen") ?? "") ? url.searchParams.get("autoOpen") : null,
-        getPageContext: () => ({ ...pageContext, at: new Date().toISOString() }),
+        getPageContext: () => ({
+          pageContext: { ...pageContext, at: new Date().toISOString() },
+          authority: signedFixtureAuthority,
+        }),
         elements: {
           iframe: "#agent-frame",
           chatSlot: "#chat-frame-slot",

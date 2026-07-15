@@ -177,6 +177,9 @@ function createPageControlClient(frame) {
     async getApprovalState() {
       return frame.evaluate(() => window.__sonikAgentUI.getApprovalState());
     },
+    async getCanvasControls() {
+      return frame.evaluate(() => window.__sonikAgentUI.getCanvasControls?.() ?? null);
+    },
     /** Call `window.__sonikAgentUI.actions[name](input)` and return its result verbatim. */
     async callAction(name, input) {
       if (!PAGE_CONTROL_ACTION_NAMES.includes(name)) {

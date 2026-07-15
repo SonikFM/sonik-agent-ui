@@ -168,56 +168,27 @@ async function run() {
       );
     }
 
-    // --- check 3: signed host-context envelope is accepted (no LLM call) ---
-    const sessionCreateProbe = await secondFrame.evaluate(async () => {
-      // Mirrors the encode used by scripts/agent-ui-booking-context-pipeb-smoke.mjs's
-      // artifact-upsert probe.
-      const encode = (value) => btoa(unescape(encodeURIComponent(JSON.stringify(value)))).replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-      const pageContext = window.__sonikAgentUI.getPageContext();
-      const hostSession = pageContext?.hostSession;
-      if (!hostSession?.authenticated) return { ok: false, error: "missing authenticated hostSession on getPageContext()" };
-      const organizationId = hostSession.organizationId ?? pageContext.organizationId;
-      const userId = hostSession.userId ?? hostSession.principalId;
-      const signedHeader = encode({
-        authenticated: true,
-        organizationId,
-        scopes: pageContext.scopes ?? hostSession.scopes ?? [],
-        signatureVersion: pageContext.signatureVersion ?? null,
-        issuedAt: pageContext.issuedAt ?? null,
-        expiresAt: pageContext.expiresAt ?? null,
-        signature: pageContext.signature ?? null,
-        hostSession: {
-          source: hostSession.source,
-          sessionId: hostSession.sessionId ?? null,
-          userId,
-          principalId: hostSession.principalId ?? userId,
-          organizationId,
-          authenticated: true,
-          scopes: hostSession.scopes ?? [],
-          expiresAt: hostSession.expiresAt ?? null,
-          ...(hostSession.metadata ? { metadata: hostSession.metadata } : {}),
-        },
-      });
-      const headerBytes = new TextEncoder().encode(signedHeader).length;
-      const response = await fetch("/api/session", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-sonik-agent-ui-host-context": signedHeader },
-        body: JSON.stringify({ name: "agent-eval-reservation-runtime-probe", mode: "chat" }),
-      });
-      const body = await response.text();
-      return {
-        ok: response.ok,
-        status: response.status,
-        headerBytes,
-        headers: {
-          hostAuthenticated: response.headers.get("x-sonik-agent-ui-host-authenticated"),
-          hostOrg: response.headers.get("x-sonik-agent-ui-host-org"),
-          hostUser: response.headers.get("x-sonik-agent-ui-host-user"),
-          cloudError: response.headers.get("x-sonik-agent-ui-cloud-error"),
-        },
-        bodySample: body.slice(0, 500),
-      };
+    // --- check 3: the page's exact opaque host authority is accepted (no LLM call) ---
+    const sessionResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.origin === agentOrigin && url.pathname === "/api/session" && response.request().method() === "POST";
     });
+    const actionResultPromise = secondFrame.evaluate(async () => window.__sonikAgentUI.actions.createSession());
+    const [sessionResponse, actionResult] = await Promise.all([sessionResponsePromise, actionResultPromise]);
+    const observedOpaqueHeader = sessionResponse.request().headers()["x-sonik-agent-ui-host-context"] ?? "";
+    const responseHeaders = sessionResponse.headers();
+    const sessionCreateProbe = {
+      ok: sessionResponse.ok() && actionResult?.ok === true,
+      status: sessionResponse.status(),
+      headerBytes: new TextEncoder().encode(observedOpaqueHeader).length,
+      headers: {
+        hostAuthenticated: responseHeaders["x-sonik-agent-ui-host-authenticated"] ?? null,
+        hostOrg: responseHeaders["x-sonik-agent-ui-host-org"] ?? null,
+        hostUser: responseHeaders["x-sonik-agent-ui-host-user"] ?? null,
+        cloudError: responseHeaders["x-sonik-agent-ui-cloud-error"] ?? null,
+      },
+      actionResult,
+    };
     diagnostics.sessionCreateProbe = sessionCreateProbe;
     if (sessionCreateProbe.error) {
       inconclusiveReasons.push(`reservationRuntimeMounted: ${sessionCreateProbe.error}`);

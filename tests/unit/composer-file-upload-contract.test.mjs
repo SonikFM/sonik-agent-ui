@@ -4,6 +4,9 @@ import { readFile } from "node:fs/promises";
 const page = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/+page.svelte", import.meta.url), "utf8");
 const composer = await readFile(new URL("../../packages/chat-surface/src/components/AgentComposer.svelte", import.meta.url), "utf8");
 const menu = await readFile(new URL("../../packages/chat-surface/src/components/ComposerAttachmentMenu.svelte", import.meta.url), "utf8");
+const stagedContextRow = await readFile(new URL("../../packages/chat-surface/src/components/StagedContextRow.svelte", import.meta.url), "utf8");
+const uploadState = await readFile(new URL("../../packages/chat-surface/src/file-upload-state.ts", import.meta.url), "utf8");
+const contextChip = await readFile(new URL("../../packages/chat-surface/src/components/ContextChip.svelte", import.meta.url), "utf8");
 const generate = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/generate/+server.ts", import.meta.url), "utf8");
 
 const uploadFunction = page.match(/async function uploadComposerFile[\s\S]*?\n  }/)?.[0] ?? "";
@@ -24,8 +27,27 @@ for (const guidance of [
   /PPTX.*Convert.*PDF/i,
   /10 MiB/,
 ]) assert.match(composer, guidance);
-assert.match(composer, /onAttachContext\?\.\(item\)/, "successful multipart uploads become detachable context chips");
-assert.match(composer, /onCancelUpload=\{cancelUpload\}/, "bounded upload state remains cancellable");
+assert.match(composer, /executeComposerFileUpload\(\{ upload, onUploadFile, onAttachContext \}\)/, "the upload state machine owns the single successful context attachment");
+assert.match(uploadState, /if \(!input\.upload\.controller\.signal\.aborted\) input\.onAttachContext\?\.\(item\)/, "successful multipart uploads become detachable context chips exactly once");
+assert.match(composer, /onRemoveUpload=\{removeUpload\}/, "bounded upload state remains cancellable and removable");
+assert.match(composer, /retryComposerFileUpload\(failed\)/, "failed uploads retain an explicit retry path");
+assert.match(composer, /items=\{contextItems\}/, "composer passes the complete semantic context selection to the presentation row");
+
+assert.doesNotMatch(stagedContextRow, /filesExpanded/, "overflow disclosure is not limited to document context");
+assert.match(stagedContextRow, /\.\.\.items\.map[\s\S]*\.\.\.pinnedTools\.map/, "context and pinned tools share one bounded presentation list");
+assert.match(stagedContextRow, /stagedPresentations\.slice\(0, collapsedLimit\)/, "collapsed rendering derives a visual subset without mutating source selection");
+assert.match(stagedContextRow, /new ResizeObserver/, "chip disclosure responds to its container width, including floated sidecars");
+assert.match(stagedContextRow, /if \(width < 420\) return 1;[\s\S]*if \(width < 640\) return 2;[\s\S]*return 3;/, "collapsed chip capacity has deterministic narrow, sidecar, and wide bounds");
+assert.match(stagedContextRow, /aria-controls=\{stagedItemsId\}/);
+assert.match(stagedContextRow, /aria-expanded=\{expanded\}/);
+assert.match(stagedContextRow, /`\+\$\{hiddenCount\} more`/, "collapsed state exposes the hidden item count");
+assert.match(stagedContextRow, /disclosureElement\?\.focus\(\)/, "container shrink recovers focus when a visible chip becomes hidden");
+assert.match(stagedContextRow, /role=\{upload\.status === "failed" \? "alert" : "status"\}/, "upload failures remain visible and live-announced outside the hidden subset");
+assert.match(stagedContextRow, /data-file-upload-status=\{upload\.id\}/, "upload lifecycle has a presentation surface distinct from semantic context chips");
+assert.doesNotMatch(stagedContextRow.match(/\{#if uploads\.length > 0\}[\s\S]*?\{\/if\}/)?.[0] ?? "", /<ContextChip/, "failed and in-flight uploads never render as AgentRunContext chips");
+assert.match(stagedContextRow, />Retry<\/button>/);
+assert.match(stagedContextRow, />Remove<\/button>/);
+assert.match(contextChip, /h-8 w-8/, "context removal keeps an accessible 32px hit target");
 
 assert.match(menu, /type="file"/);
 assert.match(menu, /\.pdf,.txt,.md,.markdown,.csv,.html,.htm,.xml,.css,.js,.mjs,.cjs,.json,.bmp,.jpg,.jpeg,.png,.webp/);

@@ -4,7 +4,7 @@
 // api/reservation/commit precedent.
 import { json } from "@sveltejs/kit";
 import { createAgentHostSessionEnvelope } from "$lib/server/host-command-runtime";
-import { handleWorkflowRunsAction, type WorkflowRunsAction } from "$lib/server/workflow-runs";
+import { handleWorkflowRunsAction, workflowRunOwnerFromHostSession, type WorkflowRunsAction } from "$lib/server/workflow-runs";
 import { resolveWorkflowRunStore } from "$lib/server/workflow-run-store";
 import type { RequestHandler } from "./$types";
 
@@ -19,6 +19,9 @@ export const POST: RequestHandler = async (event) => {
   }
 
   const hostSession = createAgentHostSessionEnvelope(event);
+  if (!workflowRunOwnerFromHostSession(hostSession)) {
+    return json({ ok: false, reason: "authenticated_workspace_owner_required" }, { status: 401 });
+  }
   const env = event.platform?.env as Record<string, unknown> | undefined;
   const store = resolveWorkflowRunStore(env);
   const result = await handleWorkflowRunsAction(action, { hostSession, store, env });
