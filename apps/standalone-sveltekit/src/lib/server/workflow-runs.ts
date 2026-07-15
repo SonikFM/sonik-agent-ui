@@ -36,6 +36,7 @@ import {
   type WorkflowNodeAttemptEvent,
   type WorkflowNodeExecutor,
 } from "./workflow-node-executors.ts";
+import type { WorkflowRunDriver } from "./workflow-run-driver.ts";
 import { workflowRunStore, wrapWorkflowRunStoreAsync, type AsyncWorkflowRunStore, type WorkflowRunOwner, type WorkflowRunRow } from "./workflow-run-store.ts";
 
 const AMPLIFY_CAMPAIGN_KNOWLEDGE_STORE_ID = "sonik.knowledge.campaign-artifacts";
@@ -44,7 +45,10 @@ export type WorkflowRunsAction =
   | { action: "start"; runId?: string; workflowId: string; workflow?: unknown; brief?: AmplifyCampaignBrief; artifactId?: string | null }
   | { action: "preview"; runId: string; nodeId: string }
   | { action: "approve"; runId: string; nodeId: string }
-  | { action: "commit"; runId: string; nodeId: string };
+  | { action: "commit"; runId: string; nodeId: string }
+  | { action: "run_until_blocked"; request: unknown }
+  | { action: "resume_run"; request: unknown }
+  | { action: "cancel_run"; runId: string; lease: unknown };
 
 export type WorkflowRunsResult =
   | { ok: true; run: WorkflowRunState }
@@ -64,6 +68,7 @@ export interface WorkflowRunsDeps {
   /** Optional package/runtime executors. The registry still owns validation and descriptor dispatch. */
   nodeExecutors?: Partial<Record<WorkflowVNextNodeType, WorkflowNodeExecutor>>;
   onNodeAttempt?: (event: WorkflowNodeAttemptEvent) => void;
+  driver?: WorkflowRunDriver;
 }
 
 export function workflowRunOwnerFromHostSession(hostSession: HostSessionEnvelope | null): WorkflowRunOwner | null {
@@ -131,6 +136,20 @@ function isRunIdConflictError(error: unknown): boolean {
 export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps: WorkflowRunsDeps): Promise<WorkflowRunsResult> {
   const owner = workflowRunOwnerFromHostSession(deps.hostSession);
   if (!owner) return { ok: false, reason: "authenticated_workspace_owner_required" };
+  if (action.action === "run_until_blocked" || action.action === "resume_run" || action.action === "cancel_run") {
+    if (!deps.driver) return { ok: false, reason: "workflow_run_driver_unavailable" };
+    if (action.action !== "cancel_run" && action.request && typeof action.request === "object" && "hostSigned" in action.request) return { ok: false, reason: "public_hostSigned_forbidden" };
+    try {
+      const run = action.action === "run_until_blocked"
+        ? await deps.driver.runUntilBlocked(action.request)
+        : action.action === "resume_run"
+          ? await deps.driver.resume(action.request)
+          : await deps.driver.cancel(action.runId, action.lease);
+      return { ok: true, run: run as unknown as WorkflowRunState };
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : "workflow_run_driver_failed" };
+    }
+  }
   const store = deps.store ?? wrapWorkflowRunStoreAsync(workflowRunStore);
 
   if (action.action === "start") {

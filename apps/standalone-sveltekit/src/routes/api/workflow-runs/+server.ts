@@ -3,9 +3,15 @@
 // that plain module so it stays testable without a SvelteKit runtime, matching the
 // api/reservation/commit precedent.
 import { json } from "@sveltejs/kit";
+import { createHash, randomUUID } from "node:crypto";
 import { createAgentHostSessionEnvelope } from "$lib/server/host-command-runtime";
 import { handleWorkflowRunsAction, workflowRunOwnerFromHostSession, type WorkflowRunsAction } from "$lib/server/workflow-runs";
-import { resolveWorkflowRunStore } from "$lib/server/workflow-run-store";
+import { resolveWorkflowRunJournalStore, resolveWorkflowRunStore } from "$lib/server/workflow-run-store";
+import { resolveWorkflowDefinitionRepository } from "$lib/server/workflow-definition-repository";
+import { WorkflowRunDriver } from "$lib/server/workflow-run-driver";
+import { resolveStandaloneCapabilityReadiness } from "$lib/server/standalone-capability-readiness";
+import { approvedCommandIdsFromHostSession } from "$lib/server/host-command-runtime";
+import { startControllerRun } from "@sonik-agent-ui/tool-contracts/workflow-controller";
 import type { RequestHandler } from "./$types";
 
 export const POST: RequestHandler = async (event) => {
@@ -13,8 +19,8 @@ export const POST: RequestHandler = async (event) => {
   if (!body || typeof body !== "object" || typeof (body as Record<string, unknown>).action !== "string") {
     return json({ ok: false, error: "invalid_json_body" }, { status: 400 });
   }
-  const action = body as WorkflowRunsAction;
-  if (!["start", "preview", "approve", "commit"].includes(action.action)) {
+  let action = body as WorkflowRunsAction;
+  if (!["start", "preview", "approve", "commit", "run_until_blocked", "resume_run", "cancel_run"].includes(action.action)) {
     return json({ ok: false, error: "unknown_action" }, { status: 400 });
   }
 
@@ -24,6 +30,62 @@ export const POST: RequestHandler = async (event) => {
   }
   const env = event.platform?.env as Record<string, unknown> | undefined;
   const store = resolveWorkflowRunStore(env);
-  const result = await handleWorkflowRunsAction(action, { hostSession, store, env });
+  let driver: WorkflowRunDriver | undefined;
+  if (action.action === "run_until_blocked" || action.action === "resume_run" || action.action === "cancel_run") {
+    const owner = workflowRunOwnerFromHostSession(hostSession)!;
+    const request = action.action === "cancel_run" ? null : action.request as Record<string, unknown>;
+    const workflowVersionId = typeof request?.workflowVersionId === "string" ? request.workflowVersionId : "";
+    const repository = resolveWorkflowDefinitionRepository(env);
+    const published = workflowVersionId ? await repository.getPublished(owner, workflowVersionId) : null;
+    if (!published) return json({ ok: false, reason: "published_workflow_not_found" }, { status: 404 });
+    const runId = action.action === "cancel_run" ? action.runId : String(request?.workflowRunId ?? "");
+    if (!runId) return json({ ok: false, reason: "workflowRunId_required" }, { status: 400 });
+    let row = await store.getRun(owner, runId);
+    if (!row) {
+      const compatibilityDefinition = legacyProjection(published.definition);
+      await store.createRun(owner, { workflowId: published.workflowId, workflowVersionId: published.workflowVersionId, definition: compatibilityDefinition, input: request?.runInput ?? null, state: startControllerRun(compatibilityDefinition, { runId, workflowVersionId: published.workflowVersionId }) });
+      row = await store.getRun(owner, runId);
+    }
+    const resumeEvent = request?.resumeEvent && typeof request.resumeEvent === "object" ? request.resumeEvent as Record<string, unknown> : null;
+    const signedResumeEvent = resumeEvent ? { ...resumeEvent, organizationId: owner.organizationId, subjectId: owner.userId, authenticationEvidenceDigest: digest(`${hostSession?.sessionId ?? owner.userId}:${owner.organizationId}`) } as Record<string, unknown> : undefined;
+    const serverRequest = request ? { ...request, resumeEvent: signedResumeEvent, lease: { leaseId: randomUUID(), ownerId: `api:${owner.userId}`, expiresAt: new Date(Date.now() + 30_000).toISOString() } } : null;
+    if (action.action !== "cancel_run") action = { ...action, request: serverRequest } as WorkflowRunsAction;
+    const readiness = () => resolveStandaloneCapabilityReadiness({ hostSession, approvedCommandIds: approvedCommandIdsFromHostSession(hostSession) });
+    driver = new WorkflowRunDriver({
+      journal: resolveWorkflowRunJournalStore(env), owner, definition: published.definition,
+      initialState: {
+        workflowRunId: runId, organizationId: owner.organizationId,
+        source: { kind: "published", organizationId: owner.organizationId, workflowVersionId: published.workflowVersionId, definitionDigest: published.definitionDigest },
+        status: "ready", revision: 0, eventSequence: 0, selectedPath: [], schedulerFrontier: [published.definition.entryNodeId], outputs: {}, outputRefs: {}, waits: [], compatibilityPhase: "ready", dependencyPins: published.dependencyPins,
+      },
+      runInput: (request?.runInput ?? null) as never,
+      hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
+      resolveReadiness: readiness,
+      resolveDependencyPins: () => published.dependencyPins,
+      executionContext: (node) => ({ subjectId: owner.userId, ...(node.nodeType === "approval" && signedResumeEvent?.kind === "approval" ? { approvalDecision: "approved" as const } : {}) }),
+      approvalDecision: (commitNodeId) => {
+        if (signedResumeEvent?.kind !== "approval") return undefined;
+        const commit = published.definition.nodes.find((node) => node.nodeId === commitNodeId && node.nodeType === "tool_commit");
+        if (!commit?.effectBinding) return undefined;
+        return { decisionId: String(signedResumeEvent.eventId), decision: "approved", runId, approvalNodeId: commit.effectBinding.approvalNodeId, previewNodeId: commit.effectBinding.previewNodeId, commitNodeId, commandId: commit.effectBinding.commandId, logicalEffectId: commit.effectBinding.logicalEffectId, organizationId: owner.organizationId, approverId: owner.userId, grantEvidenceDigest: digest(JSON.stringify(readiness())), resolvedInputHash: commit.effectBinding.resolvedInputHash, issuedAt: String(signedResumeEvent.issuedAt), expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), hostSigned: true };
+      },
+    });
+  }
+  const result = await handleWorkflowRunsAction(action, { hostSession, store, env, driver });
   return json(result, { status: 200 });
 };
+
+function digest(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
+function legacyProjection(definition: import("@sonik-agent-ui/tool-contracts/workflow-vnext").WorkflowVNextDefinition) {
+  const entry = definition.nodes.find((node) => node.nodeId === definition.entryNodeId)!;
+  const nodes = [entry, ...definition.nodes.filter((node) => node !== entry)].map((node) => ({
+    nodeId: node.nodeId,
+    type: node.nodeType === "reasoning" ? "skill" as const : node.nodeType as Exclude<typeof node.nodeType, "reasoning" | "creative" | "promotion">,
+    title: node.nodeId,
+    ...(node.previewEffect?.commandId || node.effectBinding?.commandId ? { commandId: node.previewEffect?.commandId ?? node.effectBinding?.commandId } : {}),
+    effect: node.nodeType === "tool_commit" ? "write" as const : node.nodeType === "tool_preview" ? "read" as const : "none" as const,
+    approvalPolicy: node.nodeType === "tool_commit" ? "preview_then_trusted_approval" as const : "none" as const,
+    requiredHostContext: node.requiredHostContext,
+  }));
+  return { workflowId: definition.workflowId, title: definition.title, triggerPhrases: [], nodes, edges: definition.edges.map((edge) => ({ edgeId: edge.edgeId, from: edge.from, to: edge.to })), requiredSkills: [], requiredCommands: definition.facadeToolIds, facadeToolIds: definition.facadeToolIds, version: "1.0.0" };
+}
