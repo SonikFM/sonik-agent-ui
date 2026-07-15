@@ -10,16 +10,16 @@ import {
 
 const workflow = createEmptyWorkflowDefinition("organizer.test");
 const parameters = [
-  { path: "title", kind: "set_title", label: "Title", type: "text", value: "Original" },
-  { path: "capacity", kind: "set_parameter", label: "Capacity", type: "number", value: 10 },
-  { path: "internal.graph", kind: "set_topology", label: "Graph", type: "text", value: "hidden" },
+  { path: "nodes.identity.config.title", kind: "safe_patch", label: "Title", type: "text", value: "Original" },
+  { path: "parameters.intake.capacity", kind: "parameter_edit", label: "Capacity", type: "number", value: 10 },
+  { path: "nodes.graph.topology", kind: "safe_patch", label: "Graph", type: "text", value: "hidden" },
 ];
 const request = createOrganizerPatchRequest(
   workflow,
   7,
   parameters,
-  ["title", "capacity"],
-  { title: "Updated", capacity: 20, "internal.graph": "rewrite", undeclared: "drop" },
+  ["nodes.identity.config.title", "parameters.intake.capacity", "nodes.graph.topology"],
+  { "nodes.identity.config.title": "Updated", "parameters.intake.capacity": 20, "nodes.graph.topology": "rewrite", undeclared: "drop" },
 );
 assert.deepEqual(request, {
   action: "organizer_patch",
@@ -27,13 +27,13 @@ assert.deepEqual(request, {
   patch: {
     expectedDraftRevision: 7,
     edits: [
-      { kind: "set_title", path: "title", value: "Updated" },
-      { kind: "set_parameter", path: "capacity", value: 20 },
+      { kind: "safe_patch", path: "nodes.identity.config.title", value: "Updated" },
+      { kind: "parameter_edit", path: "parameters.intake.capacity", value: 20 },
     ],
   },
 }, "P2 emits only declared, allowlisted patches and carries the expected revision");
 assert.deepEqual(
-  createOrganizerPatchRequest(workflow, 7, parameters, ["capacity"], { capacity: Number.NaN }).patch.edits,
+  createOrganizerPatchRequest(workflow, 7, parameters, ["parameters.intake.capacity"], { "parameters.intake.capacity": Number.NaN }).patch.edits,
   [],
   "invalid numeric input never crosses the organizer callback boundary",
 );
@@ -78,7 +78,7 @@ assert.doesNotMatch(organizerSource, /nodes|edges|topology/i, "the organizer sur
 for (const action of ["configure", "test", "publish", "approve", "receipt"]) {
   assert.match(organizerSource, new RegExp(action, "i"), `organizer supports ${action} through an injected callback`);
 }
-for (const field of ["correlationId", "events", "approvals", "artifacts", "receipts"]) {
+for (const field of ["history.query", "events", "approvals", "artifacts", "receipts"]) {
   assert.match(historySource, new RegExp(field), `operator history renders typed ${field}`);
 }
 

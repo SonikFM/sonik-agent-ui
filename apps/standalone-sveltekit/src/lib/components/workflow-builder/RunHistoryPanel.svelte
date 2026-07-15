@@ -1,64 +1,83 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import * as Card from "$lib/components/ui/card";
-  import type { OperatorHistoryItem, OperatorRunProjection } from "./organizer-model";
+  import type { WorkflowHistoryProjection } from "./organizer-model";
+
+  type HistoryKind = "event" | "approval" | "artifact" | "receipt";
+  type HistoryItem = WorkflowHistoryProjection["events"][number]
+    | WorkflowHistoryProjection["approvals"][number]
+    | WorkflowHistoryProjection["artifacts"][number]
+    | WorkflowHistoryProjection["receipts"][number];
 
   interface Props {
-    runs?: OperatorRunProjection[];
-    onInspect?: (kind: "event" | "approval" | "artifact" | "receipt", item: OperatorHistoryItem, run: OperatorRunProjection) => void;
+    history?: WorkflowHistoryProjection | null;
+    onInspect?: (kind: HistoryKind, item: HistoryItem) => void;
   }
 
-  let { runs = [], onInspect }: Props = $props();
-
-  const sections = ["events", "approvals", "artifacts", "receipts"] as const;
-
-  function inspect(section: typeof sections[number], item: OperatorHistoryItem, run: OperatorRunProjection): void {
-    onInspect?.(section.slice(0, -1) as "event" | "approval" | "artifact" | "receipt", item, run);
-  }
+  let { history = null, onInspect }: Props = $props();
 </script>
 
 <section class="flex flex-col gap-4" aria-labelledby="operator-history-title" data-run-history-panel>
   <h2 id="operator-history-title" class="text-lg font-semibold">Operator history</h2>
-  {#each runs as run (run.runId)}
+  {#if history}
     <Card.Root>
       <Card.Header>
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <Card.Title>{run.runId}</Card.Title>
-          <Badge variant="outline">{run.status}</Badge>
-        </div>
-        <Card.Description>
-          <span>Correlation ID: <code>{run.correlationId}</code></span>
-          <span class="ml-2">{run.occurredAt}</span>
-        </Card.Description>
+        <Card.Title>Correlation</Card.Title>
+        <Card.Description>Redacted join keys for this operator-history projection.</Card.Description>
       </Card.Header>
-      <Card.Content class="grid gap-4 md:grid-cols-2">
-        {#each sections as section (section)}
-          <div>
-            <h3 class="mb-2 text-sm font-medium capitalize">{section}</h3>
-            {#if run[section].length > 0}
-              <ul class="flex flex-col gap-2">
-                {#each run[section] as item (item.id)}
-                  <li>
-                    <button
-                      type="button"
-                      class="w-full rounded-md border border-border p-2 text-left text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onclick={() => inspect(section, item, run)}
-                    >
-                      <span class="font-medium">{item.type}: {item.label}</span>
-                      {#if item.status}<span class="ml-2 text-muted-foreground">{item.status}</span>{/if}
-                      {#if item.reference}<code class="mt-1 block text-xs">{item.reference}</code>{/if}
-                    </button>
-                  </li>
-                {/each}
-              </ul>
-            {:else}
-              <p class="text-sm text-muted-foreground">None</p>
-            {/if}
-          </div>
+      <Card.Content class="flex flex-wrap gap-2 text-xs">
+        {#each Object.entries(history.query) as [key, value] (key)}
+          {#if value}<Badge variant="outline">{key}: {value}</Badge>{/if}
         {/each}
       </Card.Content>
     </Card.Root>
+
+    <div class="grid gap-4 md:grid-cols-2">
+      <Card.Root>
+        <Card.Header><Card.Title>Events ({history.events.length})</Card.Title></Card.Header>
+        <Card.Content>
+          <ul class="flex flex-col gap-2">
+            {#each history.events as event (event.eventId)}
+              <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("event", event)}><strong>{event.source}</strong> · {event.eventId}<br /><span class="text-muted-foreground">{event.timestamp}{event.status ? ` · ${event.status}` : ""}</span></button></li>
+            {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
+          </ul>
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root>
+        <Card.Header><Card.Title>Approvals ({history.approvals.length})</Card.Title></Card.Header>
+        <Card.Content>
+          <ul class="flex flex-col gap-2">
+            {#each history.approvals as approval (approval.approvalId)}
+              <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("approval", approval)}><strong>{approval.approvalId}</strong> · {approval.status ?? "unknown"}<br /><code class="text-xs">{approval.workflowRunId}/{approval.nodeId}</code></button></li>
+            {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
+          </ul>
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root>
+        <Card.Header><Card.Title>Artifacts ({history.artifacts.length})</Card.Title></Card.Header>
+        <Card.Content>
+          <ul class="flex flex-col gap-2">
+            {#each history.artifacts as artifact (artifact.artifactId)}
+              <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("artifact", artifact)}><strong>{artifact.artifactId}</strong> · {artifact.status ?? "unknown"}<br /><code class="text-xs">{artifact.workflowRunId}/{artifact.nodeId}</code></button></li>
+            {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
+          </ul>
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root>
+        <Card.Header><Card.Title>Receipts ({history.receipts.length})</Card.Title></Card.Header>
+        <Card.Content>
+          <ul class="flex flex-col gap-2">
+            {#each history.receipts as receipt (receipt.receiptId)}
+              <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("receipt", receipt)}><strong>{receipt.receiptId}</strong> · {receipt.status ?? "unknown"}<br /><code class="text-xs">{receipt.workflowRunId}/{receipt.nodeId}</code></button></li>
+            {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
+          </ul>
+        </Card.Content>
+      </Card.Root>
+    </div>
   {:else}
-    <p class="text-sm text-muted-foreground">No workflow runs recorded.</p>
-  {/each}
+    <p class="text-sm text-muted-foreground">No workflow history loaded.</p>
+  {/if}
 </section>

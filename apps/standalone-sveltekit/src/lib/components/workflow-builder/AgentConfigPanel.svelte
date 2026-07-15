@@ -208,7 +208,7 @@
         {/if}
       </div>
       <div
-        class="flex flex-col divide-y divide-border overflow-y-auto rounded-md border border-border {modelCatalogExpanded ? 'max-h-none' : 'max-h-[50rem]'}"
+        class="flex flex-col divide-y divide-border overflow-y-auto rounded-md ring-1 ring-border {modelCatalogExpanded ? 'max-h-none' : 'max-h-[50rem]'}"
         role="listbox"
         aria-label="Model"
         tabindex="0"

@@ -5,10 +5,11 @@ import { isModelIncompatible } from "./builder-model.ts";
 export const COLLAPSED_MODEL_ROW_LIMIT = 10;
 
 export type OrganizerParameterType = "text" | "textarea" | "number" | "boolean";
+export type OrganizerEditKind = "parameter_edit" | "safe_patch";
 
 export interface OrganizerParameter {
   path: string;
-  kind: string;
+  kind: OrganizerEditKind;
   label: string;
   type: OrganizerParameterType;
   value: string | number | boolean;
@@ -20,29 +21,35 @@ export interface OrganizerPatchRequest {
   workflowId: string;
   patch: {
     expectedDraftRevision: number;
-    edits: Array<{ kind: string; path: string; value: string | number | boolean }>;
+    edits: Array<{ kind: OrganizerEditKind; path: string; value: string | number | boolean }>;
   };
 }
 
 export type OrganizerAction = "test" | "publish" | "approve";
 
-export interface OperatorHistoryItem {
-  id: string;
-  type: string;
-  label: string;
-  status?: string;
-  reference?: string;
+export interface WorkflowHistoryQuery {
+  sessionId?: string;
+  conversationRunId?: string;
+  workflowRunId?: string;
+  nodeId?: string;
+  toolCallId?: string;
+  approvalId?: string;
+  artifactId?: string;
+  receiptId?: string;
+  requestId?: string;
+  traceId?: string;
 }
 
-export interface OperatorRunProjection {
-  runId: string;
-  correlationId: string;
-  occurredAt: string;
-  status: string;
-  events: OperatorHistoryItem[];
-  approvals: OperatorHistoryItem[];
-  artifacts: OperatorHistoryItem[];
-  receipts: OperatorHistoryItem[];
+export interface WorkflowHistoryProjection {
+  query: WorkflowHistoryQuery;
+  conversations: Array<{ conversationRunId: string; sessionId: string; messageId?: string; requestId?: string; traceId?: string; startedAt: string; endedAt?: string; status?: string }>;
+  workflows: Array<{ workflowRunId: string; workflowId: string; workflowVersionId: string; sessionId: string; createdAt: string; updatedAt: string; status?: string }>;
+  nodes: Array<{ workflowRunId: string; nodeId: string; status?: string }>;
+  toolCalls: Array<{ toolCallId: string; sessionId: string; messageId?: string; requestId?: string; artifactId?: string; createdAt: string; completedAt?: string; status?: string }>;
+  approvals: Array<{ approvalId: string; workflowRunId: string; nodeId: string; status?: string; timestamp?: string }>;
+  artifacts: Array<{ artifactId: string; workflowRunId: string; nodeId: string; status?: string; timestamp?: string }>;
+  receipts: Array<{ receiptId: string; workflowRunId: string; nodeId: string; status?: string; timestamp?: string }>;
+  events: Array<{ eventId: string; source: string; timestamp: string; status?: string; workflowRunId?: string; nodeId?: string; approvalId?: string; artifactId?: string }>;
 }
 
 export type CatalogModelOption = AgentModelOption & {
@@ -65,6 +72,8 @@ export function createOrganizerPatchRequest(
   const edits = Object.entries(values).flatMap(([path, value]) => {
     const parameter = declared.get(path);
     if (!parameter || !allowed.has(path)) return [];
+    if (parameter.kind === "parameter_edit" && !/^parameters\.[^.]+\..+/.test(path)) return [];
+    if (parameter.kind === "safe_patch" && !/^nodes\.[^.]+\.config\..+/.test(path)) return [];
     const valid = parameter.type === "boolean"
       ? typeof value === "boolean"
       : parameter.type === "number"
