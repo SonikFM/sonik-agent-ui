@@ -49,7 +49,6 @@ export function resolveCapabilityReadiness(input: CapabilityReadinessResolverInp
     const access = evaluateCapabilityAccess({
       registry,
       grants: [...input.grants],
-      revokedCapabilityIds: [...revoked],
       capabilityId: descriptor.capabilityId,
     });
     const policyMode = input.toolPermissionModes?.[descriptor.capabilityId];
