@@ -135,9 +135,12 @@ export async function dispatchWorkflowNode(
     correlationId: request.attemptId,
   });
   const executor = context.executors?.[request.nodeType];
+  const reasoningContract = request.nodeType === "reasoning" ? reasoningExecutionContractSchema.safeParse(context.reasoning) : null;
   const response = parseEngineResponseForRegistry(
     request,
-    executor ? await executor(request) : defaultExecutor(request, context),
+    reasoningContract && !reasoningContract.success
+      ? terminal("reasoning_contract_required", "Reasoning requires structured output and execution budgets with no governed nested writes")
+      : executor ? await executor(request) : defaultExecutor(request, context),
     workflowNodeExecutorRuntimeRegistry,
   );
   context.onAttempt?.({

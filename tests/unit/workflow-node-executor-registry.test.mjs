@@ -5,7 +5,7 @@ import {
 } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
 import { handleWorkflowRunsAction } from "../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts";
 import { createInMemoryWorkflowRunStore, wrapWorkflowRunStoreAsync } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
-import { workflowEffectIdempotencyKey } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import { workflowEffectIdempotencyKey } from "../../packages/tool-contracts/src/workflow-vnext.ts";
 
 const request = (nodeType, extra = {}) => ({
   workflowRunId: "run-registry",
