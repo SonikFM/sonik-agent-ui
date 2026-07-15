@@ -54,7 +54,8 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
       workflows: workflowRows.map(projectWorkflow),
       nodes: workflowRows.flatMap(projectNodes).filter((node) => !query.nodeId || node.nodeId === query.nodeId),
       toolCalls: filteredToolCalls.map(projectToolCall),
-      approvals: workflowRows.flatMap(projectApprovals).filter((approval) => !query.approvalId || approval.approvalId === query.approvalId),
+      approvals: dedupeById([...workflowRows.flatMap(projectApprovals), ...workflowEvents.flatMap(projectEventApproval)], "approvalId")
+        .filter((approval) => !query.approvalId || approval.approvalId === query.approvalId),
       artifacts: projectArtifacts(workflowRows, workflowEvents, artifact).filter((entry) => !query.artifactId || entry.artifactId === query.artifactId),
       receipts: workflowRows.flatMap(projectReceipts).filter((receipt) => !query.receiptId || receipt.receiptId === query.receiptId),
       events: [
@@ -73,13 +74,25 @@ function normalizeQuery(input: WorkflowHistoryQuery): WorkflowHistoryQuery {
 }
 
 function matchesWorkflow(row: WorkflowRunRow, query: WorkflowHistoryQuery, sessionId?: string): boolean {
-  if (query.workflowRunId && row.runId !== query.workflowRunId) return false;
+  if (query.workflowRunId) return row.runId === query.workflowRunId;
   if (!query.workflowRunId && sessionId && row.hostSessionId !== sessionId) return false;
   if (query.nodeId && !row.state.nodeStates[query.nodeId]) return false;
   if (query.approvalId && !projectApprovals(row).some((approval) => approval.approvalId === query.approvalId)) return false;
   if (query.artifactId && row.state.artifactId !== query.artifactId) return false;
   if (query.receiptId && !row.state.receipts.some((receipt) => receipt.receiptRef === query.receiptId)) return false;
   return true;
+}
+
+function projectEventApproval(event: CanonicalWorkflowEvent) {
+  if (event.eventType !== "wait_created" || event.payload.waitpoint.kind !== "approval") return [];
+  return [{
+    approvalId: event.payload.waitpoint.waitpointId, workflowRunId: event.workflowRunId,
+    nodeId: event.payload.waitpoint.nodeId, commandId: null, status: "requested", hostSigned: false,
+  }];
+}
+
+function dedupeById<T extends Record<K, string>, K extends keyof T>(entries: T[], key: K): T[] {
+  return [...new Map(entries.map((entry) => [entry[key], entry])).values()];
 }
 
 function matchesConversation(run: WorkspaceRunRecord, query: WorkflowHistoryQuery): boolean {
