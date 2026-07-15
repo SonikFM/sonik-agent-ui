@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createInMemoryWorkflowRunJournalStore } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
 import { WorkflowRunDriver } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-driver.ts";
+import { hashWorkflowInput } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
 import { handleWorkflowRunsAction } from "../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts";
 import { train0SelectedPathRunState, train0WorkflowFixtures } from "../../packages/tool-contracts/src/workflow-vnext-fixtures.ts";
 
@@ -121,6 +122,8 @@ function approvalDefinition() {
   }
   return definition;
 }
+
+assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({ a: { c: 3, d: 4 }, b: 2 }), "resolved input hashing is canonical across object insertion order");
 
 {
   const definition = approvalDefinition();
@@ -299,15 +302,40 @@ function approvalDefinition() {
   const definition = approvalDefinition();
   definition.nodes.find((node) => node.nodeType === "tool_commit").bindings = { changed: { source: "constant", value: true } };
   let providerCalls = 0;
-  const { runId, driver } = harness(definition, "commit-input-mismatch", {
+  const { runId, driver, journal } = harness(definition, "commit-input-mismatch", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
     executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { providerCalls += 1; throw new Error("must not dispatch"); } } } : {},
   });
+  let claimCalls = 0;
+  const claimEffect = journal.claimEffect.bind(journal);
+  journal.claimEffect = (...args) => { claimCalls += 1; return claimEffect(...args); };
   driver.deps.approvalDecision = () => approvalDecision(runId, definition);
   const denied = await driver.start(request(runId, "commit-input-mismatch-a"));
   assert.equal(denied.compatibilityPhase, "resolved_input_hash_mismatch");
+  assert.equal(claimCalls, 0, "changed commit input is rejected before the durable effect claim");
   assert.equal(providerCalls, 0, "changed commit input is rejected before effect claim and provider dispatch");
+}
+
+{
+  const definition = approvalDefinition();
+  let providerCalls = 0;
+  const { runId, driver, journal } = harness(definition, "preview-output-mismatch", {
+    hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
+    resolveReadiness: () => [readiness("booking.create.booking")],
+    executionContext: (node) => node.nodeType === "tool_preview" ? { executors: { tool_preview: () => {
+      const value = { commandId: "wrong.command", stableInputHash: node.previewEffect.resolvedInputHash, effect: "read", approvalRequired: false };
+      return { status: "succeeded", output: { storage: "inline", value, byteLength: new TextEncoder().encode(JSON.stringify(value)).byteLength } };
+    } } } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { providerCalls += 1; throw new Error("must not dispatch"); } } } : {},
+  });
+  let claimCalls = 0;
+  const claimEffect = journal.claimEffect.bind(journal);
+  journal.claimEffect = (...args) => { claimCalls += 1; return claimEffect(...args); };
+  driver.deps.approvalDecision = () => approvalDecision(runId, definition);
+  const denied = await driver.start(request(runId, "preview-output-mismatch-a"));
+  assert.equal(denied.compatibilityPhase, "preview_output_binding_mismatch");
+  assert.equal(claimCalls, 0);
+  assert.equal(providerCalls, 0);
 }
 
 {
