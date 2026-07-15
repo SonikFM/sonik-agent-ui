@@ -96,6 +96,9 @@ assert.equal(validateWorkflowForPublish(futureBinding, runtimeRegistry).ok, fals
 const mismatchedPreview = structuredClone(definition);
 mismatchedPreview.nodes[1].previewEffect.commandId = "booking.cancel.booking";
 assert.equal(validateWorkflowForPublish(mismatchedPreview, runtimeRegistry).ok, false, "preview and commit bind the same exact effect instance");
+const unpinnedCommitCommand = structuredClone(definition);
+unpinnedCommitCommand.nodes[3].capabilityPins = ["booking.cancel.booking"];
+assert.equal(validateWorkflowForPublish(unpinnedCommitCommand, runtimeRegistry).ok, false, "commit command must be explicitly capability-pinned");
 const invalidConfig = structuredClone(definition);
 invalidConfig.nodes[0].config = "not-an-object";
 assert.equal(validateWorkflowForPublish(invalidConfig, runtimeRegistry).ok, false, "publish validation resolves descriptor config schemas");
