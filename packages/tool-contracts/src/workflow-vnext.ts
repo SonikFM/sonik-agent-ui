@@ -374,7 +374,7 @@ export function parseEngineResponseForRegistry(requestInput: unknown, responseIn
 
 export const approvalDecisionSchema = z.object({
   decisionId: z.string().min(1), decision: z.enum(["approved", "rejected"]), runId: z.string().min(1), approvalNodeId: z.string().min(1),
-  previewNodeId: z.string().min(1), commitNodeId: z.string().min(1), logicalEffectId: z.string().min(1), organizationId: z.string().min(1),
+  previewNodeId: z.string().min(1), commitNodeId: z.string().min(1), commandId: z.string().min(1), logicalEffectId: z.string().min(1), organizationId: z.string().min(1),
   approverId: z.string().min(1), grantEvidenceDigest: sha256DigestSchema, resolvedInputHash: sha256DigestSchema,
   issuedAt: z.string().datetime(), expiresAt: z.string().datetime(), hostSigned: z.literal(true),
 }).strict();
@@ -391,7 +391,7 @@ export function validateApprovalDecisionForCommit(
   const commit = definition.nodes.find((node) => node.nodeId === commitNodeId && node.nodeType === "tool_commit");
   if (!commit?.effectBinding) throw new Error("commit_effect_binding_missing");
   const binding = commit.effectBinding;
-  if (decision.decision !== "approved" || decision.commitNodeId !== commit.nodeId || decision.approvalNodeId !== binding.approvalNodeId || decision.previewNodeId !== binding.previewNodeId || decision.logicalEffectId !== binding.logicalEffectId || decision.resolvedInputHash !== binding.resolvedInputHash) {
+  if (decision.decision !== "approved" || decision.commitNodeId !== commit.nodeId || decision.approvalNodeId !== binding.approvalNodeId || decision.previewNodeId !== binding.previewNodeId || decision.commandId !== binding.commandId || decision.logicalEffectId !== binding.logicalEffectId || decision.resolvedInputHash !== binding.resolvedInputHash) {
     throw new Error("approval_effect_binding_mismatch");
   }
   return decision;

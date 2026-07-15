@@ -115,17 +115,20 @@ assert.equal(engineResponseSchema.safeParse({ status: "succeeded", output: { sto
 
 const approval = {
   decisionId: "decision-1", decision: "approved", runId: "run-1", approvalNodeId: "approve", previewNodeId: "preview",
-  commitNodeId: "commit", logicalEffectId: "booking.create.booking:input-a", organizationId: "org-1", approverId: "user-1",
+  commitNodeId: "commit", commandId: "booking.create.booking", logicalEffectId: "booking.create.booking:input-a", organizationId: "org-1", approverId: "user-1",
   grantEvidenceDigest: digest, resolvedInputHash: digest, issuedAt: "2026-07-15T12:00:00.000Z", expiresAt: "2026-07-15T12:05:00.000Z", hostSigned: true,
 };
 assert.equal(approvalDecisionSchema.safeParse(approval).success, true);
 assert.equal(publicApprovalDecisionRequestSchema.safeParse(approval).success, false, "public DTO rejects hostSigned");
 assert.equal(validateApprovalDecisionForCommit(approval, definition, "commit").decision, "approved");
 assert.throws(() => validateApprovalDecisionForCommit({ ...approval, logicalEffectId: "sibling" }, definition, "commit"), /approval_effect_binding_mismatch/);
+const swappedCommand = structuredClone(definition);
+swappedCommand.nodes[3].effectBinding.commandId = "booking.cancel.booking";
+assert.throws(() => validateApprovalDecisionForCommit(approval, swappedCommand, "commit"), /approval_effect_binding_mismatch/, "approval is invalid after the workflow command changes");
 const { hostSigned: _hostSigned, ...publicApproval } = approval;
 assert.equal(publicApprovalDecisionRequestSchema.safeParse(publicApproval).success, true, "server derives hostSigned after public DTO validation");
 for (const field of [
-  "decisionId", "decision", "runId", "approvalNodeId", "previewNodeId", "commitNodeId", "logicalEffectId",
+  "decisionId", "decision", "runId", "approvalNodeId", "previewNodeId", "commitNodeId", "commandId", "logicalEffectId",
   "organizationId", "approverId", "grantEvidenceDigest", "resolvedInputHash", "issuedAt", "expiresAt", "hostSigned",
 ]) {
   const invalid = structuredClone(approval);
