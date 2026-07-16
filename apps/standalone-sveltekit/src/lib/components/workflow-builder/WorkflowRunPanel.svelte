@@ -243,6 +243,7 @@
       {#if !runId}
         <Button
           onclick={() => void start()}
+          data-workflow-run-action="start"
           disabled={Boolean(busyDisabledState)}
           data-disabled-reason={busyDisabledState?.code}
           aria-describedby={busyDisabledState ? `${disabledReasonIdBase}-busy-disabled` : undefined}
@@ -309,6 +310,7 @@
           <Button
             size="sm"
             onclick={affordance.onApprove}
+            data-workflow-run-action="approve"
             disabled={Boolean(approveDisabledState)}
             data-disabled-reason={approveDisabledState?.code}
             aria-describedby={approveDisabledState ? `${disabledReasonIdBase}-approve-disabled` : undefined}

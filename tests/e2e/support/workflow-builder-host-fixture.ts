@@ -24,6 +24,18 @@ export interface WorkflowBuilderHostFixtureOptions {
 
 const SESSION_ID = "workflow-builder-host-fixture-session";
 const now = "2026-07-14T12:00:00.000Z";
+const definitionDigest = `sha256:${"a".repeat(64)}`;
+const workflowPublishPins = {
+  organizationId: "11111111-1111-4111-8111-111111111111",
+  workflowVersionId: "amplify.campaign.create@0.1.0",
+  definitionDigest,
+  agentPublishedVersionId: "agent@0.1.0",
+  nodeDescriptorsDigest: `sha256:${"b".repeat(64)}`,
+  capabilityVersionsDigest: `sha256:${"c".repeat(64)}`,
+  toolPackVersionsDigest: `sha256:${"d".repeat(64)}`,
+  skillVersionsDigest: `sha256:${"e".repeat(64)}`,
+  runtimePolicyDigest: `sha256:${"f".repeat(64)}`,
+};
 const sessionSummary = {
   id: SESSION_ID,
   name: "Embedded campaign planning",
@@ -102,7 +114,6 @@ export async function installWorkflowBuilderHostFixture(
   let draftRevision = 0;
   let definition: Record<string, unknown> | undefined;
   let published = false;
-  const definitionDigest = `sha256:${"a".repeat(64)}`;
   const recordSignedHeader = (kind: SignedRequestKind, route: Route) => {
     observation.signedHostContextHeaders[kind].push(route.request().headers()["x-sonik-agent-ui-host-context"] ?? "");
   };
@@ -208,7 +219,7 @@ export async function installWorkflowBuilderHostFixture(
   });
 
   await page.waitForFunction(() => Boolean((window as Window & { __sonikAgentUI?: unknown }).__sonikAgentUI));
-  await page.evaluate(({ approvedCommandIds }) => {
+  await page.evaluate(({ approvedCommandIds, workflowPublishPins }) => {
     const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
     window.postMessage({
       source: "sonik-agent-ui-host",
@@ -233,10 +244,10 @@ export async function installWorkflowBuilderHostFixture(
           authenticated: true,
           scopes: ["amplify:write"],
           expiresAt,
-          metadata: { approvedCommandIds },
+          metadata: { approvedCommandIds, workflowPublishPins },
         },
       },
     }, window.location.origin);
-  }, { approvedCommandIds: options.approvedCommandIds ?? [AMPLIFY_CAMPAIGN_COMMAND_ID] });
+  }, { approvedCommandIds: options.approvedCommandIds ?? [AMPLIFY_CAMPAIGN_COMMAND_ID], workflowPublishPins });
   return observation;
 }

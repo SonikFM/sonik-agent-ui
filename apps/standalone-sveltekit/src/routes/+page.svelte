@@ -14,6 +14,7 @@
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, createDefaultHostUiTargetRegistry, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
+  import { workflowDependencyPinsSchema, type WorkflowDependencyPins } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
   import {
     createEmptyAgentRunContextSelection,
     reconcileAgentContextSelection,
@@ -2054,6 +2055,11 @@
     const value = hostPageContext?.hostSession?.metadata?.approvedCommandIds;
     if (!Array.isArray(value)) return [];
     return [...new Set(value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim()))];
+  }
+
+  function getSignedWorkflowPublishPins(): WorkflowDependencyPins | undefined {
+    const parsed = workflowDependencyPinsSchema.safeParse(hostPageContext?.hostSession?.metadata?.workflowPublishPins);
+    return parsed.success ? parsed.data : undefined;
   }
 
 
@@ -4696,6 +4702,7 @@
   {workspaceFetch}
   workspaceContextReady={isWorkspaceHostContextReady()}
   signedHostApprovedCommandIds={getSignedWorkspaceApprovedCommandIds()}
+  workflowPublishPins={getSignedWorkflowPublishPins()}
   onController={(controller) => { builderController = controller; }}
   onExit={() => { workspaceMode = "workspace"; }}
 />
