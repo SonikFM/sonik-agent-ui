@@ -333,9 +333,16 @@
 
   async function handleOrganizerAction(action: OrganizerAction): Promise<void> {
     if (action === "publish") { await publishWorkflow(); return; }
-    saveMessage = action === "test"
-      ? "Testing uses the workflow run controls in the Builder audience."
-      : "Approval truth is shown by the active run and operator history.";
+    const selector = action === "test"
+      ? '[data-workflow-run-action="start"]'
+      : '[data-workflow-run-action="approve"]';
+    const target = document.querySelector<HTMLElement>(selector);
+    target?.focus();
+    saveMessage = target && document.activeElement === target
+      ? `${action === "test" ? "Run" : "Approval"} control focused.`
+      : action === "test"
+        ? "Run controls are available below."
+        : "Start and preview this workflow before reviewing its approval.";
   }
 
   async function refreshWorkflowHistory(extra: Record<string, string> = {}): Promise<void> {
@@ -473,7 +480,9 @@
       {/if}
       <Button variant="outline" onclick={newAgent}>New agent</Button>
       <Button variant="outline" onclick={() => void cloneWorkflow()} disabled={!workflowDraft}>Clone workflow</Button>
-      <Button data-builder-action="publish" variant="outline" onclick={() => void publishWorkflow()} disabled={!workflowDraft || !workflowPublishPins || workflowLifecycle === "dirty" || workflowLifecycle === "invalid" || workflowLifecycle === "saving" || workflowLifecycle === "publishing"} title={workflowPublishPins ? "Publish this saved revision" : "Authoritative dependency pins are required to publish"}>{workflowPublishing ? "Publishing…" : "Publish"}</Button>
+      {#if audience === "builder"}
+        <Button data-builder-action="publish" variant="outline" onclick={() => void publishWorkflow()} disabled={!workflowDraft || !workflowPublishPins || workflowLifecycle === "dirty" || workflowLifecycle === "invalid" || workflowLifecycle === "saving" || workflowLifecycle === "publishing"} title={workflowPublishPins ? "Publish this saved revision" : "Authoritative dependency pins are required to publish"}>{workflowPublishing ? "Publishing…" : "Publish"}</Button>
+      {/if}
       <Button onclick={() => void saveDraft()} disabled={saveStatus === "saving"}>
         {saveStatus === "saving" ? "Saving…" : "Save draft"}
       </Button>
@@ -595,6 +604,12 @@
       onConfigure={(request) => void configureOrganizer(request)}
       onAction={(action) => void handleOrganizerAction(action)}
       onInspectReceipt={(receiptId) => { audience = "history"; void refreshWorkflowHistory({ receiptId }); }}
+    />
+    <WorkflowRunPanel
+      workflow={draftWorkflow}
+      {workspaceFetch}
+      {signedHostApprovedCommandIds}
+      onRunStateChange={handleRunStateChange}
     />
   {:else}
     <div class="flex flex-col gap-3">

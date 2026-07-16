@@ -563,16 +563,16 @@ test("E2E-03 Organizer edits allowlisted fields and preserves the P3 published s
   await page.getByRole("button", { name: "Save configuration" }).click();
   await expect(page.getByText(/Organizer configuration saved at revision/)).toBeVisible();
   await page.getByRole("button", { name: "Test", exact: true }).click();
-  await expect(page.getByText("Testing uses the workflow run controls in the Builder audience.")).toBeVisible();
+  const runPanel = page.locator(`[data-workflow-run-panel="${AMPLIFY_CAMPAIGN_COMMAND_ID}"]`);
+  await expect(runPanel.getByRole("button", { name: "Run", exact: true })).toBeFocused();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await expect(page.locator('[data-workflow-lifecycle="published"]')).toBeVisible();
 
-  await page.getByRole("button", { name: "Builder", exact: true }).click();
-  await page.getByRole("tab", { name: "Canvas" }).click();
-  const runPanel = page.locator(`[data-workflow-run-panel="${AMPLIFY_CAMPAIGN_COMMAND_ID}"]`).first();
   await runPanel.getByRole("button", { name: "Run", exact: true }).click();
   await runPanel.getByRole("button", { name: "Preview", exact: true }).click();
-  await runPanel.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("button", { name: "Review approvals", exact: true }).click();
+  await expect(runPanel.getByRole("button", { name: "Approve", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
   await runPanel.getByRole("button", { name: "Commit", exact: true }).click();
   await page.getByRole("button", { name: "Organizer", exact: true }).click();
   await page.getByRole("button", { name: "campaign-fixture-receipt" }).click();
