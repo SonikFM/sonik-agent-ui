@@ -485,7 +485,7 @@ test("UI-04 keyboard path deletes, validates, publishes, starts, traces, and res
   await openSignedWorkflowBuilder(page, { waitOnStart: true });
   await draftCampaignThroughUi(page);
 
-  await page.getByRole("button", { name: "Add node" }).first().click();
+  await page.keyboard.press("Alt+Shift+A");
   const disposableNode = page.locator('[data-workflow-node-id="node_7"]');
   await disposableNode.focus();
   await disposableNode.press("Delete");
