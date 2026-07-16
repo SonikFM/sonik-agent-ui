@@ -60,8 +60,10 @@ assert.equal(canonicalRow.state.output.status, "updated", "update input and retu
 serializedSafe(canonicalRow, "canonical in-memory workflow run");
 
 const cloudRunQueries = [];
+let cloudRunTransactions = 0;
 const cloudRunStore = createCloudWorkflowRunStore({
   async transaction(operation) {
+    cloudRunTransactions += 1;
     return operation({
       async query(sql, params = []) {
         cloudRunQueries.push({ sql, params });
@@ -76,6 +78,13 @@ await assert.rejects(
   "cloud run creation rejects secret-bearing state before SQL",
 );
 assert.equal(cloudRunQueries.length, 0, "rejected cloud run values never reach SQL");
+await assert.rejects(
+  () => cloudRunStore.updateRunState(owner, runId, { runId, password: sentinel }),
+  /workflow_persistence_secret_rejected/,
+  "cloud run updates reject secret-bearing state before opening a transaction",
+);
+assert.equal(cloudRunTransactions, 0, "rejected cloud run values never open a transaction");
+assert.equal(cloudRunQueries.length, 0, "rejected cloud run updates never reach SQL");
 
 const journal = createInMemoryWorkflowRunJournalStore({ getRun: () => ({}) });
 const externalEffectIdentity = {

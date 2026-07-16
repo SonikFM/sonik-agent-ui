@@ -347,6 +347,7 @@ export function createCloudWorkflowRunStore(executor: WorkspaceSqlExecutor): Asy
   }
 
   async function updateRunState(ownerInput: WorkflowRunOwner, runId: string, state: WorkflowRunState): Promise<WorkflowRunRow | null> {
+    assertWorkflowPersistenceSafe(state);
     return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
       const result = await tx.query<WorkflowRunRowColumns>(`
         update sonik_agent_ui.agent_workflow_runs
