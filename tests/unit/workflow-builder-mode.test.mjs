@@ -519,10 +519,9 @@ assert.match(builderRootSource, /data-builder-action="validate"/);
 assert.match(builderRootSource, /aria-keyshortcuts="Alt\+Shift\+V"/);
 assert.match(builderRootSource, /function activateBuilderAction/);
 assert.match(builderRootSource, /trace\.open = true/);
-assert.match(builderRootSource, /trace\.querySelector<HTMLElement>\("summary"\)/);
-assert.match(builderRootSource, /\[data-workflow-run-resume-action\]/);
+assert.match(builderRootSource, /\[data-workflow-run-trace-row\]/);
+assert.match(builderRootSource, /\[data-workflow-run-resume-answer\]/);
 assert.match(workflowRunPanelSource, /aria-label="Answer for the paused workflow"/);
-assert.match(workflowRunPanelSource, /data-workflow-run-resume-action/);
 assert.match(workflowRunPanelSource, /data-workflow-run-trace-row/);
 
 // -- agent-definitions API: save_draft zod-validates, publish delegates ----
