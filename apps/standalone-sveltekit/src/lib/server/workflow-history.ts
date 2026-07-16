@@ -15,7 +15,7 @@ export type WorkflowHistoryQuery = Partial<Record<(typeof WORKFLOW_HISTORY_QUERY
 const EXACT_WORKFLOW_HISTORY_QUERY_KEYS = ["workflowRunId", "nodeId", "approvalId", "artifactId", "receiptId", "attemptId"] as const;
 
 export function hasExactWorkflowHistoryIdentifier(query: WorkflowHistoryQuery): boolean {
-  return EXACT_WORKFLOW_HISTORY_QUERY_KEYS.some((key) => Boolean(query[key]?.trim()));
+  return Boolean(query.conversationRunId?.trim()) || EXACT_WORKFLOW_HISTORY_QUERY_KEYS.some((key) => Boolean(query[key]?.trim()));
 }
 
 export interface WorkflowHistoryDeps {
@@ -28,7 +28,7 @@ export interface WorkflowHistoryDeps {
 export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps: WorkflowHistoryDeps) {
   const query = normalizeQuery(queryInput);
   if (!Object.keys(query).length) return { ok: false as const, reason: "history_identifier_required" };
-  const hasExactWorkflowIdentifier = hasExactWorkflowHistoryIdentifier(query);
+  const hasExactWorkflowIdentifier = EXACT_WORKFLOW_HISTORY_QUERY_KEYS.some((key) => Boolean(query[key]));
 
   const [workflowCandidates, exactConversation, artifact] = await Promise.all([
     query.workflowRunId
@@ -120,6 +120,7 @@ function dedupeById<T extends Record<K, string>, K extends keyof T>(entries: T[]
 
 function matchesConversation(run: WorkspaceRunRecord, query: WorkflowHistoryQuery, correlationIds: Set<string>): boolean {
   const explicitlyMatched = (!query.conversationRunId || run.id === query.conversationRunId)
+    && (!query.sessionId || run.session_id === query.sessionId)
     && (!query.requestId || run.request_id === query.requestId)
     && (!query.traceId || run.trace_id === query.traceId);
   if (!explicitlyMatched) return false;

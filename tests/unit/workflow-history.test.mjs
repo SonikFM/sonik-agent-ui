@@ -144,7 +144,29 @@ for (const key of ["workflowRunId", "nodeId", "approvalId", "artifactId", "recei
   const exactResult = await getWorkflowHistory({ [key]: queryValues[key] }, { ...identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }), owner: rotatedOwner });
   assert.deepEqual(exactResult.history.workflows.map((run) => run.workflowRunId), [workflowRow.runId], `${key} survives host-session rotation`);
 }
-assert.equal(hasExactWorkflowHistoryIdentifier({ conversationRunId: conversation.id }), false, "workspace identifiers retain session-derived browsing behavior");
+assert.equal(hasExactWorkflowHistoryIdentifier({ conversationRunId: conversation.id }), true, "an exact conversation lookup must not inherit the current host session");
+
+const rotatedConversation = await getWorkflowHistory(
+  { conversationRunId: conversation.id },
+  { ...identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }), owner: rotatedOwner },
+);
+assert.deepEqual(rotatedConversation.history.conversations.map((run) => run.conversationRunId), [conversation.id], "an exact same-owner conversation lookup survives host-session rotation");
+
+const mismatchedConversation = await getWorkflowHistory(
+  { sessionId: rotatedOwner.hostSessionId, conversationRunId: conversation.id },
+  identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+);
+assert.deepEqual(mismatchedConversation.history.conversations, [], "an explicit mismatched session excludes the exact conversation");
+assert.deepEqual(mismatchedConversation.history.toolCalls, [], "an explicit mismatched session excludes conversation tool correlations");
+assert.deepEqual(mismatchedConversation.history.events, [], "an explicit mismatched session excludes conversation events");
+
+const matchedConversation = await getWorkflowHistory(
+  { sessionId: conversation.session_id, conversationRunId: conversation.id },
+  identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+);
+assert.deepEqual(matchedConversation.history.conversations.map((run) => run.conversationRunId), [conversation.id], "an explicit matching session retains the exact conversation");
+assert.deepEqual(matchedConversation.history.toolCalls.map((call) => call.toolCallId), [toolCall.id], "an explicit matching session retains conversation tool correlations");
+assert.deepEqual(matchedConversation.history.events.map((event) => event.eventId), ["conversation-event-a", "workflow-event-a"], "an explicit matching session retains correlated events");
 
 for (const owner of [
   { ...rotatedOwner, userId: "user-foreign" },
