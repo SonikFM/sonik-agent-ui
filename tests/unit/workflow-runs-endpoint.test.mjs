@@ -127,6 +127,57 @@ try {
   const store = wrapWorkflowRunStoreAsync(createInMemoryWorkflowRunStore());
   const deps = (hostSession) => ({ hostSession, store, knowledgeStore });
 
+  // A published run must resolve the exact immutable definition pin. In
+  // particular, a matching internal workflow id must not silently replace an
+  // Organizer-edited published definition with the built-in fixture.
+  const publishedRepository = createInMemoryWorkflowDefinitionRepository();
+  const publishedDefinition = {
+    ...structuredClone(train0WorkflowFixtures.linear),
+    workflowId: "amplify.campaign.create",
+    title: "Organizer-edited published campaign",
+  };
+  const publishedDraft = await publishedRepository.createDraft(owner, publishedDefinition, owner.userId);
+  assert.ok(publishedDraft);
+  const publishedWorkflowVersionId = "amplify.campaign.create@0.1.0";
+  const publishedPins = {
+    ...structuredClone(train0SelectedPathRunState.dependencyPins),
+    organizationId: owner.organizationId,
+    workflowVersionId: publishedWorkflowVersionId,
+    definitionDigest: publishedDraft.definitionDigest,
+  };
+  assert.ok(await publishedRepository.publish(owner, {
+    workflowId: publishedDefinition.workflowId,
+    expectedRevision: publishedDraft.draftRevision,
+    workflowVersionId: publishedWorkflowVersionId,
+    definitionDigest: publishedDraft.definitionDigest,
+    dependencyPins: publishedPins,
+    actorId: owner.userId,
+  }));
+  const publishedStart = await handleWorkflowRunsAction({
+    action: "start",
+    workflowId: publishedDefinition.workflowId,
+    source: {
+      kind: "published",
+      workflowVersionId: publishedWorkflowVersionId,
+      definitionDigest: publishedDraft.definitionDigest,
+    },
+    workflowInput: { campaign: "governed" },
+  }, { ...deps(authenticatedHostSession), repository: publishedRepository });
+  assert.equal(publishedStart.ok, true, "an exact published pin starts successfully");
+  const publishedRow = await store.getRun(owner, publishedStart.run.runId);
+  assert.equal(publishedRow.workflowVersionId, publishedWorkflowVersionId);
+  assert.equal(publishedRow.definition.title, publishedDefinition.title, "the exact published definition drives the run");
+  assert.deepEqual(publishedRow.input, { campaign: "governed" });
+  assert.deepEqual(await handleWorkflowRunsAction({
+    action: "start",
+    workflowId: publishedDefinition.workflowId,
+    source: {
+      kind: "published",
+      workflowVersionId: publishedWorkflowVersionId,
+      definitionDigest: `sha256:${"0".repeat(64)}`,
+    },
+  }, { ...deps(authenticatedHostSession), repository: publishedRepository }), { ok: false, reason: "pinned_workflow_not_found" });
+
   // 1. start: persists a run row keyed by the fixture's own workflowVersionId.
   const started = await handleWorkflowRunsAction({ action: "start", workflowId: "amplify.campaign.create", brief }, deps(authenticatedHostSession));
   assert.equal(started.ok, true, "start must succeed for the registered Amplify campaign workflow");
