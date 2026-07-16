@@ -1,8 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { embeddedHostUrl } from "./support/dev-smoke";
 
-const embedUrl = "/?embedMode=chat&agentUiHostOrigin=http%3A%2F%2Flocalhost%3A5173";
+const embedUrl = embeddedHostUrl();
 
 const historicalSession = sessionSummary({
   id: "g010-historical-session",
@@ -237,7 +238,7 @@ for (const scenario of historyModes) {
       await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: "not_found" }) });
     });
 
-    const url = `/?embedMode=${scenario.mode}&rail=${scenario.rail}&agentUiHostOrigin=http%3A%2F%2Flocalhost%3A5173`;
+    const url = embeddedHostUrl({ mode: scenario.mode, rail: scenario.rail });
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await donateHistoryAuthority(page, { header: "g019-authority-a", revision: 100, hostSessionId: "g019-host-a" });
 

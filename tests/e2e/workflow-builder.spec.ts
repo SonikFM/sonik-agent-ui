@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { amplifyCampaignWorkflowManifest } from "../../packages/tool-contracts/dist/marketplace-fixtures.js";
-import { gotoFreshWorkspace, smokeUrl, submitPrompt, WORKFLOW_DRAFT_SCENARIO } from "./support/dev-smoke";
+import { embeddedHostUrl, gotoFreshWorkspace, smokeUrl, submitPrompt, WORKFLOW_DRAFT_SCENARIO } from "./support/dev-smoke";
 import { AMPLIFY_CAMPAIGN_COMMAND_ID, installWorkflowBuilderHostFixture, postWorkflowBuilderHostContext, type WorkflowBuilderHostFixtureObservation } from "./support/workflow-builder-host-fixture";
 
 // Slice D (production-readiness-agent-creation-2026-07-13.md P1 #7): the
@@ -148,7 +148,7 @@ async function installWorkflowDraftStreamFixture(page: Page): Promise<void> {
   }));
 }
 
-const signedEmbedUrl = "/?embedMode=chat&agentUiHostOrigin=http%3A%2F%2Flocalhost%3A5173";
+const signedEmbedUrl = embeddedHostUrl();
 
 async function openSignedWorkflowBuilder(page: Page, options: { waitOnStart?: boolean } = {}): Promise<WorkflowBuilderHostFixtureObservation> {
   await page.goto(signedEmbedUrl, { waitUntil: "domcontentloaded" });

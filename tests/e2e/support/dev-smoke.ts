@@ -25,6 +25,19 @@ export const DOCUMENT_INTENT_SCENARIO = "document-intent-stream";
 export const DOCUMENT_FAILURE_SCENARIO = "document-failure-stream";
 export const WORKFLOW_DRAFT_SCENARIO = "workflow-draft-stream";
 
+export function embeddedHostUrl(input: {
+  mode?: "chat" | "workspace" | "canvas";
+  rail?: "expanded" | "hidden";
+} = {}): string {
+  const port = process.env.SONIK_AGENT_UI_E2E_PORT ?? "5173";
+  const params = new URLSearchParams({
+    embedMode: input.mode ?? "chat",
+    agentUiHostOrigin: `http://localhost:${port}`,
+  });
+  if (input.rail) params.set("rail", input.rail);
+  return `/?${params.toString()}`;
+}
+
 /** `scenario` omitted (or null) selects the default text-only dev-smoke stream
  *  (dev-smoke-stream.ts's fallback branch -- three text-delta chunks, no tool call). */
 export function smokeUrl(scenario: string | null, extraParams: Record<string, string> = {}): string {

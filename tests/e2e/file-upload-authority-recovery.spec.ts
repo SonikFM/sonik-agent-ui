@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { embeddedHostUrl } from "./support/dev-smoke";
 
 const SESSION_ID = "g018-upload-session";
 const now = "2026-07-14T16:00:00.000Z";
@@ -179,7 +180,7 @@ for (const width of [360, 1100]) {
     const generateObservations: UploadObservation[] = [];
     await page.setViewportSize({ width, height: 820 });
     await installHost(page, observations, generateObservations);
-    await page.goto("/?embedMode=chat&agentUiHostOrigin=http%3A%2F%2Flocalhost%3A5173", { waitUntil: "domcontentloaded" });
+    await page.goto(embeddedHostUrl(), { waitUntil: "domcontentloaded" });
     await expect.poll(() => page.evaluate(() => window.__sonikAgentUI?.getPageContext?.().activeSessionId ?? null)).toBe(SESSION_ID);
 
     const fileInput = page.locator('input[type="file"]').first();

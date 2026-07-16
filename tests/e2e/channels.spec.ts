@@ -1,7 +1,8 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { installChannelsHostFixture } from "./support/channels-host-fixture";
+import { embeddedHostUrl } from "./support/dev-smoke";
 
-const embedUrl = "/?embedMode=chat&agentUiHostOrigin=http%3A%2F%2Flocalhost%3A5173";
+const embedUrl = embeddedHostUrl();
 
 test("contextless embed refuses Channels before any fixture request", async ({ page }) => {
   let channelRequests = 0;

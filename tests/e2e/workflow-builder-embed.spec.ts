@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { embeddedHostUrl } from "./support/dev-smoke";
 import { AMPLIFY_CAMPAIGN_COMMAND_ID, installWorkflowBuilderHostFixture } from "./support/workflow-builder-host-fixture";
 
-const embedUrl = "/?embedMode=chat&agentUiHostOrigin=http%3A%2F%2Flocalhost%3A5173";
+const embedUrl = embeddedHostUrl();
 
 test("embedded chat exposes Workflow Builder and refuses context-less builder cloud calls", async ({ page }) => {
   let modelCatalogRequests = 0;
