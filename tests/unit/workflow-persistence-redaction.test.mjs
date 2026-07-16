@@ -46,6 +46,10 @@ assert.equal(persistedClaim.result.receipt.providerToken, "[REDACTED]");
 assert.equal(persistedClaim.result.output.value.longSafeString, longSafeString, "safe long strings remain byte-for-byte replayable");
 assert.deepEqual(persistedClaim.result.output.value.longSafeList, longSafeList, "safe lists are never telemetry-truncated");
 assert.deepEqual(persistedClaim.result.output.value.deepSafeValue, deepSafeValue, "safe nested JSON preserves its full depth");
+const replayedClaim = await journal.claimEffect(owner, { ...effect, claimId: "claim-redaction-replay", attemptId: "attempt-redaction-replay" });
+assert.equal(replayedClaim.created, false);
+assert.deepEqual(replayedClaim.claim.result.output.value.longSafeList, longSafeList, "idempotent claim replay returns the complete safe payload");
+assert.equal(replayedClaim.claim.result.output.value.longSafeString, longSafeString);
 
 const initial = {
   ...structuredClone(train0SelectedPathRunState),
