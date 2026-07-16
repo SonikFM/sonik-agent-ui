@@ -169,7 +169,7 @@ export function createInMemoryAgentDefinitionStore(): AgentDefinitionStore {
 
   function saveDraft(authority: AgentDefinitionAuthority, definition: AgentDefinition): AgentDefinitionDraftRecord {
     assertAgentDefinitionAuthorized(authority, "edit_draft");
-    const parsed = agentDefinitionSchema.parse(definition);
+    const parsed = agentDefinitionSchema.parse(structuredClone(definition));
     const existing = drafts.get(key(authority, parsed.agentId));
     const record: AgentDefinitionDraftRecord = {
       organizationId: authority.organizationId,
@@ -180,17 +180,18 @@ export function createInMemoryAgentDefinitionStore(): AgentDefinitionStore {
       updatedAt: new Date().toISOString(),
     };
     drafts.set(key(authority, parsed.agentId), record);
-    return record;
+    return structuredClone(record);
   }
 
   function getDraft(authority: AgentDefinitionAuthority, agentId: string, action: "view" | "start" = "view"): AgentDefinitionDraftRecord | null {
     assertAgentDefinitionAuthorized(authority, action);
-    return drafts.get(key(authority, agentId)) ?? null;
+    const draft = drafts.get(key(authority, agentId));
+    return draft ? structuredClone(draft) : null;
   }
 
   function listDrafts(authority: AgentDefinitionAuthority): AgentDefinitionDraftRecord[] {
     assertAgentDefinitionAuthorized(authority, "inspect_org_history");
-    return [...drafts.values()].filter((draft) => draft.organizationId === authority.organizationId);
+    return structuredClone([...drafts.values()].filter((draft) => draft.organizationId === authority.organizationId));
   }
 
   function deleteDraft(authority: AgentDefinitionAuthority, agentId: string): boolean {
@@ -210,20 +211,21 @@ export function createInMemoryAgentDefinitionStore(): AgentDefinitionStore {
     }
     assertSemverAdvancesPast(draft.agentId, input.packageSemver, existing.at(-1)?.packageSemver);
     const version = buildAgentDefinitionPackageVersion(draft.definition, input, packageVersionId);
-    publishedVersions.set(scopedKey, [...existing, version]);
-    return version;
+    publishedVersions.set(scopedKey, [...existing, structuredClone(version)]);
+    return structuredClone(version);
   }
 
   function listPublishedVersions(authority: AgentDefinitionAuthority, agentId: string): MarketplacePackageVersion[] {
     assertAgentDefinitionAuthorized(authority, "view");
-    return publishedVersions.get(key(authority, agentId)) ?? [];
+    return structuredClone(publishedVersions.get(key(authority, agentId)) ?? []);
   }
 
   function resolvePublished(authority: AgentDefinitionAuthority, agentId: string, action: "view" | "start" = "view"): AgentDefinition | null {
     assertAgentDefinitionAuthorized(authority, action);
     const versions = publishedVersions.get(key(authority, agentId));
     if (!versions || versions.length === 0) return null;
-    return versions[versions.length - 1].manifest.payload.agent ?? null;
+    const definition = versions[versions.length - 1].manifest.payload.agent;
+    return definition ? structuredClone(definition) : null;
   }
 
   return { saveDraft, getDraft, listDrafts, deleteDraft, publish, listPublishedVersions, resolvePublished };

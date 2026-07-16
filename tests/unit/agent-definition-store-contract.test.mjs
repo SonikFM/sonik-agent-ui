@@ -66,6 +66,39 @@ async function assertAgentDefinitionStoreContract(store, label) {
 
 await assertAgentDefinitionStoreContract(wrapAgentDefinitionStoreAsync(createInMemoryAgentDefinitionStore()), "in-memory");
 
+const isolatedStore = createInMemoryAgentDefinitionStore();
+const isolatedAuthority = { organizationId: "org-isolation", userId: "user-isolation", scopes: ["agent-definitions:*"] };
+const mutableInput = agentDefinitionSchema.parse({
+  agentId: "sonik.agent.mutation-isolation",
+  title: "Mutation Isolation",
+  toolPolicy: { booking: "allow" },
+  promptModules: { moduleIds: ["core"], overrides: { core: "Original" } },
+  modelPolicy: { modelId: "anthropic/claude-haiku-4.5", requireZdr: true },
+});
+const savedReturn = isolatedStore.saveDraft(isolatedAuthority, mutableInput);
+mutableInput.promptModules.overrides.core = "mutated input";
+savedReturn.definition.promptModules.moduleIds.push("mutated-save-return");
+assert.deepEqual(isolatedStore.getDraft(isolatedAuthority, mutableInput.agentId)?.definition.promptModules, { moduleIds: ["core"], overrides: { core: "Original" } });
+
+const getReturn = isolatedStore.getDraft(isolatedAuthority, mutableInput.agentId);
+getReturn.definition.toolPolicy.booking = "off";
+const listReturn = isolatedStore.listDrafts(isolatedAuthority);
+listReturn[0].definition.modelPolicy.modelId = "mutated-list-return";
+assert.equal(isolatedStore.getDraft(isolatedAuthority, mutableInput.agentId)?.definition.toolPolicy.booking, "allow");
+assert.equal(isolatedStore.getDraft(isolatedAuthority, mutableInput.agentId)?.definition.modelPolicy.modelId, "anthropic/claude-haiku-4.5");
+
+const publishReturn = isolatedStore.publish(isolatedAuthority, { agentId: mutableInput.agentId, packageSemver: "0.1.0" });
+publishReturn.manifest.payload.agent.promptModules.overrides.core = "mutated-publish-return";
+const publishedListReturn = isolatedStore.listPublishedVersions(isolatedAuthority, mutableInput.agentId);
+publishedListReturn[0].manifest.payload.agent.promptModules.moduleIds.push("mutated-published-list-return");
+const resolvedReturn = isolatedStore.resolvePublished(isolatedAuthority, mutableInput.agentId);
+resolvedReturn.modelPolicy.modelId = "mutated-resolve-return";
+isolatedStore.saveDraft(isolatedAuthority, agentDefinitionSchema.parse({ ...mutableInput, title: "Later Draft Edit" }));
+const immutablePublished = isolatedStore.resolvePublished(isolatedAuthority, mutableInput.agentId);
+assert.equal(immutablePublished.title, "Mutation Isolation");
+assert.deepEqual(immutablePublished.promptModules, { moduleIds: ["core"], overrides: { core: "Original" } });
+assert.equal(immutablePublished.modelPolicy.modelId, "anthropic/claude-haiku-4.5");
+
 assert.throws(
   () => assertAgentDefinitionAuthorized(null, "view"),
   /owner_context_required/,
