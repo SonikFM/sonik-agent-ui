@@ -21,9 +21,10 @@ import {
 import { applyWorkflowRunEvent, type WorkflowRunCommandPreview, type WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
 import { workflowDefinitionSchema, type WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
 import { amplifyCampaignWorkflowManifest } from "@sonik-agent-ui/tool-contracts/marketplace-fixtures";
-import { workflowEffectIdempotencyKey, type EngineResponse, type JsonValue, type WorkflowVNextNodeType } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import { workflowEffectIdempotencyKey, workflowNodeAttemptId, type EngineResponse, type JsonValue, type WorkflowVNextNodeType } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import { validateDraftedWorkflow } from "../agent-workflows/drafting-agent.ts";
+import { workflowVNextToDefinition } from "../components/workflow-builder/builder-model.ts";
 import {
   assembleAmplifyCampaignContent,
   commitAmplifyCampaignArtifact,
@@ -37,12 +38,13 @@ import {
   type WorkflowNodeExecutor,
 } from "./workflow-node-executors.ts";
 import type { WorkflowRunDriver } from "./workflow-run-driver.ts";
+import type { WorkflowDefinitionPin, WorkflowDefinitionRepository } from "./workflow-definition-repository.ts";
 import { workflowRunStore, wrapWorkflowRunStoreAsync, type AsyncWorkflowRunStore, type WorkflowRunOwner, type WorkflowRunRow } from "./workflow-run-store.ts";
 
 const AMPLIFY_CAMPAIGN_KNOWLEDGE_STORE_ID = "sonik.knowledge.campaign-artifacts";
 
 export type WorkflowRunsAction =
-  | { action: "start"; runId?: string; workflowId: string; workflow?: unknown; brief?: AmplifyCampaignBrief; artifactId?: string | null }
+  | { action: "start"; runId?: string; workflowId: string; source?: WorkflowDefinitionPin & { organizationId?: string }; workflow?: unknown; workflowInput?: unknown; brief?: AmplifyCampaignBrief; artifactId?: string | null }
   | { action: "preview"; runId: string; nodeId: string }
   | { action: "approve"; runId: string; nodeId: string }
   | { action: "commit"; runId: string; nodeId: string }
@@ -69,6 +71,7 @@ export interface WorkflowRunsDeps {
   nodeExecutors?: Partial<Record<WorkflowVNextNodeType, WorkflowNodeExecutor>>;
   onNodeAttempt?: (event: WorkflowNodeAttemptEvent) => void;
   driver?: WorkflowRunDriver;
+  repository?: WorkflowDefinitionRepository;
 }
 
 export function workflowRunOwnerFromHostSession(hostSession: HostSessionEnvelope | null): WorkflowRunOwner | null {
@@ -158,7 +161,18 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     let workflowVersionId: string;
     let runInput: unknown = null;
 
-    if (registered) {
+    if (action.source?.kind === "published") {
+      if (!deps.repository || (action.source.organizationId && action.source.organizationId !== owner.organizationId)) {
+        return { ok: false, reason: "pinned_workflow_not_found" };
+      }
+      const published = await deps.repository.resolvePin(owner, action.source);
+      if (!published || published.definition.workflowId !== action.workflowId) {
+        return { ok: false, reason: "pinned_workflow_not_found" };
+      }
+      definition = workflowVNextToDefinition(published.definition);
+      workflowVersionId = published.workflowVersionId;
+      runInput = action.workflowInput ?? action.brief ?? null;
+    } else if (registered) {
       definition = registered.definition;
       workflowVersionId = registered.workflowVersionId;
       if (action.workflowId === "amplify.campaign.create") {
@@ -265,7 +279,7 @@ function resolveCallbacks(row: WorkflowRunRow, deps: WorkflowRunsDeps): Workflow
     .filter((node) => node.type === "tool_preview" || node.type === "tool_commit")
     .map((node) => [node.nodeId, async () => {
       const logicalEffectId = node.type === "tool_commit" ? `${node.nodeId}:${node.commandId ?? "unbound"}` : undefined;
-      const attemptId = `${row.runId}:${node.nodeId}:attempt:1`;
+      const attemptId = workflowNodeAttemptId(row.runId, node.nodeId, 1);
       const response = await dispatchWorkflowNode({
         workflowRunId: row.runId,
         workflowVersionId: row.workflowVersionId,

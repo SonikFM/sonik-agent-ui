@@ -20,9 +20,15 @@
     workflow: WorkflowDefinition;
     workspaceFetch: typeof fetch;
     signedHostApprovedCommandIds?: string[];
+    publishedSource?: {
+      kind: "published";
+      organizationId: string;
+      workflowVersionId: string;
+      definitionDigest: string;
+    };
     onRunStateChange?: (workflowId: string, run: WorkflowRunState | null) => void;
   }
-  let { workflow, workspaceFetch, signedHostApprovedCommandIds = [], onRunStateChange }: Props = $props();
+  let { workflow, workspaceFetch, signedHostApprovedCommandIds = [], publishedSource, onRunStateChange }: Props = $props();
 
   const previewNodeId = $derived(workflow.nodes.find((node) => node.type === "tool_preview")?.nodeId ?? null);
   const commitNodeId = $derived(workflow.nodes.find((node) => node.type === "tool_commit")?.nodeId ?? null);
@@ -130,7 +136,11 @@
       const result = await callEndpoint({
         action: "start",
         workflowId: workflow.workflowId,
-        ...(needsCampaignBrief ? { brief: input } : { workflow, workflowInput: input }),
+        ...(publishedSource
+          ? { source: publishedSource, workflowInput: input }
+          : needsCampaignBrief
+            ? { brief: input }
+            : { workflow, workflowInput: input }),
       });
       if (!result.ok || !result.run) {
         statusMessage = result.reason ?? "Run could not be started.";
@@ -226,7 +236,11 @@
   );
 </script>
 
-<Card.Root data-workflow-run-panel={workflow.workflowId}>
+<Card.Root
+  data-workflow-run-panel={workflow.workflowId}
+  data-workflow-run-version={run?.workflowVersionId}
+  data-workflow-definition-digest={(run as (WorkflowRunState & { definitionDigest?: string }) | null)?.definitionDigest}
+>
   <Card.Header>
     <Card.Title>Run</Card.Title>
     <Card.Description>Drive this workflow through the shipped controller: start, preview, approve, commit.</Card.Description>
