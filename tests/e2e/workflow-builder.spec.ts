@@ -158,7 +158,7 @@ async function draftCampaignThroughUi(page: Page): Promise<void> {
   await preview.locator("textarea").fill("Create trigger, ask, preview, approval, commit, and evidence steps");
   await preview.getByRole("button", { name: "Send" }).click();
   await expect(page.getByRole("tab", { name: "Canvas", selected: true })).toBeVisible();
-  await expect(page.locator(`[data-workflow-run-panel="${AMPLIFY_CAMPAIGN_COMMAND_ID}"]`)).toBeVisible();
+  await expect(page.locator(`[data-workflow-run-panel="${AMPLIFY_CAMPAIGN_COMMAND_ID}"]`).first()).toBeVisible();
 }
 
 test("workflow builder mode toggle mounts the builder", async ({ page }) => {
