@@ -1,6 +1,7 @@
 import { sanitizePageContext, type AgentUiPageContextSnapshot } from "@sonik-agent-ui/agent-observability";
 import type { HostSessionEnvelope, PlatformAdapterContext } from "@sonik-agent-ui/platform-adapters";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
+import { workflowDependencyPinsSchema, type WorkflowDependencyPins } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import {
   agentActionChannelVersion,
   createHostActionRequest,
@@ -1026,7 +1027,7 @@ function sanitizePublicHostUiLocator(locator: HostUiTarget["locator"]): HostUiTa
 }
 
 
-type SanitizedHostSessionMetadataValue = string | number | boolean | string[];
+type SanitizedHostSessionMetadataValue = string | number | boolean | string[] | WorkflowDependencyPins;
 
 function sanitizeHostSessionMetadata(value: unknown): Record<string, SanitizedHostSessionMetadataValue> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -1037,6 +1038,14 @@ function sanitizeHostSessionMetadata(value: unknown): Record<string, SanitizedHo
     if (!key) continue;
     const isSignedCommandMetadata = SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS.has(key);
     if (!isSignedCommandMetadata && publicMetadataCount >= MAX_LIST_ITEMS) continue;
+    if (key === "workflowPublishPins") {
+      const parsed = workflowDependencyPinsSchema.safeParse(rawValue);
+      if (parsed.success) {
+        entries.push([key, parsed.data]);
+        publicMetadataCount += 1;
+      }
+      continue;
+    }
     if (typeof rawValue === "boolean" || typeof rawValue === "number") {
       entries.push([key, rawValue]);
       if (!isSignedCommandMetadata) publicMetadataCount += 1;

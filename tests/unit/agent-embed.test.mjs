@@ -185,6 +185,17 @@ const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
   },
 });
 const approvedCommandGrantList = Array.from({ length: 72 }, (_, index) => `booking.generated.${index + 1}`);
+const workflowPublishPins = {
+  organizationId: "org_signed",
+  workflowVersionId: "workflow@1",
+  definitionDigest: `sha256:${"a".repeat(64)}`,
+  agentPublishedVersionId: "agent@1",
+  nodeDescriptorsDigest: `sha256:${"b".repeat(64)}`,
+  capabilityVersionsDigest: `sha256:${"c".repeat(64)}`,
+  toolPackVersionsDigest: `sha256:${"d".repeat(64)}`,
+  skillVersionsDigest: `sha256:${"e".repeat(64)}`,
+  runtimePolicyDigest: `sha256:${"f".repeat(64)}`,
+};
 const signedTrustedSessionWithFullCommandMetadata = sanitizeAgentHostPageContext({
   authenticated: true,
   organizationId: "org_signed",
@@ -203,6 +214,7 @@ const signedTrustedSessionWithFullCommandMetadata = sanitizeAgentHostPageContext
     expiresAt: "2026-06-24T22:10:00.000Z",
     metadata: {
       approvedCommandIds: approvedCommandGrantList,
+      workflowPublishPins,
     },
   },
 });
@@ -219,6 +231,24 @@ assert.deepEqual(
   signedTrustedSessionWithFullCommandMetadata?.hostSession?.metadata?.approvedCommandIds,
   approvedCommandGrantList,
   "full approvedCommandIds hints remain available without reconstructing the opaque authority header",
+);
+assert.deepEqual(
+  signedTrustedSessionWithFullCommandMetadata?.hostSession?.metadata?.workflowPublishPins,
+  workflowPublishPins,
+  "valid named workflowPublishPins survive host-session sanitization without positional encoding",
+);
+const invalidWorkflowPublishPins = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: { approvedCommandIds: ["booking.create.hold"], workflowPublishPins: { ...workflowPublishPins, runtimePolicyDigest: "invalid" } },
+  },
+});
+assert.deepEqual(
+  invalidWorkflowPublishPins?.hostSession?.metadata,
+  { approvedCommandIds: ["booking.create.hold"] },
+  "invalid workflowPublishPins fail closed without dropping approvedCommandIds",
 );
 
 assert.deepEqual(

@@ -402,6 +402,14 @@ function sanitizeHostSessionMetadata(value) {
     if (!key) continue;
     const isSignedCommandMetadata = SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS.has(key);
     if (!isSignedCommandMetadata && publicMetadataCount >= MAX_LIST_ITEMS) continue;
+    if (key === "workflowPublishPins") {
+      const pins = sanitizeWorkflowPublishPins(rawValue);
+      if (pins) {
+        entries.push([key, pins]);
+        publicMetadataCount += 1;
+      }
+      continue;
+    }
     if (typeof rawValue === "boolean" || typeof rawValue === "number") {
       entries.push([key, rawValue]);
       if (!isSignedCommandMetadata) publicMetadataCount += 1;
@@ -423,6 +431,19 @@ function sanitizeHostSessionMetadata(value) {
     }
   }
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+function sanitizeWorkflowPublishPins(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const keys = [
+    "organizationId", "workflowVersionId", "definitionDigest", "agentPublishedVersionId",
+    "nodeDescriptorsDigest", "capabilityVersionsDigest", "toolPackVersionsDigest",
+    "skillVersionsDigest", "runtimePolicyDigest",
+  ];
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !(key in value))) return undefined;
+  if (keys.slice(0, 2).concat("agentPublishedVersionId").some((key) => typeof value[key] !== "string" || value[key].length === 0)) return undefined;
+  const digest = /^sha256:[a-f0-9]{64}$/;
+  if (["definitionDigest", "nodeDescriptorsDigest", "capabilityVersionsDigest", "toolPackVersionsDigest", "skillVersionsDigest", "runtimePolicyDigest"].some((key) => typeof value[key] !== "string" || !digest.test(value[key]))) return undefined;
+  return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 function sanitizeAgentHostActiveEntity(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
