@@ -208,6 +208,37 @@ const exactArtifact = await getWorkflowHistory(
 );
 assert.deepEqual(exactArtifact.history.artifacts.map((artifactEntry) => artifactEntry.artifactId), ["artifact-a"], "an exact artifact without an explicit session retains causal correlation");
 
+for (const [key, exactId, missingId] of [
+  ["nodeId", "commit", "node-missing"],
+  ["approvalId", "approval", "approval-missing"],
+  ["receiptId", "receipt-a", "receipt-missing"],
+]) {
+  for (const [value, message] of [
+    [exactId, `an exact ${key} constrained to a mismatched populated session`],
+    [missingId, `a missing exact ${key} constrained to a populated session`],
+  ]) {
+    const failedCausalLookup = await getWorkflowHistory(
+      { [key]: value, sessionId: decoyConversation.session_id },
+      identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+    );
+    for (const historyKey of ["conversations", "workflows", "nodes", "toolCalls", "approvals", "artifacts", "receipts", "events"]) {
+      assert.deepEqual(failedCausalLookup.history[historyKey], [], `${message} fails closed for ${historyKey}`);
+    }
+  }
+
+  const matchingSession = await getWorkflowHistory(
+    { [key]: exactId, sessionId: conversation.session_id },
+    identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+  );
+  assert.deepEqual(matchingSession.history.workflows.map((run) => run.workflowRunId), [workflowRow.runId], `${key} retains causal history in its matching session`);
+
+  const noSession = await getWorkflowHistory(
+    { [key]: exactId },
+    { ...identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }), owner: rotatedOwner },
+  );
+  assert.deepEqual(noSession.history.workflows.map((run) => run.workflowRunId), [workflowRow.runId], `${key} without a session survives host-session rotation`);
+}
+
 for (const owner of [
   { ...rotatedOwner, userId: "user-foreign" },
   { ...rotatedOwner, organizationId: "org-foreign" },
