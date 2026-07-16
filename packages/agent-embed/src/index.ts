@@ -197,7 +197,7 @@ const MAX_HOST_AUTHORITY_HEADER_LENGTH = 8_192;
 const MAX_HOST_AUTHORITY_JSON_BYTE_LENGTH = MAX_HOST_AUTHORITY_HEADER_LENGTH * 3 / 4;
 const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
 const MAX_HOST_UI_TARGETS = MAX_LIST_ITEMS * 4;
-const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds"]);
+const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds", "workflowPublishPins"]);
 const ALLOWED_CONTEXT_KEYS = new Set([
   "route",
   "surface",
@@ -1042,7 +1042,6 @@ function sanitizeHostSessionMetadata(value: unknown): Record<string, SanitizedHo
       const parsed = workflowDependencyPinsSchema.safeParse(rawValue);
       if (parsed.success) {
         entries.push([key, parsed.data]);
-        publicMetadataCount += 1;
       }
       continue;
     }

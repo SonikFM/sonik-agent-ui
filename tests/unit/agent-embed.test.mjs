@@ -260,6 +260,29 @@ assert.deepEqual(
   workflowPublishPins,
   "valid workflowPublishPins survive after the public metadata cap is reached",
 );
+const signedTrustedSessionWithPinsBeforeFullPublicMetadata = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: {
+      workflowPublishPins,
+      public1: "one",
+      public2: "two",
+      public3: "three",
+      public4: "four",
+      public5: "five",
+      public6: "six",
+      public7: "seven",
+      public8: "eight",
+    },
+  },
+});
+assert.equal(
+  signedTrustedSessionWithPinsBeforeFullPublicMetadata?.hostSession?.metadata?.public8,
+  "eight",
+  "workflowPublishPins do not consume the public metadata allowance",
+);
 const invalidWorkflowPublishPins = sanitizeAgentHostPageContext({
   hostSession: {
     source: "amplify-embedded",
