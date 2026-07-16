@@ -244,7 +244,11 @@ export async function installWorkflowBuilderHostFixture(
           authenticated: true,
           scopes: ["amplify:write"],
           expiresAt,
-          metadata: { approvedCommandIds, workflowPublishPins: Object.values(workflowPublishPins) },
+          metadata: {
+            approvedCommandIds,
+            workflowPublishPins: Object.values(workflowPublishPins).slice(0, 8),
+            workflowPublishRuntimePolicyDigest: workflowPublishPins.runtimePolicyDigest,
+          },
         },
       },
     }, window.location.origin);

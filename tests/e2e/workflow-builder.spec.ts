@@ -578,9 +578,9 @@ test("E2E-03 Organizer edits allowlisted fields and preserves the P3 published s
   await page.getByRole("button", { name: "campaign-fixture-receipt" }).click();
   await expect(page.getByText("Receipts (1)", { exact: true })).toBeVisible();
 
-  const organizerPatch = fixture.workflowDefinitionBodies.find(({ action }) => action === "organizer_patch") as { expectedRevision?: number; patch?: { edits?: Array<{ path: string }> } };
+  const organizerPatch = fixture.workflowDefinitionBodies.find(({ action }) => action === "organizer_patch") as { patch?: { expectedDraftRevision?: number; edits?: Array<{ path: string }> } };
   const publish = fixture.workflowDefinitionBodies.find(({ action }) => action === "publish") as { dependencyPins?: Record<string, unknown> };
-  expect(organizerPatch.expectedRevision).toBeGreaterThan(0);
+  expect(organizerPatch.patch?.expectedDraftRevision).toBeGreaterThan(0);
   expect(organizerPatch.patch?.edits?.map(({ path }) => path)).toEqual(["nodes.trigger.config.title"]);
   expect(Object.keys(p3Definition).sort()).toEqual(["definitionVersion", "edges", "entryNodeId", "facadeToolIds", "nodes", "schemaVersion", "title", "workflowId"].sort());
   expect(publish.dependencyPins).toMatchObject({

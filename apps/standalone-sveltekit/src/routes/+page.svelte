@@ -2069,7 +2069,7 @@
       capabilityVersionsDigest: values[5],
       toolPackVersionsDigest: values[6],
       skillVersionsDigest: values[7],
-      runtimePolicyDigest: values[8],
+      runtimePolicyDigest: hostPageContext?.hostSession?.metadata?.workflowPublishRuntimePolicyDigest,
     });
     return parsed.success ? parsed.data : undefined;
   }
