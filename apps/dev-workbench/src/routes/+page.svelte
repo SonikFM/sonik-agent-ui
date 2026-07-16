@@ -40,7 +40,7 @@
     if (!workspace) {
       const busy = operation === "resuming" || operation === "starting" || operation === "stopping";
       const message = operation === "starting"
-        ? "Cloning the configured repository, installing dependencies, and starting tmux."
+        ? "Creating the sandbox, cloning the repository, installing dependencies, then starting tmux and the preview. First startup usually takes 60–90 seconds; keep this tab open."
         : operation === "resuming"
           ? "Checking for an existing isolated workspace."
           : operation === "stopping"
