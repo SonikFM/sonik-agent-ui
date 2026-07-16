@@ -37,7 +37,9 @@ function harness(definition, suffix, options = {}) {
   const completed = await driver.start(request(runId, "linear-a"));
   assert.equal(completed.status, "succeeded");
   assert.deepEqual(completed.selectedPath, ["start", "work"], "scheduler, not client node IDs, owns traversal");
-  assert.equal((await journal.listEvents(owner, runId)).length, 3, "status plus two node events are canonical and gap-free");
+  const events = await journal.listEvents(owner, runId);
+  assert.equal(events.length, 3, "status plus two node events are canonical and gap-free");
+  assert.equal(events.filter((event) => event.eventType === "node_completed").every((event) => event.attemptId && event.correlationIds.includes(event.attemptId)), true, "node events carry their canonical attempt correlation");
 }
 
 {
@@ -69,12 +71,15 @@ function harness(definition, suffix, options = {}) {
 
 {
   let answered = false;
-  const { runId, driver } = harness(train0WorkflowFixtures.askUser, "ask", {
+  const { runId, driver, journal } = harness(train0WorkflowFixtures.askUser, "ask", {
     executionContext: (node) => node.nodeType === "ask_user" ? { subjectId: owner.userId, ...(answered ? { answer: "Ada" } : {}) } : {},
   });
   const waiting = await driver.start(request(runId, "ask-a"));
   assert.equal(waiting.status, "waiting");
   const waitpoint = waiting.waits[0];
+  const waitEvent = (await journal.listEvents(owner, runId)).find((event) => event.eventType === "wait_created");
+  assert.equal(waitEvent.attemptId, waitpoint.waitpointId, "wait events retain the exact executed attempt identity");
+  assert.equal(waitEvent.correlationIds.includes(waitEvent.attemptId), true);
   answered = true;
   const resumed = await driver.resume({
     ...request(runId, "ask-a"),
@@ -336,6 +341,28 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
   assert.equal(failed.status, "failed");
   assert.equal(failed.compatibilityPhase, "safe_read_retry_exhausted");
   assert.equal(attempts, 3, "safe reads retry only within the fixed attempt bound");
+}
+
+{
+  const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].nodeType = "tool_preview";
+  let attempts = 0;
+  const attemptedIds = [];
+  const { runId, driver, journal } = harness(definition, "retry-success", {
+    executionContext: (node) => node.nodeType === "tool_preview" ? { executors: { tool_preview: (request) => {
+      attempts += 1;
+      attemptedIds.push(request.attemptId);
+      return attempts < 3
+        ? { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }
+        : { status: "succeeded", output: { storage: "inline", value: request.input, byteLength: new TextEncoder().encode(JSON.stringify(request.input)).byteLength } };
+    } } } : {},
+  });
+  const completed = await driver.start(request(runId, "retry-success-a"));
+  assert.equal(completed.status, "succeeded");
+  const event = (await journal.listEvents(owner, runId)).find((candidate) => candidate.eventType === "node_completed" && candidate.subject.id === "work");
+  assert.equal(event.attemptId, attemptedIds.at(-1), "the persisted node event uses the successful executed attempt, not the first request attempt");
+  assert.equal(new Set(attemptedIds).size, 3, "each safe retry has a distinct canonical attempt identity");
+  assert.equal(event.correlationIds.includes(event.attemptId), true);
 }
 
 {

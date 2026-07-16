@@ -538,7 +538,11 @@ export const canonicalWorkflowEventSchema = z.discriminatedUnion("eventType", [
         ? { kind: "effect", id: event.payload.logicalEffectId }
         : { kind: "run", id: event.workflowRunId };
   if (event.subject.kind !== expectedSubject.kind || event.subject.id !== expectedSubject.id) ctx.addIssue({ code: "custom", path: ["subject"], message: "Event subject must match its redacted payload reference" });
-  if (event.attemptId && !event.correlationIds.includes(event.attemptId)) ctx.addIssue({ code: "custom", path: ["correlationIds"], message: "Node attempt identity must be a canonical correlation identifier" });
+  if (event.attemptId) {
+    const nodeId = event.eventType === "node_completed" ? event.payload.nodeId : event.eventType === "wait_created" ? event.payload.waitpoint.nodeId : undefined;
+    if (!nodeId || !isWorkflowNodeAttemptId(event.attemptId, event.workflowRunId, nodeId)) ctx.addIssue({ code: "custom", path: ["attemptId"], message: "Attempt identity must match the event workflow run and node" });
+    if (!event.correlationIds.includes(event.attemptId)) ctx.addIssue({ code: "custom", path: ["correlationIds"], message: "Node attempt identity must be a canonical correlation identifier" });
+  }
 });
 export type CanonicalWorkflowEvent = z.infer<typeof canonicalWorkflowEventSchema>;
 export type CanonicalWorkflowEventUpcaster = (value: Readonly<Record<string, unknown>>) => unknown;

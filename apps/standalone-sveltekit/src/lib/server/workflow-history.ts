@@ -57,7 +57,12 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
   const conversationEvents = correlatedConversationId
     ? await failSoft(() => deps.workspace.listRunEvents(correlatedConversationId), [])
     : [];
-  const attemptNodeIds = new Set(causalWorkflowEvents.flatMap((event) => event.attemptId === query.attemptId && event.subject.kind === "node" ? [event.subject.id] : []));
+  const attemptNodeIds = new Set(causalWorkflowEvents.flatMap((event) => {
+    if (event.attemptId !== query.attemptId) return [];
+    if (event.eventType === "node_completed") return [event.payload.nodeId];
+    if (event.eventType === "wait_created") return [event.payload.waitpoint.nodeId];
+    return [];
+  }));
 
   return {
     ok: true as const,
