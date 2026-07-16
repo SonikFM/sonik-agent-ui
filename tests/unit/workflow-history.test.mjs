@@ -183,6 +183,31 @@ assert.deepEqual(matchedConversation.history.conversations.map((run) => run.conv
 assert.deepEqual(matchedConversation.history.toolCalls.map((call) => call.toolCallId), [toolCall.id], "an explicit matching session retains conversation tool correlations");
 assert.deepEqual(matchedConversation.history.events.map((event) => event.eventId), ["conversation-event-a", "workflow-event-a"], "an explicit matching session retains correlated events");
 
+for (const [artifactId, message] of [
+  ["artifact-a", "an exact artifact constrained to a mismatched populated session"],
+  ["artifact-missing", "a missing exact artifact constrained to a populated session"],
+]) {
+  const failedCausalLookup = await getWorkflowHistory(
+    { sessionId: decoyConversation.session_id, artifactId },
+    identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+  );
+  for (const key of ["conversations", "workflows", "nodes", "toolCalls", "approvals", "artifacts", "receipts", "events"]) {
+    assert.deepEqual(failedCausalLookup.history[key], [], `${message} fails closed for ${key}`);
+  }
+}
+
+const matchedArtifact = await getWorkflowHistory(
+  { sessionId: conversation.session_id, artifactId: "artifact-a" },
+  identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+);
+assert.deepEqual(matchedArtifact.history.artifacts.map((artifactEntry) => artifactEntry.artifactId), ["artifact-a"], "an explicit matching session retains the exact artifact");
+
+const exactArtifact = await getWorkflowHistory(
+  { artifactId: "artifact-a" },
+  identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+);
+assert.deepEqual(exactArtifact.history.artifacts.map((artifactEntry) => artifactEntry.artifactId), ["artifact-a"], "an exact artifact without an explicit session retains causal correlation");
+
 for (const owner of [
   { ...rotatedOwner, userId: "user-foreign" },
   { ...rotatedOwner, organizationId: "org-foreign" },

@@ -53,6 +53,7 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
   ]);
   const hasCausalMatch = (!query.conversationRunId || Boolean(exactConversation && (!query.sessionId || exactConversation.session_id === query.sessionId)))
     && (!query.workflowRunId || workflowRows.length === 1)
+    && (!query.artifactId || Boolean(artifact && (!query.sessionId || artifact.session_id === query.sessionId)))
     && (!query.attemptId || workflowEvents.some((event) => event.attemptId === query.attemptId));
   const causalWorkflowRows = hasCausalMatch ? workflowRows : [];
   const causalWorkflowEvents = hasCausalMatch ? workflowEvents : [];
