@@ -104,6 +104,11 @@ export const boundedNodeOutputSchema = z.discriminatedUnion("storage", [
   z.object({ storage: z.literal("artifact"), artifact: artifactRefSchema }).strict(),
 ]);
 export type BoundedNodeOutput = z.infer<typeof boundedNodeOutputSchema>;
+export const workflowEventOutputRefSchema = z.discriminatedUnion("storage", [
+  z.object({ storage: z.literal("inline_redacted"), digest: sha256DigestSchema, byteLength: z.number().int().nonnegative().max(MAX_INLINE_OUTPUT_BYTES), redactedSummary: z.string().min(1).max(256) }).strict(),
+  z.object({ storage: z.literal("artifact"), artifact: artifactRefSchema }).strict(),
+]);
+export type WorkflowEventOutputRef = z.infer<typeof workflowEventOutputRefSchema>;
 
 export const exactEffectBindingSchema = z.object({
   commandId: z.string().min(1),
@@ -337,7 +342,7 @@ export const workflowRunSourceSchema = z.discriminatedUnion("kind", [
 export const workflowWaitpointSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("answer"), waitpointId: z.string().min(1), runId: z.string().min(1), nodeId: z.string().min(1), subjectId: z.string().min(1), expiresAt: z.string().datetime().optional() }).strict(),
   z.object({ kind: z.literal("approval"), waitpointId: z.string().min(1), runId: z.string().min(1), nodeId: z.string().min(1), subjectId: z.string().min(1), logicalEffectId: z.string().min(1), expiresAt: z.string().datetime() }).strict(),
-  z.object({ kind: z.literal("budget_yield"), waitpointId: z.string().min(1), runId: z.string().min(1), nodeId: z.string().min(1), wakeupReason: z.enum(["node_budget_exhausted", "wall_time_budget_exhausted"]), resumeAfter: z.string().datetime().optional() }).strict(),
+  z.object({ kind: z.literal("budget_yield"), waitpointId: z.string().min(1), runId: z.string().min(1), nodeId: z.string().min(1), wakeupReason: z.enum(["node_budget_exhausted", "wall_time_budget_exhausted"]), outputRef: workflowEventOutputRefSchema.optional(), resumeAfter: z.string().datetime().optional() }).strict(),
 ]);
 export type WorkflowWaitpoint = z.infer<typeof workflowWaitpointSchema>;
 
@@ -362,7 +367,7 @@ export const engineResponseSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("succeeded"), output: boundedNodeOutputSchema, receipt: z.object({ receiptId: z.string().min(1), semanticStatus: z.literal("success") }).strict().optional() }).strict(),
   z.object({ status: z.literal("waiting"), waitpoint: workflowWaitpointSchema }).strict(),
   z.object({ status: z.literal("retryable_error"), error: workflowErrorSchema.refine((error) => error.retrySafe, "retryable errors must be marked retrySafe") }).strict(),
-  z.object({ status: z.literal("terminal_error"), error: workflowErrorSchema }).strict(),
+  z.object({ status: z.literal("terminal_error"), error: workflowErrorSchema, outputRef: workflowEventOutputRefSchema.optional() }).strict(),
 ]);
 export type EngineRequest = z.infer<typeof engineRequestSchema>;
 export type EngineResponse = z.infer<typeof engineResponseSchema>;
@@ -471,10 +476,6 @@ export function isWorkflowNodeAttemptId(attemptId: string, workflowRunId: string
   const prefix = `${workflowRunId}:${nodeId}:`;
   return attemptId.startsWith(prefix) && /^[1-9]\d*$/.test(attemptId.slice(prefix.length));
 }
-export const workflowEventOutputRefSchema = z.discriminatedUnion("storage", [
-  z.object({ storage: z.literal("inline_redacted"), digest: sha256DigestSchema, byteLength: z.number().int().nonnegative().max(MAX_INLINE_OUTPUT_BYTES), redactedSummary: z.string().min(1).max(256) }).strict(),
-  z.object({ storage: z.literal("artifact"), artifact: artifactRefSchema }).strict(),
-]);
 export const workflowVNextRunStateSchema = z.object({
   workflowRunId: z.string().min(1), organizationId: z.string().min(1), source: workflowRunSourceSchema,
   status: workflowRunStatusSchema, revision: z.number().int().nonnegative(), selectedPath: z.array(z.string().min(1)),
@@ -575,7 +576,7 @@ export function replayCanonicalWorkflowEvents(initial: z.infer<typeof workflowVN
     if (event.workflowRunId !== state.workflowRunId || event.sequence !== state.eventSequence + 1 || event.revision !== state.revision + 1) throw new Error("invalid_workflow_event_order");
     if (event.eventType === "run_started") state = { ...state, source: event.payload.source, status: "running" };
     else if (event.eventType === "node_completed") state = { ...state, selectedPath: state.selectedPath.includes(event.payload.nodeId) ? state.selectedPath : [...state.selectedPath, event.payload.nodeId], schedulerFrontier: state.schedulerFrontier.filter((nodeId) => nodeId !== event.payload.nodeId), outputRefs: { ...state.outputRefs, [event.payload.nodeId]: event.payload.outputRef } };
-    else if (event.eventType === "wait_created") state = { ...state, waits: [...state.waits, event.payload.waitpoint], status: "waiting" };
+    else if (event.eventType === "wait_created") state = { ...state, waits: [...state.waits, event.payload.waitpoint], status: "waiting", ...(event.payload.waitpoint.kind === "budget_yield" && event.payload.waitpoint.outputRef ? { outputRefs: { ...state.outputRefs, [event.payload.waitpoint.nodeId]: event.payload.waitpoint.outputRef } } : {}) };
     else if (event.eventType === "run_status_changed") state = { ...state, status: event.payload.status, compatibilityPhase: event.payload.compatibilityPhase };
     state = { ...state, revision: event.revision, eventSequence: event.sequence };
   }

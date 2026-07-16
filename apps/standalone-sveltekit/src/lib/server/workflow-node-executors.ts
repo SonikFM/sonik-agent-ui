@@ -8,8 +8,10 @@ import {
   workflowSchemaRefKey,
   type EngineRequest,
   type EngineResponse,
+  type BoundedNodeOutput,
   type ExternalEffectIdentity,
   type JsonValue,
+  type WorkflowEventOutputRef,
   type WorkflowNodeDescriptor,
   type WorkflowRuntimeRegistry,
   type WorkflowVNextNodeType,
@@ -85,8 +87,17 @@ function inline(value: JsonValue): EngineResponse {
   };
 }
 
-function terminal(code: string, message: string): EngineResponse {
-  return { status: "terminal_error", error: { code, message, retrySafe: false } };
+function terminal(code: string, message: string, outputRef?: WorkflowEventOutputRef): EngineResponse {
+  return { status: "terminal_error", error: { code, message, retrySafe: false }, ...(outputRef ? { outputRef } : {}) };
+}
+
+export function toWorkflowOutputRef(output: BoundedNodeOutput): WorkflowEventOutputRef {
+  return output.storage === "artifact" ? output : {
+    storage: "inline_redacted",
+    digest: `sha256:${createHash("sha256").update(JSON.stringify(output)).digest("hex")}`,
+    byteLength: output.byteLength,
+    redactedSummary: "Reasoning output withheld at budget yield",
+  };
 }
 
 function canonicalJson(value: JsonValue): string {
@@ -164,13 +175,14 @@ export async function dispatchWorkflowNode(
     const usage = context.reasoningUsage ?? { steps: 1, tokens: 0 };
     const elapsed = (context.now ?? Date.now)() - startedAt;
     const inlineBytes = response.status === "succeeded" && response.output.storage === "inline" ? new TextEncoder().encode(JSON.stringify(response.output.value)).byteLength : 0;
+    const outputRef = response.status === "succeeded" ? toWorkflowOutputRef(response.output) : undefined;
     if (usage.steps > reasoningContract.data.budgets.maxSteps || usage.tokens > reasoningContract.data.budgets.maxTokens || elapsed > reasoningContract.data.budgets.maxWallTimeMs) {
-      response = terminal("reasoning_budget_exhausted", "Reasoning exceeded its step, token, or wall-time budget");
+      response = terminal("reasoning_budget_exhausted", "Reasoning exceeded its step, token, or wall-time budget", outputRef);
     }
     if (response.status === "succeeded" && response.output.storage === "inline" && context.inlineOutputByteLimit === undefined) {
       response = terminal("reasoning_output_budget_required", "Reasoning requires an inline output byte budget");
     } else if (response.status === "succeeded" && inlineBytes > context.inlineOutputByteLimit!) {
-      response = terminal("reasoning_output_budget_exhausted", "Reasoning output exceeded its inline byte budget");
+      response = terminal("reasoning_output_budget_exhausted", "Reasoning output exceeded its inline byte budget", outputRef);
     }
   }
   context.onAttempt?.({

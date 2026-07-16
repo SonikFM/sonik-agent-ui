@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createInMemoryWorkflowRunJournalStore } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
 import { WorkflowRunDriver } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-driver.ts";
 import { dispatchWorkflowNode } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
+import { engineResponseSchema } from "../../packages/tool-contracts/src/workflow-vnext.ts";
 import { train0SelectedPathRunState, train0WorkflowFixtures } from "../../packages/tool-contracts/src/workflow-vnext-fixtures.ts";
 
 const owner = { organizationId: "org-1", userId: "user-1" };
@@ -10,6 +11,7 @@ const engineRequest = { workflowRunId: "run-reasoning", workflowVersionId: "work
 
 assert.equal((await dispatchWorkflowNode(engineRequest, {})).error.code, "reasoning_contract_required");
 assert.equal((await dispatchWorkflowNode(engineRequest, { reasoning: { ...contract, nestedCapabilityEffects: ["write"] } })).error.code, "reasoning_contract_required", "nested governed writes fail closed at contract validation");
+assert.equal(engineResponseSchema.safeParse({ status: "terminal_error", error: { code: "reasoning_budget_exhausted", message: "yield", retrySafe: false }, output: { storage: "inline", value: { secret: true }, byteLength: 15 } }).success, false, "terminal budget responses reject raw partial output");
 
 async function governedRun({ usage, output, inlineOutputByteLimit = 64, now, driverNow }) {
   const definition = structuredClone(train0WorkflowFixtures.linear);
@@ -21,7 +23,7 @@ async function governedRun({ usage, output, inlineOutputByteLimit = 64, now, dri
   const context = (node) => node.nodeType === "reasoning" ? { reasoning: contract, reasoningUsage: usage, inlineOutputByteLimit, now, executors: { reasoning: () => ({ status: "succeeded", output }) } } : {};
   const driver = new WorkflowRunDriver({ journal, owner, definition, initialState: state, executionContext: context, now: driverNow });
   const request = { workflowRunId: runId, lease: { leaseId: runId, ownerId: runId, expiresAt: new Date(Date.now() + 60_000).toISOString() }, budget: { maxNodes: 20, maxWallTimeMs: 10_000 } };
-  return { state: await driver.start(request), driver, journal, request };
+  return { state: await driver.start(request), driver, initialState: state, journal, request };
 }
 
 const resumableUsage = { steps: 2, tokens: 1 };
@@ -38,9 +40,13 @@ for (const input of cases) {
   assert.equal(yielded.waits[0].kind, "budget_yield");
   assert.deepEqual(yielded.schedulerFrontier, ["work"], "yield preserves the resumable reasoning frontier");
   assert.equal(yielded.outputs.work, undefined, "rejected reasoning output is not persisted inline at yield");
+  assert.equal(yielded.outputRefs.work.storage, "inline_redacted", "inline reasoning output becomes a bounded redacted reference at yield");
+  assert.equal("value" in yielded.outputRefs.work, false, "yield output reference contains no raw inline value");
   const yieldEvent = (await run.journal.listEvents(owner, yielded.workflowRunId)).at(-1);
   assert.equal(yieldEvent.eventType, "wait_created", "yield is persisted as a canonical event");
   assert.equal(yieldEvent.payload.waitpoint.waitpointId, yielded.waits[0].waitpointId);
+  assert.deepEqual(yieldEvent.payload.waitpoint.outputRef, yielded.outputRefs.work, "canonical yield event contains the same bounded output reference as the snapshot");
+  assert.deepEqual((await run.journal.replayEvents(owner, run.initialState)).outputRefs.work, yielded.outputRefs.work, "canonical event replay reconstructs the yielded output reference");
   resumable ??= run;
 }
 resumableUsage.steps = 1;
@@ -50,6 +56,10 @@ const artifact = { storage: "artifact", artifact: { artifactId: "artifact-reason
 const artifactRun = await governedRun({ usage: { steps: 1, tokens: 1 }, output: artifact, inlineOutputByteLimit: 1 });
 assert.equal(artifactRun.state.status, "succeeded", "large safe output uses ArtifactRef instead of leaking inline data");
 assert.deepEqual(artifactRun.state.outputRefs.work, artifact, "the persisted output reference is the bounded ArtifactRef");
+const artifactYield = await governedRun({ usage: { steps: 2, tokens: 1 }, output: artifact, inlineOutputByteLimit: 1 });
+assert.equal(artifactYield.state.status, "waiting");
+assert.deepEqual(artifactYield.state.outputRefs.work, artifact, "budget yield preserves an exact ArtifactRef");
+assert.deepEqual((await artifactYield.journal.replayEvents(owner, artifactYield.initialState)).outputRefs.work, artifact, "event replay reconstructs the yielded ArtifactRef");
 
 let clock = 0;
 const wallTimeRun = await governedRun({ usage: { steps: 1, tokens: 1 }, output: { storage: "inline", value: { secret: "must-not-persist" }, byteLength: 29 }, driverNow: () => (clock += 101) });
@@ -57,6 +67,7 @@ assert.equal(wallTimeRun.state.status, "waiting", "wall-time exhaustion yields i
 assert.equal(wallTimeRun.state.waits[0].wakeupReason, "wall_time_budget_exhausted");
 assert.equal(wallTimeRun.state.outputs.work, undefined, "wall-time yield does not persist unsafe output");
 assert.equal((await wallTimeRun.journal.listEvents(owner, wallTimeRun.state.workflowRunId)).at(-1).eventType, "wait_created", "wall-time yield is durably evented");
+assert.equal(wallTimeRun.state.outputRefs.work.storage, "inline_redacted", "driver wall-time yield retains only a bounded safe reference");
 
 const ambiguous = structuredClone(train0WorkflowFixtures.conditional);
 ambiguous.nodes[0].bindings = { available: { source: "constant", value: true } };
