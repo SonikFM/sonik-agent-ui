@@ -219,7 +219,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       const claim = effectClaimSchema.parse({ ...input, status: "claimed", createdAt: now, updatedAt: now });
       claims.set(key, claim);
       claimIds.set(effectClaimIdKey(owner, claim.claimId), key);
-      return { created: true, claim };
+      return { created: true, claim: structuredClone(claim) };
     },
     async transitionEffectClaim(ownerInput, claimId, from, to, result) {
       if (!canTransitionEffectClaim(from, to)) throw new Error("invalid_effect_claim_transition");

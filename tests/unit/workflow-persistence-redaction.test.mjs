@@ -34,7 +34,10 @@ await assert.rejects(
   /workflow_persistence_secret_rejected/,
   "attempt persistence rejects secret-shaped identities before claim creation",
 );
-await journal.claimEffect(owner, effect);
+const createdClaim = await journal.claimEffect(owner, effect);
+createdClaim.claim.attemptId = "mutated-created-return";
+const replayedCreatedClaim = await journal.claimEffect(owner, { ...effect, claimId: "claim-redaction-created-replay", attemptId: "attempt-redaction-created-replay" });
+assert.equal(replayedCreatedClaim.claim.attemptId, effect.attemptId, "mutating a newly created claim cannot alter the persisted claim");
 await journal.transitionEffectClaim(owner, effect.claimId, "claimed", "in_flight");
 const longSafeString = "safe-replay-data-".repeat(300);
 const longSafeList = Array.from({ length: 80 }, (_, index) => ({ index, value: `safe-${index}` }));
