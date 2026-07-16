@@ -510,10 +510,19 @@ assert.match(canvasSource, /data-workflow-port="input"/);
 assert.match(canvasSource, /data-workflow-port="output"/);
 assert.match(canvasSource, /function openInspector\(nodeId: string\): void/);
 assert.match(canvasSource, /Workflow is valid\.|Workflow is invalid:/, "canvas mutations announce validation recovery");
+assert.match(canvasSource, /data-builder-action="add"/);
+assert.match(canvasSource, /aria-keyshortcuts="Alt\+Shift\+A"/);
 assert.match(builderRootSource, /beforeunload/);
 assert.match(builderRootSource, /hasUnsavedWorkflowChanges/);
 assert.match(builderRootSource, /data-builder-action="publish"/);
-assert.match(builderRootSource, /focusBuilderAction/);
+assert.match(builderRootSource, /data-builder-action="validate"/);
+assert.match(builderRootSource, /aria-keyshortcuts="Alt\+Shift\+V"/);
+assert.match(builderRootSource, /function activateBuilderAction/);
+assert.match(builderRootSource, /trace\.open = true/);
+assert.match(builderRootSource, /\[data-workflow-run-trace-row\]/);
+assert.match(builderRootSource, /\[data-workflow-run-resume-answer\]/);
+assert.match(workflowRunPanelSource, /aria-label="Answer for the paused workflow"/);
+assert.match(workflowRunPanelSource, /data-workflow-run-trace-row/);
 
 // -- agent-definitions API: save_draft zod-validates, publish delegates ----
 
