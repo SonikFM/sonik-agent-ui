@@ -109,6 +109,16 @@ async function installCapabilityReadinessFixture(page: Page): Promise<void> {
 
 async function installWorkflowDraftStreamFixture(page: Page): Promise<void> {
   const toolCallId = "workflow-builder-e2e-draft";
+  const campaignWorkflow = structuredClone(amplifyCampaignWorkflowManifest.payload.workflow);
+  campaignWorkflow.nodes.push({
+    nodeId: "evidence",
+    type: "evidence",
+    title: "Record campaign artifact evidence",
+    effect: "none",
+    approvalPolicy: "none",
+    requiredHostContext: [],
+  });
+  campaignWorkflow.edges.push({ edgeId: "e5", from: "commit", to: "evidence" });
   const chunks = [
     { type: "tool-input-start", toolCallId, toolName: "draftWorkflow" },
     {
@@ -123,7 +133,7 @@ async function installWorkflowDraftStreamFixture(page: Page): Promise<void> {
       output: {
         kind: "workflow-draft",
         ok: true,
-        workflow: amplifyCampaignWorkflowManifest.payload.workflow,
+        workflow: campaignWorkflow,
       },
     },
   ];
@@ -476,11 +486,11 @@ test("UI-04 keyboard path deletes, validates, publishes, starts, traces, and res
   await draftCampaignThroughUi(page);
 
   await page.getByRole("button", { name: "Add node" }).first().click();
-  const disposableNode = page.locator('[data-workflow-node-id="node_6"]');
+  const disposableNode = page.locator('[data-workflow-node-id="node_7"]');
   await disposableNode.focus();
   await disposableNode.press("Delete");
   await expect(disposableNode).toHaveCount(0);
-  await expect(page.getByText("Deleted node_6. Workflow is valid.")).toBeAttached();
+  await expect(page.getByText("Deleted node_7. Workflow is valid.")).toBeAttached();
 
   const title = page.getByLabel("Workflow title").first();
   await title.fill("");
@@ -546,13 +556,14 @@ test("E2E-01 author journey reloads and governs trigger through correlated evide
   await expect(runPanel.locator("[data-workflow-run-trace]")).toContainText("preview");
   await expect(runPanel.locator("[data-workflow-run-trace]")).toContainText("confirm");
   await expect(runPanel.locator("[data-workflow-run-trace]")).toContainText("commit");
+  await expect(runPanel.locator("[data-workflow-run-trace]")).toContainText("evidence");
 
   await page.getByRole("button", { name: "Organizer", exact: true }).click();
   await page.getByRole("button", { name: "campaign-fixture-receipt" }).click();
   await expect(page.getByText("Artifacts (1)", { exact: true })).toBeVisible();
   await expect(page.getByText("Receipts (1)", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /campaign-fixture-artifact.*workflow-builder-host-fixture-run\/commit/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /campaign-fixture-receipt.*workflow-builder-host-fixture-run\/commit/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /campaign-fixture-artifact.*workflow-builder-host-fixture-run\/evidence/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /campaign-fixture-receipt.*workflow-builder-host-fixture-run\/evidence/ })).toBeVisible();
   expect(fixture.workflowDefinitionActions).toEqual(expect.arrayContaining(["create", "get", "publish"]));
   expect(fixture.workflowRunActions).toEqual(["start", "resume_run", "preview", "approve", "commit"]);
   expect(fixture.historyQueries.at(-1)).toContain("receiptId=campaign-fixture-receipt");
@@ -567,6 +578,10 @@ test("E2E-01 author journey reloads and governs trigger through correlated evide
     },
   });
   expect(fixture.workflowRunBodies[0].workflow).toBeUndefined();
+  const persistedDefinition = fixture.workflowDefinitionBodies
+    .filter(({ definition }) => definition)
+    .at(-1)?.definition as { nodes?: Array<{ nodeType?: string }> };
+  expect(persistedDefinition.nodes?.some(({ nodeType }) => nodeType === "evidence")).toBe(true);
 });
 
 test("E2E-03 Organizer edits allowlisted fields and preserves the P3 published schema", async ({ page }) => {

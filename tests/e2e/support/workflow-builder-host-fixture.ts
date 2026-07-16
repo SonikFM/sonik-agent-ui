@@ -79,6 +79,7 @@ function workflowRun(phase: RunPhase, waiting = false, workflowVersionId = workf
       },
       confirm: { nodeId: "confirm", type: "approval", status: approved ? "approved" : "pending", effect: "none", required: false },
       commit: { nodeId: "commit", type: "tool_commit", status: phase === "committed" ? "committed" : approved ? "approved" : "pending", commandId: AMPLIFY_CAMPAIGN_COMMAND_ID, effect: "write", required: false },
+      evidence: { nodeId: "evidence", type: "evidence", status: phase === "committed" ? "committed" : "pending", effect: "none", required: false },
     },
     approvalState: approved
       ? { status: "approved", hostSigned: true, approvedCommandIds: [AMPLIFY_CAMPAIGN_COMMAND_ID], approvedInputHashes: { [AMPLIFY_CAMPAIGN_COMMAND_ID]: "campaign-hash" } }
@@ -200,8 +201,8 @@ export async function installWorkflowBuilderHostFixture(
         nodes: [],
         toolCalls: [],
         approvals: [{ approvalId: "campaign-fixture-approval", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "confirm", status: "approved" }],
-        artifacts: [{ artifactId: "campaign-fixture-artifact", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "commit", status: "ready" }],
-        receipts: [{ receiptId: "campaign-fixture-receipt", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "commit", status: "committed" }],
+        artifacts: [{ artifactId: "campaign-fixture-artifact", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "evidence", status: "ready" }],
+        receipts: [{ receiptId: "campaign-fixture-receipt", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "evidence", status: "committed" }],
         events: [],
       },
     });

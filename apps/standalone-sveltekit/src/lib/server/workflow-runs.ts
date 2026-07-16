@@ -165,8 +165,10 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
       if (!deps.repository || (action.source.organizationId && action.source.organizationId !== owner.organizationId)) {
         return { ok: false, reason: "pinned_workflow_not_found" };
       }
-      const published = await deps.repository.resolvePin(owner, action.source);
-      if (!published || published.definition.workflowId !== action.workflowId) {
+      const published = await deps.repository.getPublished(owner, action.source.workflowVersionId);
+      if (!published
+        || published.definitionDigest !== action.source.definitionDigest
+        || published.definition.workflowId !== action.workflowId) {
         return { ok: false, reason: "pinned_workflow_not_found" };
       }
       definition = workflowVNextToDefinition(published.definition);
