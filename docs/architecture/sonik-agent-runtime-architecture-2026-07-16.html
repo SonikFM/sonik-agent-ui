@@ -1,0 +1,976 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    name="description"
+    content="Sonik agent runtime architecture: AI SDK Harness, AgentOS, sandboxes, workflows, TUI, voice, and the Sonik product edge."
+  />
+  <title>Sonik Agent Runtime Architecture</title>
+
+  <style>
+    /* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
+    /* Hallmark · macrostructure: Workbench · tone: technical · anchor hue: violet */
+
+    :root {
+      color-scheme: light;
+      --paper: oklch(98.5% 0.005 285);
+      --surface: oklch(100% 0 0);
+      --subtle: oklch(96.5% 0.009 285);
+      --ink: oklch(21% 0.025 285);
+      --muted: oklch(45% 0.024 285);
+      --faint: oklch(61% 0.018 285);
+      --rule: oklch(86% 0.014 285);
+      --accent: oklch(54% 0.2 295);
+      --accent-strong: oklch(43% 0.2 295);
+      --accent-soft: oklch(94% 0.04 295);
+      --positive: oklch(44% 0.12 150);
+      --positive-soft: oklch(95% 0.035 150);
+      --warning: oklch(52% 0.12 75);
+      --warning-soft: oklch(95% 0.045 80);
+      --danger: oklch(49% 0.17 25);
+      --danger-soft: oklch(95% 0.035 25);
+      --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
+      --content: 1180px;
+      --reading: 760px;
+      --radius: 8px;
+      --shadow: 0 8px 24px oklch(20% 0.02 285 / 0.06);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; background: var(--paper); }
+    body {
+      margin: 0;
+      min-width: 320px;
+      overflow-x: clip;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.58;
+      text-rendering: optimizeLegibility;
+    }
+
+    a {
+      color: var(--accent-strong);
+      text-decoration-thickness: 0.08em;
+      text-underline-offset: 0.18em;
+    }
+    a:hover { color: var(--accent); }
+    :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+    .skip-link {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 100;
+      padding: 9px 13px;
+      transform: translateY(-160%);
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--ink);
+      font-weight: 800;
+    }
+    .skip-link:focus { transform: translateY(0); }
+
+    .shell { width: min(calc(100% - 32px), var(--content)); margin-inline: auto; }
+
+    .topbar {
+      border-bottom: 1px solid var(--rule);
+      background: color-mix(in oklch, var(--paper) 94%, transparent);
+    }
+    .topbar__inner {
+      display: flex;
+      min-height: 64px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand { display: flex; align-items: baseline; gap: 10px; color: var(--ink); text-decoration: none; }
+    .brand strong { letter-spacing: -0.02em; }
+    .brand span { color: var(--muted); font: 0.75rem var(--mono); }
+    .button {
+      min-height: 40px;
+      padding: 8px 13px;
+      border: 1px solid var(--rule);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--ink);
+      font: 700 0.88rem var(--font);
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .button:hover { border-color: var(--accent); color: var(--accent-strong); }
+
+    .hero {
+      padding-block: clamp(54px, 8vw, 104px) clamp(44px, 7vw, 82px);
+      border-bottom: 1px solid var(--rule);
+    }
+    .hero__grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.55fr);
+      gap: clamp(32px, 7vw, 88px);
+      align-items: end;
+    }
+    .eyebrow {
+      margin: 0 0 15px;
+      color: var(--accent-strong);
+      font: 800 0.76rem var(--mono);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { margin: 0; line-height: 1.12; text-wrap: balance; }
+    h1 { max-width: 880px; font-size: clamp(2.65rem, 7vw, 5.7rem); letter-spacing: -0.065em; }
+    h2 { font-size: clamp(1.8rem, 3.5vw, 3rem); letter-spacing: -0.045em; }
+    h3 { font-size: clamp(1.05rem, 2vw, 1.35rem); letter-spacing: -0.025em; }
+    .hero__lede {
+      max-width: 780px;
+      margin: 28px 0 0;
+      color: var(--muted);
+      font-size: clamp(1.08rem, 2vw, 1.3rem);
+    }
+    .thesis { padding: 19px 0 0 20px; border-left: 3px solid var(--accent); }
+    .thesis strong { display: block; margin-bottom: 8px; }
+    .thesis p { margin: 0; color: var(--muted); }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 24px;
+      margin-top: 34px;
+      color: var(--faint);
+      font: 0.76rem var(--mono);
+    }
+
+    .local-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--rule);
+      background: color-mix(in oklch, var(--paper) 96%, transparent);
+      backdrop-filter: blur(12px);
+    }
+    .local-nav__inner { display: flex; min-width: max-content; min-height: 50px; align-items: center; gap: 22px; }
+    .local-nav a { color: var(--muted); font-size: 0.83rem; font-weight: 750; text-decoration: none; }
+    .local-nav a:hover { color: var(--accent-strong); }
+
+    main section {
+      padding-block: clamp(58px, 8vw, 96px);
+      border-bottom: 1px solid var(--rule);
+      scroll-margin-top: 58px;
+    }
+    .section-heading {
+      display: grid;
+      grid-template-columns: minmax(180px, 0.45fr) minmax(0, 1fr);
+      gap: clamp(28px, 6vw, 80px);
+      margin-bottom: clamp(34px, 6vw, 62px);
+      align-items: start;
+    }
+    .section-heading p { max-width: var(--reading); margin: 3px 0 0; color: var(--muted); font-size: 1.05rem; }
+    .index { display: block; margin-bottom: 10px; color: var(--accent-strong); font: 800 0.74rem var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+
+    .decision {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 18px;
+      padding: 24px;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      background: var(--accent-soft);
+    }
+    .decision__mark {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: white;
+      font-weight: 900;
+    }
+    .decision h3 { margin-bottom: 8px; }
+    .decision p { margin: 0; color: var(--muted); }
+
+    .diagram {
+      margin-top: 30px;
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .diagram__head { display: flex; justify-content: space-between; gap: 16px; padding: 15px 18px; border-bottom: 1px solid var(--rule); }
+    .diagram__head strong { font-size: 0.9rem; }
+    .diagram__head span { color: var(--faint); font: 0.7rem var(--mono); }
+    .diagram__scroll { overflow-x: auto; padding: clamp(18px, 4vw, 36px); }
+    .mermaid { min-width: 740px; text-align: center; }
+
+    .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+    .finding { padding: 22px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); }
+    .finding h3 { margin-bottom: 13px; }
+    .finding p { margin: 0; color: var(--muted); }
+    .finding ul { margin: 16px 0 0; padding-left: 1.2rem; }
+    .finding li + li { margin-top: 8px; }
+    .finding--good { border-color: color-mix(in oklch, var(--positive) 45%, var(--rule)); background: var(--positive-soft); }
+    .finding--warn { border-color: color-mix(in oklch, var(--warning) 48%, var(--rule)); background: var(--warning-soft); }
+    .finding--risk { border-color: color-mix(in oklch, var(--danger) 42%, var(--rule)); background: var(--danger-soft); }
+
+    .table-wrap { overflow-x: auto; margin-top: 30px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); }
+    table { width: 100%; min-width: 900px; border-collapse: collapse; font-size: 0.9rem; }
+    caption { padding: 16px 18px; color: var(--muted); font-weight: 700; text-align: left; }
+    th, td { padding: 15px 17px; border-top: 1px solid var(--rule); vertical-align: top; text-align: left; }
+    thead th { border-top: 0; background: var(--subtle); color: var(--ink); font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    tbody th { min-width: 174px; color: var(--ink); }
+    td { color: var(--muted); }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 25px;
+      padding: 3px 9px;
+      border: 1px solid var(--rule);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 0.71rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .tag--good { border-color: var(--positive); background: var(--positive-soft); color: var(--positive); }
+    .tag--evaluate { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
+    .tag--caution { border-color: var(--warning); background: var(--warning-soft); color: oklch(42% 0.1 70); }
+
+    .edges {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      margin-top: 30px;
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--rule);
+    }
+    .edge { min-height: 220px; padding: 21px; background: var(--surface); }
+    .edge__number { display: block; margin-bottom: 42px; color: var(--accent-strong); font: 800 0.72rem var(--mono); }
+    .edge h3 { margin-bottom: 9px; font-size: 1rem; }
+    .edge p { margin: 0; color: var(--muted); font-size: 0.89rem; }
+
+    .workbench {
+      display: grid;
+      grid-template-columns: 0.72fr 1.35fr 1fr;
+      grid-template-areas: "goal goal goal" "activity conversation context" "activity composer context";
+      min-height: 600px;
+      overflow: hidden;
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--rule);
+      gap: 1px;
+    }
+    .workbench > article { padding: 22px; background: var(--surface); }
+    .workbench h3 { margin-bottom: 10px; font-size: 0.95rem; }
+    .workbench p, .workbench li { color: var(--muted); font-size: 0.88rem; }
+    .workbench__goal { grid-area: goal; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+    .workbench__activity { grid-area: activity; }
+    .workbench__conversation { grid-area: conversation; }
+    .workbench__composer { grid-area: composer; min-height: 150px; }
+    .workbench__context { grid-area: context; }
+    .event { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 10px; padding-block: 11px; border-bottom: 1px solid var(--rule); }
+    .event:last-child { border-bottom: 0; }
+    .event__dot { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--accent); }
+    .event strong { display: block; font-size: 0.84rem; }
+    .event span { color: var(--faint); font: 0.68rem var(--mono); }
+    .artifact-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+    .artifact { min-height: 220px; padding: 18px; border: 1px solid var(--rule); border-radius: 5px; background: var(--subtle); }
+    .artifact code { color: var(--muted); font: 0.75rem/1.65 var(--mono); }
+
+    .capabilities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 30px; border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
+    .capability { min-height: 185px; padding: 21px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: var(--surface); }
+    .capability .tag { margin-bottom: 28px; }
+    .capability h3 { margin-bottom: 9px; font-size: 1rem; }
+    .capability p { margin: 0; color: var(--muted); font-size: 0.89rem; }
+
+    .phases { margin-top: 28px; border-top: 1px solid var(--rule); }
+    .phase { display: grid; grid-template-columns: 110px minmax(180px, 0.5fr) minmax(0, 1fr); gap: 25px; padding-block: 24px; border-bottom: 1px solid var(--rule); }
+    .phase__id { color: var(--accent-strong); font: 800 0.78rem var(--mono); }
+    .phase h3 { font-size: 1.04rem; }
+    .phase p { margin: 0; color: var(--muted); }
+    .gate { margin-top: 10px; color: var(--positive); font-size: 0.81rem; font-weight: 800; }
+
+    .do-not { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; margin: 28px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
+    .do-not li { position: relative; padding: 17px 0 17px 28px; border-bottom: 1px solid var(--rule); color: var(--muted); }
+    .do-not li::before { content: "×"; position: absolute; left: 0; color: var(--danger); font-size: 1.2rem; font-weight: 900; }
+
+    details { border-top: 1px solid var(--rule); }
+    details:last-child { border-bottom: 1px solid var(--rule); }
+    summary { padding: 18px 2px; font-weight: 800; cursor: pointer; }
+    details p { max-width: var(--reading); color: var(--muted); }
+    .sources { columns: 2; column-gap: 42px; padding-left: 1.2rem; }
+    .sources li { break-inside: avoid; margin-bottom: 12px; color: var(--muted); }
+
+    .closing { padding-block: clamp(64px, 9vw, 116px); }
+    .closing__statement { max-width: 940px; font-size: clamp(1.7rem, 4vw, 3.5rem); font-weight: 800; line-height: 1.18; letter-spacing: -0.045em; text-wrap: balance; }
+    .closing__statement em { color: var(--accent-strong); font-style: normal; }
+    footer { padding-block: 30px; border-top: 1px solid var(--rule); color: var(--faint); font: 0.72rem var(--mono); }
+
+    @media (max-width: 940px) {
+      .hero__grid, .section-heading { grid-template-columns: 1fr; }
+      .edges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .edge:last-child { grid-column: 1 / -1; }
+      .workbench { grid-template-columns: 0.8fr 1.2fr; grid-template-areas: "goal goal" "activity conversation" "activity composer" "context context"; }
+      .capabilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 680px) {
+      .shell { width: min(calc(100% - 24px), var(--content)); }
+      .brand span { display: none; }
+      .split, .do-not, .edges, .capabilities { grid-template-columns: 1fr; }
+      .edge:last-child { grid-column: auto; }
+      .edge { min-height: 0; }
+      .edge__number { margin-bottom: 24px; }
+      .workbench { display: block; }
+      .workbench > article + article { border-top: 1px solid var(--rule); }
+      .workbench__goal { display: block; }
+      .phase { grid-template-columns: 1fr; gap: 8px; }
+      .sources { columns: 1; }
+      h1 { font-size: clamp(2.5rem, 15vw, 4.2rem); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+    }
+
+    @media print {
+      .topbar, .local-nav, .skip-link { display: none !important; }
+      body { background: white; font-size: 11pt; }
+      main section, .hero { padding-block: 30px; }
+      .diagram, .finding, .table-wrap, .workbench { box-shadow: none; break-inside: avoid; }
+      .diagram__scroll, .table-wrap { overflow: visible; }
+      .mermaid, table { min-width: 0; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+
+<body>
+  <a class="skip-link" href="#main">Skip to architecture</a>
+
+  <header class="topbar">
+    <div class="shell topbar__inner">
+      <a class="brand" href="#top" aria-label="Sonik architecture report">
+        <strong>Sonik</strong>
+        <span>Agent runtime architecture / 2026.07</span>
+      </a>
+      <button class="button" id="print-report" type="button">Print report</button>
+    </div>
+  </header>
+
+  <div class="hero" id="top">
+    <div class="shell hero__grid">
+      <div>
+        <p class="eyebrow">Architecture research synthesis</p>
+        <h1>One control plane. Multiple execution depths.</h1>
+        <p class="hero__lede">
+          Sonik should not become another coding harness or workflow engine. It should become the
+          governed workspace that authenticates context, routes work to the correct runtime,
+          preserves every consequential event, and lets people supervise the same agent from web,
+          terminal, voice, or messaging.
+        </p>
+        <div class="meta" aria-label="Report metadata">
+          <span>RESEARCHED 2026-07-16</span>
+          <span>SONIK AGENT UI</span>
+          <span>ARCHITECTURE READINESS</span>
+          <span>OFFICIAL + REPOSITORY SOURCES</span>
+        </div>
+      </div>
+
+      <aside class="thesis">
+        <strong>The recommendation</strong>
+        <p>
+          Keep Sonik’s workflow journal, approvals, host authority, and telemetry as the source of
+          truth. Prove the full coding loop with AI SDK Harness plus a full sandbox. Evaluate AgentOS
+          as a lightweight execution lane—not as a replacement platform.
+        </p>
+      </aside>
+    </div>
+  </div>
+
+  <nav class="local-nav" aria-label="Report sections">
+    <div class="shell local-nav__inner">
+      <a href="#decision">Decision</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#foundation">Foundation</a>
+      <a href="#comparison">Comparison</a>
+      <a href="#agentos">AgentOS</a>
+      <a href="#tools">Tools</a>
+      <a href="#experience">Experience</a>
+      <a href="#sequence">Sequence</a>
+      <a href="#sources">Sources</a>
+    </div>
+  </nav>
+
+  <main id="main">
+    <section id="decision">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">01 / Decision</span><h2>The short answer</h2></div>
+          <p>
+            The architecture is substantially closer than a greenfield six-to-eight-week platform
+            build. Sonik already owns many of the difficult control-plane contracts. The missing
+            work is a bounded execution plane, a truthful capability boundary, and a coherent
+            supervisory experience.
+          </p>
+        </div>
+
+        <div class="decision">
+          <div class="decision__mark" aria-hidden="true">✓</div>
+          <div>
+            <h3>Adopt a two-depth execution model</h3>
+            <p>
+              Start with a full Linux sandbox for the end-to-end vertical slice. Add AgentOS only
+              after its faster lane demonstrates real value for repository analysis, transforms,
+              bindings, and lightweight commands. Both lanes emit Sonik’s normalized run events and
+              remain subordinate to Sonik authorization.
+            </p>
+          </div>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram__head"><strong>Decision posture</strong><span>NOW → PROVE → EXPAND</span></div>
+          <div class="diagram__scroll">
+            <pre class="mermaid">
+flowchart LR
+    A["Now<br/>AI SDK Harness + full sandbox"] --> B["Prove<br/>Repo-aware edit, test, diff, preview"]
+    B --> C{"Acceptance gate passed?"}
+    C -- "No" --> D["Repair contracts and UX<br/>before adding providers"]
+    C -- "Yes" --> E["Evaluate AgentOS fast lane"]
+    E --> F{"Faster or cheaper<br/>without contract loss?"}
+    F -- "Yes" --> G["Route eligible tasks<br/>to AgentOS"]
+    F -- "No" --> H["Keep as research reference"]
+    G --> I["Later<br/>Cloudflare edge and voice channels"]
+    H --> I
+            </pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">02 / Architecture</span><h2>The target system</h2></div>
+          <p>
+            The decisive seam sits between Sonik’s durable, authenticated control plane and
+            provider-specific execution. The UI, TUI, voice agent, and future WhatsApp channel
+            consume the same event and approval protocol.
+          </p>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram__head"><strong>Target topology</strong><span>PROVIDER-NEUTRAL ABOVE THE RUNTIME</span></div>
+          <div class="diagram__scroll">
+            <pre class="mermaid">
+flowchart TB
+    subgraph Channels["Client surfaces"]
+      WEB["Sonik web workspace"]
+      TUI["Terminal UI"]
+      VOICE["Voice client"]
+      MSG["WhatsApp / messaging"]
+    end
+
+    subgraph Control["Sonik control plane — source of truth"]
+      AUTH["Authenticated host context<br/>organization · workspace · grants"]
+      RUN["Agent run contract<br/>goal · repository · sitemap · budget"]
+      JOURNAL["Run event journal<br/>text · reasoning · tools · files · usage"]
+      APPROVAL["Approval and external-effect claims"]
+      OBS["OpenTelemetry and diagnostics"]
+    end
+
+    subgraph Runtime["Execution selection"]
+      ROUTE{"Execution depth"}
+      FAST["AgentOS fast lane<br/>bindings · transforms · lightweight commands"]
+      FULL["AI SDK Harness<br/>Workflow Harness + full sandbox"]
+      LOCAL["Trusted local developer mode"]
+    end
+
+    subgraph Infra["Provider infrastructure"]
+      VERCEL["Vercel Sandbox"]
+      CF["Cloudflare Sandbox / Durable Object"]
+    end
+
+    subgraph Outputs["Durable outcomes"]
+      DIFF["Files and diffs"]
+      PREVIEW["Signed live preview"]
+      TESTS["Tests and verification"]
+      ARTIFACTS["Documents and structured artifacts"]
+    end
+
+    WEB --> AUTH
+    TUI --> AUTH
+    VOICE --> AUTH
+    MSG --> AUTH
+    AUTH --> RUN
+    RUN --> ROUTE
+    ROUTE --> FAST
+    ROUTE --> FULL
+    ROUTE --> LOCAL
+    FULL --> VERCEL
+    FULL -. "future adapter" .-> CF
+    FAST --> JOURNAL
+    VERCEL --> JOURNAL
+    CF --> JOURNAL
+    LOCAL --> JOURNAL
+    JOURNAL --> APPROVAL
+    APPROVAL --> RUN
+    JOURNAL --> OBS
+    JOURNAL --> DIFF
+    JOURNAL --> PREVIEW
+    JOURNAL --> TESTS
+    JOURNAL --> ARTIFACTS
+    DIFF --> WEB
+    PREVIEW --> WEB
+    TESTS --> TUI
+    ARTIFACTS --> VOICE
+            </pre>
+          </div>
+        </div>
+
+        <div class="edges" aria-label="Sonik competitive edges">
+          <article class="edge"><span class="edge__number">EDGE 01</span><h3>Host-aware authority</h3><p>Signed workspace identity and explicit grants replace prompt-inferred authority.</p></article>
+          <article class="edge"><span class="edge__number">EDGE 02</span><h3>Execution routing</h3><p>Lightweight work avoids a full container while native and hot-server work escalates.</p></article>
+          <article class="edge"><span class="edge__number">EDGE 03</span><h3>Truthful tools</h3><p>Operators see only capabilities that are mounted, supported, authorized, and callable.</p></article>
+          <article class="edge"><span class="edge__number">EDGE 04</span><h3>Surface continuity</h3><p>Web, terminal, voice, and messaging reconnect to the same durable session.</p></article>
+          <article class="edge"><span class="edge__number">EDGE 05</span><h3>Outcome supervision</h3><p>Goals, activity, diffs, previews, approvals, and verification define the experience.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="foundation">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">03 / Foundation</span><h2>What Sonik already owns</h2></div>
+          <p>
+            The repository already contains the bones of a serious workflow control plane.
+            Replacing these with another framework would add migration risk and divide authority
+            across multiple sources of truth.
+          </p>
+        </div>
+
+        <div class="split">
+          <article class="finding finding--good">
+            <h3>Existing hard contracts</h3>
+            <ul>
+              <li>Workflow nodes, bindings, waitpoints, budgets, and leases</li>
+              <li>Replay, approval, idempotency, and external-effect claims</li>
+              <li>Lease-fenced compare-and-swap run driver</li>
+              <li>Durable workflow and run-event storage</li>
+              <li>Text, reasoning, tool, artifact, error, and usage events</li>
+              <li>Workflow, trace, run, and session telemetry correlation</li>
+              <li>Reusable workspace, chat, canvas, and devtools surfaces</li>
+            </ul>
+          </article>
+
+          <article class="finding finding--warn">
+            <h3>Missing execution seams</h3>
+            <ul>
+              <li>Concrete workflow executors beyond current stubs</li>
+              <li>Sandbox lifecycle and attachment contract</li>
+              <li>PTY, process, file, diff, preview, and network events</li>
+              <li>Repository and sitemap identity in the run context</li>
+              <li>Resumable live SSE or WebSocket transport</li>
+              <li>Provider capability and readiness reporting</li>
+              <li>Delayed retry and queue conformance</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <caption>Recommended ownership boundaries</caption>
+            <thead><tr><th>Concern</th><th>System of record</th><th>Runtime responsibility</th><th>Decision</th></tr></thead>
+            <tbody>
+              <tr><th>Identity and grants</th><td>Sonik host context</td><td>Receive scoped, serialized authority</td><td><span class="tag tag--good">Keep</span></td></tr>
+              <tr><th>Run lifecycle</th><td>Sonik workflow run journal</td><td>Attach, execute, suspend, and report</td><td><span class="tag tag--good">Keep</span></td></tr>
+              <tr><th>Human approval</th><td>Sonik approval contract</td><td>Pause pending authoritative decision</td><td><span class="tag tag--good">Keep</span></td></tr>
+              <tr><th>Tool execution</th><td>Sonik capability manifest</td><td>Expose only runtime-supported tools</td><td><span class="tag tag--evaluate">Extend</span></td></tr>
+              <tr><th>Processes and files</th><td>Execution provider</td><td>Run commands and emit normalized events</td><td><span class="tag tag--evaluate">Add</span></td></tr>
+              <tr><th>Chat, TUI, voice</th><td>Sonik session transport</td><td>Render the same event stream</td><td><span class="tag tag--evaluate">Unify</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="comparison">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">04 / Comparison</span><h2>Runtime landscape</h2></div>
+          <p>
+            These projects solve different layers. Treating them as interchangeable agent platforms
+            hides the distinctions that matter: Linux fidelity, durability ownership, capability
+            translation, security maturity, and overlap with Sonik.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <caption>Qualitative comparison; vendor benchmark claims are not used as decision evidence</caption>
+            <thead><tr><th>Option</th><th>Best at</th><th>Hot server / native tooling</th><th>Durability</th><th>Primary constraint</th><th>Sonik role</th></tr></thead>
+            <tbody>
+              <tr><th>AI SDK Harness + Vercel Sandbox</th><td>Codex events, full Linux, preview ports, workflow slicing</td><td>Strong</td><td>Workflow Harness reattaches across durable steps</td><td>Codex tool and approval limitations must remain visible</td><td><span class="tag tag--good">First vertical slice</span></td></tr>
+              <tr><th>Rivet AgentOS</th><td>Lightweight VMs, bindings, sessions, transcripts, multiplayer</td><td>Limited: no file watching, Docker, or arbitrary binaries</td><td>Filesystem and session records persist; processes do not</td><td>Security review and Codex integration are beta</td><td><span class="tag tag--evaluate">Fast-lane prototype</span></td></tr>
+              <tr><th>Cloudflare Worker + Sandbox</th><td>Global ingress, workspace coordination, edge channels</td><td>Strong through Sandbox containers</td><td>Durable Object coordinates state and connections</td><td>Requires a Sonik harness adapter</td><td><span class="tag tag--evaluate">Later edge provider</span></td></tr>
+              <tr><th>Vercel Eve</th><td>Filesystem-first authoring, replayable sessions, shared web/TUI protocol</td><td>Integrated framework model</td><td>Durable session, turn, step, and continuation concepts</td><td>Beta framework with substantial Sonik overlap</td><td><span class="tag">UX reference</span></td></tr>
+              <tr><th>Daytona</th><td>Managed workspaces, PTY, preview URLs, lifecycle UX</td><td>Strong</td><td>Managed workspace lifecycle</td><td>Public core retired; private-source direction needs diligence</td><td><span class="tag">Provider reference</span></td></tr>
+              <tr><th>Trusted local process</th><td>Lowest-friction development against a local checkout</td><td>Full host capabilities</td><td>Sonik owns reconnection and cleanup</td><td>Not a tenant-safe security boundary</td><td><span class="tag tag--caution">Developer mode only</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram__head"><strong>Selection rule</strong><span>ROUTE BY TASK REQUIREMENT</span></div>
+          <div class="diagram__scroll">
+            <pre class="mermaid">
+flowchart TD
+    A["Agent task"] --> B{"Needs a native binary,<br/>browser, Docker, file watch,<br/>or long-running hot server?"}
+    B -- "Yes" --> C["Full sandbox lane"]
+    B -- "No" --> D{"Needs repository files,<br/>bindings, transforms,<br/>or lightweight commands?"}
+    D -- "Yes" --> E["AgentOS fast-lane candidate"]
+    D -- "No" --> F{"Read-only reasoning<br/>or structured output?"}
+    F -- "Yes" --> G["Model call without sandbox"]
+    F -- "No" --> C
+    C --> H["AI SDK Harness<br/>Vercel first"]
+    H -. "future" .-> I["Cloudflare or other provider"]
+    E --> J{"AgentOS security and<br/>acceptance gates pass?"}
+    J -- "Yes" --> K["Use fast lane"]
+    J -- "No" --> C
+            </pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="agentos">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">05 / AgentOS</span><h2>What AgentOS changes</h2></div>
+          <p>
+            AgentOS makes a two-depth execution plane credible. It is not a complete replacement for
+            a Linux sandbox, but its virtualized kernel, bindings, sessions, network controls, and
+            multiplayer events could make routine agent work dramatically lighter.
+          </p>
+        </div>
+
+        <div class="split">
+          <article class="finding finding--good">
+            <h3>Why it matters</h3>
+            <ul>
+              <li>In-process or sidecar virtual machine architecture</li>
+              <li>Virtual filesystem, processes, pipes, PTYs, and sockets</li>
+              <li>Deny-by-default mounts, network, and host process access</li>
+              <li>Long-lived, streamed, replayable agent sessions</li>
+              <li>Host functions exposed as typed CLI bindings</li>
+              <li>Broadcast events for observers and copilots</li>
+              <li>Signed preview URLs and full-sandbox escalation</li>
+            </ul>
+          </article>
+
+          <article class="finding finding--risk">
+            <h3>Why it cannot be the only lane</h3>
+            <ul>
+              <li>No arbitrary apt, yum, or binary installation</li>
+              <li>No Docker, kernel modules, eBPF, GPU, or hardware access</li>
+              <li>No inotify or filesystem watching</li>
+              <li>Running processes and shells do not survive VM sleep</li>
+              <li>Codex adapter is beta</li>
+              <li>Security model is still undergoing review</li>
+              <li>Host bindings carry full authority if mis-scoped</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram__head"><strong>AgentOS integration boundary</strong><span>EXECUTION PROVIDER, NOT CONTROL PLANE</span></div>
+          <div class="diagram__scroll">
+            <pre class="mermaid">
+sequenceDiagram
+    actor Operator
+    participant UI as Sonik Workbench
+    participant Control as Sonik Control Plane
+    participant AgentOS as AgentOS VM
+    participant Binding as Sonik Binding Gateway
+    participant Store as Sonik Run Journal
+
+    Operator->>UI: Start repository task
+    UI->>Control: Goal + repository + grants
+    Control->>AgentOS: Create scoped session
+    AgentOS-->>Store: Session-start event
+    AgentOS->>Binding: list-tools
+    Binding-->>AgentOS: Callable manifest only
+    AgentOS->>Binding: Invoke typed command
+    Binding->>Control: Preflight authority and approval
+    alt Approval required
+      Control-->>UI: Approval request
+      Operator->>UI: Approve or deny
+      UI->>Control: Authoritative decision
+    end
+    Control-->>Binding: Execution claim
+    Binding-->>AgentOS: Normalized result
+    AgentOS-->>Store: Tool, file, text, and usage events
+    Store-->>UI: Resumable event stream
+            </pre>
+          </div>
+        </div>
+
+        <details>
+          <summary>AgentOS adoption rule</summary>
+          <p>
+            Prototype the smallest core or sidecar integration and translate its session events into
+            Sonik run events. Do not adopt Rivet workflow or actor state as a second authoritative
+            workflow ledger. Host bindings must pass the same Sonik grant, approval, idempotency, and
+            external-effect checks as every other command.
+          </p>
+        </details>
+        <details>
+          <summary>Benchmark interpretation</summary>
+          <p>
+            AgentOS publishes compelling start-time and density claims. They are vendor-supplied and
+            directional. Sonik should evaluate them using its own repository sizes, command mix,
+            concurrency, model latency, and audit requirements before making a product promise.
+          </p>
+        </details>
+      </div>
+    </section>
+
+    <section id="tools">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">06 / Tools</span><h2>Fixing the capability disconnect</h2></div>
+          <p>
+            A tool appearing in a global catalog does not mean the current model can call it. The UI
+            must derive availability from registration, mounting, provider support, authorization,
+            approval policy, credentials, and runtime health.
+          </p>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram__head"><strong>Truthful tool availability</strong><span>CATALOG ≠ CALLABLE</span></div>
+          <div class="diagram__scroll">
+            <pre class="mermaid">
+flowchart LR
+    A["Registered<br/>capability"] --> B{"Mounted in this<br/>workspace?"}
+    B -- "No" --> X1["Unavailable<br/>not mounted"]
+    B -- "Yes" --> C{"Supported by the<br/>selected harness?"}
+    C -- "No" --> X2["Unavailable<br/>provider limitation"]
+    C -- "Yes" --> D{"Host grant and<br/>organization policy?"}
+    D -- "No" --> X3["Unavailable<br/>not authorized"]
+    D -- "Yes" --> E{"Runtime healthy and<br/>credentials attached?"}
+    E -- "No" --> X4["Unavailable<br/>configuration issue"]
+    E -- "Yes" --> F{"Approval required?"}
+    F -- "Yes" --> G["Selectable<br/>approval on use"]
+    F -- "No" --> H["Callable now"]
+    G --> I["Sonik capability manifest"]
+    H --> I
+    I --> J["Model tool schema"]
+    I --> K["UI tool picker"]
+    I --> L["Diagnostics"]
+            </pre>
+          </div>
+        </div>
+
+        <div class="split" style="margin-top: 24px">
+          <article class="finding">
+            <h3>Codex-specific reality</h3>
+            <p>
+              AI SDK’s current Codex harness normalizes shell and web search, translates file patches
+              into file-change events, and relays custom host tools through a CLI bridge. Native
+              Codex tool approvals and arbitrary MCP execution do not map cleanly into the AI SDK
+              abstraction yet.
+            </p>
+          </article>
+          <article class="finding">
+            <h3>AgentOS opportunity</h3>
+            <p>
+              AgentOS bindings can expose typed host capabilities as discoverable CLI commands. Used
+              behind Sonik’s authority gateway, this can produce a concrete answer to “what can the
+              agent actually call right now?”
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="experience">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">07 / Experience</span><h2>The Live Workbench</h2></div>
+          <p>
+            The experience should feel like supervising consequential work—not operating an exposed
+            terminal and not chatting with an assistant that mutates a repository offscreen.
+          </p>
+        </div>
+
+        <div class="workbench" aria-label="Conceptual Live Workbench layout">
+          <article class="workbench__goal">
+            <div><h3>Goal and run state</h3><p>Audit the workflow, repair host context, verify uploads, and prepare a preview.</p></div>
+            <span class="tag tag--evaluate">Running · full sandbox</span>
+          </article>
+          <article class="workbench__activity">
+            <h3>Live activity</h3>
+            <div class="event"><span class="event__dot"></span><div><strong>Repository attached</strong><span>RUN.EVENT / 0012</span></div></div>
+            <div class="event"><span class="event__dot"></span><div><strong>Context boundary inspected</strong><span>REASONING / 0018</span></div></div>
+            <div class="event"><span class="event__dot"></span><div><strong>Three files changed</strong><span>FILE.CHANGE / 0029</span></div></div>
+            <div class="event"><span class="event__dot"></span><div><strong>Targeted tests passed</strong><span>VERIFICATION / 0034</span></div></div>
+            <div class="event"><span class="event__dot"></span><div><strong>Preview is healthy</strong><span>PREVIEW.READY / 0037</span></div></div>
+          </article>
+          <article class="workbench__conversation">
+            <h3>Agent conversation</h3>
+            <p>Conversation explains decisions and requests authority. Consequential actions link to their event, file, command, or approval record.</p>
+            <div class="artifact"><code>Root cause isolated: the document entered composer context, but the generation route did not receive an authenticated host-session attachment. I repaired the handoff, added regression coverage, and restarted the preview.</code></div>
+          </article>
+          <article class="workbench__composer">
+            <h3>Follow-up or intervention</h3>
+            <p>Ask a question, narrow the goal, attach a document, grant a capability, approve an action, or stop the run.</p>
+          </article>
+          <article class="workbench__context">
+            <h3>Evidence and outcomes</h3>
+            <div class="artifact-tabs"><span class="tag tag--evaluate">Diff</span><span class="tag">Preview</span><span class="tag">Tests</span><span class="tag">Files</span><span class="tag">Run log</span></div>
+            <div class="artifact"><code>+ attach authenticated host session<br/>+ preserve workspace document context<br/>+ surface actionable capability reason<br/>+ add regression coverage</code></div>
+            <ul><li>Signed preview URL with expiry</li><li>Repository revision and dirty state</li><li>Verification claims linked to raw output</li><li>Approval queue separated from notifications</li></ul>
+          </article>
+        </div>
+
+        <div class="capabilities">
+          <article class="capability"><span class="tag tag--good">Core</span><h3>Repository-aware sessions</h3><p>Start from an authenticated repository, revision, working directory, sitemap, and bootstrap contract.</p></article>
+          <article class="capability"><span class="tag tag--good">Core</span><h3>Live files and diffs</h3><p>Stream file changes into inspectable artifacts rather than burying them in tool payloads.</p></article>
+          <article class="capability"><span class="tag tag--good">Core</span><h3>Hot preview</h3><p>Run the app on a reserved port and expose a signed, expiring preview beside the conversation.</p></article>
+          <article class="capability"><span class="tag tag--good">Core</span><h3>Resumable execution</h3><p>Reattach after refresh, interruption, workflow suspension, or handoff to another client.</p></article>
+          <article class="capability"><span class="tag tag--evaluate">Collaboration</span><h3>Shared supervision</h3><p>Authorized users observe events, inspect artifacts, and coordinate interventions against one run.</p></article>
+          <article class="capability"><span class="tag tag--evaluate">Channels</span><h3>Voice and messaging</h3><p>Pipecat and WhatsApp become channels into the same durable session and approval model.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="sequence">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">08 / Sequence</span><h2>Divide and conquer</h2></div>
+          <p>
+            Independent lanes can start after the event and authority contracts are frozen. Avoid a
+            broad provider abstraction until two implementations have proven the actual seam.
+          </p>
+        </div>
+
+        <div class="phases">
+          <article class="phase"><div class="phase__id">TRAIN 0</div><h3>Freeze contracts</h3><div><p>Define repository manifest, execution attachment, normalized process/file/preview events, capability readiness, and resumable cursor.</p><div class="gate">Gate: fixtures replay without a live provider.</div></div></article>
+          <article class="phase"><div class="phase__id">TRAIN 1</div><h3>Prove the full sandbox</h3><div><p>Attach a repository, edit a file, run a targeted test, start the hot server, and return a signed preview through AI SDK Harness.</p><div class="gate">Gate: one end-to-end run survives client reconnection.</div></div></article>
+          <article class="phase"><div class="phase__id">TRAIN 2</div><h3>Build the Live Workbench</h3><div><p>Reuse workspace, chat, canvas, and devtools primitives. Add activity, files, diff, preview, verification, approval, and readiness views.</p><div class="gate">Gate: state is clear without raw logs.</div></div></article>
+          <article class="phase"><div class="phase__id">TRAIN 3</div><h3>Evaluate AgentOS</h3><div><p>Test bindings, repository transforms, concurrency, suspend behavior, security boundaries, and event translation.</p><div class="gate">Gate: measurable advantage with no authority or replay loss.</div></div></article>
+          <article class="phase"><div class="phase__id">TRAIN 4</div><h3>Add the TUI</h3><div><p>Connect AI SDK TUI to Sonik’s existing transport rather than creating a second backend or history.</p><div class="gate">Gate: web and TUI supervise the same run.</div></div></article>
+          <article class="phase"><div class="phase__id">TRAIN 5</div><h3>Extend to edge and voice</h3><div><p>Add Cloudflare when global topology is needed and connect Pipecat transports to the shared session contract.</p><div class="gate">Gate: new channels add no new authority model.</div></div></article>
+        </div>
+
+        <h3 style="margin-top: 48px">Do not build</h3>
+        <ul class="do-not">
+          <li>A second workflow engine beside Sonik’s run journal</li>
+          <li>A generic provider framework before a second provider proves it</li>
+          <li>A terminal as the primary product experience</li>
+          <li>A global tool catalog presented as current availability</li>
+          <li>Provider-specific events leaking directly into the UI</li>
+          <li>Secrets or host environment values copied into guest runtimes</li>
+          <li>Model-native approval treated as organizational authority</li>
+          <li>Separate histories for web, terminal, voice, or WhatsApp</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span class="index">09 / Sources</span><h2>Research foundation</h2></div>
+          <p>
+            Recommendations combine direct Sonik repository inspection with current official
+            documentation and upstream source repositories. Beta and vendor-claimed capabilities
+            are identified as such.
+          </p>
+        </div>
+
+        <ul class="sources">
+          <li><a href="https://github.com/rivet-dev/agentos">Rivet AgentOS repository</a></li>
+          <li><a href="https://agentos-sdk.dev/docs/architecture/">AgentOS architecture</a></li>
+          <li><a href="https://agentos-sdk.dev/docs/security-model/">AgentOS security model</a></li>
+          <li><a href="https://agentos-sdk.dev/docs/limitations/">AgentOS limitations</a></li>
+          <li><a href="https://agentos-sdk.dev/docs/bindings/">AgentOS bindings</a></li>
+          <li><a href="https://agentos-sdk.dev/docs/sandbox/">AgentOS full-sandbox mounting</a></li>
+          <li><a href="https://agentos-sdk.dev/docs/agents/codex/">AgentOS Codex integration</a></li>
+          <li><a href="https://agentos-sdk.dev/docs/multiplayer/">AgentOS multiplayer</a></li>
+          <li><a href="https://github.com/vercel/ai/tree/main/packages/harness-codex">AI SDK Codex harness</a></li>
+          <li><a href="https://github.com/vercel/ai/tree/main/packages/sandbox-vercel">AI SDK Vercel Sandbox adapter</a></li>
+          <li><a href="https://github.com/vercel/ai/tree/main/packages/workflow-harness">AI SDK Workflow Harness</a></li>
+          <li><a href="https://github.com/vercel/ai/tree/main/packages/tui">AI SDK TUI</a></li>
+          <li><a href="https://github.com/vercel/ai/blob/main/packages/svelte/src/structured-object.svelte.ts">AI SDK Svelte StructuredObject</a></li>
+          <li><a href="https://vercel.com/docs/sandbox">Vercel Sandbox documentation</a></li>
+          <li><a href="https://github.com/vercel/eve">Vercel Eve</a></li>
+          <li><a href="https://developers.cloudflare.com/reference-architecture/diagrams/ai/enterprise-ai-agent-workspace/">Cloudflare enterprise agent workspace</a></li>
+          <li><a href="https://developers.cloudflare.com/sandbox/">Cloudflare Sandbox</a></li>
+          <li><a href="https://github.com/daytonaio/daytona">Daytona repository</a></li>
+          <li><a href="https://docs.pipecat.ai/client/introduction">Pipecat client architecture</a></li>
+          <li><a href="https://github.com/pipecat-ai/voice-ui-kit">Pipecat Voice UI Kit</a></li>
+          <li><a href="https://github.com/pipecat-ai/pipecat-client-web">Pipecat web client</a></li>
+          <li><a href="https://github.com/pipecat-ai/pipecat-client-web-transports">Pipecat web transports</a></li>
+        </ul>
+      </div>
+    </section>
+
+    <div class="closing">
+      <div class="shell">
+        <p class="eyebrow">Strategic conclusion</p>
+        <div class="closing__statement">
+          The edge is not a faster terminal or another agent loop. It is a
+          <em>governed, host-aware workspace</em> that places each task in the cheapest capable
+          runtime while preserving one truthful history of intent, authority, execution, and proof.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer><div class="shell">Sonik Agent Runtime Architecture · research synthesis · 2026-07-16</div></footer>
+
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "base",
+      fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+      themeVariables: {
+        background: "#ffffff",
+        primaryColor: "#f2edff",
+        primaryTextColor: "#25212c",
+        primaryBorderColor: "#7652c8",
+        secondaryColor: "#f7f5fa",
+        secondaryTextColor: "#3f3947",
+        secondaryBorderColor: "#d8d2df",
+        tertiaryColor: "#f0f8f3",
+        tertiaryTextColor: "#253a2c",
+        tertiaryBorderColor: "#659374",
+        lineColor: "#7e7588",
+        textColor: "#25212c",
+        mainBkg: "#ffffff",
+        nodeBorder: "#cfc7d8",
+        clusterBkg: "#faf9fc",
+        clusterBorder: "#d8d2df",
+        edgeLabelBackground: "#ffffff"
+      },
+      flowchart: { curve: "basis", htmlLabels: true, padding: 18 }
+    });
+
+    await mermaid.run({ querySelector: ".mermaid" });
+    document.querySelector("#print-report")?.addEventListener("click", () => window.print());
+  </script>
+</body>
+</html>
