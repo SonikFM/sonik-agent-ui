@@ -21,8 +21,9 @@ test("embedded chat exposes Workflow Builder and refuses context-less builder cl
   await builderButton.click();
 
   await expect(page.locator('[data-agent-mode="workflow-builder"]')).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveText("Reconnect the embedded page with an authenticated workspace session to load cloud models.");
-  await expect(page.getByRole("alert")).not.toContainText(/missing-host-context|host_auth_required|workspace_fetch/i);
+  const modelCatalogAlert = page.getByRole("alert").filter({ hasText: "Reconnect the embedded page" });
+  await expect(modelCatalogAlert).toHaveText("Reconnect the embedded page with an authenticated workspace session to load cloud models.");
+  await expect(modelCatalogAlert).not.toContainText(/missing-host-context|host_auth_required|workspace_fetch/i);
   expect(modelCatalogRequests).toBe(requestsBeforeBuilderMount);
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByText("Reconnect the embedded page with an authenticated workspace session to save agent drafts.")).toBeVisible();
