@@ -10,7 +10,7 @@ import path from "node:path";
 // fixture (the one workflow this endpoint has real, reviewed callbacks for; booking stays
 // reads-only-by-construction here, unchanged from /api/reservation/commit).
 
-const [workflowRunsModule, workflowRunStoreModule, knowledgeStoreModule, campaignWorkflowModule, workflowDefinitionModule, publicWorkflowRunsModule, workflowFixturesModule] = await Promise.all([
+const [workflowRunsModule, workflowRunStoreModule, knowledgeStoreModule, campaignWorkflowModule, workflowDefinitionModule, publicWorkflowRunsModule, workflowFixturesModule, builderModelModule] = await Promise.all([
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts"),
   import("../../apps/standalone-sveltekit/src/lib/knowledge/knowledge-store.ts"),
@@ -18,6 +18,7 @@ const [workflowRunsModule, workflowRunStoreModule, knowledgeStoreModule, campaig
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-definition-repository.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-runs-public.ts"),
   import("../../packages/tool-contracts/src/workflow-vnext-fixtures.ts"),
+  import("../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts"),
 ]);
 const { handleWorkflowRunsAction, workflowRunOwnerFromHostSession } = workflowRunsModule;
 const { createCloudWorkflowRunStore, createInMemoryWorkflowRunJournalStore, createInMemoryWorkflowRunStore, wrapWorkflowRunStoreAsync } = workflowRunStoreModule;
@@ -26,6 +27,7 @@ const { assembleAmplifyCampaignContent } = campaignWorkflowModule;
 const { createInMemoryWorkflowDefinitionRepository } = workflowDefinitionModule;
 const { handlePublicWorkflowDriverAction } = publicWorkflowRunsModule;
 const { train0SelectedPathRunState, train0WorkflowFixtures } = workflowFixturesModule;
+const { workflowVNextToDefinition } = builderModelModule;
 
 const brief = { productName: "Loyalty Weekend", audience: "returning_members", offer: "20% off", launchDate: "2026-08-01" };
 
@@ -166,7 +168,11 @@ try {
   assert.equal(publishedStart.ok, true, "an exact published pin starts successfully");
   const publishedRow = await store.getRun(owner, publishedStart.run.runId);
   assert.equal(publishedRow.workflowVersionId, publishedWorkflowVersionId);
-  assert.equal(publishedRow.definition.title, publishedDefinition.title, "the exact published definition drives the run");
+  assert.deepEqual(
+    publishedRow.definition,
+    workflowVNextToDefinition(publishedDefinition),
+    "the persisted runtime projection must exactly preserve the published nodes, edges, and capability pins",
+  );
   assert.deepEqual(publishedRow.input, { campaign: "governed" });
   assert.deepEqual(await handleWorkflowRunsAction({
     action: "start",
