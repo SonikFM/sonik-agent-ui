@@ -223,6 +223,7 @@ export function validateWorkflowForPublish(input: unknown, registry: WorkflowRun
     if (!INITIAL_WORKFLOW_PUBLISH_SUPPORT[node.nodeType]) issues.push({ path: ["nodes", index], code: "node_not_publishable", message: `${node.nodeType} is not initially publishable` });
     for (const binding of Object.values(node.bindings)) {
       if (binding.source === "node_output" && binding.nodeId === node.nodeId) issues.push({ path: ["nodes", index, "bindings"], code: "self_binding", message: "A node cannot bind its own output" });
+      if (binding.source === "host_context" && !node.requiredHostContext.includes(binding.key)) issues.push({ path: ["nodes", index, "bindings"], code: "unauthorized_context_binding", message: `Host context binding must be declared in requiredHostContext: ${binding.key}` });
     }
     if (node.nodeType === "tool_commit") {
       const binding = node.effectBinding;
@@ -270,6 +271,16 @@ export function validateWorkflowForPublish(input: unknown, registry: WorkflowRun
     if (node?.nodeType === "branch") {
       if (edges.filter((edge) => edge.default).length > 1) issues.push({ path: ["nodes", nodeId], code: "multiple_default_edges", message: "Branch nodes may have at most one default edge" });
       if (edges.some((edge) => !edge.default && !edge.predicate)) issues.push({ path: ["nodes", nodeId], code: "branch_predicate_required", message: "Non-default branch edges require a structured predicate" });
+      const predicates = new Set<string>();
+      for (const edge of edges) {
+        if (!edge.predicate) continue;
+        const predicate = JSON.stringify(edge.predicate);
+        if (predicates.has(predicate)) issues.push({ path: ["nodes", nodeId], code: "ambiguous_branch_match", message: "Branch predicates must be structurally distinct" });
+        predicates.add(predicate);
+        for (const binding of [edge.predicate.left, edge.predicate.right].filter((operand): operand is WorkflowBinding => Boolean(operand && "source" in operand))) {
+          if (binding.source === "host_context" && !node.requiredHostContext.includes(binding.key)) issues.push({ path: ["nodes", nodeId], code: "unauthorized_context_binding", message: `Host context predicate must be declared in requiredHostContext: ${binding.key}` });
+        }
+      }
     }
   }
 
