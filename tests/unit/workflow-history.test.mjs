@@ -163,6 +163,20 @@ assert.deepEqual(waitAttempt.history.events.find((event) => event.eventId === "w
 });
 assert.equal(Object.values(waitAttemptCalls).every((count) => count <= 1), true, "wait attempt correlation preserves one read per authoritative store");
 
+for (const [operation, query] of [
+  ["getArtifact", { artifactId: "artifact-a" }],
+  ["listToolCalls", { sessionId: "session-a" }],
+  ["listRunEvents", { conversationRunId: "conversation-run-a" }],
+]) {
+  const rejectingDeps = identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 });
+  rejectingDeps.workspace[operation] = async () => { throw new Error(`db_unavailable:${operation}`); };
+  await assert.rejects(
+    () => getWorkflowHistory(query, rejectingDeps),
+    new RegExp(`db_unavailable:${operation}`),
+    `${operation} failures must propagate instead of returning successful incomplete history`,
+  );
+}
+
 const route = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/workflow-history/+server.ts", import.meta.url), "utf8");
 assert.match(route, /createAgentHostSessionEnvelope\(event\)/);
 assert.match(route, /status: 401/);

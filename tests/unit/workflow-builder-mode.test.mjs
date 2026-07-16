@@ -299,9 +299,9 @@ assert.equal(
   "app shell should import the workflow-builder root component",
 );
 assert.equal(
-  pageSource.includes('let workspaceMode = $state<"workspace" | "workflow-builder" | "channels">("workspace")'),
+  pageSource.includes('let workspaceMode = $state<"workspace" | "workflow-builder">("workspace")'),
   true,
-  "app shell should preserve workflow builder as a local mode alongside the default and channels workspaces",
+  "app shell should preserve workflow builder as a local mode alongside the default workspace",
 );
 assert.equal(
   pageSource.includes('{#if workspaceMode === "workflow-builder"}'),

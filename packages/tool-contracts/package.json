@@ -62,14 +62,6 @@
     "./marketplace-fixtures": {
       "types": "./dist/marketplace-fixtures.d.ts",
       "default": "./dist/marketplace-fixtures.js"
-    },
-    "./channels": {
-      "types": "./dist/channels.d.ts",
-      "default": "./dist/channels.js"
-    },
-    "./channel-fixtures": {
-      "types": "./dist/channel-fixtures.d.ts",
-      "default": "./dist/channel-fixtures.js"
     }
   },
   "files": ["dist"],

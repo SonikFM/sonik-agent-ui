@@ -836,14 +836,14 @@ async function runWorkspaceCloudSqlAdapterTests() {
     source: "browser-page-context",
     authority: "display-only",
     route: "/",
-    surface: "channels",
+    surface: "workflow-builder",
     page_type: "standalone-agent-workspace",
     command_families: [],
     skill_families: [],
-    visible_actions: ["saveFixtureTriggerBinding"],
-    context: { fixtureOnly: true, nested: { count: 2 } },
+    visible_actions: ["saveAgentDefinitionDraft"],
+    context: { draftRevision: 2, nested: { count: 2 } },
   });
-  assert.deepEqual(pageContext.context, { fixtureOnly: true, nested: { count: 2 } });
+  assert.deepEqual(pageContext.context, { draftRevision: 2, nested: { count: 2 } });
   assert.equal((await adapterA.listPageContextSnapshots(session.id))[0]?.id, pageContext.id, "cloud adapter restores generic page context snapshots newest first");
   assert.deepEqual(await adapterB.listPageContextSnapshots(session.id), [], "another tenant cannot list guessed page context snapshots");
   assert.throws(

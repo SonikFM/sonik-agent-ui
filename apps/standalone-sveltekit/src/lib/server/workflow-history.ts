@@ -29,7 +29,7 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
       ? deps.workflowRuns.getRun(deps.owner, query.workflowRunId).then((row) => row ? [row] : [])
       : deps.workflowRuns.listRuns(deps.owner),
     query.conversationRunId ? deps.workspace.getRun(query.conversationRunId) : Promise.resolve(null),
-    query.artifactId ? failSoft(() => deps.workspace.getArtifact(query.artifactId!), null) : Promise.resolve(null),
+    query.artifactId ? deps.workspace.getArtifact(query.artifactId) : Promise.resolve(null),
   ]);
   const workflowMatches = workflowCandidates.filter((row) => matchesWorkflow(row, query));
   const sessionId = query.sessionId
@@ -44,7 +44,7 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
   const [conversationCandidates, workflowEvents, toolCalls] = await Promise.all([
     exactConversation ? Promise.resolve([exactConversation]) : sessionId ? deps.workspace.listRuns(sessionId) : Promise.resolve([]),
     correlatedWorkflowId ? deps.journal.listEvents(deps.owner, correlatedWorkflowId) : Promise.resolve([]),
-    sessionId ? failSoft(() => deps.workspace.listToolCalls(sessionId), []) : Promise.resolve([]),
+    sessionId ? deps.workspace.listToolCalls(sessionId) : Promise.resolve([]),
   ]);
   const hasExactAttempt = !query.attemptId || workflowEvents.some((event) => event.attemptId === query.attemptId);
   const causalWorkflowRows = hasExactAttempt ? workflowRows : [];
@@ -55,7 +55,7 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
   const filteredToolCalls = hasExactAttempt ? toolCalls.filter((call) => matchesToolCall(call, query, correlationIds, conversationRequestIds)) : [];
   const correlatedConversationId = conversations.length === 1 ? conversations[0]?.id : undefined;
   const conversationEvents = correlatedConversationId
-    ? await failSoft(() => deps.workspace.listRunEvents(correlatedConversationId), [])
+    ? await deps.workspace.listRunEvents(correlatedConversationId)
     : [];
   const attemptNodeIds = new Set(causalWorkflowEvents.flatMap((event) => {
     if (event.attemptId !== query.attemptId) return [];
@@ -203,8 +203,4 @@ function projectWorkflowEvent(event: CanonicalWorkflowEvent) {
     artifactId: event.eventType === "node_completed" && event.payload.outputRef.storage === "artifact" ? event.payload.outputRef.artifact.artifactId : null,
     attemptId: event.attemptId ?? null, correlationIds: event.correlationIds, timestamp: event.timestamp,
   };
-}
-
-async function failSoft<T>(operation: () => Promise<T>, fallback: T): Promise<T> {
-  try { return await operation(); } catch { return fallback; }
 }

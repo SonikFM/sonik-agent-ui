@@ -130,11 +130,11 @@ const persistedPageContext = recordWorkspacePageContextSnapshot({
   source: "browser-page-context",
   authority: "display-only",
   route: "/",
-  surface: "channels",
+  surface: "workflow-builder",
   page_type: "standalone-agent-workspace",
-  context: { fixtureOnly: true, bindingCount: 2 },
+  context: { draftRevision: 2 },
 });
-assert.deepEqual(listWorkspacePageContextSnapshots(session.id)[0]?.context, { fixtureOnly: true, bindingCount: 2 }, "sync workspace-store wrapper preserves generic page-context payloads");
+assert.deepEqual(listWorkspacePageContextSnapshots(session.id)[0]?.context, { draftRevision: 2 }, "sync workspace-store wrapper preserves generic page-context payloads");
 assert.equal(workspaceProcedures["workspace.pageContextSnapshot.record"], recordWorkspacePageContextSnapshot);
 assert.equal(persistedPageContext.authority, "display-only");
 

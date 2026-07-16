@@ -26,51 +26,6 @@ export interface AgentUiWorkflowCommandPreviewSnapshot {
   approvalRequired: boolean;
 }
 
-export interface AgentUiChannelSnapshot {
-  schemaVersion: "v1";
-  channelId: string;
-  kind: "whatsapp" | "slack";
-  label: string;
-  provisioningState: "unconfigured" | "pending" | "connected" | "error";
-  identity: { displayName: string } | null;
-  statusMessage: string | null;
-  runtimeMode: "fixture_only";
-  integrationAction: {
-    label: "Connect" | "Finish setup" | "Manage" | "Retry";
-    enabled: false;
-    disabledReason: "integration_not_yet_available";
-  };
-}
-
-export interface AgentUiTriggerBindingSnapshot {
-  schemaVersion: "v1";
-  bindingId: string;
-  channelId: string;
-  event: string;
-  workflowId: string;
-  triggerNodeId: string;
-  inputMapping: Array<{ sourcePath: string; targetPath: string }>;
-  runtimeMode: "fixture_only";
-  enabled: false;
-  disabledReason: "integration_not_yet_available";
-}
-
-export interface AgentUiChannelWorkflowSnapshot {
-  workflowId: string;
-}
-
-export interface AgentUiChannelsStateSnapshot {
-  schemaVersion: "sonik.agent_ui.channels_state.v1";
-  fixtureOnly: true;
-  sessionId: string | null;
-  status: "idle" | "loading" | "ready" | "saving" | "error";
-  workflows: AgentUiChannelWorkflowSnapshot[];
-  channels: AgentUiChannelSnapshot[];
-  triggerBindings: AgentUiTriggerBindingSnapshot[];
-  message?: string;
-  disabledReason?: string;
-}
-
 export interface AgentUiWorkflowSnapshot {
   activeWorkflowId: string | null;
   activeArtifactId: string | null;
@@ -85,9 +40,6 @@ export interface AgentUiWorkflowSnapshot {
   canApproveAndRun: boolean;
   disabledReasons: string[];
   commandPreview?: AgentUiWorkflowCommandPreviewSnapshot | null;
-  /** Locally persisted, fixture-only channel triggers. Reasserted after host
-   * context merge so an embedding page cannot claim trigger activation. */
-  triggers?: AgentUiTriggerBindingSnapshot[];
 }
 
 export interface AgentUiDeploymentSnapshot {
@@ -150,13 +102,6 @@ export interface AgentUiPageAssertions {
   messageCount: number;
   visibleErrorCount: number;
   lastPersistStatus?: "idle" | "eligible" | "in_flight" | "success" | "error";
-  channels?: {
-    fixtureOnly: true;
-    channelCount: number;
-    triggerBindingCount: number;
-    allIntegrationActionsDisabled: boolean;
-    disabledReason: "integration_not_yet_available";
-  };
 }
 
 export interface AgentUiSemanticActionResult<TState = AgentUiPageAssertions> {
@@ -256,8 +201,6 @@ export interface AgentUiPageControl {
    *  the workflow-builder mode's working state, when that mode is mounted.
    *  Additive/optional so hosts that predate the builder mode see no change. */
   getBuilderState?: () => Record<string, unknown> | null;
-  /** Fixture-only channel definitions and dormant trigger bindings. */
-  getChannelsState?: () => AgentUiChannelsStateSnapshot;
   actions: {
     createSession: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     submitPrompt: (input: { prompt?: string; sessionId?: string | null }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
@@ -294,20 +237,11 @@ export interface AgentUiPageControl {
     /** Phase 5: switches the top-level app between the chat/canvas workspace
      *  and the workflow-builder mode. Optional/additive -- absent on hosts
      *  that predate the builder mode. */
-    setWorkspaceMode?: (input: { mode: "workspace" | "workflow-builder" | "channels" }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
+    setWorkspaceMode?: (input: { mode: "workspace" | "workflow-builder" }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
     /** Phase 5: validates and saves the workflow-builder's current working
      *  AgentDefinition as a draft. Fails closed with a disabledReason if the
      *  builder mode is not mounted. */
     saveAgentDefinitionDraft?: () => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
-    connectChannel?: (input: { channelId?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
-    enableTriggerBinding?: (input: { bindingId?: string }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
-    saveFixtureTriggerBinding?: (input: {
-      channelId?: string;
-      event?: string;
-      workflowId?: string;
-      sourcePath?: string;
-      targetPath?: string;
-    }) => AgentUiSemanticActionResult | Promise<AgentUiSemanticActionResult>;
   };
 }
 
@@ -571,48 +505,7 @@ function sanitizeWorkflowSnapshot(value: unknown): AgentUiWorkflowSnapshot | und
     canApproveAndRun: record.canApproveAndRun === true,
     disabledReasons: sanitizeTelemetryStringList(record.disabledReasons) ?? [],
     commandPreview: preview ?? null,
-    triggers: sanitizeTriggerBindingSnapshots(record.triggers),
   };
-}
-
-function sanitizeTriggerBindingSnapshots(value: unknown): AgentUiTriggerBindingSnapshot[] {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, MAX_LIST_ITEMS).flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-    const record = entry as Record<string, unknown>;
-    if (
-      record.schemaVersion !== "v1"
-      || record.runtimeMode !== "fixture_only"
-      || record.enabled !== false
-      || record.disabledReason !== "integration_not_yet_available"
-    ) return [];
-    const bindingId = cleanOptionalString(record.bindingId);
-    const channelId = cleanOptionalString(record.channelId);
-    const event = cleanOptionalString(record.event);
-    const workflowId = cleanOptionalString(record.workflowId);
-    const triggerNodeId = cleanOptionalString(record.triggerNodeId);
-    if (!bindingId || !channelId || !event || !workflowId || !triggerNodeId || !Array.isArray(record.inputMapping)) return [];
-    const inputMapping = record.inputMapping.slice(0, MAX_LIST_ITEMS).flatMap((mapping) => {
-      if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) return [];
-      const mappingRecord = mapping as Record<string, unknown>;
-      const sourcePath = cleanOptionalString(mappingRecord.sourcePath);
-      const targetPath = cleanOptionalString(mappingRecord.targetPath);
-      return sourcePath && targetPath ? [{ sourcePath, targetPath }] : [];
-    });
-    if (inputMapping.length !== record.inputMapping.length) return [];
-    return [{
-      schemaVersion: "v1" as const,
-      bindingId,
-      channelId,
-      event,
-      workflowId,
-      triggerNodeId,
-      inputMapping,
-      runtimeMode: "fixture_only" as const,
-      enabled: false as const,
-      disabledReason: "integration_not_yet_available" as const,
-    }];
-  });
 }
 
 function sanitizeWorkflowQuestion(value: unknown): AgentUiWorkflowQuestionSnapshot | undefined {

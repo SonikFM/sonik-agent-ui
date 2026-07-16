@@ -45,7 +45,7 @@
     type ArtifactStatus,
   } from "$lib/artifacts/artifact-observability";
   import { CANVAS_CONTROL_DISABLED_MESSAGES, CanvasViewport, ChatWindow, WorkspaceDocumentFrame, WorkspaceRoot, deriveCanvasControlStates, type CanvasControlStateMap, type CanvasPanel, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
-  import { createTelemetryCorrelation, sanitizeDeploymentSnapshot, sanitizeTurnCorrelationSnapshot, type AgentUiActionDescriptor, type AgentUiActionRegistrySnapshot, type AgentUiApprovalStateSnapshot, type AgentUiChannelsStateSnapshot, type AgentUiDeploymentSnapshot, type AgentUiPageAssertions, type AgentUiPageContextSnapshot, type AgentUiPageControl, type AgentUiSemanticActionResult, type AgentUiTargetRegistrySnapshot, type AgentUiTurnCorrelationSnapshot, type AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
+  import { createTelemetryCorrelation, sanitizeDeploymentSnapshot, sanitizeTurnCorrelationSnapshot, type AgentUiActionDescriptor, type AgentUiActionRegistrySnapshot, type AgentUiApprovalStateSnapshot, type AgentUiDeploymentSnapshot, type AgentUiPageAssertions, type AgentUiPageContextSnapshot, type AgentUiPageControl, type AgentUiSemanticActionResult, type AgentUiTargetRegistrySnapshot, type AgentUiTurnCorrelationSnapshot, type AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
   import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
     createAgentHostAuthorityDonationFromLegacyPayload,
@@ -115,7 +115,6 @@
   import { createSupportDiagnosticsExport, exportTranscriptMarkdown } from "$lib/support-export";
   import { createTurnCorrelationRecord, createTurnCorrelationRecordFromResponse, deploymentSnapshotFromHeaders, selectTurnCorrelationRecord, upsertTurnCorrelationRecord, type AgentUiTurnCorrelationInput } from "$lib/chat-correlation";
   import WorkflowBuilderRoot, { type WorkflowBuilderController } from "$lib/components/workflow-builder/WorkflowBuilderRoot.svelte";
-  import ChannelsRoot, { type FixtureTriggerBindingDraft } from "$lib/components/channels/ChannelsRoot.svelte";
 
 
   interface ReservationApprovalPreview {
@@ -248,19 +247,8 @@
   // stays untouched. builderController is populated by WorkflowBuilderRoot so
   // its state/actions can be surfaced through the shared __sonikAgentUI
   // page-control contract below.
-  let workspaceMode = $state<"workspace" | "workflow-builder" | "channels">("workspace");
+  let workspaceMode = $state<"workspace" | "workflow-builder">("workspace");
   let builderController = $state<WorkflowBuilderController | null>(null);
-  let channelsActionButton = $state<HTMLButtonElement | null>(null);
-  let channelsProjectionRevision = 0;
-  let channelsProjection = $state.raw<AgentUiChannelsStateSnapshot>({
-    schemaVersion: "sonik.agent_ui.channels_state.v1",
-    fixtureOnly: true,
-    sessionId: null,
-    status: "idle",
-    workflows: [],
-    channels: [],
-    triggerBindings: [],
-  });
   let activeDocument = $state<ActiveDocumentSnapshot | null>(null);
   let documentSeed = $state<ActiveDocumentSnapshot | null>(null);
   let documentPreferredView = $state<PreferredDocumentView>("auto");
@@ -482,16 +470,6 @@
     messageCount: conversation.messages.length,
     visibleErrorCount: sessionRailError || conversation.error ? 1 : 0,
     lastPersistStatus,
-    channels: {
-      fixtureOnly: true,
-      channelCount: channelsProjection.channels.length,
-      triggerBindingCount: channelsProjection.triggerBindings.length,
-      allIntegrationActionsDisabled: channelsProjection.channels.every((channel) => !channel.integrationAction.enabled)
-        && channelsProjection.triggerBindings.every((binding) => !binding.enabled),
-      disabledReason: channelsProjection.channels[0]?.integrationAction.disabledReason
-        ?? channelsProjection.triggerBindings[0]?.disabledReason
-        ?? "integration_not_yet_available",
-    },
   });
   const latestJsonRenderSpec = $derived.by<{ id: string; spec: Spec; sourceUserMessageId: string; userPrompt: string; title?: string; forcePromote?: boolean } | null>(() => {
     for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
@@ -1489,179 +1467,6 @@
     return fetch(attemptInput, { ...init, headers });
   }
 
-  function createEmptyChannelsProjection(
-    sessionId: string | null,
-    status: AgentUiChannelsStateSnapshot["status"],
-    message?: string,
-    disabledReason?: string,
-  ): AgentUiChannelsStateSnapshot {
-    return {
-      schemaVersion: "sonik.agent_ui.channels_state.v1",
-      fixtureOnly: true,
-      sessionId,
-      status,
-      workflows: [],
-      channels: [],
-      triggerBindings: [],
-      message,
-      disabledReason,
-    };
-  }
-
-  function resetChannelsProjection(sessionId: string | null): number {
-    const revision = ++channelsProjectionRevision;
-    channelsProjection = createEmptyChannelsProjection(sessionId, "idle");
-    return revision;
-  }
-
-  function channelsSaveDisabledReason(): string | undefined {
-    if (channelsProjection.status === "saving") return "save_in_progress";
-    if (isEmbeddedHostContextExpected() && !isWorkspaceHostContextReady()) return "missing_signed_host_context";
-    if (!activeSessionId) return "missing_session";
-    if (channelsProjection.sessionId !== activeSessionId) return "active_session_mismatch";
-    if (channelsProjection.status === "loading") return "channels_loading";
-    if (channelsProjection.status !== "ready") return channelsProjection.disabledReason ?? "channels_not_ready";
-    if (channelsProjection.channels.length === 0 || channelsProjection.workflows.length === 0) return "channels_projection_empty";
-    return undefined;
-  }
-
-  function channelIntegrationDisabledReason(): "integration_not_yet_available" {
-    return channelsProjection.channels[0]?.integrationAction.disabledReason ?? "integration_not_yet_available";
-  }
-
-  function triggerIntegrationDisabledReason(): "integration_not_yet_available" {
-    return channelsProjection.triggerBindings[0]?.disabledReason ?? "integration_not_yet_available";
-  }
-
-  function isChannelsProjection(value: unknown): value is AgentUiChannelsStateSnapshot {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    const record = value as Record<string, unknown>;
-    return record.schemaVersion === "sonik.agent_ui.channels_state.v1"
-      && record.fixtureOnly === true
-      && typeof record.sessionId === "string"
-      && record.status === "ready"
-      && Array.isArray(record.workflows)
-      && Array.isArray(record.channels)
-      && Array.isArray(record.triggerBindings);
-  }
-
-  async function loadChannelsProjection(sessionId: string): Promise<void> {
-    if (isEmbeddedHostContextExpected() && !isWorkspaceHostContextReady()) {
-      channelsProjection = createEmptyChannelsProjection(
-        sessionId,
-        "error",
-        "Signed host context is required before channel fixtures can load.",
-        "missing_signed_host_context",
-      );
-      return;
-    }
-    const revision = ++channelsProjectionRevision;
-    channelsProjection = createEmptyChannelsProjection(sessionId, "loading");
-    try {
-      const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}/channels`);
-      const body = await response.json().catch(() => null) as unknown;
-      if (revision !== channelsProjectionRevision || activeSessionId !== sessionId) return;
-      if (!response.ok || !isChannelsProjection(body)) {
-        channelsProjection = createEmptyChannelsProjection(
-          sessionId,
-          "error",
-          body && typeof body === "object" && "message" in body && typeof body.message === "string" ? body.message : `Channel fixtures could not load (${response.status}).`,
-          "channels_load_failed",
-        );
-        return;
-      }
-      channelsProjection = body;
-    } catch (error) {
-      if (revision !== channelsProjectionRevision || activeSessionId !== sessionId) return;
-      const disabledReason = isEmbeddedHostContextExpected() && !isWorkspaceHostContextReady()
-        ? "missing_signed_host_context"
-        : "channels_load_failed";
-      channelsProjection = createEmptyChannelsProjection(
-        sessionId,
-        "error",
-        error instanceof Error ? error.message : "Channel fixtures could not load.",
-        disabledReason,
-      );
-    }
-  }
-
-  async function openChannelsWorkspace(): Promise<void> {
-    workspaceMode = "channels";
-    const sessionId = activeSessionId;
-    if (!sessionId) {
-      const disabledReason = isEmbeddedHostContextExpected() && !isWorkspaceHostContextReady()
-        ? "missing_signed_host_context"
-        : "missing_session";
-      channelsProjection = createEmptyChannelsProjection(
-        null,
-        "error",
-        disabledReason === "missing_signed_host_context"
-          ? "Signed host context is required before channel fixtures can load."
-          : "Open a chat session before loading channel fixtures.",
-        disabledReason,
-      );
-      return;
-    }
-    await loadChannelsProjection(sessionId);
-  }
-
-  async function closeChannelsWorkspace(): Promise<void> {
-    workspaceMode = "workspace";
-    await tick();
-    channelsActionButton?.focus();
-  }
-
-  async function saveFixtureTriggerBinding(
-    draft: FixtureTriggerBindingDraft,
-  ): Promise<AgentUiSemanticActionResult> {
-    const disabledReason = channelsSaveDisabledReason();
-    if (disabledReason) {
-      const message = disabledReason === "save_in_progress"
-        ? "A fixture binding save is already in progress."
-        : disabledReason === "missing_signed_host_context"
-          ? "Signed host context is required before saving a fixture binding."
-          : "Open a chat session before saving a fixture binding.";
-      return semanticActionResult(false, message, disabledReason);
-    }
-    const sessionId = activeSessionId as string;
-    const revision = ++channelsProjectionRevision;
-    channelsProjection = { ...channelsProjection, status: "saving", message: "Saving fixture trigger binding…", disabledReason: undefined };
-    try {
-      const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}/channels`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-      const body = await response.json().catch(() => null) as {
-        ok?: boolean;
-        projection?: AgentUiChannelsStateSnapshot;
-        message?: string;
-        disabledReason?: string;
-      } | null;
-      if (revision !== channelsProjectionRevision || activeSessionId !== sessionId) {
-        return semanticActionResult(false, "The active session changed before the fixture binding save completed.", "active_session_mismatch", { expectedSessionId: sessionId });
-      }
-      if (!response.ok || !body?.ok || !body.projection) {
-        const reason = body?.disabledReason ?? "invalid_trigger_binding";
-        const message = body?.message ?? `Fixture binding save failed (${response.status}).`;
-        channelsProjection = { ...channelsProjection, status: "error", message, disabledReason: reason };
-        return semanticActionResult(false, message, reason, { expectedSessionId: sessionId });
-      }
-      channelsProjection = { ...body.projection, status: "ready", message: body.message, disabledReason: undefined };
-      return semanticActionResult(true, body.message ?? "Fixture trigger binding saved.", undefined, { expectedSessionId: sessionId });
-    } catch (error) {
-      if (revision !== channelsProjectionRevision || activeSessionId !== sessionId) {
-        return semanticActionResult(false, "The active session changed before the fixture binding save completed.", "active_session_mismatch", { expectedSessionId: sessionId });
-      }
-      const reason = isEmbeddedHostContextExpected() && !isWorkspaceHostContextReady()
-        ? "missing_signed_host_context"
-        : "channels_save_failed";
-      const message = error instanceof Error ? error.message : "Fixture binding save failed.";
-      channelsProjection = { ...channelsProjection, status: "error", message, disabledReason: reason };
-      return semanticActionResult(false, message, reason, { expectedSessionId: sessionId });
-    }
-  }
-
   function recordWorkspaceRuntimeDiagnostics(response: Response, input: RequestInfo | URL): void {
     const policy = response.headers.get("x-sonik-agent-ui-persistence-policy");
     const mode = response.headers.get("x-sonik-agent-ui-persistence-mode");
@@ -1885,25 +1690,19 @@
     return createDefaultHostUiTargetRegistry({
       provider: "sonik-agent-ui-local",
       route: hostPageContext?.route ?? "/",
-      surface: workspaceMode === "channels" ? "channels" : documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
+      surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
       activeArtifactId: activeArtifact?.id,
       activeBookingContext,
     });
   }
 
   function createLocalWorkflowSnapshot(): AgentUiWorkflowSnapshot {
-    return {
-      ...createAgentWorkflowSnapshot({
+    return createAgentWorkflowSnapshot({
       activeArtifact,
       pendingChangeCount: pendingActiveArtifactStateChanges.length,
       isStreaming,
       approvalReadiness: getActiveIntakeApprovalReadiness(),
-      }),
-      triggers: channelsProjection.triggerBindings.map((binding) => ({
-        ...binding,
-        inputMapping: binding.inputMapping.map((mapping) => ({ ...mapping })),
-      })),
-    };
+    });
   }
 
   function createPageContextSnapshot(): AgentUiPageContextSnapshot {
@@ -1914,7 +1713,7 @@
     const localDeployment = sanitizeDeploymentSnapshot(latestDeploymentSnapshot);
     const localContext: AgentUiPageContextSnapshot = {
       route: "/",
-      surface: workspaceMode === "channels" ? "channels" : documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
+      surface: documentEditorOpen ? "document" : activeArtifact ? "artifact" : "chat",
       pageType: "standalone-agent-workspace",
       title: currentSession?.name ?? "Sonik Chat",
       theme: typeof document !== "undefined" ? document.documentElement.dataset.theme : undefined,
@@ -1929,7 +1728,6 @@
         ...(isEmbeddedHostContextExpected() ? [] : ["theme-picker"]),
         "workspace-docs",
         "workflow-builder",
-        "channels",
         "start-over",
         "createSession",
         "submitPrompt",
@@ -1947,9 +1745,6 @@
         "support",
         "exportChat",
         "exportDiagnostics",
-        "connectChannel",
-        "enableTriggerBinding",
-        "saveFixtureTriggerBinding",
       ],
       visibleWarnings: sessionRailError ? [sessionRailError] : undefined,
       visibleErrors: workflowVisibleErrors.length > 0 ? workflowVisibleErrors : undefined,
@@ -1964,10 +1759,6 @@
     return {
       ...mergedContext,
       activeSessionId,
-      workflow: {
-        ...(mergedContext.workflow ?? workflow),
-        triggers: workflow.triggers ?? [],
-      },
       ...(localDeployment ? { deployment: localDeployment } : {}),
       ...(localCorrelation ? { correlation: localCorrelation } : {}),
     };
@@ -2182,24 +1973,6 @@
         enabled: Boolean(activeSessionId) && !supportExportBusy,
         disabledReason: activeSessionId ? (supportExportBusy ? "export_in_progress" : undefined) : "missing_session",
         effect: "read",
-      }),
-      createActionDescriptor("connectChannel", "Connect channel", {
-        enabled: false,
-        disabledReason: channelIntegrationDisabledReason(),
-        effect: "environment",
-        policyMode: "ask",
-      }),
-      createActionDescriptor("enableTriggerBinding", "Activate trigger binding", {
-        enabled: false,
-        disabledReason: triggerIntegrationDisabledReason(),
-        effect: "environment",
-        policyMode: "ask",
-      }),
-      createActionDescriptor("saveFixtureTriggerBinding", "Save fixture trigger binding", {
-        enabled: !channelsSaveDisabledReason(),
-        disabledReason: channelsSaveDisabledReason(),
-        effect: "write",
-        policyMode: "ask",
       }),
       createActionDescriptor("requestHostAction", "Request host action", {
         kind: "host_action",
@@ -2501,7 +2274,6 @@
       getApprovalState: snapshotApprovalState,
       getCanvasControls: snapshotCanvasControls,
       getBuilderState: () => builderController?.snapshot() ?? null,
-      getChannelsState: () => $state.snapshot(channelsProjection) as AgentUiChannelsStateSnapshot,
       actions: {
         createSession: async () => {
           if (isStreaming) return semanticActionResult(false, "Stop the current stream before creating a new session.", "streaming");
@@ -2644,49 +2416,11 @@
         requestApprovalPreview: async (input = {}) => {
           return runPageControlHostAction({ actionKey: "approval.requestPreview", targetId: input.targetId, targetInstanceId: input.targetInstanceId, entityRef: input.entityRef, intentLabel: "Request approval preview for a command-backed action." });
         },
-        connectChannel: ({ channelId }) => {
-          return semanticActionResult(
-            false,
-            channelId
-              ? `Channel integration is unavailable for ${channelId}.`
-              : "Channel integrations are not available yet.",
-            channelIntegrationDisabledReason(),
-          );
-        },
-        enableTriggerBinding: ({ bindingId }) => {
-          return semanticActionResult(
-            false,
-            bindingId
-              ? `Fixture trigger activation is unavailable for ${bindingId}.`
-              : "Fixture trigger activation is not available yet.",
-            triggerIntegrationDisabledReason(),
-          );
-        },
-        saveFixtureTriggerBinding: async (input) => {
-          return saveFixtureTriggerBinding({
-            channelId: input.channelId ?? "",
-            event: input.event ?? "",
-            workflowId: input.workflowId ?? "",
-            sourcePath: input.sourcePath ?? "",
-            targetPath: input.targetPath ?? "",
-          });
-        },
-        setWorkspaceMode: async ({ mode }) => {
-          if (mode !== "workspace" && mode !== "workflow-builder" && mode !== "channels") {
+        setWorkspaceMode: ({ mode }) => {
+          if (mode !== "workspace" && mode !== "workflow-builder") {
             return semanticActionResult(false, `Unknown workspace mode: ${mode}.`, "invalid_mode");
           }
-          if (mode === "channels") {
-            await openChannelsWorkspace();
-            if (channelsProjection.status !== "ready") {
-              return semanticActionResult(
-                false,
-                channelsProjection.message ?? "Channel fixtures are not ready.",
-                channelsProjection.disabledReason ?? `channels_${channelsProjection.status}`,
-              );
-            }
-          } else {
-            workspaceMode = mode;
-          }
+          workspaceMode = mode;
           return semanticActionResult(true, `Workspace mode set to ${mode}.`);
         },
         saveAgentDefinitionDraft: async () => {
@@ -3046,7 +2780,6 @@
     if (!force && sessionId === activeSessionId && conversation.messages.length > 0) return true;
     if (sessionRailBusy && !force) return false;
     const selectionRevision = ++sessionSelectionRevision;
-    resetChannelsProjection(sessionId);
     sessionRailBusy = true;
     sessionRailError = null;
     try {
@@ -3061,7 +2794,6 @@
       activeSessionId = detail.session.id;
       sessions = upsertSessionSummary(sessions, detail.session);
       hydrateWorkspaceSession(detail);
-      void loadChannelsProjection(detail.session.id);
       logSessionTelemetry("session.switch.success", { sessionId: detail.session.id, mode: detail.session.mode });
       return true;
     } catch (error) {
@@ -4706,13 +4438,6 @@
   onController={(controller) => { builderController = controller; }}
   onExit={() => { workspaceMode = "workspace"; }}
 />
-{:else if workspaceMode === "channels"}
-<ChannelsRoot
-  projection={channelsProjection}
-  saveDisabledReason={channelsSaveDisabledReason()}
-  onSave={saveFixtureTriggerBinding}
-  onExit={closeChannelsWorkspace}
-/>
 {:else}
 <WorkspaceRoot
   title="Sonik Chat"
@@ -4841,15 +4566,6 @@
           aria-label={workspaceMode === "workspace" ? "Open the workflow builder" : "Return to the chat workspace"}
         >
           {workspaceMode === "workspace" ? "Workflow Builder" : "Back to chat"}
-        </button>
-        <button
-          bind:this={channelsActionButton}
-          type="button"
-          onclick={() => void openChannelsWorkspace()}
-          class="min-h-11 px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          aria-label="Open channels"
-        >
-          Channels
         </button>
         <SupportDiagnosticsMenu
           activeSessionId={activeSessionId}

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { sanitizePageContext, sanitizeTelemetryValue } from "../../packages/agent-observability/src/index.ts";
-import { createInMemoryWorkflowRunJournalStore } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
+import {
+  createCloudWorkflowRunJournalStore,
+  createInMemoryWorkflowRunJournalStore,
+} from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
 import { externalEffectIdempotencyKey, replayCanonicalWorkflowEvents } from "../../packages/tool-contracts/dist/workflow-vnext.js";
 import { train0CanonicalEvent, train0SelectedPathRunState } from "../../packages/tool-contracts/dist/workflow-vnext-fixtures.js";
 import { exportTranscriptMarkdown } from "../../apps/standalone-sveltekit/src/lib/support-export.ts";
@@ -73,6 +76,42 @@ await assert.rejects(
   /workflow_persistence_secret_rejected/,
   "snapshot persistence rejects secret-shaped source identifiers",
 );
+
+const secretOutputValue = { password: "hunter2" };
+const secretKeySnapshot = {
+  ...snapshot,
+  outputs: {
+    ...snapshot.outputs,
+    unsafe: {
+      storage: "inline",
+      value: secretOutputValue,
+      byteLength: new TextEncoder().encode(JSON.stringify(secretOutputValue)).byteLength,
+    },
+  },
+};
+await assert.rejects(
+  () => journal.appendEventAndProject(owner, { expectedRevision: 0, leaseId: "lease-redaction", event: train0CanonicalEvent, snapshot: secretKeySnapshot }),
+  /workflow_persistence_secret_rejected/,
+  "in-memory canonical persistence rejects ordinary secret-bearing object keys",
+);
+
+const cloudQueries = [];
+const cloudJournal = createCloudWorkflowRunJournalStore({
+  async transaction(operation) {
+    return operation({
+      async query(sql, params = []) {
+        cloudQueries.push({ sql, params });
+        return { rows: [] };
+      },
+    });
+  },
+});
+await assert.rejects(
+  () => cloudJournal.appendEventAndProject(owner, { expectedRevision: 0, leaseId: "lease-redaction", event: train0CanonicalEvent, snapshot: secretKeySnapshot }),
+  /workflow_persistence_secret_rejected/,
+  "cloud canonical persistence rejects ordinary secret-bearing object keys before SQL serialization",
+);
+assert.equal(cloudQueries.length, 0, "rejected secret-keyed snapshots never reach cloud SQL parameters");
 
 const artifactMetadata = sanitizeTelemetryValue({ artifactId: "artifact-1", digest: `sha256:${"3".repeat(64)}`, title: `upload ${sentinel}`, uploadedContent: sentinel, authorization: sentinel });
 serializedSafe(artifactMetadata, "artifact metadata");

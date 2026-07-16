@@ -150,7 +150,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
   return {
     async appendEventAndProject(ownerInput, input) {
       const owner = normalizeWorkflowRunOwner(ownerInput);
-      const event = validateJournalAppend(input);
+      const { event, snapshot } = validateJournalAppend(input);
       if (!runStore.getRun(owner, event.workflowRunId)) return false;
       const key = workflowRunKey(owner, event.workflowRunId);
       const current = snapshots.get(key);
@@ -159,7 +159,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
         || lease?.leaseId !== input.leaseId
         || Date.parse(lease.expiresAt) <= Date.now()) return false;
       events.set(key, [...(events.get(key) ?? []), event]);
-      snapshots.set(key, input.snapshot);
+      snapshots.set(key, snapshot);
       return true;
     },
     async listEvents(ownerInput, runId) {
@@ -380,7 +380,7 @@ type EffectClaimColumns = {
 export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecutor): WorkflowRunJournalStore {
   return {
     async appendEventAndProject(ownerInput, input) {
-      const event = validateJournalAppend(input);
+      const { event, snapshot } = validateJournalAppend(input);
       return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
         const result = await tx.query<{ event_id: string }>(`
           with projected as (
@@ -412,8 +412,8 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
           event.workflowRunId,
           event.revision,
           event.sequence,
-          JSON.stringify(input.snapshot),
-          input.snapshot.compatibilityPhase,
+          JSON.stringify(snapshot),
+          snapshot.compatibilityPhase,
           input.expectedRevision,
           event.eventId,
           event.eventType,
@@ -636,7 +636,7 @@ function workflowRunConflictError(runId: string): Error & { code: string } {
   return Object.assign(new Error(`Workflow run ${runId} already exists for this workspace owner`), { code: "23505" });
 }
 
-function validateJournalAppend(input: AppendWorkflowRunEventInput): CanonicalWorkflowEvent {
+function validateJournalAppend(input: AppendWorkflowRunEventInput): { event: CanonicalWorkflowEvent; snapshot: WorkflowRunSnapshot } {
   assertWorkflowPersistenceSafe(input.event);
   assertWorkflowPersistenceSafe(input.snapshot);
   const event = parseCanonicalWorkflowEvent(input.event);
@@ -650,7 +650,7 @@ function validateJournalAppend(input: AppendWorkflowRunEventInput): CanonicalWor
     || snapshot.eventSequence !== event.sequence) {
     throw new Error("invalid_workflow_event_projection");
   }
-  return event;
+  return { event, snapshot };
 }
 
 function validateEffectIdentity(input: ClaimWorkflowEffectInput): void {
@@ -711,7 +711,11 @@ function assertWorkflowPersistenceSafe(value: unknown): void {
     return;
   }
   if (value && typeof value === "object") {
-    for (const entry of Object.values(value as Record<string, unknown>)) assertWorkflowPersistenceSafe(entry);
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      const keyProbe = sanitizePersistenceValue({ [key]: "safe" }) as Record<string, unknown>;
+      if (keyProbe[key] !== "safe") throw new Error("workflow_persistence_secret_rejected");
+      assertWorkflowPersistenceSafe(entry);
+    }
   }
 }
 
