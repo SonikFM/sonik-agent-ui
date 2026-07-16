@@ -14,6 +14,7 @@ import {
   type WorkflowWaitpoint,
 } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { WorkspaceSqlExecutor, WorkspaceSqlTransaction } from "@sonik-agent-ui/workspace-session";
+import { redactTelemetryString, sanitizeTelemetryValue } from "@sonik-agent-ui/agent-observability";
 import { createNeonWorkspaceSqlExecutor } from "./workspace-cloud-sql.ts";
 
 export interface WorkflowRunOwner {
@@ -227,7 +228,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       if (!key) return null;
       const current = claims.get(key);
       if (!current || current.status !== from) return null;
-      const updated = { ...current, status: to, updatedAt: new Date().toISOString(), ...(result === undefined ? {} : { result }) };
+      const updated = { ...current, status: to, updatedAt: new Date().toISOString(), ...(result === undefined ? {} : { result: sanitizeWorkflowPersistenceValue(result) }) };
       claims.set(key, updated);
       return updated;
     },
@@ -571,7 +572,7 @@ export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecuto
           where organization_id = $1 and claim_id = $2 and status = $3
           returning claim_id, run_id, logical_effect_id, effect_namespace, external_effect_key_digest, command_id, resolved_input_hash, attempt_id, idempotency_key,
                     provider_supports_idempotency, status, result, created_at, updated_at
-        `, [owner.organizationId, claimId, from, to, JSON.stringify(resultValue ?? null)]);
+        `, [owner.organizationId, claimId, from, to, JSON.stringify(sanitizeWorkflowPersistenceValue(resultValue ?? null))]);
         return result.rows[0] ? effectClaimFromColumns(result.rows[0]) : null;
       });
     },
@@ -636,6 +637,8 @@ function workflowRunConflictError(runId: string): Error & { code: string } {
 }
 
 function validateJournalAppend(input: AppendWorkflowRunEventInput): CanonicalWorkflowEvent {
+  assertWorkflowPersistenceSafe(input.event);
+  assertWorkflowPersistenceSafe(input.snapshot);
   const event = parseCanonicalWorkflowEvent(input.event);
   const snapshot = workflowVNextRunStateSchema.parse(input.snapshot);
   if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new Error("invalid_expected_revision");
@@ -651,6 +654,7 @@ function validateJournalAppend(input: AppendWorkflowRunEventInput): CanonicalWor
 }
 
 function validateEffectIdentity(input: ClaimWorkflowEffectInput): void {
+  assertWorkflowPersistenceSafe(input);
   if (input.idempotencyKey !== externalEffectIdempotencyKey(input.externalEffectIdentity)) {
     throw new Error("invalid_effect_idempotency");
   }
@@ -690,7 +694,25 @@ function effectClaimFromColumns(row: EffectClaimColumns): WorkflowEffectClaim {
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
-  return row.result == null ? claim : { ...claim, result: parseJsonColumn(row.result) };
+  return row.result == null ? claim : { ...claim, result: sanitizeWorkflowPersistenceValue(parseJsonColumn(row.result)) };
+}
+
+function sanitizeWorkflowPersistenceValue(value: unknown): unknown {
+  return sanitizeTelemetryValue(value);
+}
+
+function assertWorkflowPersistenceSafe(value: unknown): void {
+  if (typeof value === "string") {
+    if (redactTelemetryString(value) !== value) throw new Error("workflow_persistence_secret_rejected");
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) assertWorkflowPersistenceSafe(entry);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const entry of Object.values(value as Record<string, unknown>)) assertWorkflowPersistenceSafe(entry);
+  }
 }
 
 function parseJsonColumn<T = unknown>(value: T | string): T {
