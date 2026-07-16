@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   authenticatedResumeEventSchema,
   engineResponseSchema,
@@ -16,11 +16,12 @@ import {
   type EngineResponse,
   type ExternalEffectIdentity,
   type JsonValue,
+  type WorkflowEventOutputRef,
   type WorkflowVNextDefinition,
   type WorkflowVNextNode,
 } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import { requireCallableCapability } from "./capability-readiness.ts";
-import { dispatchWorkflowNode, hashWorkflowInput, type WorkflowNodeExecutionContext } from "./workflow-node-executors.ts";
+import { dispatchWorkflowNode, hashWorkflowInput, toWorkflowOutputRef, type WorkflowNodeExecutionContext } from "./workflow-node-executors.ts";
 import type { WorkflowRunJournalStore, WorkflowRunOwner, WorkflowRunSnapshot } from "./workflow-run-store.ts";
 
 type PumpRequest = ReturnType<typeof runDriverPumpRequestSchema.parse>;
@@ -156,7 +157,7 @@ export class WorkflowRunDriver {
           return this.appendStatus(state, request, "waiting", "outcome_unknown");
         }
         const reasoningTimeExhausted = node.nodeType === "reasoning" && this.now() - reasoningStartedAt >= (node.reasoning?.budgets.maxWallTimeMs ?? 0);
-        if (reasoningTimeExhausted) return this.appendReasoningYield(state, request, node, "wall_time_budget_exhausted", completedAttemptId);
+        if (reasoningTimeExhausted) return this.appendReasoningYield(state, request, node, "wall_time_budget_exhausted", completedAttemptId, response.status === "succeeded" ? toWorkflowOutputRef(response.output, "Reasoning output withheld at budget yield") : response.status === "terminal_error" ? response.outputRef : undefined);
         if (response.status !== "retryable_error" || logicalEffectId || retry + 1 >= maxAttempts) break;
       }
       if (response.status === "waiting") {
@@ -173,7 +174,7 @@ export class WorkflowRunDriver {
       if (response.status === "terminal_error") {
         if (logicalEffectId) await this.deps.journal.transitionEffectClaim(this.deps.owner, claim!.claim.claimId, "in_flight", "failed", response);
         if (node.nodeType === "reasoning" && ["reasoning_budget_exhausted", "reasoning_output_budget_exhausted"].includes(response.error.code)) {
-          return this.appendReasoningYield(state, request, node, "node_budget_exhausted", completedAttemptId);
+          return this.appendReasoningYield(state, request, node, "node_budget_exhausted", completedAttemptId, response.outputRef);
         }
         return this.appendStatus(state, request, "failed", response.error.code, { schedulerFrontier: [] });
       }
@@ -233,17 +234,17 @@ export class WorkflowRunDriver {
   }
 
   private async complete(state: WorkflowRunSnapshot, request: PumpRequest, node: WorkflowVNextNode, output: BoundedNodeOutput, next = this.next(node.nodeId), attemptId?: string): Promise<WorkflowRunSnapshot> {
-    const digest = `sha256:${createHash("sha256").update(JSON.stringify(output)).digest("hex")}`;
-    const outputRef = output.storage === "artifact" ? output : { storage: "inline_redacted" as const, digest, byteLength: output.byteLength, redactedSummary: "Node output recorded" };
+    const outputRef = toWorkflowOutputRef(output);
     return this.append(state, request, "node_completed", { nodeId: node.nodeId, outputRef }, { status: next.length ? "running" : "succeeded", selectedPath: [...state.selectedPath, node.nodeId], schedulerFrontier: next, outputs: { ...state.outputs, [node.nodeId]: output }, outputRefs: { ...state.outputRefs, [node.nodeId]: outputRef }, compatibilityPhase: next.length ? "saving" : "committed" }, { kind: "node", id: node.nodeId }, attemptId);
   }
 
   private appendWait(state: WorkflowRunSnapshot, request: PumpRequest, waitpoint: WorkflowRunSnapshot["waits"][number], attemptId?: string): Promise<WorkflowRunSnapshot> {
-    return this.append(state, request, "wait_created", { waitpoint }, { status: "waiting", waits: [waitpoint], compatibilityPhase: "waiting" }, { kind: "waitpoint", id: waitpoint.waitpointId }, attemptId);
+    const outputRefs = waitpoint.kind === "budget_yield" && waitpoint.outputRef ? { ...state.outputRefs, [waitpoint.nodeId]: waitpoint.outputRef } : state.outputRefs;
+    return this.append(state, request, "wait_created", { waitpoint }, { status: "waiting", waits: [waitpoint], outputRefs, compatibilityPhase: "waiting" }, { kind: "waitpoint", id: waitpoint.waitpointId }, attemptId);
   }
 
-  private async appendReasoningYield(state: WorkflowRunSnapshot, request: PumpRequest, node: WorkflowVNextNode, wakeupReason: "node_budget_exhausted" | "wall_time_budget_exhausted", attemptId: string): Promise<WorkflowRunSnapshot> {
-    const waitpoint = { kind: "budget_yield" as const, waitpointId: `reasoning-budget:${state.workflowRunId}:${state.revision + 1}`, runId: state.workflowRunId, nodeId: node.nodeId, wakeupReason };
+  private async appendReasoningYield(state: WorkflowRunSnapshot, request: PumpRequest, node: WorkflowVNextNode, wakeupReason: "node_budget_exhausted" | "wall_time_budget_exhausted", attemptId: string, outputRef?: WorkflowEventOutputRef): Promise<WorkflowRunSnapshot> {
+    const waitpoint = { kind: "budget_yield" as const, waitpointId: `reasoning-budget:${state.workflowRunId}:${state.revision + 1}`, runId: state.workflowRunId, nodeId: node.nodeId, wakeupReason, ...(outputRef ? { outputRef } : {}) };
     await this.deps.journal.createWaitpoint(this.deps.owner, waitpoint);
     return this.appendWait(state, request, waitpoint, attemptId);
   }
