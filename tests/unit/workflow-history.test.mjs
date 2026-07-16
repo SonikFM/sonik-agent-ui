@@ -11,7 +11,7 @@ const workflowRow = {
     runId: "workflow-run-a", workflowId: "workflow-a", workflowVersionId: "workflow-a@1", artifactId: "artifact-a", phase: "committed", currentNodeId: "commit",
     facadeToolIds: ["booking.create"],
     nodeStates: {
-      approval: { nodeId: "approval", type: "approval", status: "approved", effect: "none", required: false },
+      approval: { nodeId: "approval", type: "approval", status: "approved", commandId: "booking.create", effect: "none", required: false },
       commit: { nodeId: "commit", type: "tool_commit", status: "committed", commandId: "booking.create", effect: "write", required: false },
     },
     approvalState: { status: "approved", hostSigned: true, approvedCommandIds: ["booking.create"], approvedInputHashes: {} },
@@ -292,6 +292,11 @@ const sameRunApprovalHistory = await getWorkflowHistory(
   identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }, [sameRunApprovalEvent]),
 );
 assert.deepEqual(sameRunApprovalHistory.history.approvals.map((approval) => approval.approvalId), ["approval"], "same-run row and event approval projections coalesce");
+assert.deepEqual(
+  sameRunApprovalHistory.history.approvals[0],
+  { approvalId: "approval", workflowRunId: workflowRow.runId, nodeId: "approval", commandId: "booking.create", status: "approved", hostSigned: true },
+  "same-run coalescing preserves the first authoritative row projection",
+);
 
 for (const [workflowRunId, message] of [
   [workflowRow.runId, "an exact workflow constrained to a mismatched populated session"],

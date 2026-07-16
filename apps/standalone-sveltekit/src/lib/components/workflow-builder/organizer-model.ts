@@ -47,8 +47,12 @@ export interface WorkflowHistoryProjection {
   toolCalls: Array<{ toolCallId: string; sessionId: string; messageId?: string; requestId?: string; artifactId?: string; createdAt: string; completedAt?: string; status?: string }>;
   approvals: Array<{ approvalId: string; workflowRunId: string; nodeId: string; status?: string; timestamp?: string }>;
   artifacts: Array<{ artifactId: string; workflowRunId: string; nodeId: string; status?: string; timestamp?: string }>;
-  receipts: Array<{ receiptId: string; workflowRunId: string; nodeId: string; status?: string; timestamp?: string }>;
+  receipts: Array<{ receiptId: string; workflowRunId: string; nodeId: string; semanticStatus: string; timestamp?: string }>;
   events: Array<{ eventId: string; source: string; timestamp: string; status?: string; workflowRunId?: string; nodeId?: string; approvalId?: string; artifactId?: string }>;
+}
+
+export function workflowHistoryItemKey(workflowRunId: string, identifier: string): string {
+  return JSON.stringify([workflowRunId, identifier]);
 }
 
 export type CatalogModelOption = AgentModelOption & {

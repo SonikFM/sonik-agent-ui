@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import * as Card from "$lib/components/ui/card";
-  import type { WorkflowHistoryProjection } from "./organizer-model";
+  import { workflowHistoryItemKey, type WorkflowHistoryProjection } from "./organizer-model";
 
   type HistoryKind = "event" | "approval" | "artifact" | "receipt";
   type HistoryItem = WorkflowHistoryProjection["events"][number]
@@ -48,7 +48,7 @@
         <Card.Header><Card.Title>Approvals ({history.approvals.length})</Card.Title></Card.Header>
         <Card.Content>
           <ul class="flex flex-col gap-2">
-            {#each history.approvals as approval (approval.approvalId)}
+            {#each history.approvals as approval (workflowHistoryItemKey(approval.workflowRunId, approval.approvalId))}
               <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("approval", approval)}><strong>{approval.approvalId}</strong> · {approval.status ?? "unknown"}<br /><code class="text-xs">{approval.workflowRunId}/{approval.nodeId}</code></button></li>
             {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
           </ul>
@@ -70,8 +70,8 @@
         <Card.Header><Card.Title>Receipts ({history.receipts.length})</Card.Title></Card.Header>
         <Card.Content>
           <ul class="flex flex-col gap-2">
-            {#each history.receipts as receipt (receipt.receiptId)}
-              <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("receipt", receipt)}><strong>{receipt.receiptId}</strong> · {receipt.status ?? "unknown"}<br /><code class="text-xs">{receipt.workflowRunId}/{receipt.nodeId}</code></button></li>
+            {#each history.receipts as receipt (workflowHistoryItemKey(receipt.workflowRunId, receipt.receiptId))}
+              <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("receipt", receipt)}><strong>{receipt.receiptId}</strong> · {receipt.semanticStatus ?? "unknown"}<br /><code class="text-xs">{receipt.workflowRunId}/{receipt.nodeId}</code></button></li>
             {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
           </ul>
         </Card.Content>

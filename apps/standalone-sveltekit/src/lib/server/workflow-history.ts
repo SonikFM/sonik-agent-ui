@@ -119,7 +119,12 @@ function projectEventApproval(event: CanonicalWorkflowEvent) {
 }
 
 function dedupeApprovals<T extends { workflowRunId: string; approvalId: string }>(entries: T[]): T[] {
-  return [...new Map(entries.map((entry) => [JSON.stringify([entry.workflowRunId, entry.approvalId]), entry])).values()];
+  const unique = new Map<string, T>();
+  for (const entry of entries) {
+    const key = JSON.stringify([entry.workflowRunId, entry.approvalId]);
+    if (!unique.has(key)) unique.set(key, entry);
+  }
+  return [...unique.values()];
 }
 
 function matchesConversation(run: WorkspaceRunRecord, query: WorkflowHistoryQuery, correlationIds: Set<string>): boolean {

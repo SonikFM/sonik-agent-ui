@@ -7,6 +7,7 @@ import {
   filterCatalogModels,
   modelCapabilityBadges,
   modelDisabledReason,
+  workflowHistoryItemKey,
 } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/organizer-model.ts";
 
 const workflow = createEmptyWorkflowDefinition("organizer.test");
@@ -61,6 +62,8 @@ assert.deepEqual(
 assert.match(modelDisabledReason(true, { id: "no-tools", label: "No tools", provider: "Test", supportsTools: false }), /does not support tool use/);
 assert.equal(modelDisabledReason(false, { id: "tools", label: "Tools", provider: "Test", supportsTools: true }), null);
 assert.equal(modelDisabledReason(false, { id: "disabled", label: "Disabled", provider: "Test", disabledReason: "Provider outage" }), "Provider outage");
+assert.notEqual(workflowHistoryItemKey("run-a", "shared"), workflowHistoryItemKey("run-b", "shared"), "history keys retain workflow run identity");
+assert.notEqual(workflowHistoryItemKey("a:b", "c"), workflowHistoryItemKey("a", "b:c"), "history keys cannot collide through ambiguous concatenation");
 
 const componentRoot = new URL("../../apps/standalone-sveltekit/src/lib/components/workflow-builder/", import.meta.url);
 const [configSource, organizerSource, historySource, rootSource] = await Promise.all([
@@ -90,6 +93,9 @@ for (const surface of ["Identity", "Instructions", "Knowledge", "Curated capabil
 for (const field of ["history.query", "events", "approvals", "artifacts", "receipts"]) {
   assert.match(historySource, new RegExp(field), `operator history renders typed ${field}`);
 }
+assert.match(historySource, /workflowHistoryItemKey\(approval\.workflowRunId, approval\.approvalId\)/, "approval rows use collision-safe causal identity");
+assert.match(historySource, /workflowHistoryItemKey\(receipt\.workflowRunId, receipt\.receiptId\)/, "receipt rows use collision-safe causal identity");
+assert.match(historySource, /receipt\.semanticStatus/, "receipt rows render the server projection field");
 assert.match(rootSource, /<OrganizerPanel/, "the root mounts the graph-free P2 organizer audience");
 assert.match(rootSource, /<RunHistoryPanel/, "the root mounts redacted operator history without merging stores");
 assert.match(rootSource, /workflowDefinitions\(request as unknown as Record<string, unknown>\)/, "organizer_patch crosses the root boundary unchanged");

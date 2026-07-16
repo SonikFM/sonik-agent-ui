@@ -463,7 +463,7 @@ test("operator history visibly correlates the governed causal path", async ({ pa
         toolCalls: [{ toolCallId: query.toolCallId, sessionId: query.sessionId, requestId: query.requestId, artifactId: query.artifactId, createdAt: "2026-07-15T21:00:10.000Z", status: "succeeded" }],
         approvals: [{ approvalId: query.approvalId, workflowRunId: query.workflowRunId, nodeId: "approval", status: "approved" }],
         artifacts: [{ artifactId: query.artifactId, workflowRunId: query.workflowRunId, nodeId: "evidence", status: "ready" }],
-        receipts: [{ receiptId: query.receiptId, workflowRunId: query.workflowRunId, nodeId: query.nodeId, status: "committed" }],
+        receipts: [{ receiptId: query.receiptId, workflowRunId: query.workflowRunId, nodeId: query.nodeId, semanticStatus: "success" }],
         events: [{ eventId: "event-e2e", source: "workflow", timestamp: "2026-07-15T21:01:00.000Z", status: "completed", workflowRunId: query.workflowRunId, nodeId: query.nodeId, approvalId: query.approvalId, artifactId: query.artifactId }],
       },
     }),

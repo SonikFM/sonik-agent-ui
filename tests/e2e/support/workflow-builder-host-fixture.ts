@@ -202,7 +202,7 @@ export async function installWorkflowBuilderHostFixture(
         toolCalls: [],
         approvals: [{ approvalId: "campaign-fixture-approval", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "confirm", status: "approved" }],
         artifacts: [{ artifactId: "campaign-fixture-artifact", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "evidence", status: "ready" }],
-        receipts: [{ receiptId: "campaign-fixture-receipt", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "evidence", status: "committed" }],
+        receipts: [{ receiptId: "campaign-fixture-receipt", workflowRunId: "workflow-builder-host-fixture-run", nodeId: "evidence", semanticStatus: "success" }],
         events: [],
       },
     });
