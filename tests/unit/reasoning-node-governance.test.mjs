@@ -20,20 +20,28 @@ async function governedRun({ usage, output, inlineOutputByteLimit = 64, now }) {
   const journal = createInMemoryWorkflowRunJournalStore({ getRun: () => ({}) });
   const context = (node) => node.nodeType === "reasoning" ? { reasoning: contract, reasoningUsage: usage, inlineOutputByteLimit, now, executors: { reasoning: () => ({ status: "succeeded", output }) } } : {};
   const driver = new WorkflowRunDriver({ journal, owner, definition, initialState: state, executionContext: context });
-  return driver.start({ workflowRunId: runId, lease: { leaseId: runId, ownerId: runId, expiresAt: new Date(Date.now() + 60_000).toISOString() }, budget: { maxNodes: 20, maxWallTimeMs: 10_000 } });
+  const request = { workflowRunId: runId, lease: { leaseId: runId, ownerId: runId, expiresAt: new Date(Date.now() + 60_000).toISOString() }, budget: { maxNodes: 20, maxWallTimeMs: 10_000 } };
+  return { state: await driver.start(request), driver, request };
 }
 
-for (const input of [
-  { usage: { steps: 2, tokens: 1 }, output: { storage: "inline", value: { ok: true }, byteLength: 11 } },
+const resumableUsage = { steps: 2, tokens: 1 };
+const cases = [
+  { usage: resumableUsage, output: { storage: "inline", value: { ok: true }, byteLength: 11 } },
   { usage: { steps: 1, tokens: 11 }, output: { storage: "inline", value: { ok: true }, byteLength: 11 } },
   { usage: { steps: 1, tokens: 1 }, output: { storage: "inline", value: { text: "too large" }, byteLength: 20 }, inlineOutputByteLimit: 4 },
-]) {
-  const yielded = await governedRun(input);
+];
+let resumable;
+for (const input of cases) {
+  const run = await governedRun(input);
+  const yielded = run.state;
   assert.equal(yielded.status, "waiting", "reasoning exhaustion is a visible persisted yield, not terminal failure");
   assert.equal(yielded.waits[0].kind, "budget_yield");
+  resumable ??= run;
 }
+resumableUsage.steps = 1;
+assert.equal((await resumable.driver.resume(resumable.request)).status, "succeeded", "a persisted reasoning yield resumes from the same frontier after budget replenishment");
 
 const artifact = { storage: "artifact", artifact: { artifactId: "artifact-reasoning", organizationId: owner.organizationId, contentType: "application/json", byteLength: 1000, digest: `sha256:${"b".repeat(64)}`, createdByNodeId: "work" } };
-assert.equal((await governedRun({ usage: { steps: 1, tokens: 1 }, output: artifact, inlineOutputByteLimit: 1 })).status, "succeeded", "large safe output uses ArtifactRef instead of leaking inline data");
+assert.equal((await governedRun({ usage: { steps: 1, tokens: 1 }, output: artifact, inlineOutputByteLimit: 1 })).state.status, "succeeded", "large safe output uses ArtifactRef instead of leaking inline data");
 
 console.log("reasoning-node-governance.test.mjs passed");
