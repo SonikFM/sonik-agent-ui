@@ -5,11 +5,11 @@ import type {
   WorkspaceRunRecord,
   WorkspaceToolCallRecord,
 } from "@sonik-agent-ui/workspace-session";
-import type { CanonicalWorkflowEvent } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import { isWorkflowNodeAttemptId, type CanonicalWorkflowEvent } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { AsyncWorkflowRunStore, WorkflowRunJournalStore, WorkflowRunOwner, WorkflowRunRow } from "./workflow-run-store.ts";
 
 export const WORKFLOW_HISTORY_QUERY_KEYS = [
-  "sessionId", "conversationRunId", "workflowRunId", "nodeId", "toolCallId", "approvalId", "artifactId", "receiptId", "requestId", "traceId",
+  "sessionId", "conversationRunId", "workflowRunId", "nodeId", "toolCallId", "approvalId", "artifactId", "receiptId", "requestId", "traceId", "attemptId",
 ] as const;
 export type WorkflowHistoryQuery = Partial<Record<(typeof WORKFLOW_HISTORY_QUERY_KEYS)[number], string>>;
 
@@ -46,30 +46,39 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
     correlatedWorkflowId ? deps.journal.listEvents(deps.owner, correlatedWorkflowId) : Promise.resolve([]),
     sessionId ? failSoft(() => deps.workspace.listToolCalls(sessionId), []) : Promise.resolve([]),
   ]);
-  const correlationIds = new Set(workflowEvents.flatMap((event) => event.correlationIds));
-  const conversations = conversationCandidates.filter((run) => matchesConversation(run, query, correlationIds));
+  const hasExactAttempt = !query.attemptId || workflowEvents.some((event) => event.attemptId === query.attemptId);
+  const causalWorkflowRows = hasExactAttempt ? workflowRows : [];
+  const causalWorkflowEvents = hasExactAttempt ? workflowEvents : [];
+  const correlationIds = new Set(causalWorkflowEvents.flatMap((event) => event.correlationIds));
+  const conversations = hasExactAttempt ? conversationCandidates.filter((run) => matchesConversation(run, query, correlationIds)) : [];
   const conversationRequestIds = new Set(conversations.flatMap((run) => run.request_id ? [run.request_id] : []));
-  const filteredToolCalls = toolCalls.filter((call) => matchesToolCall(call, query, correlationIds, conversationRequestIds));
+  const filteredToolCalls = hasExactAttempt ? toolCalls.filter((call) => matchesToolCall(call, query, correlationIds, conversationRequestIds)) : [];
   const correlatedConversationId = conversations.length === 1 ? conversations[0]?.id : undefined;
   const conversationEvents = correlatedConversationId
     ? await failSoft(() => deps.workspace.listRunEvents(correlatedConversationId), [])
     : [];
+  const attemptNodeIds = new Set(causalWorkflowEvents.flatMap((event) => {
+    if (event.attemptId !== query.attemptId) return [];
+    if (event.eventType === "node_completed") return [event.payload.nodeId];
+    if (event.eventType === "wait_created") return [event.payload.waitpoint.nodeId];
+    return [];
+  }));
 
   return {
     ok: true as const,
     history: {
       query,
       conversations: conversations.map(projectConversation),
-      workflows: workflowRows.map(projectWorkflow),
-      nodes: workflowRows.flatMap(projectNodes).filter((node) => !query.nodeId || node.nodeId === query.nodeId),
+      workflows: causalWorkflowRows.map(projectWorkflow),
+      nodes: causalWorkflowRows.flatMap(projectNodes).filter((node) => (!query.nodeId || node.nodeId === query.nodeId) && (!query.attemptId || attemptNodeIds.has(node.nodeId))),
       toolCalls: filteredToolCalls.map(projectToolCall),
-      approvals: dedupeById([...workflowRows.flatMap(projectApprovals), ...workflowEvents.flatMap(projectEventApproval)], "approvalId")
+      approvals: dedupeById([...causalWorkflowRows.flatMap(projectApprovals), ...causalWorkflowEvents.flatMap(projectEventApproval)], "approvalId")
         .filter((approval) => !query.approvalId || approval.approvalId === query.approvalId),
-      artifacts: projectArtifacts(workflowRows, workflowEvents, artifact).filter((entry) => !query.artifactId || entry.artifactId === query.artifactId),
-      receipts: workflowRows.flatMap(projectReceipts).filter((receipt) => !query.receiptId || receipt.receiptId === query.receiptId),
+      artifacts: projectArtifacts(causalWorkflowRows, causalWorkflowEvents, hasExactAttempt ? artifact : null).filter((entry) => !query.artifactId || entry.artifactId === query.artifactId),
+      receipts: causalWorkflowRows.flatMap(projectReceipts).filter((receipt) => !query.receiptId || receipt.receiptId === query.receiptId),
       events: [
         ...conversationEvents.map(projectConversationEvent),
-        ...workflowEvents.map(projectWorkflowEvent),
+        ...causalWorkflowEvents.map(projectWorkflowEvent),
       ],
     },
   };
@@ -85,6 +94,7 @@ function normalizeQuery(input: WorkflowHistoryQuery): WorkflowHistoryQuery {
 function matchesWorkflow(row: WorkflowRunRow, query: WorkflowHistoryQuery): boolean {
   if (query.workflowRunId) return row.runId === query.workflowRunId;
   if (query.nodeId && !row.state.nodeStates[query.nodeId]) return false;
+  if (query.attemptId && !Object.keys(row.state.nodeStates).some((nodeId) => isWorkflowNodeAttemptId(query.attemptId!, row.runId, nodeId))) return false;
   if (query.approvalId && !projectApprovals(row).some((approval) => approval.approvalId === query.approvalId)) return false;
   if (query.artifactId && row.state.artifactId !== query.artifactId) return false;
   if (query.receiptId && !row.state.receipts.some((receipt) => receipt.receiptRef === query.receiptId)) return false;
@@ -188,10 +198,10 @@ function projectConversationEvent(record: WorkspaceRunEventRecord) {
 function projectWorkflowEvent(event: CanonicalWorkflowEvent) {
   return {
     source: "workflow" as const, eventId: event.eventId, workflowRunId: event.workflowRunId,
-    type: event.eventType, sequence: event.sequence, nodeId: event.subject.kind === "node" ? event.subject.id : null,
+    type: event.eventType, sequence: event.sequence, nodeId: event.subject.kind === "node" ? event.subject.id : event.eventType === "wait_created" ? event.payload.waitpoint.nodeId : null,
     approvalId: event.eventType === "wait_created" && event.payload.waitpoint.kind === "approval" ? event.payload.waitpoint.waitpointId : null,
     artifactId: event.eventType === "node_completed" && event.payload.outputRef.storage === "artifact" ? event.payload.outputRef.artifact.artifactId : null,
-    correlationIds: event.correlationIds, timestamp: event.timestamp,
+    attemptId: event.attemptId ?? null, correlationIds: event.correlationIds, timestamp: event.timestamp,
   };
 }
 

@@ -30,14 +30,20 @@ const toolCall = {
 };
 const canonicalEvent = {
   eventId: "workflow-event-a", schemaVersion: "sonik.workflow.event.v1", eventVersion: 1, workflowRunId: "workflow-run-a", sequence: 1, revision: 1,
-  actor: { kind: "worker", id: "worker-a" }, subject: { kind: "node", id: "commit" }, causationId: "request-a", correlationIds: ["conversation-run-a", "request-a", "trace-a", "tool-a", "receipt-a"],
+  actor: { kind: "worker", id: "worker-a" }, subject: { kind: "node", id: "commit" }, causationId: "request-a", attemptId: "workflow-run-a:commit:1", correlationIds: ["conversation-run-a", "request-a", "trace-a", "tool-a", "receipt-a", "workflow-run-a:commit:1"],
   timestamp: "2026-07-15T20:00:11.000Z", eventType: "node_completed",
   payload: { nodeId: "commit", outputRef: { storage: "artifact", artifact: { artifactId: "artifact-a", organizationId: "org-a", contentType: "application/json", byteLength: 10, digest: `sha256:${"a".repeat(64)}`, createdByNodeId: "commit" } } },
+};
+const waitCanonicalEvent = {
+  eventId: "workflow-wait-a", schemaVersion: "sonik.workflow.event.v1", eventVersion: 1, workflowRunId: "workflow-run-a", sequence: 2, revision: 2,
+  actor: { kind: "worker", id: "worker-a" }, subject: { kind: "waitpoint", id: "workflow-run-a:approval:2" }, causationId: "request-a", attemptId: "workflow-run-a:approval:2",
+  correlationIds: ["conversation-run-a", "request-a", "trace-a", "workflow-run-a:approval:2"], timestamp: "2026-07-15T20:00:12.000Z", eventType: "wait_created",
+  payload: { waitpoint: { kind: "approval", waitpointId: "workflow-run-a:approval:2", runId: "workflow-run-a", nodeId: "approval", subjectId: "user-a", logicalEffectId: "effect-a", expiresAt: "2026-07-15T20:15:12.000Z" } },
 };
 
 const result = await getWorkflowHistory({
   sessionId: "session-a", conversationRunId: "conversation-run-a", workflowRunId: "workflow-run-a", nodeId: "commit",
-  toolCallId: "tool-a", artifactId: "artifact-a", receiptId: "receipt-a", requestId: "request-a", traceId: "trace-a",
+  toolCallId: "tool-a", artifactId: "artifact-a", receiptId: "receipt-a", requestId: "request-a", traceId: "trace-a", attemptId: "workflow-run-a:commit:1",
 }, {
   owner: { organizationId: "org-a", userId: "user-a" },
   workflowRuns: {
@@ -81,6 +87,7 @@ const queryValues = {
   receiptId: "receipt-a",
   requestId: "request-a",
   traceId: "trace-a",
+  attemptId: "workflow-run-a:commit:1",
 };
 assert.deepEqual(Object.keys(queryValues), [...WORKFLOW_HISTORY_QUERY_KEYS]);
 
@@ -104,40 +111,57 @@ const decoyWorkflow = {
   },
 };
 
+const identifierDeps = (identifierCalls, workflowEvents = [canonicalEvent]) => ({
+  owner: { organizationId: "org-a", userId: "user-a", hostSessionId: "session-a" },
+  workflowRuns: {
+    getRun: async (_owner, runId) => (identifierCalls.workflowGet++, runId === workflowRow.runId ? workflowRow : null),
+    listRuns: async () => (identifierCalls.workflowList++, [decoyWorkflow, workflowRow]),
+    createRun: async () => { throw new Error("unused"); },
+    updateRunState: async () => { throw new Error("unused"); },
+  },
+  journal: { listEvents: async (_owner, runId) => (identifierCalls.journal++, runId === workflowRow.runId ? workflowEvents : []) },
+  workspace: {
+    getRun: async (runId) => (identifierCalls.conversationGet++, runId === conversation.id ? conversation : null),
+    listRuns: async (sessionId) => (identifierCalls.conversationList++, sessionId === conversation.session_id ? [conversation] : []),
+    listRunEvents: async (runId) => (identifierCalls.conversationEvents++, runId === conversation.id ? [{ id: "conversation-event-a", run_id: conversation.id, session_id: conversation.session_id, seq: 0, kind: "tool_result", event: { secret: "must-not-leak" }, created_at: "2026-07-15T20:00:11.000Z" }] : []),
+    listToolCalls: async (sessionId) => (identifierCalls.tools++, sessionId === toolCall.session_id ? [toolCall] : []),
+    getArtifact: async (artifactId) => (identifierCalls.artifact++, artifactId === "artifact-a" ? { id: "artifact-a", session_id: "session-a", kind: "json-render", title: "Safe title", content: { secret: "must-not-leak" }, version: 2, created_at: "2026-07-15T20:00:00.000Z", updated_at: "2026-07-15T20:00:11.000Z" } : null),
+  },
+});
+
 for (const key of WORKFLOW_HISTORY_QUERY_KEYS) {
   const identifierCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
-  const identifierResult = await getWorkflowHistory({ [key]: queryValues[key] }, {
-    owner: { organizationId: "org-a", userId: "user-a", hostSessionId: "session-a" },
-    workflowRuns: {
-      getRun: async (_owner, runId) => (identifierCalls.workflowGet++, runId === workflowRow.runId ? workflowRow : null),
-      listRuns: async () => (identifierCalls.workflowList++, [decoyWorkflow, workflowRow]),
-      createRun: async () => { throw new Error("unused"); },
-      updateRunState: async () => { throw new Error("unused"); },
-    },
-    journal: {
-      listEvents: async (_owner, runId) => (identifierCalls.journal++, runId === workflowRow.runId ? [canonicalEvent] : []),
-    },
-    workspace: {
-      getRun: async (runId) => (identifierCalls.conversationGet++, runId === conversation.id ? conversation : null),
-      listRuns: async (sessionId) => (identifierCalls.conversationList++, sessionId === conversation.session_id ? [conversation] : []),
-      listRunEvents: async (runId) => (identifierCalls.conversationEvents++, runId === conversation.id ? [{ id: "conversation-event-a", run_id: conversation.id, session_id: conversation.session_id, seq: 0, kind: "tool_result", event: { secret: "must-not-leak" }, created_at: "2026-07-15T20:00:11.000Z" }] : []),
-      listToolCalls: async (sessionId) => (identifierCalls.tools++, sessionId === toolCall.session_id ? [toolCall] : []),
-      getArtifact: async (artifactId) => (identifierCalls.artifact++, artifactId === "artifact-a" ? { id: "artifact-a", session_id: "session-a", kind: "json-render", title: "Safe title", content: { secret: "must-not-leak" }, version: 2, created_at: "2026-07-15T20:00:00.000Z", updated_at: "2026-07-15T20:00:11.000Z" } : null),
-    },
-  });
+  const identifierResult = await getWorkflowHistory({ [key]: queryValues[key] }, identifierDeps(identifierCalls));
 
   assert.equal(identifierResult.ok, true, `${key} query succeeds`);
   assert.deepEqual(identifierResult.history.conversations.map((run) => run.conversationRunId), ["conversation-run-a"], `${key} resolves the correlated conversation`);
   assert.deepEqual(identifierResult.history.workflows.map((run) => run.workflowRunId), ["workflow-run-a"], `${key} never selects the unrelated first workflow session`);
-  assert.deepEqual(identifierResult.history.nodes.map((node) => node.nodeId), ["approval", "commit"].filter((nodeId) => key !== "nodeId" || nodeId === "commit"), `${key} resolves the correlated nodes`);
+  assert.deepEqual(identifierResult.history.nodes.map((node) => node.nodeId), ["approval", "commit"].filter((nodeId) => !["nodeId", "attemptId"].includes(key) || nodeId === "commit"), `${key} resolves the correlated nodes`);
   assert.deepEqual(identifierResult.history.toolCalls.map((call) => call.toolCallId), ["tool-a"], `${key} resolves the correlated tool call`);
   assert.deepEqual(identifierResult.history.approvals.map((approval) => approval.approvalId), ["approval"], `${key} resolves the correlated approval`);
   assert.deepEqual(identifierResult.history.artifacts.map((artifactEntry) => artifactEntry.artifactId), ["artifact-a"], `${key} resolves the correlated artifact`);
   assert.deepEqual(identifierResult.history.receipts.map((receipt) => receipt.receiptId), ["receipt-a"], `${key} resolves the correlated receipt`);
   assert.deepEqual(identifierResult.history.events.map((event) => event.eventId), ["conversation-event-a", "workflow-event-a"], `${key} resolves the same causal event path`);
+  assert.equal(identifierResult.history.events.find((event) => event.eventId === "workflow-event-a")?.attemptId, "workflow-run-a:commit:1", `${key} projects the canonical node attempt`);
   assert.equal(JSON.stringify(identifierResult).includes("must-not-leak"), false, `${key} projection remains redacted`);
   assert.equal(Object.values(identifierCalls).every((count) => count <= 1), true, `${key} performs at most one call per authoritative store`);
 }
+
+const missingAttemptCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
+const missingAttempt = await getWorkflowHistory({ attemptId: "workflow-run-a:commit:999" }, identifierDeps(missingAttemptCalls));
+assert.deepEqual(missingAttempt.history.workflows, [], "a canonical-looking but nonexistent attempt does not match the run prefix");
+assert.deepEqual(missingAttempt.history.events, [], "a nonexistent attempt has no causal path");
+assert.equal(Object.values(missingAttemptCalls).every((count) => count <= 1), true, "exact attempt rejection preserves one read per authoritative store");
+
+const waitAttemptCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
+const waitAttempt = await getWorkflowHistory({ attemptId: "workflow-run-a:approval:2" }, identifierDeps(waitAttemptCalls, [canonicalEvent, waitCanonicalEvent]));
+assert.deepEqual(waitAttempt.history.nodes.map((node) => node.nodeId), ["approval"], "a wait attempt projects its owning node rather than its waitpoint subject");
+assert.deepEqual(waitAttempt.history.events.find((event) => event.eventId === "workflow-wait-a"), {
+  source: "workflow", eventId: "workflow-wait-a", workflowRunId: "workflow-run-a", type: "wait_created", sequence: 2,
+  nodeId: "approval", approvalId: "workflow-run-a:approval:2", artifactId: null, attemptId: "workflow-run-a:approval:2",
+  correlationIds: ["conversation-run-a", "request-a", "trace-a", "workflow-run-a:approval:2"], timestamp: "2026-07-15T20:00:12.000Z",
+});
+assert.equal(Object.values(waitAttemptCalls).every((count) => count <= 1), true, "wait attempt correlation preserves one read per authoritative store");
 
 const route = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/workflow-history/+server.ts", import.meta.url), "utf8");
 assert.match(route, /createAgentHostSessionEnvelope\(event\)/);

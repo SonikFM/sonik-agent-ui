@@ -184,6 +184,18 @@ assert.equal(canonicalWorkflowEventSchema.safeParse({
   correlationIds: ["trace-1"], timestamp: "2026-07-15T12:00:00.000Z", eventType: "run_status_changed",
   payload: { status: "succeeded", compatibilityPhase: "committed" },
 }).success, true, "canonical event envelope is durable and versioned");
+const canonicalAttemptEvent = {
+  eventId: "event-attempt", schemaVersion: WORKFLOW_EVENT_SCHEMA_VERSION, eventVersion: 1, workflowRunId: "run-1", sequence: 1, revision: 1,
+  actor: { kind: "system", id: "scheduler" }, subject: { kind: "node", id: "work" }, causationId: "request-1",
+  attemptId: "run-1:work:1", correlationIds: ["trace-1", "run-1:work:1"], timestamp: "2026-07-15T12:00:00.000Z", eventType: "node_completed",
+  payload: { nodeId: "work", outputRef: { storage: "inline_redacted", digest, byteLength: 1, redactedSummary: "done" } },
+};
+assert.equal(canonicalWorkflowEventSchema.safeParse(canonicalAttemptEvent).success, true, "canonical node attempts bind run, node, event, and correlation identity");
+assert.equal(canonicalWorkflowEventSchema.safeParse({ ...canonicalAttemptEvent, attemptId: "run-1:sibling:1", correlationIds: ["run-1:sibling:1"] }).success, false, "forged sibling-node attempt identity is rejected");
+assert.equal(canonicalWorkflowEventSchema.safeParse({
+  ...canonicalAttemptEvent, subject: { kind: "run", id: "run-1" }, eventType: "run_status_changed",
+  payload: { status: "succeeded", compatibilityPhase: "committed" },
+}).success, false, "run-level events cannot claim a node attempt identity");
 assert.equal(canonicalWorkflowEventSchema.safeParse({
   eventId: "event-secret", schemaVersion: WORKFLOW_EVENT_SCHEMA_VERSION, eventVersion: 1, workflowRunId: "run-1", sequence: 1, revision: 1,
   actor: { kind: "system", id: "scheduler" }, subject: { kind: "node", id: "work" }, causationId: "request-1",
