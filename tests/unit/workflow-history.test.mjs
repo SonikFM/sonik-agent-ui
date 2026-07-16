@@ -34,6 +34,12 @@ const canonicalEvent = {
   timestamp: "2026-07-15T20:00:11.000Z", eventType: "node_completed",
   payload: { nodeId: "commit", outputRef: { storage: "artifact", artifact: { artifactId: "artifact-a", organizationId: "org-a", contentType: "application/json", byteLength: 10, digest: `sha256:${"a".repeat(64)}`, createdByNodeId: "commit" } } },
 };
+const waitCanonicalEvent = {
+  eventId: "workflow-wait-a", schemaVersion: "sonik.workflow.event.v1", eventVersion: 1, workflowRunId: "workflow-run-a", sequence: 2, revision: 2,
+  actor: { kind: "worker", id: "worker-a" }, subject: { kind: "waitpoint", id: "workflow-run-a:approval:2" }, causationId: "request-a", attemptId: "workflow-run-a:approval:2",
+  correlationIds: ["conversation-run-a", "request-a", "trace-a", "workflow-run-a:approval:2"], timestamp: "2026-07-15T20:00:12.000Z", eventType: "wait_created",
+  payload: { waitpoint: { kind: "approval", waitpointId: "workflow-run-a:approval:2", runId: "workflow-run-a", nodeId: "approval", subjectId: "user-a", logicalEffectId: "effect-a", expiresAt: "2026-07-15T20:15:12.000Z" } },
+};
 
 const result = await getWorkflowHistory({
   sessionId: "session-a", conversationRunId: "conversation-run-a", workflowRunId: "workflow-run-a", nodeId: "commit",
@@ -105,7 +111,7 @@ const decoyWorkflow = {
   },
 };
 
-const identifierDeps = (identifierCalls) => ({
+const identifierDeps = (identifierCalls, workflowEvents = [canonicalEvent]) => ({
   owner: { organizationId: "org-a", userId: "user-a", hostSessionId: "session-a" },
   workflowRuns: {
     getRun: async (_owner, runId) => (identifierCalls.workflowGet++, runId === workflowRow.runId ? workflowRow : null),
@@ -113,7 +119,7 @@ const identifierDeps = (identifierCalls) => ({
     createRun: async () => { throw new Error("unused"); },
     updateRunState: async () => { throw new Error("unused"); },
   },
-  journal: { listEvents: async (_owner, runId) => (identifierCalls.journal++, runId === workflowRow.runId ? [canonicalEvent] : []) },
+  journal: { listEvents: async (_owner, runId) => (identifierCalls.journal++, runId === workflowRow.runId ? workflowEvents : []) },
   workspace: {
     getRun: async (runId) => (identifierCalls.conversationGet++, runId === conversation.id ? conversation : null),
     listRuns: async (sessionId) => (identifierCalls.conversationList++, sessionId === conversation.session_id ? [conversation] : []),
@@ -146,6 +152,16 @@ const missingAttempt = await getWorkflowHistory({ attemptId: "workflow-run-a:com
 assert.deepEqual(missingAttempt.history.workflows, [], "a canonical-looking but nonexistent attempt does not match the run prefix");
 assert.deepEqual(missingAttempt.history.events, [], "a nonexistent attempt has no causal path");
 assert.equal(Object.values(missingAttemptCalls).every((count) => count <= 1), true, "exact attempt rejection preserves one read per authoritative store");
+
+const waitAttemptCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
+const waitAttempt = await getWorkflowHistory({ attemptId: "workflow-run-a:approval:2" }, identifierDeps(waitAttemptCalls, [canonicalEvent, waitCanonicalEvent]));
+assert.deepEqual(waitAttempt.history.nodes.map((node) => node.nodeId), ["approval"], "a wait attempt projects its owning node rather than its waitpoint subject");
+assert.deepEqual(waitAttempt.history.events.find((event) => event.eventId === "workflow-wait-a"), {
+  source: "workflow", eventId: "workflow-wait-a", workflowRunId: "workflow-run-a", type: "wait_created", sequence: 2,
+  nodeId: "approval", approvalId: "workflow-run-a:approval:2", artifactId: null, attemptId: "workflow-run-a:approval:2",
+  correlationIds: ["conversation-run-a", "request-a", "trace-a", "workflow-run-a:approval:2"], timestamp: "2026-07-15T20:00:12.000Z",
+});
+assert.equal(Object.values(waitAttemptCalls).every((count) => count <= 1), true, "wait attempt correlation preserves one read per authoritative store");
 
 const route = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/workflow-history/+server.ts", import.meta.url), "utf8");
 assert.match(route, /createAgentHostSessionEnvelope\(event\)/);

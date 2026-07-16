@@ -123,7 +123,7 @@ export class WorkflowRunDriver {
         if (!claim.created) {
           const replay = this.persistedEffectResponse(claim.claim.result);
           if ((claim.claim.status === "succeeded" || claim.claim.status === "reconciled") && replay) {
-            state = await this.complete(state, request, node, replay.output, undefined, claim.claim.attemptId);
+            state = await this.complete(state, request, node, replay.output, undefined, attemptId);
             completed += 1;
             continue;
           }
@@ -131,7 +131,7 @@ export class WorkflowRunDriver {
             const reconciled = await this.deps.reconcileEffect(node, claim.claim);
             if (reconciled.status === "succeeded" && reconciled.receipt) {
               await this.deps.journal.transitionEffectClaim(this.deps.owner, claim.claim.claimId, "outcome_unknown", "reconciled", reconciled);
-              state = await this.complete(state, request, node, reconciled.output, undefined, claim.claim.attemptId);
+              state = await this.complete(state, request, node, reconciled.output, undefined, attemptId);
               completed += 1;
               continue;
             }

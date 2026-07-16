@@ -198,7 +198,7 @@ function projectConversationEvent(record: WorkspaceRunEventRecord) {
 function projectWorkflowEvent(event: CanonicalWorkflowEvent) {
   return {
     source: "workflow" as const, eventId: event.eventId, workflowRunId: event.workflowRunId,
-    type: event.eventType, sequence: event.sequence, nodeId: event.subject.kind === "node" ? event.subject.id : null,
+    type: event.eventType, sequence: event.sequence, nodeId: event.subject.kind === "node" ? event.subject.id : event.eventType === "wait_created" ? event.payload.waitpoint.nodeId : null,
     approvalId: event.eventType === "wait_created" && event.payload.waitpoint.kind === "approval" ? event.payload.waitpoint.waitpointId : null,
     artifactId: event.eventType === "node_completed" && event.payload.outputRef.storage === "artifact" ? event.payload.outputRef.artifact.artifactId : null,
     attemptId: event.attemptId ?? null, correlationIds: event.correlationIds, timestamp: event.timestamp,
