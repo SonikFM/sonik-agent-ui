@@ -260,7 +260,7 @@
     {/each}
     {#if !locked}
       <div class="flex gap-2">
-        <Button variant="secondary" onclick={addNode}>Add node</Button>
+        <Button variant="secondary" onclick={addNode} data-builder-action="add" aria-keyshortcuts="Alt+Shift+A">Add node</Button>
         <Button variant="ghost" onclick={undo} disabled={undoStack.length === 0}>Undo</Button>
         <Button variant="ghost" onclick={redo} disabled={redoStack.length === 0}>Redo</Button>
       </div>

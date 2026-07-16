@@ -393,15 +393,41 @@
     if (confirmDiscardUnsavedWorkflow()) onExit?.();
   }
 
-  type BuilderAction = "publish" | "start" | "trace" | "resume";
-  function focusBuilderAction(action: BuilderAction): void {
+  type BuilderAction = "add" | "validate" | "publish" | "start" | "trace" | "resume";
+  function validateBuilder(): void {
+    builderAnnouncement = workflowValidation.ok
+      ? "Workflow is valid."
+      : `Workflow is invalid: ${workflowValidation.issues?.[0] ?? "Review the highlighted fields."}`;
+  }
+
+  function activateBuilderAction(action: BuilderAction): void {
+    if (action === "trace") {
+      const trace = document.querySelector<HTMLDetailsElement>("[data-workflow-run-trace]");
+      if (!trace) { builderAnnouncement = "trace control is not available."; return; }
+      trace.open = true;
+      const target = trace.querySelector<HTMLElement>("[data-workflow-run-trace-row]") ?? trace.querySelector<HTMLElement>("summary");
+      target?.focus();
+      builderAnnouncement = "Run trace opened for inspection.";
+      return;
+    }
+    if (action === "resume") {
+      const target = document.querySelector<HTMLElement>("[data-workflow-run-resume-answer]");
+      target?.focus();
+      builderAnnouncement = target && document.activeElement === target
+        ? "Paused workflow answer focused."
+        : "resume control is not available.";
+      return;
+    }
     const selectors: Record<BuilderAction, string> = {
+      add: '[data-builder-action="add"]',
+      validate: '[data-builder-action="validate"]',
       publish: '[data-builder-action="publish"]',
       start: '[data-workflow-run-panel] button',
       trace: '[data-workflow-run-trace] summary',
-      resume: '[data-workflow-run-waitpoint] button',
+      resume: '[data-workflow-run-resume-answer]',
     };
     const target = document.querySelector<HTMLElement>(selectors[action]);
+    if (action === "add" || action === "validate") target?.click();
     target?.focus();
     builderAnnouncement = target && document.activeElement === target
       ? `${target.textContent?.trim() || action} control focused.`
@@ -411,10 +437,10 @@
   let builderAnnouncement = $state("");
   function handleBuilderShortcut(event: KeyboardEvent): void {
     if (!event.altKey || !event.shiftKey) return;
-    const action = ({ p: "publish", r: "start", t: "trace", m: "resume" } as const)[event.key.toLowerCase() as "p" | "r" | "t" | "m"];
+    const action = ({ a: "add", v: "validate", p: "publish", r: "start", t: "trace", m: "resume" } as const)[event.key.toLowerCase() as "a" | "v" | "p" | "r" | "t" | "m"];
     if (!action) return;
     event.preventDefault();
-    focusBuilderAction(action);
+    activateBuilderAction(action);
   }
 
   function handleRunStateChange(workflowId: string, nextRun: WorkflowRunState | null): void {
@@ -481,6 +507,7 @@
       <Button variant="outline" onclick={newAgent}>New agent</Button>
       <Button variant="outline" onclick={() => void cloneWorkflow()} disabled={!workflowDraft}>Clone workflow</Button>
       {#if audience === "builder"}
+        <Button data-builder-action="validate" variant="outline" onclick={validateBuilder} aria-keyshortcuts="Alt+Shift+V">Validate</Button>
         <Button data-builder-action="publish" variant="outline" onclick={() => void publishWorkflow()} disabled={!workflowDraft || !workflowPublishPins || workflowLifecycle === "dirty" || workflowLifecycle === "invalid" || workflowLifecycle === "saving" || workflowLifecycle === "publishing"} title={workflowPublishPins ? "Publish this saved revision" : "Authoritative dependency pins are required to publish"}>{workflowPublishing ? "Publishing…" : "Publish"}</Button>
       {/if}
       <Button onclick={() => void saveDraft()} disabled={saveStatus === "saving"}>
