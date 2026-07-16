@@ -51,7 +51,8 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
     correlatedWorkflowId ? deps.journal.listEvents(deps.owner, correlatedWorkflowId) : Promise.resolve([]),
     sessionId ? deps.workspace.listToolCalls(sessionId) : Promise.resolve([]),
   ]);
-  const hasCausalMatch = (!query.workflowRunId || workflowRows.length === 1)
+  const hasCausalMatch = (!query.conversationRunId || Boolean(exactConversation && (!query.sessionId || exactConversation.session_id === query.sessionId)))
+    && (!query.workflowRunId || workflowRows.length === 1)
     && (!query.attemptId || workflowEvents.some((event) => event.attemptId === query.attemptId));
   const causalWorkflowRows = hasCausalMatch ? workflowRows : [];
   const causalWorkflowEvents = hasCausalMatch ? workflowEvents : [];

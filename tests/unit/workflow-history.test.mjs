@@ -162,13 +162,18 @@ const rotatedConversation = await getWorkflowHistory(
 );
 assert.deepEqual(rotatedConversation.history.conversations.map((run) => run.conversationRunId), [conversation.id], "an exact same-owner conversation lookup survives host-session rotation");
 
-const mismatchedConversation = await getWorkflowHistory(
-  { sessionId: rotatedOwner.hostSessionId, conversationRunId: conversation.id },
-  identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
-);
-assert.deepEqual(mismatchedConversation.history.conversations, [], "an explicit mismatched session excludes the exact conversation");
-assert.deepEqual(mismatchedConversation.history.toolCalls, [], "an explicit mismatched session excludes conversation tool correlations");
-assert.deepEqual(mismatchedConversation.history.events, [], "an explicit mismatched session excludes conversation events");
+for (const [conversationRunId, message] of [
+  [conversation.id, "an exact conversation constrained to a mismatched populated session"],
+  ["conversation-run-missing", "a missing exact conversation constrained to a populated session"],
+]) {
+  const failedCausalLookup = await getWorkflowHistory(
+    { sessionId: rotatedOwner.hostSessionId, conversationRunId },
+    identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+  );
+  for (const key of ["conversations", "workflows", "nodes", "toolCalls", "approvals", "artifacts", "receipts", "events"]) {
+    assert.deepEqual(failedCausalLookup.history[key], [], `${message} fails closed for ${key}`);
+  }
+}
 
 const matchedConversation = await getWorkflowHistory(
   { sessionId: conversation.session_id, conversationRunId: conversation.id },
