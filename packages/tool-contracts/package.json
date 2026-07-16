@@ -23,6 +23,10 @@
       "types": "./dist/capability-registry.d.ts",
       "default": "./dist/capability-registry.js"
     },
+    "./capability-family": {
+      "types": "./dist/capability-family.d.ts",
+      "default": "./dist/capability-family.js"
+    },
     "./workflow-run-state": {
       "types": "./dist/workflow-run-state.d.ts",
       "default": "./dist/workflow-run-state.js"

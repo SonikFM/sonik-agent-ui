@@ -1,6 +1,7 @@
 import { sonikBookingCapabilityRegistry } from "@sonik-agent-ui/tool-contracts/capability-registry";
 import { resolveCapabilityToolPermissionModes, synthesizeCapabilityGrantsFromRuntimeState } from "@sonik-agent-ui/tool-contracts/grant-synthesis";
 import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import { normalizeCapabilityFamilyModes } from "@sonik-agent-ui/tool-contracts/capability-family";
 import { resolveCapabilityReadiness, type CapabilityVersionPins } from "./capability-readiness.ts";
 import { createStandaloneHostCommandRuntimeBundle, type StandaloneHostRuntimeInput } from "./host-command-runtime.ts";
 
@@ -15,7 +16,11 @@ export function resolveStandaloneCapabilityReadiness(input: StandaloneHostRuntim
   const bundle = createStandaloneHostCommandRuntimeBundle(input);
   const registry = sonikBookingCapabilityRegistry;
   const familyIds = Object.fromEntries(bundle.catalog.commands.map((command) => [command.id, command.familyId]));
-  const toolPermissionModes = resolveCapabilityToolPermissionModes({ registry, capabilityFamilyIds: familyIds, familyModes: input.toolPermissionModes });
+  const toolPermissionModes = resolveCapabilityToolPermissionModes({
+    registry,
+    capabilityFamilyIds: familyIds,
+    familyModes: normalizeCapabilityFamilyModes(input.toolPermissionModes ?? {}),
+  });
   if (input.defaultToolPermissionMode) {
     for (const capability of registry.capabilities) toolPermissionModes[capability.capabilityId] ??= input.defaultToolPermissionMode;
   }

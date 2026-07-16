@@ -17,6 +17,10 @@ import {
   type CapabilityDescriptor,
   type CapabilityRegistry,
 } from "@sonik-agent-ui/tool-contracts/capability-registry";
+import {
+  normalizeCapabilityFamilyModes,
+  sonikBookingCapabilityFamilyIds,
+} from "@sonik-agent-ui/tool-contracts/capability-family";
 import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
 import {
   WORKFLOW_VNEXT_SCHEMA_VERSION,
@@ -122,39 +126,36 @@ export function createEmptyWorkflowDefinition(workflowId: string): WorkflowDefin
 }
 
 export interface CapabilityFamilyGroup {
-  familyId: string;
+  familyId: string | null;
+  displayId: string;
   capabilities: CapabilityDescriptor[];
 }
 
 /**
  * Groups the flat capability registry into family rows for the tool-scoping
- * drill-down. `CapabilityDescriptor` has no explicit familyId (D013 keeps
- * capability ids as the single dotted namespace) -- the first two dotted
- * segments (e.g. "booking.create" from "booking.create.booking",
- * "amplify.campaign" from "amplify.campaign.create") is a stable,
- * deterministic grouping key that matches how `toolPolicy`/`toolPermissionModes`
- * are keyed at the family level (see agent-runtime-adapter.ts, command-catalog.ts).
+ * drill-down using the client-safe projection generated from the same mounted
+ * command catalog as the server. Registry-only capabilities stay visible but
+ * have no runnable family id and therefore cannot create policy authority.
  */
 export function groupCapabilitiesByFamily(registry: CapabilityRegistry = sonikBookingCapabilityRegistry): CapabilityFamilyGroup[] {
-  const byFamily = new Map<string, CapabilityDescriptor[]>();
+  const byFamily = new Map<string, CapabilityFamilyGroup>();
   for (const capability of registry.capabilities) {
-    const familyId = capability.capabilityId.split(".").slice(0, 2).join(".");
-    const bucket = byFamily.get(familyId) ?? [];
-    bucket.push(capability);
-    byFamily.set(familyId, bucket);
+    const familyId = sonikBookingCapabilityFamilyIds[capability.capabilityId] ?? null;
+    const displayId = familyId ?? capability.capabilityId.split(".").slice(0, 2).join(".");
+    const key = familyId ?? `unavailable:${displayId}`;
+    const bucket = byFamily.get(key) ?? { familyId, displayId, capabilities: [] };
+    bucket.capabilities.push(capability);
+    byFamily.set(key, bucket);
   }
-  return [...byFamily.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([familyId, capabilities]) => ({
-      familyId,
-      capabilities: capabilities.slice().sort((a, b) => a.capabilityId.localeCompare(b.capabilityId)),
-    }));
+  return [...byFamily.values()]
+    .sort((a, b) => a.displayId.localeCompare(b.displayId))
+    .map((family) => ({ ...family, capabilities: family.capabilities.slice().sort((a, b) => a.capabilityId.localeCompare(b.capabilityId)) }));
 }
 
 /** Read-only projection of the definition's toolPolicy for one family --
  *  reflects the grant, never issues it (Onyx drill-down pattern). */
-export function effectiveFamilyMode(definition: AgentDefinition, familyId: string): "off" | "ask" | "allow" {
-  return definition.toolPolicy[familyId] ?? "off";
+export function effectiveFamilyMode(definition: AgentDefinition, familyId: string | null): "off" | "ask" | "allow" {
+  return familyId ? normalizeCapabilityFamilyModes(definition.toolPolicy)[familyId] ?? "off" : "off";
 }
 
 export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
@@ -272,7 +273,7 @@ export function validateWorkflowDefinition(candidate: unknown): WorkflowDefiniti
 /** True once any tool family is granted "ask"/"allow" -- an agent with no
  *  grants at all can run on a model with no tool-use support. */
 export function agentRequiresToolUse(definition: AgentDefinition): boolean {
-  return Object.values(definition.toolPolicy).some((mode) => mode !== "off");
+  return Object.values(normalizeCapabilityFamilyModes(definition.toolPolicy)).some((mode) => mode !== "off");
 }
 
 /** Dify-bar incompatible-model flag for the config panel's model picker:

@@ -37,6 +37,8 @@ Prompt modules are ordered. A missing override uses the module default, a non-em
 
 Each capability family can be **Off**, **Ask**, or **Allow**. The current draft `toolPolicy` is sent to the server readiness endpoint; it is not treated as authorization.
 
+Family keys are the canonical IDs from the mounted runtime catalog (for example, `booking.create.booking` belongs to `bookings`), not dotted command prefixes. Registry-only capabilities remain visible but unavailable. Older dotted keys fail closed and must be reselected in the builder; they are never translated into broader runtime authority.
+
 Readiness is computed from the registered capability, implementation and authoring support, definition compatibility, mounted runtime binding, authenticated context/scopes, host grant or approval, kill switch, version pin, preview state, and commit approval. The UI displays the server result for each capability.
 
 - **Off** keeps the family unavailable.

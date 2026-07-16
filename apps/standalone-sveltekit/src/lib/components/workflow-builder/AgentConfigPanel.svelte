@@ -21,6 +21,7 @@
   import { COLLAPSED_MODEL_ROW_LIMIT, filterCatalogModels, modelCapabilityBadges, modelDisabledReason, type CatalogModelOption } from "./organizer-model";
   import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
   import type { CapabilityReadiness } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+  import { normalizeCapabilityFamilyModes } from "@sonik-agent-ui/tool-contracts/capability-family";
 
   interface Props {
     definition: AgentDefinition;
@@ -86,10 +87,11 @@
 
   function setFamilyMode(familyId: string, mode: AgentToolPermissionMode): void {
     if (mode !== "off" && familyDisabledReason(familyId)) return;
-    definition = { ...definition, toolPolicy: { ...definition.toolPolicy, [familyId]: mode } };
+    definition = { ...definition, toolPolicy: { ...normalizeCapabilityFamilyModes(definition.toolPolicy), [familyId]: mode } };
   }
 
-  function familyDisabledReason(familyId: string): string | null {
+  function familyDisabledReason(familyId: string | null): string | null {
+    if (!familyId) return "Not available in the mounted command catalog.";
     if (!capabilityReadiness || !capabilityPolicyChangeReadiness) return "Readiness unavailable. Ask and Allow stay disabled.";
     const capabilities = capabilityFamilies.find((family) => family.familyId === familyId)?.capabilities ?? [];
     const authority = effectiveFamilyMode(definition, familyId) === "off" ? policyChangeReadinessById : readinessById;
@@ -315,13 +317,13 @@
         <p class="mb-3 text-sm text-destructive" role="alert">Capability readiness is unavailable. Ask and Allow remain disabled until authoritative readiness returns.</p>
       {/if}
       <Accordion.Root type="multiple" bind:value={expandedFamilyIds} class="w-full">
-        {#each capabilityFamilies as family (family.familyId)}
+        {#each capabilityFamilies as family (family.displayId)}
           {@const policyDisabledReason = familyDisabledReason(family.familyId)}
-          <Accordion.Item value={family.familyId}>
+          <Accordion.Item value={family.displayId}>
             <Accordion.Trigger>
               <span class="flex flex-1 items-center justify-between gap-3 pr-2">
                 <span class="flex items-center gap-2">
-                  <span class="font-mono text-sm">{family.familyId}</span>
+                  <span class="font-mono text-sm">{family.displayId}</span>
                   <Badge variant="outline">{family.capabilities.length} command{family.capabilities.length === 1 ? "" : "s"}</Badge>
                 </span>
                 <Badge variant={effectiveFamilyMode(definition, family.familyId) === "off" ? "secondary" : "default"}>
@@ -331,11 +333,11 @@
             </Accordion.Trigger>
             <Accordion.Content>
               <div class="flex flex-col gap-3">
-                <Select.Root type="single" value={effectiveFamilyMode(definition, family.familyId)} onValueChange={(value) => setFamilyMode(family.familyId, (value ?? "off") as AgentToolPermissionMode)}>
-                  <Select.Trigger aria-label="{family.familyId} tool policy">{effectiveFamilyMode(definition, family.familyId)}</Select.Trigger>
+                <Select.Root type="single" value={effectiveFamilyMode(definition, family.familyId)} onValueChange={(value) => family.familyId && setFamilyMode(family.familyId, (value ?? "off") as AgentToolPermissionMode)}>
+                  <Select.Trigger aria-label="{family.displayId} tool policy">{effectiveFamilyMode(definition, family.familyId)}</Select.Trigger>
                   <Select.Content>
                     {#each TOOL_MODES as mode (mode)}
-                      <Select.Item value={mode} disabled={mode !== "off" && Boolean(policyDisabledReason)}>{mode}</Select.Item>
+                      <Select.Item value={mode} disabled={!family.familyId || (mode !== "off" && Boolean(policyDisabledReason))}>{mode}</Select.Item>
                     {/each}
                   </Select.Content>
                 </Select.Root>

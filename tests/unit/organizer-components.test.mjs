@@ -80,7 +80,7 @@ assert.match(configSource, /aria-live="polite"/);
 assert.match(configSource, /ArrowDown/);
 for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) assert.match(configSource, new RegExp(key));
 assert.match(configSource, /Selected model:/, "screen readers receive selection changes");
-assert.match(configSource, /disabled=\{mode !== "off"/, "non-callable families cannot be saved runnable");
+assert.match(configSource, /disabled=\{!family\.familyId \|\| \(mode !== "off"/, "unmapped and non-callable families cannot be saved runnable");
 assert.match(configSource, /Readiness unavailable\. Ask and Allow stay disabled\./, "missing authority explicitly fails closed");
 assert.match(configSource, /rows\.some\(\(readiness\) => !readiness\)/, "a missing capability row cannot enable a family");
 assert.match(configSource, /effectiveFamilyMode\(definition, familyId\) === "off" \? policyChangeReadinessById : readinessById/, "leaving Off requires separate policy-neutral server proof");

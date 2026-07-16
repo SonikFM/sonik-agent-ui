@@ -71,10 +71,16 @@ function readyCapability(capabilityId: string, effectMode: "preview" | "write") 
   };
 }
 
+const BOOKINGS_CAPABILITY_IDS = [
+  "booking.add.party.member", "booking.assign.resource", "booking.cancel.booking", "booking.confirm.booking",
+  "booking.create.booking", "booking.get.booking", "booking.list.bookings", "booking.list.party.members",
+  "booking.list.resource.assignments", "booking.remove.party.member", "booking.reschedule.booking", "booking.unassign.resource",
+];
+
 async function installCapabilityReadinessFixture(page: Page): Promise<Array<Record<string, unknown>>> {
   const requests: Array<Record<string, unknown>> = [];
-  const policyNeutralReadiness = [{
-    capabilityId: "amplify.campaign.create",
+  const policyNeutralReadiness = BOOKINGS_CAPABILITY_IDS.map((capabilityId) => capabilityId === "booking.create.booking" ? {
+    capabilityId,
     effectMode: "write",
     registered: true,
     implemented: false,
@@ -90,8 +96,8 @@ async function installCapabilityReadinessFixture(page: Page): Promise<Array<Reco
     callable: false,
     reasonCodes: ["not_implemented", "definition_incompatible", "missing_context", "missing_host_grant", "kill_switched", "version_not_pinned", "preview_required", "approval_required"],
     nextAction: "Restore the listed runtime prerequisites before enabling this capability.",
-  }, {
-    capabilityId: "amplify.campaign.preview",
+  } : {
+    capabilityId,
     effectMode: "preview",
     registered: true,
     implemented: true,
@@ -107,12 +113,12 @@ async function installCapabilityReadinessFixture(page: Page): Promise<Array<Reco
     callable: true,
     reasonCodes: [],
     nextAction: null,
-  }];
+  });
   await page.route("**/api/capability-readiness", async (route) => {
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
     requests.push(body);
     const toolPolicy = body.toolPolicy as Record<string, string> | undefined;
-    const policyOff = !toolPolicy || toolPolicy["amplify.campaign"] === "off" || !toolPolicy["amplify.campaign"];
+    const policyOff = !toolPolicy || toolPolicy.bookings === "off" || !toolPolicy.bookings;
     const readiness = policyOff ? policyNeutralReadiness.map((row) => row.callable ? {
       ...row,
       grantReady: false,
@@ -402,13 +408,13 @@ test("capability readiness renders callable and actionable non-callable states",
   await gotoFreshWorkspace(page, smokeUrl(null));
   await openWorkflowBuilder(page);
 
-  await page.getByText("amplify.campaign", { exact: true }).click();
-  await expect(page.getByText("amplify.campaign.preview", { exact: true })).toBeVisible();
-  await expect(page.getByText("missing_host_grant", { exact: true })).toBeVisible();
-  await expect(page.getByText("amplify.campaign.create", { exact: true })).toBeVisible();
+  await page.getByText("bookings", { exact: true }).click();
+  await expect(page.getByText("booking.get.booking", { exact: true })).toBeVisible();
+  await expect(page.getByText("missing_host_grant", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("booking.create.booking", { exact: true })).toBeVisible();
   await expect(page.getByText("Restore the listed runtime prerequisites before enabling this capability.", { exact: true })).toBeVisible();
   await expect(page.getByText(/Blocked: not_implemented, definition_incompatible, missing_context, missing_host_grant, kill_switched, version_not_pinned, preview_required, approval_required/)).toBeAttached();
-  await expect(page.getByLabel("amplify.campaign tool policy")).toHaveText("off");
+  await expect(page.getByLabel("bookings tool policy")).toHaveText("off");
   await expect(page.getByText(/Not runnable: not_implemented/)).toBeVisible();
   expect(requests.at(-1)).toEqual({ toolPolicy: {} });
 });
@@ -418,8 +424,8 @@ test("capability readiness failures and malformed bodies remain visibly default-
   await gotoFreshWorkspace(page, smokeUrl(null));
   await openWorkflowBuilder(page);
   await expect(page.getByRole("alert").filter({ hasText: "Capability readiness is unavailable" })).toBeVisible();
-  await page.getByText("amplify.campaign", { exact: true }).click();
-  await page.getByLabel("amplify.campaign tool policy").click();
+  await page.getByText("bookings", { exact: true }).click();
+  await page.getByLabel("bookings tool policy").click();
   await expect(page.getByRole("option", { name: "ask", exact: true })).toHaveAttribute("data-disabled", "");
   await expect(page.getByRole("option", { name: "allow", exact: true })).toHaveAttribute("data-disabled", "");
 });
@@ -433,14 +439,11 @@ test("capability readiness transport failure remains visibly default-deny", asyn
 
 test("an Off family unlocks only when policy-neutral server authority is fully ready", async ({ page }) => {
   const requests: Array<Record<string, unknown>> = [];
-  const neutral = [
-    readyCapability("amplify.campaign.create", "write"),
-    readyCapability("amplify.campaign.preview", "preview"),
-  ];
+  const neutral = BOOKINGS_CAPABILITY_IDS.map((capabilityId) => readyCapability(capabilityId, "write"));
   await page.route("**/api/capability-readiness", async (route) => {
     const body = JSON.parse(route.request().postData() ?? "{}") as { toolPolicy?: Record<string, string> };
     requests.push(body);
-    const off = body.toolPolicy?.["amplify.campaign"] !== "ask" && body.toolPolicy?.["amplify.campaign"] !== "allow";
+    const off = body.toolPolicy?.bookings !== "ask" && body.toolPolicy?.bookings !== "allow";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -452,12 +455,12 @@ test("an Off family unlocks only when policy-neutral server authority is fully r
   });
   await gotoFreshWorkspace(page, smokeUrl(null));
   await openWorkflowBuilder(page);
-  await page.getByText("amplify.campaign", { exact: true }).click();
-  await page.getByLabel("amplify.campaign tool policy").click();
+  await page.getByText("bookings", { exact: true }).click();
+  await page.getByLabel("bookings tool policy").click();
   const ask = page.getByRole("option", { name: "ask", exact: true });
   await expect(ask).toBeEnabled();
   await ask.click();
-  await expect.poll(() => requests.at(-1)?.toolPolicy).toMatchObject({ "amplify.campaign": "ask" });
+  await expect.poll(() => requests.at(-1)?.toolPolicy).toMatchObject({ bookings: "ask" });
 });
 
 test("builder exposes isolated preview, full keyboard canvas semantics, and graph-free organizer", async ({ page }) => {

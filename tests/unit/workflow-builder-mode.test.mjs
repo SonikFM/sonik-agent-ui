@@ -21,6 +21,7 @@ import {
   workflowDefinitionToVNext,
   workflowVNextToDefinition,
 } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts";
+import { sonikBookingCapabilityFamilyIds } from "../../packages/tool-contracts/src/capability-family.ts";
 
 // Phase 5 (agent-creation-tool-plan-2026-07-13.md, Decision 3): the missing
 // workflow-builder verification wave -- builder-model.ts pure logic + source
@@ -59,29 +60,29 @@ for (const type of LIVE_CONTROLLER_NODE_TYPES) {
 const families = groupCapabilitiesByFamily();
 assert.ok(families.length > 0, "the shipped capability registry must group into at least one family");
 assert.deepEqual(
-  families.map((family) => family.familyId),
-  families.map((family) => family.familyId).slice().sort((a, b) => a.localeCompare(b)),
+  families.map((family) => family.displayId),
+  families.map((family) => family.displayId).slice().sort((a, b) => a.localeCompare(b)),
   "families must be sorted for stable UI ordering",
 );
 for (const family of families) {
-  assert.ok(family.capabilities.length > 0, `family ${family.familyId} must not be empty`);
+  assert.ok(family.capabilities.length > 0, `family ${family.displayId} must not be empty`);
   for (const capability of family.capabilities) {
-    assert.equal(
-      capability.capabilityId.split(".").slice(0, 2).join("."),
-      family.familyId,
-      "every capability in a family bucket must share that family's dotted prefix",
-    );
+    assert.equal(sonikBookingCapabilityFamilyIds[capability.capabilityId] ?? null, family.familyId, "catalog-backed capabilities use canonical runtime families; registry-only rows stay unavailable");
   }
   const ids = family.capabilities.map((capability) => capability.capabilityId);
   assert.deepEqual(ids, ids.slice().sort((a, b) => a.localeCompare(b)), `capabilities within family ${family.familyId} must be sorted`);
 }
+const bookingCreateFamily = families.find((family) => family.capabilities.some((capability) => capability.capabilityId === "booking.create.booking"));
+assert.equal(bookingCreateFamily?.familyId, "bookings", "booking.create.booking groups under its real runtime family");
+assert.ok(families.some((family) => family.familyId === null), "registry-only capabilities remain visibly unavailable");
 
 // -- builder-model.ts: model-picker helpers (Dify-bar incompatible flag) ----
 
 assert.equal(agentRequiresToolUse(emptyAgent), false, "a fresh agent with no tool grants must not require tool-use");
-const toolGrantedAgent = { ...emptyAgent, toolPolicy: { [families[0].familyId]: "ask" } };
+const canonicalFamilyId = families.find((family) => family.familyId)?.familyId ?? "bookings";
+const toolGrantedAgent = { ...emptyAgent, toolPolicy: { [canonicalFamilyId]: "ask" } };
 assert.equal(agentRequiresToolUse(toolGrantedAgent), true, "any non-off family grant means the agent requires tool-use");
-const offOnlyAgent = { ...emptyAgent, toolPolicy: { [families[0].familyId]: "off" } };
+const offOnlyAgent = { ...emptyAgent, toolPolicy: { [canonicalFamilyId]: "off" } };
 assert.equal(agentRequiresToolUse(offOnlyAgent), false, "an explicit off grant must not count as requiring tool-use");
 
 assert.equal(isModelIncompatible(emptyAgent, { supportsTools: false }), false, "no tool grants at all means no model can be incompatible on tool-use grounds");
@@ -93,9 +94,9 @@ assert.equal(formatModelContextWindow(undefined), "context unknown");
 assert.equal(formatModelContextWindow(8_000), "8K context");
 assert.equal(formatModelContextWindow(2_000_000), "2M context");
 
-assert.equal(effectiveFamilyMode(emptyAgent, families[0].familyId), "off", "an ungranted family must read as off, never silently allow");
-const grantedAgent = { ...emptyAgent, toolPolicy: { [families[0].familyId]: "allow" } };
-assert.equal(effectiveFamilyMode(grantedAgent, families[0].familyId), "allow", "effectiveFamilyMode must reflect an actual grant");
+assert.equal(effectiveFamilyMode(emptyAgent, canonicalFamilyId), "off", "an ungranted family must read as off, never silently allow");
+const grantedAgent = { ...emptyAgent, toolPolicy: { [canonicalFamilyId]: "allow" } };
+assert.equal(effectiveFamilyMode(grantedAgent, canonicalFamilyId), "allow", "effectiveFamilyMode must reflect an actual grant");
 assert.equal(effectiveFamilyMode(grantedAgent, "nonexistent.family"), "off", "an unknown family must fail closed to off");
 
 const validAgentResult = validateAgentDefinition(emptyAgent);
@@ -429,9 +430,9 @@ assert.equal(
   "AgentConfigPanel must never call capability-granting execution seams directly (Onyx drill-down: reflect, never grant)",
 );
 assert.equal(
-  configPanelSource.includes("definition = { ...definition, toolPolicy: { ...definition.toolPolicy, [familyId]: mode } }"),
+  configPanelSource.includes("definition = { ...definition, toolPolicy: { ...normalizeCapabilityFamilyModes(definition.toolPolicy), [familyId]: mode } }"),
   true,
-  "tool-scoping edits should patch toolPolicy on the bindable definition for the parent to validate/save",
+  "tool-scoping edits should canonicalize bounded legacy policy before the parent validates/saves",
 );
 assert.equal(
   configPanelSource.includes('import { formatModelContextWindow } from "./builder-model"')
