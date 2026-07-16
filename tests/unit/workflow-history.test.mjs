@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { getWorkflowHistory, WORKFLOW_HISTORY_QUERY_KEYS } from "../../apps/standalone-sveltekit/src/lib/server/workflow-history.ts";
+import { getWorkflowHistory, hasExactWorkflowHistoryIdentifier, WORKFLOW_HISTORY_QUERY_KEYS } from "../../apps/standalone-sveltekit/src/lib/server/workflow-history.ts";
 
 const calls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
 const workflowRow = {
@@ -129,6 +129,41 @@ const identifierDeps = (identifierCalls, workflowEvents = [canonicalEvent]) => (
   },
 });
 
+const rotatedOwner = { organizationId: "org-a", userId: "user-a", hostSessionId: decoyWorkflow.hostSessionId };
+const rotatedExactCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
+const rotatedExactDeps = identifierDeps(rotatedExactCalls);
+rotatedExactDeps.owner = rotatedOwner;
+rotatedExactDeps.workflowRuns.getRun = async (owner, runId) => (
+  rotatedExactCalls.workflowGet++,
+  owner.organizationId === workflowRow.organizationId && owner.userId === workflowRow.userId && runId === workflowRow.runId ? workflowRow : null
+);
+const rotatedExact = await getWorkflowHistory({ workflowRunId: workflowRow.runId }, rotatedExactDeps);
+assert.deepEqual(rotatedExact.history.workflows.map((run) => run.workflowRunId), [workflowRow.runId], "an exact same-owner workflow lookup survives host-session rotation");
+for (const key of ["workflowRunId", "nodeId", "approvalId", "artifactId", "receiptId", "attemptId"]) {
+  assert.equal(hasExactWorkflowHistoryIdentifier({ [key]: queryValues[key] }), true, `${key} is an exact workflow-history identifier`);
+  const exactResult = await getWorkflowHistory({ [key]: queryValues[key] }, { ...identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }), owner: rotatedOwner });
+  assert.deepEqual(exactResult.history.workflows.map((run) => run.workflowRunId), [workflowRow.runId], `${key} survives host-session rotation`);
+}
+assert.equal(hasExactWorkflowHistoryIdentifier({ conversationRunId: conversation.id }), false, "workspace identifiers retain session-derived browsing behavior");
+
+for (const owner of [
+  { ...rotatedOwner, userId: "user-foreign" },
+  { ...rotatedOwner, organizationId: "org-foreign" },
+]) {
+  const foreignCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
+  const foreignDeps = identifierDeps(foreignCalls);
+  foreignDeps.owner = owner;
+  foreignDeps.workflowRuns.getRun = rotatedExactDeps.workflowRuns.getRun;
+  const foreignExact = await getWorkflowHistory({ workflowRunId: workflowRow.runId }, foreignDeps);
+  assert.deepEqual(foreignExact.history.workflows, [], "exact workflow history remains owner-scoped across user and organization boundaries");
+}
+
+const currentSessionCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
+const currentSessionDeps = identifierDeps(currentSessionCalls);
+currentSessionDeps.owner = rotatedOwner;
+const currentSessionHistory = await getWorkflowHistory({ sessionId: rotatedOwner.hostSessionId }, currentSessionDeps);
+assert.deepEqual(currentSessionHistory.history.workflows.map((run) => run.workflowRunId), [decoyWorkflow.runId], "session-scoped history still filters workflow rows to the requested current session");
+
 for (const key of WORKFLOW_HISTORY_QUERY_KEYS) {
   const identifierCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
   const identifierResult = await getWorkflowHistory({ [key]: queryValues[key] }, identifierDeps(identifierCalls));
@@ -181,5 +216,6 @@ const route = await readFile(new URL("../../apps/standalone-sveltekit/src/routes
 assert.match(route, /createAgentHostSessionEnvelope\(event\)/);
 assert.match(route, /status: 401/);
 assert.match(route, /WORKFLOW_HISTORY_QUERY_KEYS/);
+assert.match(route, /!query\.sessionId && hostSession\.sessionId && !hasExactWorkflowHistoryIdentifier\(query\)/, "the route only defaults the current host session for non-exact browsing");
 
 console.log("workflow-history.test.mjs passed");

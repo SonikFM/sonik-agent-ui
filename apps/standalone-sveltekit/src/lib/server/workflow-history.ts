@@ -12,6 +12,11 @@ export const WORKFLOW_HISTORY_QUERY_KEYS = [
   "sessionId", "conversationRunId", "workflowRunId", "nodeId", "toolCallId", "approvalId", "artifactId", "receiptId", "requestId", "traceId", "attemptId",
 ] as const;
 export type WorkflowHistoryQuery = Partial<Record<(typeof WORKFLOW_HISTORY_QUERY_KEYS)[number], string>>;
+const EXACT_WORKFLOW_HISTORY_QUERY_KEYS = ["workflowRunId", "nodeId", "approvalId", "artifactId", "receiptId", "attemptId"] as const;
+
+export function hasExactWorkflowHistoryIdentifier(query: WorkflowHistoryQuery): boolean {
+  return EXACT_WORKFLOW_HISTORY_QUERY_KEYS.some((key) => Boolean(query[key]?.trim()));
+}
 
 export interface WorkflowHistoryDeps {
   owner: WorkflowRunOwner;
@@ -23,6 +28,7 @@ export interface WorkflowHistoryDeps {
 export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps: WorkflowHistoryDeps) {
   const query = normalizeQuery(queryInput);
   if (!Object.keys(query).length) return { ok: false as const, reason: "history_identifier_required" };
+  const hasExactWorkflowIdentifier = hasExactWorkflowHistoryIdentifier(query);
 
   const [workflowCandidates, exactConversation, artifact] = await Promise.all([
     query.workflowRunId
@@ -34,11 +40,10 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
   const workflowMatches = workflowCandidates.filter((row) => matchesWorkflow(row, query));
   const sessionId = query.sessionId
     ?? exactConversation?.session_id
-    ?? deps.owner.hostSessionId
     ?? artifact?.session_id
-    ?? workflowMatches.find((row) => row.hostSessionId)?.hostSessionId
-    ?? undefined;
-  const workflowRows = workflowMatches.filter((row) => !sessionId || row.hostSessionId === sessionId);
+    ?? (workflowMatches.length === 1 ? workflowMatches[0]?.hostSessionId : undefined)
+    ?? (hasExactWorkflowIdentifier ? undefined : deps.owner.hostSessionId);
+  const workflowRows = workflowMatches.filter((row) => (hasExactWorkflowIdentifier && !query.sessionId) || !sessionId || row.hostSessionId === sessionId);
   const correlatedWorkflowId = workflowRows.length === 1 ? workflowRows[0]?.runId : undefined;
 
   const [conversationCandidates, workflowEvents, toolCalls] = await Promise.all([
