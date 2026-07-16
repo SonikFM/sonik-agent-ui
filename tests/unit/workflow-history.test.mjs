@@ -257,6 +257,42 @@ currentSessionDeps.owner = rotatedOwner;
 const currentSessionHistory = await getWorkflowHistory({ sessionId: rotatedOwner.hostSessionId }, currentSessionDeps);
 assert.deepEqual(currentSessionHistory.history.workflows.map((run) => run.workflowRunId), [decoyWorkflow.runId], "session-scoped history still filters workflow rows to the requested current session");
 
+const sharedIdentifierRows = ["workflow-run-shared-a", "workflow-run-shared-b"].map((runId) => ({
+  ...workflowRow,
+  runId,
+  state: {
+    ...workflowRow.state,
+    runId,
+    nodeStates: {
+      approval: { ...workflowRow.state.nodeStates.approval },
+      commit: { ...workflowRow.state.nodeStates.commit },
+    },
+  },
+}));
+const sharedIdentifierDeps = identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 });
+sharedIdentifierDeps.workflowRuns.listRuns = async () => sharedIdentifierRows;
+const sharedIdentifierHistory = await getWorkflowHistory({ sessionId: workflowRow.hostSessionId }, sharedIdentifierDeps);
+for (const [historyKey, sharedId, idKey] of [
+  ["nodes", "approval", "nodeId"],
+  ["approvals", "approval", "approvalId"],
+  ["receipts", "receipt-a", "receiptId"],
+]) {
+  assert.deepEqual(
+    sharedIdentifierHistory.history[historyKey].filter((entry) => entry[idKey] === sharedId).map((entry) => entry.workflowRunId),
+    sharedIdentifierRows.map((row) => row.runId),
+    `a shared ${idKey} retains both workflow causal projections`,
+  );
+}
+const sameRunApprovalEvent = {
+  ...waitCanonicalEvent,
+  payload: { waitpoint: { ...waitCanonicalEvent.payload.waitpoint, waitpointId: "approval" } },
+};
+const sameRunApprovalHistory = await getWorkflowHistory(
+  { workflowRunId: workflowRow.runId },
+  identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }, [sameRunApprovalEvent]),
+);
+assert.deepEqual(sameRunApprovalHistory.history.approvals.map((approval) => approval.approvalId), ["approval"], "same-run row and event approval projections coalesce");
+
 for (const [workflowRunId, message] of [
   [workflowRow.runId, "an exact workflow constrained to a mismatched populated session"],
   ["workflow-run-missing", "a missing exact workflow constrained to a populated session"],

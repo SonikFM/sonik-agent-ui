@@ -81,7 +81,7 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
       workflows: causalWorkflowRows.map(projectWorkflow),
       nodes: causalWorkflowRows.flatMap(projectNodes).filter((node) => (!query.nodeId || node.nodeId === query.nodeId) && (!query.attemptId || attemptNodeIds.has(node.nodeId))),
       toolCalls: filteredToolCalls.map(projectToolCall),
-      approvals: dedupeById([...causalWorkflowRows.flatMap(projectApprovals), ...causalWorkflowEvents.flatMap(projectEventApproval)], "approvalId")
+      approvals: dedupeApprovals([...causalWorkflowRows.flatMap(projectApprovals), ...causalWorkflowEvents.flatMap(projectEventApproval)])
         .filter((approval) => !query.approvalId || approval.approvalId === query.approvalId),
       artifacts: projectArtifacts(causalWorkflowRows, causalWorkflowEvents, hasCausalMatch ? artifact : null).filter((entry) => !query.artifactId || entry.artifactId === query.artifactId),
       receipts: causalWorkflowRows.flatMap(projectReceipts).filter((receipt) => !query.receiptId || receipt.receiptId === query.receiptId),
@@ -118,8 +118,8 @@ function projectEventApproval(event: CanonicalWorkflowEvent) {
   }];
 }
 
-function dedupeById<T extends Record<K, string>, K extends keyof T>(entries: T[], key: K): T[] {
-  return [...new Map(entries.map((entry) => [entry[key], entry])).values()];
+function dedupeApprovals<T extends { workflowRunId: string; approvalId: string }>(entries: T[]): T[] {
+  return [...new Map(entries.map((entry) => [JSON.stringify([entry.workflowRunId, entry.approvalId]), entry])).values()];
 }
 
 function matchesConversation(run: WorkspaceRunRecord, query: WorkflowHistoryQuery, correlationIds: Set<string>): boolean {
