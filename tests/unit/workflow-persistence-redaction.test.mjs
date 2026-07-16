@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { sanitizePageContext, sanitizeTelemetryValue } from "../../packages/agent-observability/src/index.ts";
 import {
+  createCloudWorkflowRunStore,
+  createInMemoryWorkflowRunStore,
   createCloudWorkflowRunJournalStore,
   createInMemoryWorkflowRunJournalStore,
 } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
@@ -13,6 +15,35 @@ const serializedSafe = (value, boundary) => assert.equal(JSON.stringify(value).i
 
 const owner = { organizationId: "org-redaction", userId: "user-redaction" };
 const runId = "run-redaction";
+const safeRunInput = { workflowId: "workflow-safe", workflowVersionId: "workflow-safe@1", definition: {}, input: { campaign: "safe" }, state: { runId } };
+const unsafeRunInput = { ...safeRunInput, input: { apiKey: sentinel } };
+const runStore = createInMemoryWorkflowRunStore();
+assert.throws(
+  () => runStore.createRun(owner, unsafeRunInput),
+  /workflow_persistence_secret_rejected/,
+  "in-memory run creation rejects secret-bearing input before persistence",
+);
+assert.equal(runStore.getRun(owner, runId), null, "rejected in-memory run input creates no row");
+assert.deepEqual(runStore.createRun(owner, safeRunInput).input, safeRunInput.input, "safe run input remains exact");
+
+const cloudRunQueries = [];
+const cloudRunStore = createCloudWorkflowRunStore({
+  async transaction(operation) {
+    return operation({
+      async query(sql, params = []) {
+        cloudRunQueries.push({ sql, params });
+        return { rows: [] };
+      },
+    });
+  },
+});
+await assert.rejects(
+  () => cloudRunStore.createRun(owner, { ...safeRunInput, state: { ...safeRunInput.state, password: sentinel } }),
+  /workflow_persistence_secret_rejected/,
+  "cloud run creation rejects secret-bearing state before SQL",
+);
+assert.equal(cloudRunQueries.length, 0, "rejected cloud run values never reach SQL");
+
 const journal = createInMemoryWorkflowRunJournalStore({ getRun: () => ({}) });
 const externalEffectIdentity = {
   namespace: "booking:v1:create",

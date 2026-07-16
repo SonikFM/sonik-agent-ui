@@ -93,6 +93,7 @@ export function createInMemoryWorkflowRunStore(): WorkflowRunStore {
   const rows = new Map<string, WorkflowRunRow>();
 
   function createRun(ownerInput: WorkflowRunOwner, input: CreateWorkflowRunInput): WorkflowRunRow {
+    assertWorkflowPersistenceSafe(input);
     const owner = normalizeWorkflowRunOwner(ownerInput);
     const key = workflowRunKey(owner, input.state.runId);
     if (rows.has(key)) throw workflowRunConflictError(input.state.runId);
@@ -164,7 +165,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
     },
     async listEvents(ownerInput, runId) {
       const owner = normalizeWorkflowRunOwner(ownerInput);
-      return [...(events.get(workflowRunKey(owner, runId)) ?? [])];
+      return structuredClone(events.get(workflowRunKey(owner, runId)) ?? []);
     },
     async getSnapshot(ownerInput, runId) {
       const snapshot = snapshots.get(workflowRunKey(normalizeWorkflowRunOwner(ownerInput), runId));
@@ -293,6 +294,7 @@ function rowFromColumns(columns: WorkflowRunRowColumns): WorkflowRunRow {
 /** RLS-backed workflow-run store. Explicit owner predicates are defense in depth. */
 export function createCloudWorkflowRunStore(executor: WorkspaceSqlExecutor): AsyncWorkflowRunStore {
   async function createRun(ownerInput: WorkflowRunOwner, input: CreateWorkflowRunInput): Promise<WorkflowRunRow> {
+    assertWorkflowPersistenceSafe(input);
     return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
       const now = new Date().toISOString();
       const result = await tx.query<WorkflowRunRowColumns>(`

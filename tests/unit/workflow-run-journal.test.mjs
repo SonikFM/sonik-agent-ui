@@ -41,6 +41,11 @@ assert.deepEqual(await journal.listEvents(owner, train0CanonicalEvent.workflowRu
 assert.deepEqual(await journal.getSnapshot(owner, train0CanonicalEvent.workflowRunId), snapshot);
 assert.deepEqual(await journal.listEvents(otherOwner, train0CanonicalEvent.workflowRunId), [], "journal reads remain tenant scoped");
 assert.deepEqual(await journal.replayEvents(owner, initial), snapshot, "ordered journal replay reproduces the projected snapshot");
+const callerEvents = await journal.listEvents(owner, train0CanonicalEvent.workflowRunId);
+callerEvents[0].payload.status = "failed";
+callerEvents[0].actor.id = "caller-mutation";
+assert.deepEqual(await journal.listEvents(owner, train0CanonicalEvent.workflowRunId), [train0CanonicalEvent], "caller mutations cannot corrupt later journal reads");
+assert.deepEqual(await journal.replayEvents(owner, initial), snapshot, "caller mutations cannot corrupt later journal replay");
 await assert.rejects(
   journal.appendEventAndProject(owner, { expectedRevision: 0, leaseId: "lease-a", event: { ...train0CanonicalEvent, sequence: 2 }, snapshot }),
   /invalid_workflow_event_order|invalid_workflow_event_projection/,
