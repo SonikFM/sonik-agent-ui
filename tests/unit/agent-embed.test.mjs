@@ -237,6 +237,29 @@ assert.deepEqual(
   workflowPublishPins,
   "valid named workflowPublishPins survive host-session sanitization without positional encoding",
 );
+const signedTrustedSessionWithFullPublicMetadata = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: {
+      public1: "one",
+      public2: "two",
+      public3: "three",
+      public4: "four",
+      public5: "five",
+      public6: "six",
+      public7: "seven",
+      public8: "eight",
+      workflowPublishPins,
+    },
+  },
+});
+assert.deepEqual(
+  signedTrustedSessionWithFullPublicMetadata?.hostSession?.metadata?.workflowPublishPins,
+  workflowPublishPins,
+  "valid workflowPublishPins survive after the public metadata cap is reached",
+);
 const invalidWorkflowPublishPins = sanitizeAgentHostPageContext({
   hostSession: {
     source: "amplify-embedded",
