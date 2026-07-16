@@ -5,7 +5,7 @@ export const DEV_WORKBENCH_ROOT = "/vercel/sandbox/workspace" as const;
 export const DEV_WORKBENCH_REPOSITORY_ROOT = `${DEV_WORKBENCH_ROOT}/repo` as const;
 export const DEV_WORKBENCH_STATE_ROOT = `${DEV_WORKBENCH_ROOT}/.sonik` as const;
 export const DEV_WORKBENCH_PREVIEW_PORT = 3000 as const;
-export const DEV_WORKBENCH_PERSISTENT = false as const;
+export const DEV_WORKBENCH_PERSISTENT = true as const;
 
 const identifierSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const gitRevisionSchema = z.string().min(1).max(256).regex(/^[A-Za-z0-9][A-Za-z0-9._/@{}~^:+-]*$/);

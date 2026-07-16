@@ -55,6 +55,7 @@ export async function createVercelDevWorkbenchSandbox(input: {
       name: sandboxName(input.sessionId),
       runtime: "node24",
       persistent: DEV_WORKBENCH_PERSISTENT,
+      keepLastSnapshots: { count: 1 },
       ports: [DEV_WORKBENCH_PREVIEW_PORT],
       timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       tags: { app: "sonik-dev-workbench" },
@@ -75,6 +76,10 @@ export async function resumeVercelDevWorkbenchSandbox(input: {
       name: sandboxName(input.sessionId),
       ...(input.signal ? { signal: input.signal } : {}),
     });
+    await sandbox.update(
+      { persistent: DEV_WORKBENCH_PERSISTENT, keepLastSnapshots: { count: 1 } },
+      input.signal ? { signal: input.signal } : undefined,
+    );
     return { ok: true, value: sandbox };
   } catch (error) {
     return {

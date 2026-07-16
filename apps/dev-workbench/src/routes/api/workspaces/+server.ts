@@ -3,7 +3,10 @@ import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { readDevWorkbenchConfig } from "$lib/server/workbench-config";
 import { provisionWorkspace, reconnectWorkspace, stopWorkspace } from "$lib/server/workspace-service";
-import { DEV_WORKBENCH_SESSION_COOKIE } from "$lib/server/session-cookie";
+import {
+  DEV_WORKBENCH_SESSION_COOKIE,
+  DEV_WORKBENCH_SESSION_COOKIE_MAX_AGE_SECONDS,
+} from "$lib/server/session-cookie";
 
 const NO_STORE = { "cache-control": "no-store, max-age=0" };
 
@@ -45,7 +48,7 @@ export const POST: RequestHandler = async ({ cookies, request, url }) => {
     sameSite: "strict",
     secure: url.protocol === "https:",
     path: "/",
-    maxAge: Math.floor(configuration.value.timeoutMs / 1_000),
+    maxAge: DEV_WORKBENCH_SESSION_COOKIE_MAX_AGE_SECONDS,
   });
   return json({ workspace: result.value }, { status: 201, headers: NO_STORE });
 };
