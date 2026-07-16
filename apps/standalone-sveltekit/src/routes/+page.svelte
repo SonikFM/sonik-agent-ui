@@ -2058,19 +2058,7 @@
   }
 
   function getSignedWorkflowPublishPins(): WorkflowDependencyPins | undefined {
-    const values = hostPageContext?.hostSession?.metadata?.workflowPublishPins;
-    if (!Array.isArray(values)) return undefined;
-    const parsed = workflowDependencyPinsSchema.safeParse({
-      organizationId: values[0],
-      workflowVersionId: values[1],
-      definitionDigest: values[2],
-      agentPublishedVersionId: values[3],
-      nodeDescriptorsDigest: values[4],
-      capabilityVersionsDigest: values[5],
-      toolPackVersionsDigest: values[6],
-      skillVersionsDigest: values[7],
-      runtimePolicyDigest: hostPageContext?.hostSession?.metadata?.workflowPublishRuntimePolicyDigest,
-    });
+    const parsed = workflowDependencyPinsSchema.safeParse(hostPageContext?.hostSession?.metadata?.workflowPublishPins);
     return parsed.success ? parsed.data : undefined;
   }
 
