@@ -156,7 +156,7 @@ export class WorkflowRunDriver {
           return this.appendStatus(state, request, "waiting", "outcome_unknown");
         }
         const reasoningTimeExhausted = node.nodeType === "reasoning" && this.now() - reasoningStartedAt >= (node.reasoning?.budgets.maxWallTimeMs ?? 0);
-        if (reasoningTimeExhausted) return this.appendStatus(state, request, "failed", "reasoning_budget_exhausted", { schedulerFrontier: [] });
+        if (reasoningTimeExhausted) return this.appendReasoningYield(state, request, node, "wall_time_budget_exhausted", completedAttemptId);
         if (response.status !== "retryable_error" || logicalEffectId || retry + 1 >= maxAttempts) break;
       }
       if (response.status === "waiting") {
@@ -172,6 +172,9 @@ export class WorkflowRunDriver {
       }
       if (response.status === "terminal_error") {
         if (logicalEffectId) await this.deps.journal.transitionEffectClaim(this.deps.owner, claim!.claim.claimId, "in_flight", "failed", response);
+        if (node.nodeType === "reasoning" && ["reasoning_budget_exhausted", "reasoning_output_budget_exhausted"].includes(response.error.code)) {
+          return this.appendReasoningYield(state, request, node, "node_budget_exhausted", completedAttemptId);
+        }
         return this.appendStatus(state, request, "failed", response.error.code, { schedulerFrontier: [] });
       }
       if (logicalEffectId) {
@@ -237,6 +240,12 @@ export class WorkflowRunDriver {
 
   private appendWait(state: WorkflowRunSnapshot, request: PumpRequest, waitpoint: WorkflowRunSnapshot["waits"][number], attemptId?: string): Promise<WorkflowRunSnapshot> {
     return this.append(state, request, "wait_created", { waitpoint }, { status: "waiting", waits: [waitpoint], compatibilityPhase: "waiting" }, { kind: "waitpoint", id: waitpoint.waitpointId }, attemptId);
+  }
+
+  private async appendReasoningYield(state: WorkflowRunSnapshot, request: PumpRequest, node: WorkflowVNextNode, wakeupReason: "node_budget_exhausted" | "wall_time_budget_exhausted", attemptId: string): Promise<WorkflowRunSnapshot> {
+    const waitpoint = { kind: "budget_yield" as const, waitpointId: `reasoning-budget:${state.workflowRunId}:${state.revision + 1}`, runId: state.workflowRunId, nodeId: node.nodeId, wakeupReason };
+    await this.deps.journal.createWaitpoint(this.deps.owner, waitpoint);
+    return this.appendWait(state, request, waitpoint, attemptId);
   }
 
   private appendStatus(state: WorkflowRunSnapshot, request: PumpRequest, status: WorkflowRunSnapshot["status"], compatibilityPhase: string, patch: Partial<WorkflowRunSnapshot> = {}): Promise<WorkflowRunSnapshot> {

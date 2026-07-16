@@ -71,6 +71,12 @@ jobs:
             git diff --check
           fi
 
+      - name: Build observability contracts
+        run: pnpm --filter @sonik-agent-ui/agent-observability build
+
+      - name: Build workflow tool contracts
+        run: pnpm --filter @sonik-agent-ui/tool-contracts build
+
       - name: Check generated commands and committed source integrity
         run: pnpm check:commands
 
