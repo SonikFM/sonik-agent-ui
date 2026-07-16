@@ -33,13 +33,19 @@ await assert.rejects(
 );
 await journal.claimEffect(owner, effect);
 await journal.transitionEffectClaim(owner, effect.claimId, "claimed", "in_flight");
+const longSafeString = "safe-replay-data-".repeat(300);
+const longSafeList = Array.from({ length: 80 }, (_, index) => ({ index, value: `safe-${index}` }));
+const deepSafeValue = { level1: { level2: { level3: { level4: { level5: { level6: "exact-safe-leaf" } } } } } };
 const persistedClaim = await journal.transitionEffectClaim(owner, effect.claimId, "in_flight", "succeeded", {
-  output: { storage: "inline", value: { authorization: sentinel, uploadedContent: sentinel }, byteLength: sentinel.length },
+  output: { storage: "inline", value: { longSafeString, longSafeList, deepSafeValue, authorization: sentinel, uploadedContent: sentinel }, byteLength: sentinel.length },
   receipt: { receiptId: "receipt-redaction", semanticStatus: "success", providerToken: sentinel },
 });
 serializedSafe(persistedClaim, "effect claim");
 assert.equal(persistedClaim.result.output.value.authorization, "[REDACTED]");
 assert.equal(persistedClaim.result.receipt.providerToken, "[REDACTED]");
+assert.equal(persistedClaim.result.output.value.longSafeString, longSafeString, "safe long strings remain byte-for-byte replayable");
+assert.deepEqual(persistedClaim.result.output.value.longSafeList, longSafeList, "safe lists are never telemetry-truncated");
+assert.deepEqual(persistedClaim.result.output.value.deepSafeValue, deepSafeValue, "safe nested JSON preserves its full depth");
 
 const initial = {
   ...structuredClone(train0SelectedPathRunState),

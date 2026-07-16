@@ -14,7 +14,7 @@ import {
   type WorkflowWaitpoint,
 } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { WorkspaceSqlExecutor, WorkspaceSqlTransaction } from "@sonik-agent-ui/workspace-session";
-import { redactTelemetryString, sanitizeTelemetryValue } from "@sonik-agent-ui/agent-observability";
+import { sanitizePersistenceValue } from "@sonik-agent-ui/agent-observability";
 import { createNeonWorkspaceSqlExecutor } from "./workspace-cloud-sql.ts";
 
 export interface WorkflowRunOwner {
@@ -698,12 +698,12 @@ function effectClaimFromColumns(row: EffectClaimColumns): WorkflowEffectClaim {
 }
 
 function sanitizeWorkflowPersistenceValue(value: unknown): unknown {
-  return sanitizeTelemetryValue(value);
+  return sanitizePersistenceValue(value);
 }
 
 function assertWorkflowPersistenceSafe(value: unknown): void {
   if (typeof value === "string") {
-    if (redactTelemetryString(value) !== value) throw new Error("workflow_persistence_secret_rejected");
+    if (sanitizePersistenceValue(value) !== value) throw new Error("workflow_persistence_secret_rejected");
     return;
   }
   if (Array.isArray(value)) {

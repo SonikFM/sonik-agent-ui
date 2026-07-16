@@ -687,6 +687,23 @@ export function sanitizeTelemetryValue(value: unknown, depth = 0, errorBearing =
   return String(value);
 }
 
+/** Redacts durable JSON without telemetry's size/depth limits, so safe receipts
+ * remain replayable byte-for-byte while secret-bearing keys and values do not. */
+export function sanitizePersistenceValue(value: unknown): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value === "string") return value.replace(SECRET_VALUE_PATTERN, "[REDACTED]");
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map(sanitizePersistenceValue);
+  if (typeof value === "object") {
+    const output: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = SECRET_KEY_PATTERN.test(key) ? "[REDACTED]" : sanitizePersistenceValue(entry);
+    }
+    return output;
+  }
+  return value;
+}
+
 function containsFailureKey(value: unknown, depth = 0): boolean {
   if (!value || typeof value !== "object" || depth > 4) return false;
   if (Array.isArray(value)) return value.some((entry) => containsFailureKey(entry, depth + 1));
