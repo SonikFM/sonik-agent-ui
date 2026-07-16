@@ -6,6 +6,7 @@ import {
   runDriverPumpRequestSchema,
   validateApprovalDecisionForCommit,
   workflowEffectIdempotencyKey,
+  workflowNodeAttemptId,
   workflowVNextDefinitionSchema,
   workflowVNextRunStateSchema,
   type ApprovalDecision,
@@ -87,8 +88,10 @@ export class WorkflowRunDriver {
         return this.appendStatus(state, request, "failed", "dependency_pin_drift", { schedulerFrontier: [] });
       }
       const inputValue = this.resolveInput(node, state);
+      const attempt = state.eventSequence + 1;
+      const attemptId = workflowNodeAttemptId(state.workflowRunId, node.nodeId, attempt);
       if (node.nodeType === "branch") {
-        state = await this.complete(state, request, node, this.inline(inputValue), this.selectBranch(node, state));
+        state = await this.complete(state, request, node, this.inline(inputValue), this.selectBranch(node, state), attemptId);
         completed += 1;
         continue;
       }
@@ -96,8 +99,6 @@ export class WorkflowRunDriver {
       const logicalEffectId = node.nodeType === "tool_commit" ? node.effectBinding?.logicalEffectId : undefined;
       const executionContext = this.deps.executionContext?.(node);
       const externalEffectIdentity = this.externalEffectIdentity(node, state, executionContext);
-      const attempt = state.eventSequence + 1;
-      const attemptId = `${state.workflowRunId}:${node.nodeId}:${attempt}`;
       const engineRequest: EngineRequest = {
         workflowRunId: state.workflowRunId,
         workflowVersionId: state.source.kind === "published" ? state.source.workflowVersionId : `${state.source.workflowId}@draft-${state.source.draftRevision}`,
@@ -122,7 +123,7 @@ export class WorkflowRunDriver {
         if (!claim.created) {
           const replay = this.persistedEffectResponse(claim.claim.result);
           if ((claim.claim.status === "succeeded" || claim.claim.status === "reconciled") && replay) {
-            state = await this.complete(state, request, node, replay.output);
+            state = await this.complete(state, request, node, replay.output, undefined, claim.claim.attemptId);
             completed += 1;
             continue;
           }
@@ -130,7 +131,7 @@ export class WorkflowRunDriver {
             const reconciled = await this.deps.reconcileEffect(node, claim.claim);
             if (reconciled.status === "succeeded" && reconciled.receipt) {
               await this.deps.journal.transitionEffectClaim(this.deps.owner, claim.claim.claimId, "outcome_unknown", "reconciled", reconciled);
-              state = await this.complete(state, request, node, reconciled.output);
+              state = await this.complete(state, request, node, reconciled.output, undefined, claim.claim.attemptId);
               completed += 1;
               continue;
             }
@@ -143,8 +144,11 @@ export class WorkflowRunDriver {
       let response: EngineResponse;
       const maxAttempts = node.nodeType === "tool_preview" ? 3 : node.nodeType === "reasoning" ? node.reasoning?.budgets.maxSteps ?? 1 : 1;
       const reasoningStartedAt = this.now();
+      let completedAttemptId = attemptId;
       for (let retry = 0; ; retry += 1) {
-        const retryRequest = retry === 0 ? engineRequest : { ...engineRequest, attempt: attempt + retry, attemptId: `${state.workflowRunId}:${node.nodeId}:${attempt + retry}`, idempotencyKey: `${state.workflowRunId}:${node.nodeId}:${attempt + retry}` };
+        const retryAttemptId = workflowNodeAttemptId(state.workflowRunId, node.nodeId, attempt + retry);
+        const retryRequest = retry === 0 ? engineRequest : { ...engineRequest, attempt: attempt + retry, attemptId: retryAttemptId, idempotencyKey: retryAttemptId };
+        completedAttemptId = retryRequest.attemptId;
         try { response = await dispatchWorkflowNode(retryRequest, executionContext); }
         catch (error) {
           if (!logicalEffectId) throw error;
@@ -157,7 +161,7 @@ export class WorkflowRunDriver {
       }
       if (response.status === "waiting") {
         await this.deps.journal.createWaitpoint(this.deps.owner, response.waitpoint);
-        return this.appendWait(state, request, response.waitpoint);
+        return this.appendWait(state, request, response.waitpoint, completedAttemptId);
       }
       if (response.status === "retryable_error") {
         if (logicalEffectId) {
@@ -174,7 +178,7 @@ export class WorkflowRunDriver {
         if (!response.receipt) return this.appendStatus(state, request, "failed", "semantic_receipt_required", { schedulerFrontier: [] });
         await this.deps.journal.transitionEffectClaim(this.deps.owner, claim!.claim.claimId, "in_flight", "succeeded", response);
       }
-      state = await this.complete(state, request, node, response.output);
+      state = await this.complete(state, request, node, response.output, undefined, completedAttemptId);
       completed += 1;
     }
     return state.status === "succeeded" ? state : this.appendStatus(state, request, "succeeded", "committed");
@@ -225,24 +229,24 @@ export class WorkflowRunDriver {
     };
   }
 
-  private async complete(state: WorkflowRunSnapshot, request: PumpRequest, node: WorkflowVNextNode, output: BoundedNodeOutput, next = this.next(node.nodeId)): Promise<WorkflowRunSnapshot> {
+  private async complete(state: WorkflowRunSnapshot, request: PumpRequest, node: WorkflowVNextNode, output: BoundedNodeOutput, next = this.next(node.nodeId), attemptId?: string): Promise<WorkflowRunSnapshot> {
     const digest = `sha256:${createHash("sha256").update(JSON.stringify(output)).digest("hex")}`;
     const outputRef = output.storage === "artifact" ? output : { storage: "inline_redacted" as const, digest, byteLength: output.byteLength, redactedSummary: "Node output recorded" };
-    return this.append(state, request, "node_completed", { nodeId: node.nodeId, outputRef }, { status: next.length ? "running" : "succeeded", selectedPath: [...state.selectedPath, node.nodeId], schedulerFrontier: next, outputs: { ...state.outputs, [node.nodeId]: output }, outputRefs: { ...state.outputRefs, [node.nodeId]: outputRef }, compatibilityPhase: next.length ? "saving" : "committed" }, { kind: "node", id: node.nodeId });
+    return this.append(state, request, "node_completed", { nodeId: node.nodeId, outputRef }, { status: next.length ? "running" : "succeeded", selectedPath: [...state.selectedPath, node.nodeId], schedulerFrontier: next, outputs: { ...state.outputs, [node.nodeId]: output }, outputRefs: { ...state.outputRefs, [node.nodeId]: outputRef }, compatibilityPhase: next.length ? "saving" : "committed" }, { kind: "node", id: node.nodeId }, attemptId);
   }
 
-  private appendWait(state: WorkflowRunSnapshot, request: PumpRequest, waitpoint: WorkflowRunSnapshot["waits"][number]): Promise<WorkflowRunSnapshot> {
-    return this.append(state, request, "wait_created", { waitpoint }, { status: "waiting", waits: [waitpoint], compatibilityPhase: "waiting" }, { kind: "waitpoint", id: waitpoint.waitpointId });
+  private appendWait(state: WorkflowRunSnapshot, request: PumpRequest, waitpoint: WorkflowRunSnapshot["waits"][number], attemptId?: string): Promise<WorkflowRunSnapshot> {
+    return this.append(state, request, "wait_created", { waitpoint }, { status: "waiting", waits: [waitpoint], compatibilityPhase: "waiting" }, { kind: "waitpoint", id: waitpoint.waitpointId }, attemptId);
   }
 
   private appendStatus(state: WorkflowRunSnapshot, request: PumpRequest, status: WorkflowRunSnapshot["status"], compatibilityPhase: string, patch: Partial<WorkflowRunSnapshot> = {}): Promise<WorkflowRunSnapshot> {
     return this.append(state, request, "run_status_changed", { status, compatibilityPhase }, { ...patch, status, compatibilityPhase }, { kind: "run", id: state.workflowRunId });
   }
 
-  private async append(state: WorkflowRunSnapshot, request: PumpRequest, eventType: "node_completed" | "wait_created" | "run_status_changed", payload: unknown, patch: Partial<WorkflowRunSnapshot>, subject: { kind: "run" | "node" | "waitpoint"; id: string }): Promise<WorkflowRunSnapshot> {
+  private async append(state: WorkflowRunSnapshot, request: PumpRequest, eventType: "node_completed" | "wait_created" | "run_status_changed", payload: unknown, patch: Partial<WorkflowRunSnapshot>, subject: { kind: "run" | "node" | "waitpoint"; id: string }, attemptId?: string): Promise<WorkflowRunSnapshot> {
     const revision = state.revision + 1;
     const snapshot = workflowVNextRunStateSchema.parse({ ...state, ...patch, revision, eventSequence: revision });
-    const event = { eventId: randomUUID(), schemaVersion: "sonik.workflow.event.v1" as const, eventVersion: 1 as const, workflowRunId: state.workflowRunId, sequence: revision, revision, actor: { kind: "worker" as const, id: request.lease.ownerId }, subject, causationId: request.lease.leaseId, correlationIds: [request.lease.leaseId], timestamp: new Date(this.now()).toISOString(), eventType, payload };
+    const event = { eventId: randomUUID(), schemaVersion: "sonik.workflow.event.v1" as const, eventVersion: 1 as const, workflowRunId: state.workflowRunId, sequence: revision, revision, actor: { kind: "worker" as const, id: request.lease.ownerId }, subject, causationId: request.lease.leaseId, ...(attemptId ? { attemptId } : {}), correlationIds: [request.lease.leaseId, ...(attemptId ? [attemptId] : [])], timestamp: new Date(this.now()).toISOString(), eventType, payload };
     if (!await this.deps.journal.appendEventAndProject(this.deps.owner, { expectedRevision: state.revision, leaseId: request.lease.leaseId, event: event as never, snapshot })) throw new Error("run_revision_or_lease_conflict");
     return snapshot;
   }

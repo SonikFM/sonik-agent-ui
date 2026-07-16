@@ -37,7 +37,7 @@ const canonicalEvent = {
 
 const result = await getWorkflowHistory({
   sessionId: "session-a", conversationRunId: "conversation-run-a", workflowRunId: "workflow-run-a", nodeId: "commit",
-  toolCallId: "tool-a", artifactId: "artifact-a", receiptId: "receipt-a", requestId: "request-a", traceId: "trace-a",
+  toolCallId: "tool-a", artifactId: "artifact-a", receiptId: "receipt-a", requestId: "request-a", traceId: "trace-a", attemptId: "workflow-run-a:commit:1",
 }, {
   owner: { organizationId: "org-a", userId: "user-a" },
   workflowRuns: {
@@ -105,27 +105,27 @@ const decoyWorkflow = {
   },
 };
 
+const identifierDeps = (identifierCalls) => ({
+  owner: { organizationId: "org-a", userId: "user-a", hostSessionId: "session-a" },
+  workflowRuns: {
+    getRun: async (_owner, runId) => (identifierCalls.workflowGet++, runId === workflowRow.runId ? workflowRow : null),
+    listRuns: async () => (identifierCalls.workflowList++, [decoyWorkflow, workflowRow]),
+    createRun: async () => { throw new Error("unused"); },
+    updateRunState: async () => { throw new Error("unused"); },
+  },
+  journal: { listEvents: async (_owner, runId) => (identifierCalls.journal++, runId === workflowRow.runId ? [canonicalEvent] : []) },
+  workspace: {
+    getRun: async (runId) => (identifierCalls.conversationGet++, runId === conversation.id ? conversation : null),
+    listRuns: async (sessionId) => (identifierCalls.conversationList++, sessionId === conversation.session_id ? [conversation] : []),
+    listRunEvents: async (runId) => (identifierCalls.conversationEvents++, runId === conversation.id ? [{ id: "conversation-event-a", run_id: conversation.id, session_id: conversation.session_id, seq: 0, kind: "tool_result", event: { secret: "must-not-leak" }, created_at: "2026-07-15T20:00:11.000Z" }] : []),
+    listToolCalls: async (sessionId) => (identifierCalls.tools++, sessionId === toolCall.session_id ? [toolCall] : []),
+    getArtifact: async (artifactId) => (identifierCalls.artifact++, artifactId === "artifact-a" ? { id: "artifact-a", session_id: "session-a", kind: "json-render", title: "Safe title", content: { secret: "must-not-leak" }, version: 2, created_at: "2026-07-15T20:00:00.000Z", updated_at: "2026-07-15T20:00:11.000Z" } : null),
+  },
+});
+
 for (const key of WORKFLOW_HISTORY_QUERY_KEYS) {
   const identifierCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
-  const identifierResult = await getWorkflowHistory({ [key]: queryValues[key] }, {
-    owner: { organizationId: "org-a", userId: "user-a", hostSessionId: "session-a" },
-    workflowRuns: {
-      getRun: async (_owner, runId) => (identifierCalls.workflowGet++, runId === workflowRow.runId ? workflowRow : null),
-      listRuns: async () => (identifierCalls.workflowList++, [decoyWorkflow, workflowRow]),
-      createRun: async () => { throw new Error("unused"); },
-      updateRunState: async () => { throw new Error("unused"); },
-    },
-    journal: {
-      listEvents: async (_owner, runId) => (identifierCalls.journal++, runId === workflowRow.runId ? [canonicalEvent] : []),
-    },
-    workspace: {
-      getRun: async (runId) => (identifierCalls.conversationGet++, runId === conversation.id ? conversation : null),
-      listRuns: async (sessionId) => (identifierCalls.conversationList++, sessionId === conversation.session_id ? [conversation] : []),
-      listRunEvents: async (runId) => (identifierCalls.conversationEvents++, runId === conversation.id ? [{ id: "conversation-event-a", run_id: conversation.id, session_id: conversation.session_id, seq: 0, kind: "tool_result", event: { secret: "must-not-leak" }, created_at: "2026-07-15T20:00:11.000Z" }] : []),
-      listToolCalls: async (sessionId) => (identifierCalls.tools++, sessionId === toolCall.session_id ? [toolCall] : []),
-      getArtifact: async (artifactId) => (identifierCalls.artifact++, artifactId === "artifact-a" ? { id: "artifact-a", session_id: "session-a", kind: "json-render", title: "Safe title", content: { secret: "must-not-leak" }, version: 2, created_at: "2026-07-15T20:00:00.000Z", updated_at: "2026-07-15T20:00:11.000Z" } : null),
-    },
-  });
+  const identifierResult = await getWorkflowHistory({ [key]: queryValues[key] }, identifierDeps(identifierCalls));
 
   assert.equal(identifierResult.ok, true, `${key} query succeeds`);
   assert.deepEqual(identifierResult.history.conversations.map((run) => run.conversationRunId), ["conversation-run-a"], `${key} resolves the correlated conversation`);
@@ -140,6 +140,12 @@ for (const key of WORKFLOW_HISTORY_QUERY_KEYS) {
   assert.equal(JSON.stringify(identifierResult).includes("must-not-leak"), false, `${key} projection remains redacted`);
   assert.equal(Object.values(identifierCalls).every((count) => count <= 1), true, `${key} performs at most one call per authoritative store`);
 }
+
+const missingAttemptCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };
+const missingAttempt = await getWorkflowHistory({ attemptId: "workflow-run-a:commit:999" }, identifierDeps(missingAttemptCalls));
+assert.deepEqual(missingAttempt.history.workflows, [], "a canonical-looking but nonexistent attempt does not match the run prefix");
+assert.deepEqual(missingAttempt.history.events, [], "a nonexistent attempt has no causal path");
+assert.equal(Object.values(missingAttemptCalls).every((count) => count <= 1), true, "exact attempt rejection preserves one read per authoritative store");
 
 const route = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/workflow-history/+server.ts", import.meta.url), "utf8");
 assert.match(route, /createAgentHostSessionEnvelope\(event\)/);
