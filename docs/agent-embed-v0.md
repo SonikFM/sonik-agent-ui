@@ -1,6 +1,6 @@
 # Sonik Agent UI embedding v0
 
-The Agent UI embedding seam is transport-neutral. Hosts donate **page context** to the Agent UI; trusted auth, organization, and scope data must come from the host's server/auth adapter and must not be accepted from browser page context.
+The Agent UI embedding seam is transport-neutral. Hosts donate **display page context** and may separately donate a server-signed **opaque authority**. Trusted auth, organization, and scope fields must never be inferred from browser page context.
 
 ## Package exports
 
@@ -8,6 +8,8 @@ Use `@sonik-agent-ui/agent-embed` for the shared semantic contract:
 
 - `AgentHostPageContext` — sanitized host page context: route, surface, page type, active entity, command families, skill families, and visible actions.
 - `AgentHostContextProvider` — native host provider shape for framework adapters.
+- `AgentHostAuthorityDonation` — bounded `{ header, revision, expiresAt }` wrapper around an opaque server-signed header. Consumers forward `header` byte-for-byte and never decode or rebuild it.
+- `AgentHostContextDonation` — `{ pageContext, authority? }`, keeping display context and authority structurally separate.
 - `AgentTrustedHostContext` — trusted auth/org/scopes/host-session envelope passed only by server-owned adapter paths.
 - `mergeAgentHostPageContext(local, host, trusted?)` — overlays local app state, host page context, and trusted server context.
 - `SONIK_AGENT_UI_HOST_MESSAGE_SOURCE` / `SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE` — stable postMessage envelope constants.
@@ -20,12 +22,22 @@ Use `@sonik-agent-ui/agent-embed` for the shared semantic contract:
 
 The current standalone reference host uses iframe/postMessage first because it isolates CSS/runtime concerns and keeps the Agent UI easy to embed before native shell integration.
 
-Production v0 is **same-origin by default**. Cross-origin browser embedding needs a server-owned allowlist/adapter before it should be treated as supported; browser-donated page context is never an auth, org, scope, token, or credential channel.
+Production v0 is **same-origin by default**. Cross-origin browser embedding needs an explicit origin allowlist. Display page context is never an auth, org, scope, token, or credential channel. The only browser-carried authority is the bounded opaque sibling produced by a server signer; the iframe accepts it only from the configured parent window and allowed origin.
+
+Workspace history ownership is stable across host-session rotation. Signed
+`organization_id` and `user_id` values are the row-visibility authority;
+`host_session_id` is insert-time audit provenance and command-lifetime context
+only. It is never a history, document, artifact, file, run, or event visibility
+predicate. No migration or backfill is required: legacy rows with an older or
+null host-session value remain visible to their existing organization/user
+owner, and reads do not rewrite their identifiers, provenance, or timestamps.
 
 ```ts
 import {
   SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
   SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
+  createAgentHostPageContextMessage,
+  type AgentHostAuthorityDonation,
   type AgentHostPageContext,
 } from "@sonik-agent-ui/agent-embed";
 
@@ -39,13 +51,11 @@ const context: AgentHostPageContext = {
   visibleActions: ["viewBooking", "listResources", "assignResource"],
 };
 
+// `signedByHostServer` is returned by a same-origin server signer. Do not
+// decode, normalize, log, render, or reconstruct its `header` value.
+const authority: AgentHostAuthorityDonation = signedByHostServer.authority;
 iframe.contentWindow?.postMessage(
-  {
-    source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
-    type: SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
-    payload: context,
-    sentAt: new Date().toISOString(),
-  },
+  createAgentHostPageContextMessage(context, authority),
   window.location.origin,
 );
 ```
@@ -147,4 +157,4 @@ const trusted = {
 const agentContext = mergeAgentHostPageContext(localAgentSnapshot, amplifyPageContext, trusted);
 ```
 
-Never pass `organizationId`, `authenticated`, `scopes`, tokens, cookies, or API keys through `postMessage` or browser page context. Those belong to trusted host-session adapters only.
+Never pass `organizationId`, `authenticated`, `scopes`, tokens, cookies, API keys, or reconstructable signature fields through display page context. Donate only the server-produced opaque authority sibling, forward its header unchanged, and keep it out of logs and UI.

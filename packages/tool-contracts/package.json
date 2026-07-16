@@ -23,9 +23,25 @@
       "types": "./dist/capability-registry.d.ts",
       "default": "./dist/capability-registry.js"
     },
+    "./capability-family": {
+      "types": "./dist/capability-family.d.ts",
+      "default": "./dist/capability-family.js"
+    },
     "./workflow-run-state": {
       "types": "./dist/workflow-run-state.d.ts",
       "default": "./dist/workflow-run-state.js"
+    },
+    "./workflow-vnext": {
+      "types": "./dist/workflow-vnext.d.ts",
+      "default": "./dist/workflow-vnext.js"
+    },
+    "./workflow-vnext-fixtures": {
+      "types": "./dist/workflow-vnext-fixtures.d.ts",
+      "default": "./dist/workflow-vnext-fixtures.js"
+    },
+    "./run-driver-spike": {
+      "types": "./dist/run-driver-spike.d.ts",
+      "default": "./dist/run-driver-spike.js"
     },
     "./workflow-projection": {
       "types": "./dist/workflow-projection.d.ts",

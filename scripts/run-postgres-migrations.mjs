@@ -145,9 +145,134 @@ const migrations = [
 			)::text
 		`,
 	},
-	// NOTE for the next lane appending here: this is the ONE shared migrations
-	// manifest (per prod-slice-plan.md) -- add new entries after 0011, don't
-	// reorder/renumber existing ones.
+	{
+		version: "0012",
+		name: "commit_ledger",
+		file: "packages/workspace-session/migrations/postgres/0012_commit_ledger.sql",
+		baselineCheck: `
+			select (
+				to_regclass('sonik_agent_ui.agent_workspace_commit_ledger') is not null
+			)::text
+		`,
+	},
+	{
+		version: "0013",
+		name: "workflow_run_owner_scope",
+		file: "packages/workspace-session/migrations/postgres/0013_workflow_run_owner_scope.sql",
+		baselineCheck: `
+			select (
+				exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_runs'
+						and column_name = 'organization_id'
+				)
+				and exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_runs'
+						and column_name = 'user_id'
+				)
+				and exists (
+					select 1 from pg_class
+					where oid = to_regclass('sonik_agent_ui.agent_workflow_runs')
+						and relrowsecurity
+						and relforcerowsecurity
+				)
+			)::text
+		`,
+	},
+	{
+		version: "0014",
+		name: "commit_claim_leases",
+		file: "packages/workspace-session/migrations/postgres/0014_commit_claim_leases.sql",
+		baselineCheck: `
+			select (
+				to_regclass('sonik_agent_ui.agent_workspace_commit_claims') is not null
+			)::text
+		`,
+	},
+	{
+		version: "0015",
+		name: "agent_definition_tenant_authority",
+		file: "packages/workspace-session/migrations/postgres/0015_agent_definition_tenant_authority.sql",
+		baselineCheck: `
+			select (
+				exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_definition_drafts'
+						and column_name = 'organization_id'
+				)
+				and exists (
+					select 1 from pg_class
+					where oid = to_regclass('sonik_agent_ui.agent_definition_drafts')
+						and relrowsecurity
+						and relforcerowsecurity
+				)
+			)::text
+		`,
+	},
+	{
+		version: "0016",
+		name: "workflow_definitions",
+		file: "packages/workspace-session/migrations/postgres/0016_workflow_definitions.sql",
+		baselineCheck: `
+			select (
+				to_regclass('sonik_agent_ui.workflow_definition_drafts') is not null
+				and to_regclass('sonik_agent_ui.workflow_definition_published_versions') is not null
+				and exists (
+					select 1 from pg_class
+					where oid = to_regclass('sonik_agent_ui.workflow_definition_drafts')
+						and relrowsecurity
+						and relforcerowsecurity
+				)
+			)::text
+		`,
+	},
+	{
+		version: "0017",
+		name: "workflow_run_journal",
+		file: "packages/workspace-session/migrations/postgres/0017_workflow_run_journal.sql",
+		baselineCheck: `
+			select (
+				exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_runs'
+						and column_name = 'journal_revision'
+				)
+				and to_regclass('sonik_agent_ui.agent_workflow_run_events') is not null
+				and to_regclass('sonik_agent_ui.agent_workflow_run_leases') is not null
+				and to_regclass('sonik_agent_ui.agent_workflow_run_waitpoints') is not null
+				and to_regclass('sonik_agent_ui.agent_workflow_effect_claims') is not null
+			)::text
+		`,
+	},
+	{
+		version: "0018",
+		name: "org_scoped_external_effect_claims",
+		file: "packages/workspace-session/migrations/postgres/0018_org_scoped_external_effect_claims.sql",
+		baselineCheck: `
+			select (
+				(
+					select count(*) = 4
+					from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_effect_claims'
+						and column_name in ('effect_namespace', 'external_effect_key_digest', 'command_id', 'resolved_input_hash')
+						and is_nullable = 'NO'
+				)
+				and to_regclass('sonik_agent_ui.agent_workflow_effect_claims_external_identity_idx') is not null
+				and exists (
+					select 1 from pg_policies
+					where schemaname = 'sonik_agent_ui'
+						and tablename = 'agent_workflow_effect_claims'
+						and policyname = 'agent_workflow_effect_claims_scope'
+				)
+			)::text
+		`,
+	},
 ];
 
 if (!databaseUrl) {

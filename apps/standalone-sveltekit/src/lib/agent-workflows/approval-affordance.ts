@@ -100,6 +100,9 @@ export interface ApprovalAffordancePresentation {
   previewLabel?: string;
   approveLabel?: string;
   cancelLabel?: string;
+  /** Optional caller-owned trust/readiness reason. Omitted preserves the exact
+   *  reservation/intake affordance shape and derivation. */
+  disabledReason?: string | null;
   onRequestPreview: () => void;
   onApprove: () => void;
   onCancel: () => void;
@@ -120,14 +123,18 @@ export function createApprovalAffordanceFromWorkflowRun(
   // to point at -- generalizes to controller-driven runs too.
   const previewNode = findNodeByType(run, "tool_preview");
   const ready = run.phase === "preview_ready";
+  const hasDisabledReasonOverride = presentation.disabledReason !== undefined;
+  const disabledReason = hasDisabledReasonOverride
+    ? presentation.disabledReason ?? null
+    : ready ? null : (previewNode?.error?.message ?? null);
   return {
     title: presentation.title,
     description: presentation.description,
     commandId: previewNode?.commandId ?? "",
     artifactTitle: presentation.artifactTitle ?? null,
     status: ready ? "approval_required" : "blocked",
-    disabled: !ready,
-    disabledReason: ready ? null : (previewNode?.error?.message ?? null),
+    disabled: !ready || Boolean(disabledReason),
+    disabledReason,
     // Omit rather than set-to-undefined so flows that don't supply custom
     // labels produce the exact same object shape as before this seam existed.
     ...(presentation.previewLabel !== undefined ? { previewLabel: presentation.previewLabel } : {}),

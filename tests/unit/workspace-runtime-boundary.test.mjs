@@ -49,6 +49,37 @@ assert.equal(localServices.persistenceMode, "memory");
 assert.equal(localServices.runtime.kind, "memory");
 assert.equal((await localServices.persistence.createSession({ id: "request-local-session" })).id, "request-local-session");
 
+function memoryOwnerEvent({ organizationId = "org-memory-owner", userId = "user-memory-owner", hostSessionId }) {
+  return {
+    platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "memory" } },
+    request: new Request("http://localhost:5173/api/sessions"),
+    locals: {
+      agentUiHostSession: {
+        source: "test-host",
+        sessionId: hostSessionId,
+        userId,
+        principalId: userId,
+        organizationId,
+        authenticated: true,
+        scopes: ["workspace:read", "workspace:write"],
+      },
+    },
+  };
+}
+
+const memoryOwnerA = createRequestWorkspaceServices(memoryOwnerEvent({ hostSessionId: "memory-host-a" })).persistence;
+const memoryHistorySession = await memoryOwnerA.createSession({ id: "memory-rotated-history", name: "Stable owner history" });
+await memoryOwnerA.appendMessage({ session_id: memoryHistorySession.id, id: "memory-history-message", role: "user", content: "persist across host rotation" });
+const memoryOwnerB = createRequestWorkspaceServices(memoryOwnerEvent({ hostSessionId: "memory-host-b" })).persistence;
+assert.equal((await memoryOwnerB.listSessions()).some((row) => row.id === memoryHistorySession.id), true, "same-owner host rotation keeps memory history list access");
+assert.equal((await memoryOwnerB.getSession(memoryHistorySession.id))?.id, memoryHistorySession.id, "same-owner host rotation keeps exact session access");
+assert.equal((await memoryOwnerB.listMessages(memoryHistorySession.id))[0]?.id, "memory-history-message", "same-owner host rotation keeps message history access");
+const memoryOtherUser = createRequestWorkspaceServices(memoryOwnerEvent({ userId: "user-memory-other", hostSessionId: "memory-host-b" })).persistence;
+const memoryOtherOrg = createRequestWorkspaceServices(memoryOwnerEvent({ organizationId: "org-memory-other", hostSessionId: "memory-host-b" })).persistence;
+assert.deepEqual(await memoryOtherUser.listSessions(), [], "same-org different-user memory authority cannot list history");
+assert.equal(await memoryOtherUser.getSession(memoryHistorySession.id), null, "same-org different-user memory authority cannot read exact history");
+assert.deepEqual(await memoryOtherOrg.listMessages(memoryHistorySession.id), [], "foreign-org memory authority cannot read message history");
+
 const autoRuntime = resolveWorkspaceRuntime({ event: { platform: { env: { SONIK_AGENT_UI_PERSISTENCE_MODE: "auto" } } } });
 assert.equal(autoRuntime.kind, "memory", "auto policy should fall back to memory when DB/host context are unavailable");
 assert.equal(autoRuntime.kind === "memory" ? autoRuntime.reason : null, "cloud-unavailable");
@@ -275,6 +306,23 @@ assert.equal(servicesSource.includes("createWorkspaceRuntimeDiagnosticHeaders"),
 assert.equal(servicesSource.includes("resolveHostSessionFromLocals"), true, "cloud runtime authority should come from a server-local auth adapter seam");
 assert.equal(servicesSource.includes("isUnsignedBrowserHostContextAllowed"), true, "unsigned browser host context should be explicitly gated as a fixture path, not a default runtime authority source");
 assert.equal(servicesSource.includes("cleanRuntimeString(sessionId)"), false, "trusted runtime must not derive user authority from a browser/session id fallback");
+assert.match(servicesSource, /JSON\.stringify\(\[hostSession\.organizationId, hostSession\.userId\]\)/, "memory history cache identity must be stable organization and user authority");
+assert.equal(servicesSource.includes("JSON.stringify([hostSession.organizationId, hostSession.userId, hostSession.sessionId])"), false, "host session rotation must not partition the owner's memory history");
+const workspaceSessionSource = await readFile("packages/workspace-session/src/index.ts", "utf8");
+assert.equal(workspaceSessionSource.match(/host_session_id/g)?.length, 2, "host_session_id remains only in the two session INSERT provenance column lists");
+assert.equal(workspaceSessionSource.match(/this\.#authorized\.hostSession\.sessionId \?\? null/g)?.length, 2, "host session values remain only as insert-time provenance");
+assert.equal(workspaceSessionSource.includes("host_session_id is not distinct from"), false, "host sessions must never become row-visibility predicates");
+const sessionMigrationSource = await readFile("packages/workspace-session/migrations/postgres/0001_agent_workspace_persistence.sql", "utf8");
+const runMigrationSource = await readFile("packages/workspace-session/migrations/postgres/0003_agent_run_lifecycle.sql", "utf8");
+const fileMigrationSource = await readFile("packages/workspace-session/migrations/postgres/0008_agent_workspace_files.sql", "utf8");
+for (const [label, source, table] of [
+  ["sessions", sessionMigrationSource, "agent_workspace_sessions"],
+  ["runs", runMigrationSource, "agent_workspace_runs"],
+  ["files", fileMigrationSource, "agent_workspace_files"],
+]) {
+  assert.match(source, new RegExp(`alter table sonik_agent_ui\\.${table} force row level security`), `${label} keep forced RLS as the storage authority ceiling`);
+  assert.match(source, new RegExp(`create policy ${table}_scope[\\s\\S]*organization_id = sonik_agent_ui\\.current_organization_id\\(\\) and user_id = sonik_agent_ui\\.current_user_id\\(\\)`), `${label} RLS remains scoped to organization and user`);
+}
 
 console.log("workspace-runtime-boundary tests passed");
 

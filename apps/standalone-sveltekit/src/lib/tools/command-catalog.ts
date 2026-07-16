@@ -13,7 +13,8 @@ import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
 import { writeAgentTelemetry } from "../server/agent-telemetry.ts";
 import { resolveAgentToolPermissionMode, type AgentToolPermissionMode } from "../agent-settings.ts";
 import { validateReservationGuestForBooking } from "../server/booking-workflows/reservation-guest-validation.ts";
-import { resolveRunCapabilityPin, isCapabilityPinned, type PinnedCapabilities } from "../agent-runtime-adapter.ts";
+import { requireCallableCapability, type CapabilityVersionPins } from "../server/capability-readiness.ts";
+import { resolveStandaloneCapabilityReadiness } from "../server/standalone-capability-readiness.ts";
 
 const commandAspectSchema = z.enum(["description", "schema", "examples", "policy", "output", "surfaces", "transport", "auth"]);
 const directCommandInputSchema = z.object({
@@ -50,7 +51,7 @@ function createBookingReservationPreview(guest: Record<string, unknown>, booking
   };
 }
 
-export function createCommandCatalogTools(context: { sessionId?: string | null; approvedCommandIds?: string[]; hostSession?: HostSessionEnvelope | null; pageContext?: AgentPageContext; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; toolPermissionModes?: Record<string, AgentToolPermissionMode> } = {}) {
+export function createCommandCatalogTools(context: { sessionId?: string | null; approvedCommandIds?: string[]; revokedCapabilityIds?: string[]; capabilityVersionPins?: CapabilityVersionPins; hostSession?: HostSessionEnvelope | null; pageContext?: AgentPageContext; bookingServiceBaseUrl?: string | null; bookingRuntimeAuth?: BookingRuntimeAuthContext | null; bookingRuntimeFetcher?: typeof fetch; toolPermissionModes?: Record<string, AgentToolPermissionMode> } = {}) {
   const hostSessionInput = () => context.hostSession ? { hostSession: context.hostSession } : { hostSessionMode: "standalone-demo" as const };
   const createBundle = () => createStandaloneHostCommandRuntimeBundle({ sessionId: context.sessionId, pageContext: context.pageContext, ...hostSessionInput(), bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, fetcher: context.bookingRuntimeFetcher });
   const createContextCommandIds = () => new Set(createStandaloneHostCommandIndex({ sessionId: context.sessionId, pageContext: context.pageContext, ...hostSessionInput(), bookingServiceBaseUrl: context.bookingServiceBaseUrl, bookingRuntimeAuth: context.bookingRuntimeAuth, fetcher: context.bookingRuntimeFetcher }).commands.map((command) => command.id));
@@ -64,23 +65,18 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
     reason: command ? (contextCommandIds.has(command.id) ? "context_loaded" : "lazy_or_global") : undefined,
   });
 
-  // Registry-live capability pin (Phase 3): resolved once per run, on first
-  // use, and frozen for the rest of this createCommandCatalogTools call (one
-  // call = one run's tool set, agent.ts:88). A capability id the registry has
-  // never heard of pins to "off" regardless of family tool-policy modes.
-  let runCapabilityPin: PinnedCapabilities | null = null;
-  const resolveRunPin = (): PinnedCapabilities => {
-    if (!runCapabilityPin) {
-      const { catalog } = createBundle();
-      const capabilityFamilyIds = Object.fromEntries(catalog.commands.map((entry) => [entry.id, entry.familyId]));
-      runCapabilityPin = resolveRunCapabilityPin({
-        capabilityFamilyIds,
-        familyModes: context.toolPermissionModes,
-        approvedCommandIds: context.approvedCommandIds,
-      });
-    }
-    return runCapabilityPin;
-  };
+  const resolveReadiness = () => resolveStandaloneCapabilityReadiness({
+    sessionId: context.sessionId,
+    pageContext: context.pageContext,
+    ...hostSessionInput(),
+    bookingServiceBaseUrl: context.bookingServiceBaseUrl,
+    bookingRuntimeAuth: context.bookingRuntimeAuth,
+    fetcher: context.bookingRuntimeFetcher,
+    approvedCommandIds: context.approvedCommandIds,
+    revokedCapabilityIds: context.revokedCapabilityIds,
+    capabilityVersionPins: context.capabilityVersionPins,
+    toolPermissionModes: context.toolPermissionModes,
+  });
 
   return {
     searchCommandCatalog: tool({
@@ -95,10 +91,12 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
         const contextCommandIds = createContextCommandIds();
         const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 20));
         const result = searchCommandCatalogWithMetadata(catalog, query, 50);
+        const readiness = new Map(resolveReadiness().map((entry) => [entry.capabilityId, entry]));
         const rankedCommands = [...result.commands]
           .filter((command) => resolveToolPermissionMode(command, context.toolPermissionModes) !== "off")
           .sort((a, b) => Number(contextCommandIds.has(b.id)) - Number(contextCommandIds.has(a.id)) || a.id.localeCompare(b.id))
-          .slice(0, boundedLimit);
+          .slice(0, boundedLimit)
+          .map((command) => ({ ...command, readiness: readiness.get(command.id) }));
         const rankedResult = { ...result, commands: rankedCommands, limit: boundedLimit, truncated: result.totalMatches > boundedLimit };
         await writeAgentTelemetry({
           source: "server",
@@ -124,6 +122,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
         const command = catalog.commands.find((entry) => entry.id === commandId);
         const contextCommandIds = createContextCommandIds();
         const learned = learnCommandDescriptor(catalog, commandId, aspects as CommandLearnAspect[] | undefined);
+        const readiness = resolveReadiness().find((entry) => entry.capabilityId === commandId);
         await writeAgentTelemetry({
           source: "server",
           event: "tool.learnCommand",
@@ -131,7 +130,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
           toolCallId: commandId,
           ...summarizeCommandTelemetry(command, contextCommandIds),
         });
-        return { kind: "command-learn" as const, contextLoaded: contextCommandIds.has(commandId), ...learned };
+        return { kind: "command-learn" as const, contextLoaded: contextCommandIds.has(commandId), readiness, ...learned };
       },
     }),
     previewBookingReservationCommand: tool({
@@ -172,7 +171,6 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
         const command = catalog.commands.find((entry) => entry.id === commandId);
         const contextCommandIds = createContextCommandIds();
         assertToolFamilyEnabled(command, context.toolPermissionModes);
-        assertCapabilityPinned(commandId, resolveRunPin());
         // Draft-only invariant (Slice A, 2026-07-08): executeCommand is the only
         // surviving command-catalog tool, and it must stay read-only regardless of
         // host approvedCommandIds. commitCommand was removed from this tool set
@@ -195,6 +193,7 @@ export function createCommandCatalogTools(context: { sessionId?: string | null; 
             guidance: "This agent can only prepare drafts and previews. Publishing a write requires a human to click Approve on the preview card; there is no model-callable commit tool for this command.",
           };
         }
+        requireCallableCapability(resolveReadiness(), commandId);
         const commandInput = coerceDirectCommandInput(input, inputJson);
         const repairedInput = repairCommandInputFromPageContext(command, commandInput, context.pageContext);
         const receipt = await executeHostCatalogCommand({
@@ -241,12 +240,6 @@ function assertToolFamilyEnabled(command: CommandDescriptor | undefined, modes: 
   const mode = resolveToolPermissionMode(command, modes);
   if (mode === "off") {
     throw new Error(`Tool family ${command?.familyId ?? "unknown"} is disabled in Agent Settings for this run.`);
-  }
-}
-
-function assertCapabilityPinned(commandId: string, pinned: PinnedCapabilities): void {
-  if (!isCapabilityPinned(pinned, commandId)) {
-    throw new Error(`Capability ${commandId} is not granted for this run (registry default-deny).`);
   }
 }
 

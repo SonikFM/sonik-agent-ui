@@ -11,12 +11,12 @@ const AGENT_ACTION_CHANNEL_VERSION = "sonik.agent_ui.host_action.v1";
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
 const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
-const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds"]);
+const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds", "workflowPublishPins"]);
 const ALLOWED_CONTEXT_KEYS = new Set([
   "route", "surface", "pageType", "title", "theme", "mode", "activeSessionId",
   "activeArtifactId", "activeDocumentId", "artifactType", "conversationStatus", "messageCount",
   "visibleActions", "visibleWarnings", "visibleErrors", "commandFamilies", "skillFamilies", "activeEntity",
-  "authenticated", "organizationId", "scopes", "hostSession", "signatureVersion", "issuedAt", "expiresAt", "signature", "at",
+  "authenticated", "organizationId", "scopes", "hostSession", "at",
 ]);
 const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
 
@@ -57,11 +57,13 @@ function isAgentHostActionRequestMessage(value) {
     && typeof value.actionKey === "string";
 }
 
-export function createAgentHostPageContextMessage(payload) {
+export function createAgentHostPageContextMessage(payload, authority) {
+  const safeAuthority = sanitizeAgentHostAuthorityDonation(authority);
   return {
     source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
     type: SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
     payload,
+    ...(safeAuthority ? { authority: safeAuthority } : {}),
     sentAt: new Date().toISOString(),
   };
 }
@@ -104,14 +106,18 @@ export function mountSonikAgentUI(options) {
 
   const postContext = async () => {
     try {
+      const donated = await getPageContext();
+      const donation = donated && typeof donated === "object" && !Array.isArray(donated) && "pageContext" in donated
+        ? donated
+        : { pageContext: donated };
       const payload = {
-        ...(sanitizeAgentHostPageContext(await getPageContext()) ?? {}),
+        ...(sanitizeAgentHostPageContext(donation.pageContext) ?? {}),
         ...(activeMode ? { mode: activeMode } : {}),
       };
       const targetOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
       if (!targetOrigin) return;
       iframe.contentWindow?.postMessage(
-        createAgentHostPageContextMessage(payload),
+        createAgentHostPageContextMessage(payload, donation.authority),
         targetOrigin,
       );
     } catch (error) {
@@ -340,6 +346,15 @@ function annotateHostElement(element, control) {
   if (!element.getAttribute("data-testid")) element.setAttribute("data-testid", `sonik-agent-ui-${control}`);
 }
 
+function sanitizeAgentHostAuthorityDonation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { header, revision, expiresAt } = value;
+  if (typeof header !== "string" || header.length < 1 || header.length > 8192 || !/^[A-Za-z0-9_-]+$/.test(header)) return undefined;
+  if (!Number.isSafeInteger(revision) || revision < 0) return undefined;
+  if (typeof expiresAt !== "string" || expiresAt.length > MAX_SAFE_TEXT_LENGTH || !Number.isFinite(Date.parse(expiresAt))) return undefined;
+  return { header, revision, expiresAt };
+}
+
 function sanitizeAgentHostPageContext(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const context = {};
@@ -387,6 +402,13 @@ function sanitizeHostSessionMetadata(value) {
     if (!key) continue;
     const isSignedCommandMetadata = SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS.has(key);
     if (!isSignedCommandMetadata && publicMetadataCount >= MAX_LIST_ITEMS) continue;
+    if (key === "workflowPublishPins") {
+      const pins = sanitizeWorkflowPublishPins(rawValue);
+      if (pins) {
+        entries.push([key, pins]);
+      }
+      continue;
+    }
     if (typeof rawValue === "boolean" || typeof rawValue === "number") {
       entries.push([key, rawValue]);
       if (!isSignedCommandMetadata) publicMetadataCount += 1;
@@ -408,6 +430,19 @@ function sanitizeHostSessionMetadata(value) {
     }
   }
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+function sanitizeWorkflowPublishPins(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const keys = [
+    "organizationId", "workflowVersionId", "definitionDigest", "agentPublishedVersionId",
+    "nodeDescriptorsDigest", "capabilityVersionsDigest", "toolPackVersionsDigest",
+    "skillVersionsDigest", "runtimePolicyDigest",
+  ];
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !(key in value))) return undefined;
+  if (keys.slice(0, 2).concat("agentPublishedVersionId").some((key) => typeof value[key] !== "string" || value[key].length === 0)) return undefined;
+  const digest = /^sha256:[a-f0-9]{64}$/;
+  if (["definitionDigest", "nodeDescriptorsDigest", "capabilityVersionsDigest", "toolPackVersionsDigest", "skillVersionsDigest", "runtimePolicyDigest"].some((key) => typeof value[key] !== "string" || !digest.test(value[key]))) return undefined;
+  return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 function sanitizeAgentHostActiveEntity(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;

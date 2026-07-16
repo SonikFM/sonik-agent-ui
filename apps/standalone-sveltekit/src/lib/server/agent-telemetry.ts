@@ -13,12 +13,22 @@ import { sanitizeFailureRecord } from "./run-error-safety.ts";
 
 export type { AgentTelemetryEvent, AgentTelemetrySource } from "@sonik-agent-ui/agent-observability";
 
+/**
+ * Synchronous, fail-safe telemetry boundary for runtimes that cannot await the
+ * JSONL/workspace mirrors (for example the AI SDK OpenTelemetry bridge). The
+ * worker-log marker receives the same sanitized envelope as writeAgentTelemetry.
+ */
+export function emitAgentTelemetrySync(event: AgentTelemetryEvent): AgentTelemetryEvent {
+  const payload = sanitizeAgentTelemetry({ workflowRunId: activeWorkflowRunId(), ...event });
+  emitTelemetryToWorkerLogs(payload);
+  return payload;
+}
+
 export async function writeAgentTelemetry(event: AgentTelemetryEvent): Promise<void> {
   // AC-13 join-key: stamp the active workflow-controller run's runId as workflowRunId, unless the
   // caller already set one explicitly. A no-op outside any controller-driven run (activeWorkflowRunId
   // is undefined there), so every call site that predates this is unchanged.
-  const payload = sanitizeAgentTelemetry({ workflowRunId: activeWorkflowRunId(), ...event });
-  emitTelemetryToWorkerLogs(payload);
+  const payload = emitAgentTelemetrySync(event);
   const logPath = resolveTelemetryLogPath();
   await appendTelemetryJsonl(logPath, payload);
   try {

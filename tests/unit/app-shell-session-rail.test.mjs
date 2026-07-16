@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { formatDateDisplay, formatSessionOptionTitle } from "../../apps/standalone-sveltekit/src/lib/date-display.ts";
 
 const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
+const embeddedSessionOptionsBlock = pageSource.match(/sessionOptions=\{isEmbeddedHostContextExpected\(\) \? sessions\.map\([\s\S]*?\) : undefined\}/)?.[0] ?? "";
 const reattachRunStateSource = pageSource.match(/function reattachRunState[\s\S]*?\n  }/)?.[0] ?? "";
 assert.match(reattachRunStateSource, /!persistedMessageIds\.has\(rebuilt\.id\)/, "reattach dedup uses the exact assistant message id");
 assert.doesNotMatch(reattachRunStateSource, /runCount|localAssistantCount|localAssistantTurnExists/, "assistant counts cannot suppress exact-id reattach");
@@ -103,9 +105,26 @@ assert.equal(pageSource.includes("active_session_mismatch"), true, "page-control
 assert.equal(pageSource.includes("submit_not_appended"), true, "page-control submit should fail closed if the semantic action does not append a user turn");
 assert.equal(pageSource.includes("await tick()"), true, "page-control submit should wait one Svelte turn before claiming append success");
 assert.equal(pageSource.includes("let sessionSelectionRevision = 0"), true, "app shell should version session selection so bootstrap cannot overwrite explicit test/user selection");
+assert.match(pageSource, /type AgentSessionHistoryState|type AgentSessionHistoryState,/, "app shell should consume the typed discriminated history state");
+assert.match(pageSource, /let sessionHistoryState = \$state<AgentSessionHistoryState>\(\{ status: "loading" \}\)/, "history state should begin in a truthful loading state");
+const initializeSessionsSource = pageSource.match(/async function initializeSessions[\s\S]*?\n  }/)?.[0] ?? "";
+const loadSessionsSource = pageSource.match(/async function loadSessions[\s\S]*?\n  }/)?.[0] ?? "";
+const refreshSessionHistorySource = pageSource.match(/async function refreshSessionHistory[\s\S]*?\n  }/)?.[0] ?? "";
+assert.match(loadSessionsSource, /async function loadSessions\(\): Promise<boolean>/, "history loading should return explicit success/failure");
+assert.match(loadSessionsSource, /sessionHistoryState = \{ status: "loading" \}/, "every explicit history load should model loading without clearing rows");
+assert.match(loadSessionsSource, /sessionHistoryState = \{ status: sessions\.length > 0 \? "ready" : "empty" \}/, "successful history loads distinguish ready from empty");
+assert.match(loadSessionsSource, /sessionHistoryState = \{ status: "error", message: sessionRailError \}[\s\S]*return false/, "failed history loads expose typed error state and return false");
+assert.doesNotMatch(loadSessionsSource, /sessions\s*=\s*\[\]|activeSessionId\s*=\s*null|conversation\.messages\s*=\s*\[\]|workspaceSessionContext\s*=\s*null/, "failed history loads must preserve hydrated session, transcript, and token state");
+assert.match(initializeSessionsSource, /if \(!await loadSessions\(\)\) return;/, "bootstrap must stop before false-empty session creation when history loading fails");
+assert.equal(initializeSessionsSource.indexOf("if (!await loadSessions()) return;") < initializeSessionsSource.indexOf("createSession({ force: true })"), true, "history failure guard must precede session creation");
+assert.match(refreshSessionHistorySource, /activeSessionId \?\? sessions\[0\]\?\.id/, "read-only Retry should restore an initial failed bootstrap from the first returned session");
+assert.match(refreshSessionHistorySource, /workspaceFetch\(`\/api\/session\/\$\{encodeURIComponent\(sessionId\)\}`\)/, "history Retry should refresh detail through GET-only workspaceFetch");
+assert.doesNotMatch(refreshSessionHistorySource, /method:\s*"POST"|createSession\(/, "history Retry must never replay mutations or create false-empty sessions");
 assert.equal(pageSource.includes("session.bootstrap.superseded"), true, "bootstrap selection races should be observable and non-destructive");
 assert.equal(pageSource.includes("function deriveChatTitle"), true, "app shell should derive deterministic first-message chat titles locally");
 assert.equal(pageSource.includes("maybeNameNewChat(trimmed)"), true, "app shell should name new chats before sending the first message");
+assert.equal(embeddedSessionOptionsBlock.includes("formatSessionOptionTitle(session.name, session.last_message_at ?? session.updated_at)"), true, "embedded history options should add viewer-local historical context from the existing session timestamps");
+assert.equal(embeddedSessionOptionsBlock.includes("id: session.id"), true, "embedded history presentation must preserve each session's selection id");
 assert.equal(pageSource.includes('method: "PATCH"'), true, "app shell should call the session rename route");
 assert.equal(pageSource.includes('method: "DELETE"'), true, "app shell should call the session delete route");
 assert.equal(pageSource.includes("logSessionTelemetry"), true, "session rail actions should emit telemetry for debugging manual tests");
@@ -132,7 +151,42 @@ assert.equal(sessionRailSource.includes(">\n            Menu\n          </button
 assert.equal(sessionRailSource.includes("session-actions-button--collapsed"), false, "collapsed rail should not keep the old confusing ellipsis affordance class");
 assert.equal(sessionRailSource.includes("session-meta"), false, "session rail rows should stay slim and avoid card-style metadata clutter");
 assert.equal(sessionRailSource.includes("{archivedCount} archived"), true, "session rail should show archived chat count instead of silently losing archived records");
-assert.equal(sessionRailSource.includes("formatSessionTime"), true, "session rail should own session timestamp formatting");
+assert.equal(sessionRailSource.includes("formatDateDisplay"), true, "session rail should reuse the shared defensive date presentation helper");
+assert.equal(sessionRailSource.includes("function formatSessionTime"), false, "session rail should not duplicate date parsing/formatting logic");
+assert.equal(sessionRailSource.includes("session.last_message_at ?? session.updated_at"), true, "session rail should preserve the existing last-message then updated-at fallback semantics");
+assert.match(sessionRailSource, /historyState\?: AgentSessionHistoryState/, "session rail should consume typed loading/ready/empty/error state");
+assert.match(sessionRailSource, /historyState\.status === "loading"[\s\S]*historyState\.status === "empty"[\s\S]*historyState\.status === "error"/, "session rail should distinguish loading, empty, and error instead of showing false empty");
+assert.match(sessionRailSource, /error && \(historyState\.status !== "error" \|\| error !== historyState\.message\)/, "session rail should preserve distinct session action errors while suppressing the duplicate history error");
+assert.doesNotMatch(sessionRailSource, /Chat history is temporarily unavailable\./, "session rail should leave the universal history error alert to the conversation header");
+assert.doesNotMatch(sessionRailSource, /onRefreshHistory|Refresh chat history|refresh-history-button/, "session rail should not duplicate the universal conversation-header history refresh control");
+assert.doesNotMatch(pageSource, /onRefreshHistory=\{refreshSessionHistory\}/, "app shell should not wire a second history refresh control into the rail");
+assert.match(agentConversationSource, /role="alert"[\s\S]*data-testid="session-history-retry"[\s\S]*>Retry<\/button>/, "conversation header should expose the universal native Retry alert even when the rail is hidden");
+
+assert.equal(
+  formatDateDisplay("2026-07-15T19:00:00-04:00", {
+    locale: "en-US",
+    timeZone: "UTC",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }),
+  "Wed, Jul 15, 2026, 11:00 PM",
+  "date display should support injectable locale/timeZone for deterministic presentation tests",
+);
+assert.equal(formatDateDisplay(null, { fallback: "selected time" }), "selected time", "null dates should use the caller's safe fallback");
+assert.equal(formatDateDisplay("not-a-date", { fallback: "selected time" }), "selected time", "invalid dates should use the caller's safe fallback");
+assert.equal(formatDateDisplay("2026-07-15T19:00:00-04:00", { timeZone: "not-a-zone", fallback: "selected time" }), "selected time", "invalid formatting options should fail safely");
+assert.equal(formatDateDisplay(undefined, {}), null, "callers that omit a fallback should receive null rather than raw or invalid date text");
+assert.equal(
+  formatSessionOptionTitle("Stored title", "2026-07-13T15:02:00.000Z", { locale: "en-US", timeZone: "UTC" }),
+  "Stored title · Jul 13, 3:02 PM",
+  "embedded history should append a deterministic compact absolute timestamp without changing the stored title",
+);
+assert.equal(formatSessionOptionTitle("Stored title", "not-a-date"), "Stored title", "invalid history dates should degrade to the unchanged stored title without dangling punctuation");
+assert.equal(formatSessionOptionTitle("Stored title", null), "Stored title", "missing history dates should degrade to the unchanged stored title without dangling punctuation");
 assert.equal(pageSource.includes("Stop the current stream before switching sessions."), true, "session switches should be guarded while a stream is active");
 assert.equal(pageSource.includes("tryFlushPendingDocumentPersistence"), true, "session transitions should hard-gate on document snapshot flushes");
 assert.equal(pageSource.includes("sessionRailBusy = true;\n    sessionRailError = null;\n    try {\n      await flushPendingDocumentPersistence()"), true, "session transitions should acquire the rail lock before flushing document snapshots");
@@ -178,7 +232,7 @@ assert.equal(generateRoute.includes("event.getClientAddress()"), true, "generate
 assert.equal(generateRoute.includes('request.headers.get("x-forwarded-for")'), false, "generate rate limits must not trust caller-controlled forwarding headers");
 const parsedBodyIndex = generateRoute.indexOf("const body = await request.json()");
 const invalidDocumentGuardIndex = generateRoute.indexOf("hasInvalidExplicitDocumentContext(rawRunContextSelection)", parsedBodyIndex);
-const invalidDocumentReturnIndex = generateRoute.indexOf('error: "Invalid document context selection"', invalidDocumentGuardIndex);
+const invalidDocumentReturnIndex = generateRoute.indexOf('new AgentUiFileError(400, "Invalid document context selection"', invalidDocumentGuardIndex);
 const rateLimitIndex = generateRoute.indexOf("minuteRateLimit.limit(ip)", parsedBodyIndex);
 const activeDocumentIndex = generateRoute.indexOf("resolveActiveDocumentForRequest(event");
 const effectiveDocumentIndex = generateRoute.indexOf("resolveEffectiveContextDocument({", activeDocumentIndex);
@@ -224,7 +278,7 @@ assert.equal(pageContextSummarySource.includes("If the user asks where they are"
 assert.equal(generateRoute.includes("const skillIds = productTourIntent"), true, "product tour turns should force effective runtime skill ids to an empty list before prompt/tool composition");
 assert.equal(generateRoute.includes("suppressCommandCatalog: productTourIntent"), true, "product tour turns should suppress route-level command catalog mount decisions");
 assert.equal(generateRoute.includes("const startupIndexContext = includeStartupIndexes"), true, "product tour turns should omit booking command and runtime skill startup indexes from system context");
-assert.equal(generateRoute.includes("resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, productTourIntent })"), true, "product tour intent should reach prompt composition so booking runtime context is hidden for tour turns");
+assert.equal(generateRoute.includes("resolveAgentPromptComposition({ pageContext, skillIds, bookingRuntimeAuth, bookingServiceBaseUrl, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, workspaceDocumentIntent, productTourIntent })"), true, "document and product-tour intent should reach prompt composition so prompt modules match mounted tools");
 assert.equal(generateRoute.includes("visibleActions: routeStringArray(record.visibleActions"), true, "generate route should preserve host-visible action labels in the page context summary");
 assert.equal(commandCatalogToolsSource.includes("executeHostCatalogCommand"), true, "command catalog tools should execute through the host runtime adapter seam");
 assert.equal(commandCatalogToolsSource.includes("createStandaloneHostCommandRuntimeBundle"), true, "command catalog tools should compose host catalog/runtime adapters for standalone smoke testing");
@@ -349,6 +403,7 @@ const artifactRouteSource = await readFile("apps/standalone-sveltekit/src/routes
 const sessionRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/session/+server.ts", "utf8");
 const sessionDetailRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/session/[id]/+server.ts", "utf8");
 const workspaceFetchSource = pageSource.slice(pageSource.indexOf("async function workspaceFetch"), pageSource.indexOf("function recordWorkspaceRuntimeDiagnostics"));
+const handleAgentHostMessageSource = pageSource.match(/function handleAgentHostMessage[\s\S]*?(?=\n  function createLocalHostUiTargetRegistry)/)?.[0] ?? "";
 const sessionsRouteSource = await readFile("apps/standalone-sveltekit/src/routes/api/sessions/+server.ts", "utf8");
 const observabilityPackageSource = await readFile("packages/agent-observability/src/index.ts", "utf8");
 const evidenceServerSource = await readFile("scripts/agent-ui-dev-evidence-server.mjs", "utf8");
@@ -386,8 +441,8 @@ assert.equal(pageSource.includes("requestHostPageContext"), true, "embedded app 
 assert.equal(pageSource.includes("host.page_context.requested"), true, "embedded app should emit telemetry when it requests page context from the host");
 assert.equal(pageSource.includes("SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST"), true, "embedded app should use a stable page-context request message type");
 assert.equal(pageSource.includes("sessionBootstrapPromise"), true, "embedded session bootstrap should guard repeated host page-context messages while initialization is in flight");
-assert.equal(pageSource.includes("if (!authenticated || !organizationId || !userId || !hostSession) return {}"), true, "workspace authority headers should require an authenticated donated hostSession, not display-only page context");
-assert.equal(pageSource.includes("signature: context?.signature ?? null"), true, "workspace authority headers should forward signed host-context proof into cloud API requests");
+assert.equal(pageSource.includes("return authority ? { \"x-sonik-agent-ui-host-context\": authority.header } : {}"), true, "workspace authority headers forward only the exact opaque host donation");
+assert.equal(pageSource.includes("event.source !== window.parent"), true, "authority donations require the configured parent window source");
 assert.equal(pageSource.includes('"x-sonik-agent-ui-workspace-session-context": workspaceSessionContext'), true, "workspaceFetch should replay the server-signed active workspace context for direct file operations");
 assert.equal(workspaceFetchSource.includes('const refreshedWorkspaceSessionContext = response.headers.get("x-sonik-agent-ui-workspace-session-context")'), true, "workspaceFetch should inspect every response for a refreshed workspace token");
 assert.equal(workspaceFetchSource.includes("response.ok && refreshedWorkspaceSessionContext && requestSessionSelectionRevision === sessionSelectionRevision"), true, "successful session-detail fetches should centrally adopt their newly minted workspace token without letting superseded requests overwrite it");
@@ -395,15 +450,15 @@ assert.equal(sessionDetailRouteSource.includes("createSignedWorkspaceSessionCont
 assert.equal(sessionDetailRouteSource.includes('"cache-control": "private, no-store"'), true, "session GET responses carrying workspace tokens must not be cached");
 assert.equal(sessionDetailRouteSource.includes('pragma: "no-cache"'), true, "session GET responses carrying workspace tokens must disable legacy caches");
 assert.equal(sessionDetailRouteSource.includes('expires: "0"'), true, "session GET responses carrying workspace tokens must be immediately expired");
-assert.equal(pageSource.includes("lastSignedHostPageContext"), true, "embedded workspace requests should cache the last valid signed host context until it expires");
-assert.equal(pageSource.includes("selectSignedWorkspaceHostContext({ current: hostPageContext, cached: lastSignedHostPageContext })"), true, "embedded workspace requests should delegate signed-context selection to the fail-closed authority helper");
-assert.equal(pageSource.includes("lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext })"), true, "host-context updates must refresh or clear the signed-context cache through the authority helper");
+assert.equal(pageSource.includes("let hostAuthority = $state.raw<AgentHostAuthorityDonation | null>(null)"), true, "embedded workspace requests keep opaque authority separate from display page context");
+assert.equal(pageSource.includes("selectOpaqueHostAuthority({ current: hostAuthority, cached: null })"), true, "embedded workspace requests select only unexpired opaque authority");
+assert.match(handleAgentHostMessageSource, /const\s+nextAuthority\s*=\s*event\.data\.authority\s*\?\?\s*createAgentHostAuthorityDonationFromLegacyPayload\(\s*event\.data\.payload\s*\)\s*;\s*if\s*\(\s*nextAuthority\s*\)\s*\{[\s\S]*?acceptNewerOpaqueHostAuthority\(\s*\{\s*current:\s*previous,\s*next:\s*nextAuthority\s*\}\s*\)/, "the live host-message flow prefers explicit authority, guards the legacy fallback, and accepts only monotonic donations");
 assert.equal(pageSource.includes("workspace.fetch.blocked_missing_host_context"), true, "workspace calls should fail closed before reaching cloud APIs without signed host context");
 assert.equal(pageSource.includes("session.bootstrap.embedded_fresh_session"), false, "embedded bootstrap must resume the most recent session — forcing a fresh chat per mount lost the user's conversation every time the widget reopened (2026-07-08 regression report)");
-assert.equal(pageSource.includes("function createSignedWorkspaceHostSession"), true, "workspace authority headers should canonicalize the signed hostSession envelope before re-encoding it");
-assert.equal(pageSource.includes("...hostSession,"), false, "workspace authority headers must not spread sanitized display-only hostSession fields into the HMAC-covered envelope");
-assert.equal(pageSource.includes("hostSession.theme"), true, "the regression guard should document that display-only hostSession.theme exists outside the signed workspace header");
-assert.equal(agentEmbedSource.includes("signatureVersion"), true, "agent embed sanitizer should preserve signed host-context proof fields across postMessage donation");
+assert.equal(pageSource.includes("function createSignedWorkspaceHostSession"), false, "the browser must never reconstruct a signed host-session envelope");
+assert.equal(pageSource.includes("encodeWorkspaceHostContextHeader"), false, "the browser must never re-encode opaque authority");
+assert.equal(agentEmbedSource.includes("export type AgentHostAuthorityDonation"), true, "agent embed publishes a dedicated opaque authority donation contract");
+assert.equal(agentEmbedSource.includes("Never decode, normalize, or rebuild"), true, "the opaque authority contract documents byte-for-byte forwarding");
 assert.equal(pageSource.includes("workspace.persistence.runtime"), true, "embedded app should log safe runtime persistence diagnostics from response headers");
 assert.equal(pageSource.includes("readWorkspaceResponseError"), true, "client workspace fetch failures should parse structured error envelopes before falling back to bounded text");
 assert.equal(pageSource.includes("isWorkspaceErrorEnvelope"), true, "client should guard structured workspace error envelopes before showing them in the session rail");
@@ -431,23 +486,18 @@ assert.equal(fakeBookingHostSource.includes("postMessage"), true, "static fake h
 assert.equal(fakeBookingHostSource.includes("booking-console"), true, "static fake host should donate booking surface context");
 assert.equal(fakeBookingHostSource.includes("Summer Jazz Night"), true, "static fake host should donate active entity label");
 
-const { selectSignedWorkspaceHostContext, nextSignedWorkspaceHostContextCache } = hostAuthorityModule;
+const { selectOpaqueHostAuthority, acceptNewerOpaqueHostAuthority } = hostAuthorityModule;
 const signedContext = {
-  authenticated: true,
-  organizationId: "org_1",
-  signatureVersion: "v1",
-  issuedAt: "2026-07-06T00:00:00.000Z",
+  header: "opaque_header_revision_1",
+  revision: 1,
   expiresAt: "2026-07-06T01:00:00.000Z",
-  signature: "sig_1",
-  hostSession: { source: "amplify-embedded", authenticated: true, organizationId: "org_1", scopes: ["booking"], expiresAt: "2026-07-06T01:00:00.000Z" },
 };
-const unsignedContext = { authenticated: true, organizationId: "org_2", route: "/different" };
 const nowMs = Date.parse("2026-07-06T00:30:00.000Z");
-assert.equal(selectSignedWorkspaceHostContext({ current: null, cached: signedContext, nowMs }), signedContext, "a cached signed context is usable only while no current host context exists");
-assert.equal(selectSignedWorkspaceHostContext({ current: unsignedContext, cached: signedContext, nowMs }), null, "a current unsigned host context must fail closed instead of reusing stale signed context");
-assert.equal(nextSignedWorkspaceHostContextCache({ next: unsignedContext, nowMs }), null, "unsigned host-context updates must clear signed-context cache");
-assert.equal(nextSignedWorkspaceHostContextCache({ next: signedContext, nowMs }), signedContext, "signed host-context updates should refresh signed-context cache");
-assert.equal(selectSignedWorkspaceHostContext({ current: null, cached: signedContext, nowMs: Date.parse("2026-07-06T00:59:56.000Z") }), null, "near-expired signed host contexts should be rejected before workspace calls");
+assert.equal(selectOpaqueHostAuthority({ current: null, cached: signedContext, nowMs }), signedContext, "a valid opaque donation is selected without decoding");
+assert.equal(acceptNewerOpaqueHostAuthority({ current: signedContext, next: { ...signedContext, header: "older", revision: 0 }, nowMs }), signedContext, "authority revision rollback is ignored");
+const newerAuthority = { ...signedContext, header: "opaque_header_revision_2", revision: 2 };
+assert.equal(acceptNewerOpaqueHostAuthority({ current: signedContext, next: newerAuthority, nowMs }), newerAuthority, "a strictly newer valid donation replaces the cache");
+assert.equal(selectOpaqueHostAuthority({ current: null, cached: signedContext, nowMs: Date.parse("2026-07-06T01:00:00.000Z") }), null, "expired opaque authority is rejected before workspace calls");
 assert.equal(fakeBookingHostSource.includes("org_fake_booking") || fakeBookingHostSource.includes("user_fake_booking"), false, "static fake host should keep browser-donated page context display-only and not carry org/user authority");
 assert.equal(fakeBookingHostSource.includes("mountSonikAgentUI"), true, "static fake host should consume the one-call SDK mount helper instead of handwritten iframe glue");
 assert.equal(fakeBookingHostSource.includes('theme: () => url.searchParams.get("theme") ?? "sonik-operator-dark"'), true, "fake booking host smoke fixture should donate the Booking operator dark theme by default");
@@ -485,7 +535,8 @@ assert.equal(pageSource.includes("submitPrompt"), true, "page-control contract s
 assert.equal(pageSource.includes("function getSubmitDisabledReason"), true, "page-control submit and manual submit should share one disabled-reason gate");
 assert.equal(pageSource.includes("createDevSmokeHeaders"), true, "dev smoke mode should be transported as headers from the local smoke URL");
 assert.equal(pageSource.includes('"x-sonik-agent-ui-smoke-persistence-mode": "auto"'), true, "local dev smoke should be able to use auto persistence without requiring a live cloud DB");
-assert.equal(pageSource.includes("...createDevSmokeHeaders(),\n        ...createWorkspaceRequestHeaders()"), true, "workspaceFetch should forward dev smoke headers before signed host-context headers");
+assert.equal(pageSource.includes("...createDevSmokeHeaders(),\n        ...(workspaceSessionContext"), true, "workspaceFetch should forward dev smoke headers before request-specific headers");
+assert.equal(pageSource.includes('headers.set("x-sonik-agent-ui-host-context", authority.header)'), true, "the authority attempt centrally appends the exact opaque host header");
 assert.equal(pageSource.includes("devSmokeMockStream"), false, "page should not put smoke-only mode flags into the application request body");
 assert.equal(pageSource.includes("openWorkspaceDocument"), true, "page-control contract should expose document host action without DOM scraping");
 assert.equal(pageSource.includes("async function createInitialWorkspaceDocument"), true, "parent app should create initial workspace documents through signed workspaceFetch before mounting the static document iframe");
@@ -568,7 +619,7 @@ assert.equal(artifactToolSource.includes("getJsonArtifactToolDescription()"), tr
 assert.equal(agentPromptSource.includes("JSON_ARTIFACT_TOOL_OBJECT_GUIDANCE"), true, "agent instructions should include object-form artifact examples for live model generation quality");
 assert.equal(agentPromptSource.includes("ARTIFACT TOOL OBJECT EXAMPLES"), true, "agent instructions should have a dedicated artifact tool object section");
 assert.equal(agentPromptSource.includes("DATA BINDING FOR INLINE SPEC FENCES AND NON-TOOL UI SPECS"), true, "agent instructions should scope broad $state guidance away from strict tool input");
-assert.equal(agentPromptSource.includes("For inline JSON-render responses outside createJsonArtifact"), true, "agent instructions should keep generic $state data guidance outside strict createJsonArtifact input");
+assert.equal(agentPromptSource.includes("For inline JSON-render responses, embed fetched data directly in /state paths"), true, "agent instructions should keep generic $state data guidance for inline specs");
 assert.equal(artifactToolSource.includes("Intentional contract mirror"), true, "artifact tool should document catalog-to-tool schema coupling as an intentional contract");
 assert.equal(componentRegistrySource.includes("JSON_RENDER_COMPONENT_GROUPS"), true, "json-render components should have a human/agent-readable grouped registry map");
 assert.equal(componentRegistrySource.includes("JSON_RENDER_COMPONENT_REGISTRY_PATHS"), true, "json-render component registry should document the catalog/registry/runtime paths");

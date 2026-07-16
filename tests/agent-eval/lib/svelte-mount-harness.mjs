@@ -47,7 +47,7 @@ async function resolveWorkspaceModule(repoRoot, specifier) {
  * Returns `{ url, tmpDir, close() }`. Callers write their own `main.js` (and
  * any fixture components) into `tmpDir` before calling `start()`.
  */
-export async function createSvelteMountWorkspace({ repoRoot }) {
+export async function createSvelteMountWorkspace({ repoRoot, resolveAlias = {} }) {
   const parent = path.join(repoRoot, "tests/agent-eval/.tmp");
   await mkdir(parent, { recursive: true });
   const tmpDir = await mkdtemp(path.join(parent, "render-mount-"));
@@ -79,6 +79,7 @@ export async function createSvelteMountWorkspace({ repoRoot }) {
         root: tmpDir,
         logLevel: "warn",
         clearScreen: false,
+        resolve: { alias: resolveAlias },
         server: { fs: { allow: [repoRoot] }, strictPort: false },
         plugins: [svelte()],
       });

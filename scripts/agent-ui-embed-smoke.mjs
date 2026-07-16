@@ -326,9 +326,9 @@ try {
   const autoCanvasState = await captureCanvasWorkspaceState(autoCanvasFrame);
   if (autoCanvasState.pageContext?.activeSessionId !== streamSessionId) throw new Error(`Active session changed during automatic canvas.open: ${streamSessionId} -> ${autoCanvasState.pageContext?.activeSessionId}`);
   if (autoCanvasState.assertions?.isStreaming !== true) throw new Error(`Automatic canvas.open did not preserve active stream state at open time: ${JSON.stringify(autoCanvasState.assertions)}`);
-  if (!autoCanvasState.artifactRect || !autoCanvasState.chatRect || autoCanvasState.artifactRect.top > autoCanvasState.chatRect.top) throw new Error("Canvas layout did not render artifact above compact chat.");
-  if (autoCanvasState.conversationHeaderVisible) throw new Error("Canvas layout did not hide duplicate AgentConversation header.");
-  if (autoCanvasState.root.hasRail !== "false" || autoCanvasState.sessionRailVisible || autoCanvasState.sessionSwitcherVisible) throw new Error("Canvas layout did not hide duplicate session rail/session switcher.");
+  if (!autoCanvasState.artifactRect || !autoCanvasState.chatRect || autoCanvasState.artifactRect.top > autoCanvasState.chatRect.top) throw new Error("Canvas layout did not preserve expected artifact/chat ordering.");
+  if (!autoCanvasState.conversationHeaderVisible) throw new Error("Canvas layout did not keep the AgentConversation header visible.");
+  if (autoCanvasState.root.hasRail !== "false" || autoCanvasState.sessionRailVisible || !autoCanvasState.sessionSwitcherVisible) throw new Error("Canvas layout did not hide the session rail while keeping the chat-history switcher visible.");
   evidence.autoCanvas = {
     usedManualLauncher: false,
     chatFrameSrc,
@@ -389,7 +389,7 @@ try {
   await browser.close();
   await finish("PASS", localTelemetryRequired
     ? useMockStream
-      ? "Iframe embed accepted signed host page context, created an active session, compressed chat into a non-overlapping sidecar, auto-opened canvas from artifact creation without reloading iframe src, preserved stream/session state, and rendered artifact above compact chat with duplicate chrome hidden."
+      ? "Iframe embed accepted signed host page context, created an active session, compressed chat into a non-overlapping sidecar, auto-opened canvas from artifact creation without reloading iframe src, preserved stream/session state, and rendered artifact with compact chat, the conversation header and chat-history switcher visible, and the session rail hidden."
       : "Iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, auto-opened canvas from artifact creation without launcher overlap, and emitted correlated command-index telemetry."
     : "Remote iframe embed accepted host page context, compressed chat into a non-overlapping sidecar, auto-opened canvas from artifact creation, and skipped local JSONL telemetry because the deployed Worker uses Cloudflare/Pipe-B evidence.");
 } catch (error) {

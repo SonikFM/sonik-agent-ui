@@ -21,8 +21,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const baseUrl = process.env.AGENT_UI_BASE_URL ?? "http://localhost:5173";
 const startServer = process.env.AGENT_UI_SMOKE_START_SERVER !== "false";
 const runId = process.env.AGENT_UI_SMOKE_RUN_ID ?? `run-reattach-smoke-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-const sessionId = `${runId}-session`;
-const abortSessionId = `${runId}-abort-session`;
+let sessionId = null;
+let abortSessionId = null;
 const evidencePath = path.join(repoRoot, ".omx", "logs", `${runId}.json`);
 
 const children = [];
@@ -106,7 +106,19 @@ async function drain(response) {
   }
 }
 
+async function createSession(name) {
+  const response = await fetch(`${baseUrl}/api/session`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...SMOKE_PERSISTENCE_HEADERS },
+    body: JSON.stringify({ name, mode: "chat" }),
+  });
+  if (!response.ok) return null;
+  const created = await response.json();
+  return typeof created?.id === "string" && created.id ? created.id : null;
+}
+
 async function postGenerate({ text, fail, sessionId: targetSessionId = sessionId, abortAfterFirstChunk = false }) {
+  if (!targetSessionId) throw new Error("Smoke session must be created before generation.");
   const headers = { ...SMOKE_HEADERS };
   if (fail) headers["x-sonik-agent-ui-smoke-fail"] = "true";
   const body = JSON.stringify({
@@ -132,6 +144,7 @@ async function postGenerate({ text, fail, sessionId: targetSessionId = sessionId
 }
 
 async function getSession(targetSessionId = sessionId) {
+  if (!targetSessionId) return null;
   const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(targetSessionId)}`, { headers: SMOKE_PERSISTENCE_HEADERS });
   if (!response.ok) return null;
   return response.json();
@@ -148,6 +161,11 @@ async function pollSession(predicate, { targetSessionId = sessionId, attempts = 
 
 async function main() {
   if (!(await ensureServer())) return finish("INCONCLUSIVE", `Dev server not reachable at ${baseUrl}`);
+
+  sessionId = await createSession("Run reattach smoke");
+  if (!sessionId) return finish("FAIL", "Could not create the primary smoke session.");
+  evidence.sessionId = sessionId;
+  step("session.created", { note: sessionId });
 
   // 1. Interrupt a turn mid-stream (deterministic fail injection).
   const interrupt = await postGenerate({ text: "Build me a dashboard", fail: true });
@@ -178,6 +196,10 @@ async function main() {
 
   // 4. Client abort: cancel the response body mid-stream and assert the run is
   // canceled + resumable, then Continue completes a fresh run.
+  abortSessionId = await createSession("Run reattach abort smoke");
+  if (!abortSessionId) return finish("FAIL", "Could not create the client-abort smoke session.");
+  evidence.abortSessionId = abortSessionId;
+  step("client_abort_session.created", { note: abortSessionId });
   const clientAbort = await postGenerate({ text: "Start a long answer that I will stop.", fail: false, sessionId: abortSessionId, abortAfterFirstChunk: true });
   step("client_abort.posted", { note: `status ${clientAbort.status}, runId ${clientAbort.runIdHeader ?? "none"}` });
   if (!clientAbort.runIdHeader) return finish("FAIL", "Client-abort generate did not return a run id header.");

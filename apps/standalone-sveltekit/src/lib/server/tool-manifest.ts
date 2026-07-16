@@ -18,6 +18,8 @@ import {
 import { createStandaloneHostCommandIndex } from "./host-command-runtime.ts";
 import { resolveStandaloneHostSession } from "./host-command-runtime.ts";
 import type { BookingRuntimeAuthContext } from "./host-command-runtime.ts";
+import type { CapabilityVersionPins } from "./capability-readiness.ts";
+import { resolveStandaloneCapabilityReadiness } from "./standalone-capability-readiness.ts";
 
 export type StandaloneToolManifestInput = {
   sessionId?: string | null;
@@ -34,6 +36,10 @@ export type StandaloneToolManifestInput = {
   hostSessionMode?: "anonymous" | "standalone-demo" | "amplify-embedded";
   bookingServiceBaseUrl?: string | null;
   bookingRuntimeAuth?: BookingRuntimeAuthContext | null;
+  approvedCommandIds?: string[];
+  revokedCapabilityIds?: string[];
+  capabilityVersionPins?: CapabilityVersionPins;
+  toolPermissionModes?: Record<string, "off" | "ask" | "allow">;
 };
 
 export function createStandaloneAvailableToolManifest(input: StandaloneToolManifestInput = {}): ToolManifest {
@@ -76,12 +82,14 @@ function resolveStandaloneToolManifestContext(input: StandaloneToolManifestInput
 
 export function createStandaloneCommandIndexSummary(input: StandaloneToolManifestInput = {}): string {
   const index = createStandaloneCommandIndex(input);
+  const readiness = new Map(resolveStandaloneCapabilityReadiness(input).map((entry) => [entry.capabilityId, entry]));
   const lines = [
     `Command index ${index.provider}: ${index.commands.length}/${index.totalMatches} loaded${index.truncated ? `, truncated at ${index.limit}` : ""}`,
     `families=${index.families.map((family) => `${family.id}:${family.source}`).join(",") || "none"}`,
   ];
   for (const command of index.commands) {
-    lines.push(`- ${command.id} [${command.familyId}/${command.source}/${command.effect}/${command.approval}/${command.loadPolicy.mode}] surfaces=${command.surfaces.join(",") || "none"}: ${command.title}`);
+    const state = readiness.get(command.id);
+    lines.push(`- ${command.id} [${command.familyId}/${command.source}/${command.effect}/${command.approval}/${command.loadPolicy.mode}] readiness=${state?.callable ? "callable" : state?.reasonCodes.join(",") || "not_registered"} surfaces=${command.surfaces.join(",") || "none"}: ${command.title}`);
   }
   lines.push("Use searchCommandCatalog for lazy/discovery commands and learnCommand for full schema/policy details.");
   return lines.join("\n");

@@ -6,6 +6,7 @@ import {
   type AgentUiDeploymentSnapshot,
   type AgentUiTurnCorrelationSnapshot,
 } from "@sonik-agent-ui/agent-observability";
+import { getText } from "@sonik-agent-ui/chat-surface/message-parts";
 
 export const SUPPORT_DIAGNOSTICS_SCHEMA_VERSION = "sonik.agent_ui.support_diagnostics.v1";
 export const SUPPORT_TRANSCRIPT_SCHEMA_VERSION = "sonik.agent_ui.support_transcript.v1";
@@ -61,7 +62,7 @@ export interface AgentUiSupportDiagnosticsExport {
 export function exportTranscriptMarkdown(messages: readonly SupportTranscriptMessageLike[]): string {
   const sections = messages.flatMap((message) => {
     const role = visibleRole(message.role);
-    const text = visibleTextParts(message.parts).join("").trim();
+    const text = visibleText(message.parts).trim();
     if (!role || !text) return [];
     return [`## ${role}\n\n${text}`];
   });
@@ -94,14 +95,14 @@ export function createSupportDiagnosticsExport(input: {
   };
 }
 
-function visibleTextParts(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-    const record = entry as Record<string, unknown>;
-    if (record.type !== "text" || typeof record.text !== "string") return [];
-    return [record.text];
-  });
+function visibleText(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  const parts = value.filter(isMessagePartRecord) as Parameters<typeof getText>[0];
+  return getText(parts);
+}
+
+function isMessagePartRecord(value: unknown): value is Record<string, unknown> & { type: string } {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && typeof (value as Record<string, unknown>).type === "string");
 }
 
 function visibleRole(value: unknown): string | undefined {

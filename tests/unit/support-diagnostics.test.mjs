@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import {
   sanitizePageContext,
   sanitizeTurnCorrelationSnapshot,
@@ -12,6 +14,9 @@ import {
   createSupportDiagnosticsExport,
   exportTranscriptMarkdown,
 } from "../../apps/standalone-sveltekit/src/lib/support-export.ts";
+
+const requireFromStandalone = createRequire(new URL("../../apps/standalone-sveltekit/package.json", import.meta.url));
+const { getText } = await import(pathToFileURL(requireFromStandalone.resolve("@sonik-agent-ui/chat-surface/message-parts")).href);
 
 const secret = `sk-${"supportsecret".repeat(2)}`;
 const traceparent = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
@@ -88,6 +93,34 @@ const traceparent = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
 }
 
 {
+  const rawSpec = JSON.stringify({
+    root: "main",
+    elements: {
+      main: {
+        type: "Card",
+        props: { title: "Support-export-private raw canvas specification" },
+        children: [],
+      },
+    },
+  });
+  const legitimateParameterProse = 'parameter name="spec" string=user-authored documentation example';
+  const legitimatePreamble = "Legitimate payload: {\"ok\":true}; markup: <section>notes</section>.\nI’ll try the canvas now.";
+  const failedDynamicToolParts = [
+    { type: "text", text: legitimateParameterProse },
+    { type: "text", text: legitimatePreamble },
+    { type: "text", text: `parameter name="spec" string=${rawSpec}` },
+    {
+      type: "dynamic-tool",
+      toolName: "createJsonArtifact",
+      toolCallId: "tool-create-json-support-export-1",
+      state: "output-error",
+      input: undefined,
+      rawInput: { spec: rawSpec },
+      errorText: "Tool input did not match the createJsonArtifact schema",
+    },
+  ];
+  const expectedVisibleText = `${legitimateParameterProse}\n\n${legitimatePreamble}`;
+  const sharedVisibleText = getText(failedDynamicToolParts);
   const markdown = exportTranscriptMarkdown([
     {
       role: "user",
@@ -102,12 +135,19 @@ const traceparent = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
       metadata: { token: secret },
     },
     { role: "assistant", parts: [{ type: "text", text: "Visible assistant text" }, { type: "document", content: "secret document" }] },
+    { role: "assistant", parts: failedDynamicToolParts },
     { role: "tool", content: "tool role output should not export", parts: [{ type: "text", text: "tool text" }] },
   ]);
 
   assert.equal(markdown.includes("## user"), true);
-  assert.equal(markdown.includes("Hello world"), true);
+  assert.equal(markdown.includes("Hello\n\nworld"), true, "support transcript uses the same visible-text joining semantics as chat and persistence");
   assert.equal(markdown.includes("Visible assistant text"), true);
+  assert.equal(sharedVisibleText, expectedVisibleText, "screen/persistence projection keeps only legitimate text from the captured fixture");
+  assert.equal(markdown.includes(sharedVisibleText), true, "support transcript matches the shared screen/persistence visible-text projection");
+  assert.equal(markdown.includes(rawSpec), false, "support transcript must not export private raw artifact specs");
+  assert.equal(markdown.includes(`parameter name="spec" string=${rawSpec}`), false, "support transcript must suppress the adjacent provider parameter envelope");
+  assert.equal(markdown.includes(legitimateParameterProse), true, "support transcript preserves non-adjacent parameter prose");
+  assert.equal(markdown.includes(legitimatePreamble), true, "support transcript preserves legitimate JSON/XML-looking prose");
   assert.equal(markdown.includes("fallback text should be ignored"), false, "message content fallback is not a visible text part");
   assert.equal(markdown.includes("secret tool"), false);
   assert.equal(markdown.includes("secret artifact"), false);

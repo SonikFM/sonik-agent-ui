@@ -14,7 +14,10 @@ import { fileURLToPath } from "node:url";
 // individual `pnpm --filter <pkg> build` steps in the root "build"/"dev" script) once
 // before this lane; `pnpm dev` here only runs `vite dev`, it does not rebuild them.
 const appDir = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../../apps/standalone-sveltekit");
-const PORT = 5173;
+const PORT = Number(process.env.SONIK_AGENT_UI_E2E_PORT ?? 5173);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65_535) {
+  throw new Error("SONIK_AGENT_UI_E2E_PORT must be a valid TCP port");
+}
 const baseURL = `http://localhost:${PORT}`;
 
 export default defineConfig({
@@ -34,9 +37,16 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "retain-on-failure",
+    // Wrangler's checked-in deployment config is intentionally cloud-first.
+    // Every browser request in this local-only lane must opt into the server's
+    // localhost-scoped memory override so unmocked bootstrap reads cannot
+    // accidentally resolve the production persistence policy.
+    extraHTTPHeaders: {
+      "x-sonik-agent-ui-smoke-persistence-mode": "memory",
+    },
   },
   webServer: {
-    command: "pnpm dev -- --port " + PORT + " --strictPort",
+    command: "pnpm dev --port " + PORT + " --strictPort",
     cwd: appDir,
     url: baseURL,
     reuseExistingServer: !process.env.CI,

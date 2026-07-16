@@ -155,10 +155,10 @@ const signedTrustedSession = sanitizeAgentHostPageContext({
     scopes: ["workspace:read"],
   },
 });
-assert.equal(signedTrustedSession?.signatureVersion, "sonik.agent_ui.host_context.hmac.v1", "signed host-context signature version must survive the embed sanitizer");
-assert.equal(signedTrustedSession?.signature, "abc123_signature", "signed host-context signature must survive postMessage donation");
-assert.equal(signedTrustedSession?.issuedAt, "2026-06-24T22:00:00.000Z", "signed host-context issuedAt must survive postMessage donation");
-assert.equal(signedTrustedSession?.expiresAt, "2026-06-24T22:10:00.000Z", "signed host-context expiresAt must survive postMessage donation");
+assert.equal(signedTrustedSession?.signatureVersion, undefined, "display page context must drop reconstructable signature fields");
+assert.equal(signedTrustedSession?.signature, undefined, "display page context never carries the opaque authority signature");
+assert.equal(signedTrustedSession?.issuedAt, undefined, "display page context never carries authority issuance metadata");
+assert.equal(signedTrustedSession?.expiresAt, undefined, "display page context never carries authority expiry metadata");
 assert.equal(signedTrustedSession?.hostSession?.theme, undefined, "signed host-context sanitizer must not materialize display-only theme when the host did not sign it");
 
 const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
@@ -185,6 +185,17 @@ const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
   },
 });
 const approvedCommandGrantList = Array.from({ length: 72 }, (_, index) => `booking.generated.${index + 1}`);
+const workflowPublishPins = {
+  organizationId: "org_signed",
+  workflowVersionId: "workflow@1",
+  definitionDigest: `sha256:${"a".repeat(64)}`,
+  agentPublishedVersionId: "agent@1",
+  nodeDescriptorsDigest: `sha256:${"b".repeat(64)}`,
+  capabilityVersionsDigest: `sha256:${"c".repeat(64)}`,
+  toolPackVersionsDigest: `sha256:${"d".repeat(64)}`,
+  skillVersionsDigest: `sha256:${"e".repeat(64)}`,
+  runtimePolicyDigest: `sha256:${"f".repeat(64)}`,
+};
 const signedTrustedSessionWithFullCommandMetadata = sanitizeAgentHostPageContext({
   authenticated: true,
   organizationId: "org_signed",
@@ -203,6 +214,7 @@ const signedTrustedSessionWithFullCommandMetadata = sanitizeAgentHostPageContext
     expiresAt: "2026-06-24T22:10:00.000Z",
     metadata: {
       approvedCommandIds: approvedCommandGrantList,
+      workflowPublishPins,
     },
   },
 });
@@ -213,12 +225,76 @@ assert.deepEqual(
     sessionMode: "production",
     approvedCommandIds: ["booking.create.hold", "booking.release.hold"],
   },
-  "signed host-context metadata, including command-id arrays, must survive unchanged when it is part of the HMAC payload",
+  "sanitized host-session metadata remains available only as a display/readiness hint",
 );
 assert.deepEqual(
   signedTrustedSessionWithFullCommandMetadata?.hostSession?.metadata?.approvedCommandIds,
   approvedCommandGrantList,
-  "full signed approvedCommandIds grants must not be truncated before the Agent UI re-encodes the HMAC-covered host context",
+  "full approvedCommandIds hints remain available without reconstructing the opaque authority header",
+);
+assert.deepEqual(
+  signedTrustedSessionWithFullCommandMetadata?.hostSession?.metadata?.workflowPublishPins,
+  workflowPublishPins,
+  "valid named workflowPublishPins survive host-session sanitization without positional encoding",
+);
+const signedTrustedSessionWithFullPublicMetadata = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: {
+      public1: "one",
+      public2: "two",
+      public3: "three",
+      public4: "four",
+      public5: "five",
+      public6: "six",
+      public7: "seven",
+      public8: "eight",
+      workflowPublishPins,
+    },
+  },
+});
+assert.deepEqual(
+  signedTrustedSessionWithFullPublicMetadata?.hostSession?.metadata?.workflowPublishPins,
+  workflowPublishPins,
+  "valid workflowPublishPins survive after the public metadata cap is reached",
+);
+const signedTrustedSessionWithPinsBeforeFullPublicMetadata = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: {
+      workflowPublishPins,
+      public1: "one",
+      public2: "two",
+      public3: "three",
+      public4: "four",
+      public5: "five",
+      public6: "six",
+      public7: "seven",
+      public8: "eight",
+    },
+  },
+});
+assert.equal(
+  signedTrustedSessionWithPinsBeforeFullPublicMetadata?.hostSession?.metadata?.public8,
+  "eight",
+  "workflowPublishPins do not consume the public metadata allowance",
+);
+const invalidWorkflowPublishPins = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: { approvedCommandIds: ["booking.create.hold"], workflowPublishPins: { ...workflowPublishPins, runtimePolicyDigest: "invalid" } },
+  },
+});
+assert.deepEqual(
+  invalidWorkflowPublishPins?.hostSession?.metadata,
+  { approvedCommandIds: ["booking.create.hold"] },
+  "invalid workflowPublishPins fail closed without dropping approvedCommandIds",
 );
 
 assert.deepEqual(
@@ -348,7 +424,10 @@ const controller = mountSonikAgentUI({
   theme: "lemonade",
   smokeMockStream: "1",
   smokeRunId: "mount-test",
-  getPageContext: () => ({ surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], signatureVersion: "sonik.agent_ui.host_context.hmac.v1", issuedAt: "2026-06-24T22:00:00.000Z", expiresAt: "2026-06-24T22:10:00.000Z", signature: "abc123_signature", activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } }),
+  getPageContext: () => ({
+    pageContext: { surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } },
+    authority: { header: "opaque_signed_header_ABC123", revision: 7, expiresAt: "2099-06-24T22:10:00.000Z" },
+  }),
   elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas", launcher: "#launcher", openChat: "#open-chat", openCanvas: "#open-canvas" },
   window: fakeWindow,
   document: fakeDocument,
@@ -380,7 +459,8 @@ await controller.postContext();
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.mode, "chat", "chat postContext should donate the current active mode");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.organizationId, "forged-org", "browser postMessage payload should carry sanitized host-asserted organization context");
 assert.deepEqual(fakeIframe.contentWindow.messages.at(-1).message.payload.scopes, ["admin:*"], "browser postMessage payload should carry sanitized host-asserted scopes");
-assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.signature, "abc123_signature", "browser postMessage payload should preserve signed host-context fields for the cloud runtime header");
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.signature, undefined, "browser display payload must not carry reconstructable signed fields");
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.authority.header, "opaque_signed_header_ABC123", "browser postMessage donates the opaque authority byte-for-byte outside display context");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).targetOrigin, "https://agent.sonik.local", "cross-origin embeds should post page context to the agent iframe origin, not the host origin");
 fakeWindow.__sonikAgentHost.openCanvas();
 assert.equal(fakeIframe.parentElement, fakeCanvasSlot, "host controller should move iframe into canvas slot");
@@ -548,9 +628,10 @@ assert.equal(localEmbedSmokeSource.includes("evidence.sessionBootstrap"), true, 
 assert.equal(localEmbedSmokeSource.includes("usedManualLauncher: false"), true, "local embed smoke should prove artifact creation auto-opens canvas without the manual #open-canvas launcher");
 assert.equal(localEmbedSmokeSource.includes("Automatic canvas.open changed iframe src"), true, "local embed smoke should fail if automatic canvas opening reloads the iframe instead of moving it");
 assert.equal(localEmbedSmokeSource.includes("Automatic canvas.open did not preserve active stream state"), true, "local embed smoke should prove stream state is preserved while the iframe moves to canvas");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not render artifact above compact chat"), true, "local embed smoke should prove artifact renders above compact chat in canvas mode");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide duplicate AgentConversation header"), true, "local embed smoke should prove embedded canvas hides duplicate chat header");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide duplicate session rail/session switcher"), true, "local embed smoke should prove embedded canvas hides duplicate session chrome");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not preserve expected artifact/chat ordering"), true, "local embed smoke should prove the artifact never follows compact chat in canvas mode");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not keep the AgentConversation header visible"), true, "local embed smoke should prove embedded canvas keeps the conversation header visible");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide the session rail while keeping the chat-history switcher visible"), true, "local embed smoke should prove embedded canvas hides the session rail while keeping chat history available");
+assert.equal(localEmbedSmokeSource.includes("the conversation header and chat-history switcher visible, and the session rail hidden"), true, "local embed smoke PASS evidence should report all three canvas chrome facts");
 assert.equal(bookingContextSmokeSource.includes("usedDeterministicHostController"), true, "booking context release gate should report deterministic host-controller opening");
 assert.equal(bookingContextSmokeSource.includes("Booking embed did not open through window.__sonikAgentHost"), true, "booking context release gate should fail if host controller opening is unavailable");
 assert.equal(bookingReservationSmokeSource.includes("usedDeterministicHostController"), true, "booking reservation release gate should report deterministic host-controller opening");

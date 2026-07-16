@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   CloudWorkspacePersistenceError,
   createCloudWorkspacePersistenceAdapter,
@@ -43,6 +44,7 @@ function createFakeWorkspaceTables() {
     runs: new Map(),
     runEvents: new Map(),
     layouts: new Map(),
+    pageContexts: new Map(),
     sequence: 0,
   };
 }
@@ -93,7 +95,7 @@ class FakeRlsWorkspaceSqlTransaction {
     if (normalized.startsWith("select id, name, mode") && normalized.includes("from sonik_agent_ui.agent_workspace_sessions") && normalized.includes("where organization_id = $1 and user_id = $2 and id = $3")) {
       this.assertMatchesContext(params[0], params[1]);
       const row = this.tables.sessions.get(this.scopedKey(params[2]));
-      return { rows: row?.host_session_id === params[3] ? [clone(row)] : [] };
+      return { rows: row ? [clone(row)] : [] };
     }
 
     if (normalized.startsWith("select id from sonik_agent_ui.agent_workspace_sessions") && !normalized.includes("deleting_at")) {
@@ -102,11 +104,11 @@ class FakeRlsWorkspaceSqlTransaction {
       return { rows: this.tables.sessions.has(this.scopedKey(id)) ? [{ id }] : [] };
     }
 
-    if (normalized.startsWith("select id, name, mode") && normalized.includes("from sonik_agent_ui.agent_workspace_sessions") && normalized.includes("host_session_id is not distinct from $3 and archived = $4")) {
+    if (normalized.startsWith("select id, name, mode") && normalized.includes("from sonik_agent_ui.agent_workspace_sessions") && normalized.includes("archived = $3")) {
       this.assertMatchesContext(params[0], params[1]);
-      const archived = Boolean(params[3]);
+      const archived = Boolean(params[2]);
       const rows = [...this.tables.sessions.values()]
-        .filter((row) => row.organization_id === this.context.organizationId && row.user_id === this.context.userId && row.host_session_id === params[2] && row.archived === archived)
+        .filter((row) => row.organization_id === this.context.organizationId && row.user_id === this.context.userId && row.archived === archived)
         .sort((a, b) => String(b.last_accessed).localeCompare(String(a.last_accessed)))
         .map(clone);
       return { rows };
@@ -180,14 +182,15 @@ class FakeRlsWorkspaceSqlTransaction {
       for (const [fileKey, row] of [...this.tables.files.entries()]) {
         if (row.organization_id === this.context.organizationId && row.user_id === this.context.userId && row.session_id === id) this.tables.files.delete(fileKey);
       }
+      this.tables.pageContexts.delete(this.scopedKey(id));
       return { rows: deleted ? [{ id }] : [] };
     }
 
-    if (normalized === "select id from sonik_agent_ui.agent_workspace_sessions where organization_id = $1 and user_id = $2 and id = $3 and host_session_id is not distinct from $4 and deleting_at is null for no key update") {
-      const [organization_id, user_id, id, host_session_id] = params;
+    if (normalized === "select id from sonik_agent_ui.agent_workspace_sessions where organization_id = $1 and user_id = $2 and id = $3 and deleting_at is null for no key update") {
+      const [organization_id, user_id, id] = params;
       this.assertMatchesContext(organization_id, user_id);
       const row = this.tables.sessions.get(this.scopedKey(id));
-      return { rows: row && row.host_session_id === host_session_id && !row.deleting_at ? [{ id }] : [] };
+      return { rows: row && !row.deleting_at ? [{ id }] : [] };
     }
 
     if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_files")) {
@@ -276,49 +279,44 @@ class FakeRlsWorkspaceSqlTransaction {
       this.assertMatchesContext(organization_id, user_id);
       if (normalized.includes(" and id = $3")) {
         const row = this.tables.runs.get(this.scopedKey(value));
-        const session = row && this.tables.sessions.get(this.scopedKey(row.session_id));
-        return { rows: row && session?.host_session_id === params[3] ? [clone(row)] : [] };
+        return { rows: row ? [clone(row)] : [] };
       }
-      return { rows: [...this.tables.runs.values()].filter((row) => row.organization_id === organization_id && row.user_id === user_id && row.session_id === value && this.tables.sessions.get(this.scopedKey(row.session_id))?.host_session_id === params[3]).map(clone) };
+      return { rows: [...this.tables.runs.values()].filter((row) => row.organization_id === organization_id && row.user_id === user_id && row.session_id === value).map(clone) };
     }
 
     if (normalized.startsWith("update sonik_agent_ui.agent_workspace_runs")) {
-      const [organization_id, user_id, id, status, resumable, error, error_code, message_id, ended_at, host_session_id] = params;
+      const [organization_id, user_id, id, status, resumable, error, error_code, message_id, ended_at] = params;
       this.assertMatchesContext(organization_id, user_id);
       const row = this.tables.runs.get(this.scopedKey(id));
-      const session = row && this.tables.sessions.get(this.scopedKey(row.session_id));
-      if (!row || session?.host_session_id !== host_session_id) return { rows: [] };
+      if (!row) return { rows: [] };
       Object.assign(row, { status, resumable, error, error_code, message_id, ended_at, updated_at: this.now() });
       return { rows: [clone(row)] };
     }
 
     if (normalized.startsWith("select coalesce(max(run_events.seq), -1) + 1 as next_seq")) {
-      const [organization_id, user_id, run_id, host_session_id] = params;
+      const [organization_id, user_id, run_id] = params;
       this.assertMatchesContext(organization_id, user_id);
       const run = this.tables.runs.get(this.scopedKey(run_id));
-      const session = run && this.tables.sessions.get(this.scopedKey(run.session_id));
-      if (!run || session?.host_session_id !== host_session_id) return { rows: [] };
+      if (!run) return { rows: [] };
       const seqs = [...this.tables.runEvents.values()].filter((row) => row.organization_id === organization_id && row.user_id === user_id && row.run_id === run_id).map((row) => row.seq);
       return { rows: [{ next_seq: seqs.length ? Math.max(...seqs) + 1 : 0 }] };
     }
 
     if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_run_events")) {
-      const [organization_id, user_id, id, run_id, session_id, seq, kind, event, host_session_id] = params;
+      const [organization_id, user_id, id, run_id, session_id, seq, kind, event] = params;
       this.assertMatchesContext(organization_id, user_id);
       const run = this.tables.runs.get(this.scopedKey(run_id));
-      const session = run && this.tables.sessions.get(this.scopedKey(run.session_id));
-      if (!run || session?.host_session_id !== host_session_id || (session_id != null && session_id !== run.session_id)) return { rows: [] };
+      if (!run || (session_id != null && session_id !== run.session_id)) return { rows: [] };
       const row = { id, organization_id, user_id, run_id, session_id, seq, kind, event: parseJsonParam(event), created_at: this.now() };
       this.tables.runEvents.set(this.scopedKey(id), row);
       return { rows: [clone(row)] };
     }
 
     if (normalized.startsWith("select run_events.id, run_events.run_id")) {
-      const [organization_id, user_id, run_id, host_session_id] = params;
+      const [organization_id, user_id, run_id] = params;
       this.assertMatchesContext(organization_id, user_id);
       const run = this.tables.runs.get(this.scopedKey(run_id));
-      const session = run && this.tables.sessions.get(this.scopedKey(run.session_id));
-      if (!run || session?.host_session_id !== host_session_id) return { rows: [] };
+      if (!run) return { rows: [] };
       return { rows: [...this.tables.runEvents.values()].filter((row) => row.organization_id === organization_id && row.user_id === user_id && row.run_id === run_id).sort((a, b) => a.seq - b.seq).map(clone) };
     }
 
@@ -424,9 +422,9 @@ class FakeRlsWorkspaceSqlTransaction {
     }
 
     if (normalized.startsWith("select documents.id, documents.session_id")) {
-      const [organization_id, user_id, archived, language, search, hostSessionId, limit, offset] = params;
+      const [organization_id, user_id, archived, language, search, limit, offset] = params;
       this.assertMatchesContext(organization_id, user_id);
-      const rows = this.filteredDocuments({ archived, language, search, hostSessionId })
+      const rows = this.filteredDocuments({ archived, language, search })
         .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))
         .slice(offset, offset + limit)
         .map((row) => {
@@ -437,23 +435,23 @@ class FakeRlsWorkspaceSqlTransaction {
     }
 
     if (normalized.startsWith("select count(*)::int as total")) {
-      const [organization_id, user_id, archived, language, search, hostSessionId] = params;
+      const [organization_id, user_id, archived, language, search] = params;
       this.assertMatchesContext(organization_id, user_id);
-      return { rows: [{ total: this.filteredDocuments({ archived, language, search, hostSessionId }).length }] };
+      return { rows: [{ total: this.filteredDocuments({ archived, language, search }).length }] };
     }
 
     if (normalized.startsWith("select documents.language, count(*)::int as count")) {
-      const [organization_id, user_id, archived, language, search, hostSessionId] = params;
+      const [organization_id, user_id, archived, language, search] = params;
       this.assertMatchesContext(organization_id, user_id);
       const counts = new Map();
-      for (const row of this.filteredDocuments({ archived, language, search, hostSessionId })) counts.set(row.language, (counts.get(row.language) ?? 0) + 1);
+      for (const row of this.filteredDocuments({ archived, language, search })) counts.set(row.language, (counts.get(row.language) ?? 0) + 1);
       return { rows: [...counts.entries()].map(([language, count]) => ({ language, count })) };
     }
 
     if (normalized.startsWith("select count(distinct documents.session_id)::int as session_count")) {
-      const [organization_id, user_id, archived, language, search, hostSessionId] = params;
+      const [organization_id, user_id, archived, language, search] = params;
       this.assertMatchesContext(organization_id, user_id);
-      const sessionIds = new Set(this.filteredDocuments({ archived, language, search, hostSessionId }).map((row) => row.session_id).filter(Boolean));
+      const sessionIds = new Set(this.filteredDocuments({ archived, language, search }).map((row) => row.session_id).filter(Boolean));
       return { rows: [{ session_count: sessionIds.size }] };
     }
 
@@ -592,6 +590,41 @@ class FakeRlsWorkspaceSqlTransaction {
       return { rows };
     }
 
+    if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_page_context_snapshots")) {
+      const [organization_id, user_id, id, session_id, source, authority, route, surface, page_type, active_entity, command_families, skill_families, visible_actions, context] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      if (!this.tables.sessions.has(this.scopedKey(session_id))) throw new Error("page context session FK missing");
+      const row = {
+        id,
+        organization_id,
+        user_id,
+        session_id,
+        source,
+        authority,
+        route,
+        surface,
+        page_type,
+        active_entity: parseJsonParam(active_entity),
+        command_families,
+        skill_families,
+        visible_actions,
+        context: parseJsonParam(context),
+        created_at: this.now(),
+      };
+      const key = this.scopedKey(session_id);
+      this.tables.pageContexts.set(key, [...(this.tables.pageContexts.get(key) ?? []), row]);
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("select id, session_id, source, authority, route, surface, page_type, active_entity, command_families, skill_families, visible_actions, context, created_at from sonik_agent_ui.agent_workspace_page_context_snapshots")) {
+      const [organization_id, user_id, session_id] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const rows = [...(this.tables.pageContexts.get(this.scopedKey(session_id)) ?? [])]
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .map(clone);
+      return { rows };
+    }
+
     throw new Error(`Unhandled fake SQL: ${normalized}`);
   }
 
@@ -604,11 +637,10 @@ class FakeRlsWorkspaceSqlTransaction {
     assert.equal(userId, this.context.userId, "query user must match request context");
   }
 
-  filteredDocuments({ archived, language, search, hostSessionId }) {
+  filteredDocuments({ archived, language, search }) {
     const needle = typeof search === "string" ? search.toLowerCase() : null;
     return [...this.tables.documents.values()].filter((row) => {
       if (row.organization_id !== this.context.organizationId || row.user_id !== this.context.userId || !row.is_active || row.archived !== Boolean(archived)) return false;
-      if (this.tables.sessions.get(this.scopedKey(row.session_id))?.host_session_id !== hostSessionId) return false;
       if (language && row.language.toLowerCase() !== language) return false;
       if (needle && !`${row.title}
 ${row.current_content}`.toLowerCase().includes(needle)) return false;
@@ -640,20 +672,25 @@ async function runWorkspaceCloudSqlAdapterTests() {
   const adapterA = createCloudWorkspacePersistenceAdapter(orgA);
   const adapterB = createCloudWorkspacePersistenceAdapter(orgB);
   const adapterOtherHost = createCloudWorkspacePersistenceAdapter(createAuthorizedRuntime({ executor, organizationId: "org-a", userId: "user-a", hostSessionId: "host-session-2" }));
+  const adapterOtherUser = createCloudWorkspacePersistenceAdapter(createAuthorizedRuntime({ executor, organizationId: "org-a", userId: "user-b", hostSessionId: "host-session-2" }));
 
   const session = await adapterA.createSession({ id: "session-rls", name: "RLS Session", mode: "chat" });
   assert.equal(session.id, "session-rls");
   assert.equal(session.name, "RLS Session");
   assert.equal(session.message_count, 0);
   assert.equal(await adapterB.getSession("session-rls"), null, "Org B must not read Org A sessions by guessed id");
-  assert.equal(await adapterOtherHost.getSession("session-rls"), null, "the same org/user cannot read another trusted host session's workspace");
+  assert.equal((await adapterOtherHost.getSession("session-rls"))?.id, session.id, "the same org/user keeps workspace ownership when the host session rotates");
+  assert.equal((await adapterOtherHost.listSessions()).some((row) => row.id === session.id), true, "rotated host sessions list the stable owner's history");
+  assert.equal(await adapterOtherUser.getSession("session-rls"), null, "same-org different-user authority cannot read a guessed workspace");
 
   const message = await adapterA.appendMessage({ session_id: session.id, id: "msg-1", role: "user", content: "hello cloud", parts: [{ type: "text", text: "hello cloud" }] });
   assert.equal(message.session_id, session.id);
   assert.deepEqual(message.parts, [{ type: "text", text: "hello cloud" }]);
   assert.equal((await adapterA.getSession(session.id))?.message_count, 1, "message append should update session message_count");
   assert.equal((await adapterA.listMessages(session.id)).length, 1);
+  assert.equal((await adapterOtherHost.listMessages(session.id))[0]?.id, message.id, "rotated host sessions retain message history");
   assert.equal((await adapterB.listMessages(session.id)).length, 0, "Org B must not read Org A messages by guessed session id");
+  assert.equal((await adapterOtherUser.listMessages(session.id)).length, 0, "same-org different-user authority cannot list message history");
 
   const replayedMessage = await adapterA.appendMessage({ session_id: session.id, id: "msg-1", role: "user", content: "hello cloud", parts: [{ text: "hello cloud", type: "text" }] });
   assert.equal(replayedMessage.id, message.id, "an exact cloud replay should return the existing message");
@@ -734,21 +771,17 @@ async function runWorkspaceCloudSqlAdapterTests() {
   assert.equal(cloudRun.user_message_id, message.id);
   assert.equal(cloudRun.message_id, "assistant-cloud", "assistant message semantics remain unchanged");
   assert.equal((await adapterA.listRuns(session.id))[0]?.user_message_id, message.id);
-  assert.equal((await adapterA.getRun(cloudRun.id))?.id, cloudRun.id, "the owning host session can read its run");
-  assert.equal(await adapterOtherHost.getRun(cloudRun.id), null, "another host session cannot read a guessed run id");
-  assert.deepEqual(await adapterOtherHost.listRuns(session.id), [], "another host session cannot list runs from a guessed workspace session");
-  assert.equal(await adapterOtherHost.updateRun(cloudRun.id, { status: "failed" }), null, "another host session cannot update a guessed run id");
+  assert.equal((await adapterA.getRun(cloudRun.id))?.id, cloudRun.id, "the workspace owner can read its run");
+  assert.equal((await adapterOtherHost.getRun(cloudRun.id))?.id, cloudRun.id, "rotated host sessions retain exact run access");
+  assert.equal((await adapterOtherHost.listRuns(session.id))[0]?.id, cloudRun.id, "rotated host sessions retain run history");
+  assert.equal((await adapterOtherHost.updateRun(cloudRun.id, { resumable: true }))?.resumable, true, "rotated host sessions retain owner-authorized run updates");
   const cloudRunEvent = await adapterA.appendRunEvent({ run_id: cloudRun.id, session_id: session.id, kind: "status", event: { kind: "status", label: "started" } });
   assert.equal(cloudRunEvent.seq, 0);
   assert.deepEqual((await adapterA.listRunEvents(cloudRun.id)).map((event) => event.id), [cloudRunEvent.id]);
-  assert.deepEqual(await adapterOtherHost.listRunEvents(cloudRun.id), [], "another host session cannot read a guessed run's events");
-  const sequenceQueriesBeforeDeniedAppend = executor.transactions.flatMap((tx) => tx.queries).filter((query) => query.sql.startsWith("select coalesce(max(run_events.seq)")).length;
-  await assert.rejects(
-    () => adapterOtherHost.appendRunEvent({ run_id: cloudRun.id, session_id: session.id, kind: "status", event: { kind: "status", label: "denied" } }),
-    (error) => error instanceof CloudWorkspacePersistenceError && error.code === "missing-request-context",
-    "another host session cannot append to or allocate a sequence for a guessed run",
-  );
-  assert.equal(executor.transactions.flatMap((tx) => tx.queries).filter((query) => query.sql.startsWith("select coalesce(max(run_events.seq)")).length, sequenceQueriesBeforeDeniedAppend);
+  assert.deepEqual((await adapterOtherHost.listRunEvents(cloudRun.id)).map((event) => event.id), [cloudRunEvent.id], "rotated host sessions retain run-event history");
+  const rotatedHostEvent = await adapterOtherHost.appendRunEvent({ run_id: cloudRun.id, session_id: session.id, kind: "status", event: { kind: "status", label: "rotated host" } });
+  assert.equal(rotatedHostEvent.seq, 1, "rotated host sessions continue the same run-event sequence");
+  assert.deepEqual(await adapterOtherUser.listRunEvents(cloudRun.id), [], "same-org different-user authority cannot read run events");
   await assert.rejects(
     () => adapterA.appendRunEvent({ run_id: cloudRun.id, session_id: secondSession.id, kind: "status", event: { kind: "status", label: "mismatched" } }),
     /session_id must match the parent run/i,
@@ -776,7 +809,7 @@ async function runWorkspaceCloudSqlAdapterTests() {
   assert.equal(library.total, 1);
   assert.equal(library.documents[0]?.preview.length <= 500, true);
   assert.equal(
-    executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("left(documents.current_content, 500)") && query.sql.includes("limit $7 offset $8"))),
+    executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("left(documents.current_content, 500)") && query.sql.includes("limit $6 offset $7"))),
     true,
     "document library must use SQL-side bounded preview and pagination",
   );
@@ -798,38 +831,69 @@ async function runWorkspaceCloudSqlAdapterTests() {
   assert.equal((await adapterB.listLayoutSnapshots(session.id)).length, 0, "Org B must not read Org A layout snapshots by guessed session id");
   assert.equal((await adapterA.getSession(session.id))?.active_artifact_id, artifact.id, "layout snapshots should keep active artifact pointer current");
 
-  const hostBoundFile = await adapterA.createFile({ id: "file-host-bound", session_id: secondSession.id, storage_key: "opaque/host-bound", original_filename: "host.txt", media_type: "text/plain", byte_size: 4 });
-  await assert.rejects(
-    () => adapterOtherHost.appendMessage({ session_id: session.id, id: "host-leak-message", role: "user", content: "denied" }),
-    (error) => error instanceof CloudWorkspacePersistenceError && error.code === "missing-request-context",
+  const pageContext = await adapterA.recordPageContextSnapshot({
+    session_id: session.id,
+    source: "browser-page-context",
+    authority: "display-only",
+    route: "/",
+    surface: "workflow-builder",
+    page_type: "standalone-agent-workspace",
+    command_families: [],
+    skill_families: [],
+    visible_actions: ["saveAgentDefinitionDraft"],
+    context: { draftRevision: 2, nested: { count: 2 } },
+  });
+  assert.deepEqual(pageContext.context, { draftRevision: 2, nested: { count: 2 } });
+  assert.equal((await adapterA.listPageContextSnapshots(session.id))[0]?.id, pageContext.id, "cloud adapter restores generic page context snapshots newest first");
+  assert.deepEqual(await adapterB.listPageContextSnapshots(session.id), [], "another tenant cannot list guessed page context snapshots");
+  assert.throws(
+    () => adapterA.recordPageContextSnapshot({
+      session_id: session.id,
+      source: "browser-page-context",
+      authority: "trusted-server-derived",
+      context: {},
+    }),
+    /Browser page context snapshots must remain display-only/,
+    "browser-owned page context can never be promoted to server authority",
   );
 
-  assert.deepEqual(await adapterOtherHost.listMessages(session.id), [], "another host cannot list messages from a guessed session");
-  assert.equal(await adapterOtherHost.getDocument(document.id), null, "another host cannot read a guessed document");
-  assert.deepEqual(await adapterOtherHost.listDocuments(secondSession.id), [], "another host cannot list documents from a guessed session");
-  assert.deepEqual(await adapterOtherHost.listDocumentVersions(document.id), [], "another host cannot list guessed document versions");
-  assert.equal(await adapterOtherHost.getDocumentVersion(document.id, 1), null, "another host cannot read a guessed document version");
-  assert.equal(await adapterOtherHost.updateDocument(document.id, { content: "host leak" }), null, "another host cannot update a guessed document");
-  assert.equal(await adapterOtherHost.patchDocument(document.id, { title: "host leak" }), null, "another host cannot patch a guessed document");
-  assert.equal(await adapterOtherHost.archiveDocument(document.id), null, "another host cannot archive a guessed document");
-  assert.equal(await adapterOtherHost.deleteDocument(document.id), false, "another host cannot delete a guessed document");
-  assert.equal(await adapterOtherHost.restoreDocumentVersion(document.id, 1), null, "another host cannot restore a guessed document version");
-  assert.equal((await adapterOtherHost.listDocumentLibrary()).total, 0, "another host cannot browse another host's document library");
-  assert.equal(await adapterOtherHost.getArtifact(artifact.id), null, "another host cannot read a guessed artifact");
-  assert.equal(await adapterOtherHost.updateArtifact(artifact.id, { title: "host leak" }), null, "another host cannot update a guessed artifact");
-  assert.deepEqual(await adapterOtherHost.listArtifactVersions(artifact.id), [], "another host cannot list guessed artifact versions");
-  assert.deepEqual(await adapterOtherHost.listLayoutSnapshots(session.id), [], "another host cannot list guessed layouts");
-  assert.equal(await adapterOtherHost.getFile(hostBoundFile.id), null, "another host cannot read file provider metadata");
-  assert.deepEqual(await adapterOtherHost.listFiles(secondSession.id), [], "another host cannot list guessed files");
-  assert.equal(await adapterOtherHost.updateFile(hostBoundFile.id, { provider_references: { google: "leak" } }), null, "another host cannot write provider references");
-  assert.equal(await adapterOtherHost.deleteFile(hostBoundFile.id), false, "another host cannot delete a guessed file");
-  assert.equal(await adapterOtherHost.patchSession(session.id, { name: "host leak" }), null, "another host cannot patch a guessed session");
-  assert.equal(await adapterOtherHost.archiveSession(session.id), null, "another host cannot archive a guessed session");
-  assert.equal(await adapterOtherHost.beginSessionDeletion(session.id), false, "another host cannot fence a guessed session");
-  assert.equal(await adapterOtherHost.deleteSession(session.id), false, "another host cannot delete a guessed session");
-  assert.equal((await adapterA.getDocument(document.id))?.title, "RLS Doc Renamed", "denied document writes leave owner data unchanged");
-  assert.equal((await adapterA.getArtifact(artifact.id))?.title, "RLS Artifact Renamed", "denied artifact writes leave owner data unchanged");
-  assert.equal((await adapterA.getFile(hostBoundFile.id))?.provider_references, null, "denied provider-reference writes leave owner data unchanged");
+  const hostBoundFile = await adapterA.createFile({ id: "file-host-bound", session_id: secondSession.id, storage_key: "opaque/host-bound", original_filename: "host.txt", media_type: "text/plain", byte_size: 4 });
+  const rotatedMessage = await adapterOtherHost.appendMessage({ session_id: session.id, id: "rotated-host-message", role: "user", content: "same owner" });
+  assert.equal(rotatedMessage.session_id, session.id, "rotated host sessions retain owner-authorized message writes");
+  assert.equal((await adapterOtherHost.getDocument(document.id))?.id, document.id, "rotated host sessions retain exact document access");
+  assert.equal((await adapterOtherHost.listDocuments(secondSession.id))[0]?.id, document.id, "rotated host sessions retain document history");
+  assert.equal((await adapterOtherHost.listDocumentVersions(document.id)).length, 6, "rotated host sessions retain document version history");
+  assert.equal((await adapterOtherHost.listDocumentLibrary()).total, 1, "rotated host sessions retain the owner's document library");
+  assert.equal((await adapterOtherHost.getArtifact(artifact.id))?.id, artifact.id, "rotated host sessions retain exact artifact access");
+  assert.equal((await adapterOtherHost.listArtifactVersions(artifact.id)).length, 3, "rotated host sessions retain artifact history");
+  assert.equal((await adapterOtherHost.listLayoutSnapshots(session.id)).length, 1, "rotated host sessions retain layout history");
+  assert.equal((await adapterOtherHost.getFile(hostBoundFile.id))?.id, hostBoundFile.id, "rotated host sessions retain exact file access");
+  assert.equal((await adapterOtherHost.listFiles(secondSession.id))[0]?.id, hostBoundFile.id, "rotated host sessions retain file history");
+  assert.equal(await adapterOtherUser.getDocument(document.id), null, "same-org different-user authority cannot read documents");
+  assert.equal(await adapterOtherUser.getArtifact(artifact.id), null, "same-org different-user authority cannot read artifacts");
+  assert.equal(await adapterOtherUser.getFile(hostBoundFile.id), null, "same-org different-user authority cannot read files");
+
+  const storedSessionKey = `org-a\u0000user-a\u0000${session.id}`;
+  const nullHostSessionKey = `org-a\u0000user-a\u0000${secondSession.id}`;
+  shared.sessions.get(nullHostSessionKey).host_session_id = null;
+  const legacyProjection = (row) => ({
+    id: row.id,
+    host_session_id: row.host_session_id,
+    updated_at: row.updated_at,
+    last_accessed: row.last_accessed,
+    last_message_at: row.last_message_at,
+  });
+  const legacyBefore = legacyProjection(shared.sessions.get(storedSessionKey));
+  const nullHostBefore = legacyProjection(shared.sessions.get(nullHostSessionKey));
+  await adapterOtherHost.getSession(session.id);
+  await adapterOtherHost.listSessions();
+  await adapterOtherHost.getSession(secondSession.id);
+  assert.deepEqual(legacyProjection(shared.sessions.get(storedSessionKey)), legacyBefore, "history reads preserve legacy IDs, old host-session provenance, and timestamps byte-for-byte");
+  assert.deepEqual(legacyProjection(shared.sessions.get(nullHostSessionKey)), nullHostBefore, "history reads preserve legacy IDs, null host-session provenance, and timestamps byte-for-byte");
+
+  const workspaceSessionSource = await readFile(new URL("../../packages/workspace-session/src/index.ts", import.meta.url), "utf8");
+  assert.equal(workspaceSessionSource.match(/host_session_id/g)?.length, 2, "cloud adapter source keeps host_session_id only in two INSERT provenance columns");
+  assert.equal(workspaceSessionSource.includes("host_session_id is not distinct from"), false, "cloud adapter source never uses host-session row predicates");
 
   assert.equal(
     executor.transactions.some((tx) => tx.queries.some((query) => query.sql.includes("version_count = version_count + 1"))),

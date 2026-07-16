@@ -18,10 +18,25 @@ jobs:
     name: Types, tests, and build
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
 
       - name: Design gate — metrics (workflow-builder)
         run: python3 scripts/design-gates/check-design-metrics.py apps/standalone-sveltekit/src/lib/components/workflow-builder/
@@ -43,6 +58,37 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Check diff hygiene
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --check "$BASE_SHA...HEAD"
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            git diff --check HEAD^..HEAD
+          else
+            git diff --check
+          fi
+
+      - name: Build observability contracts
+        run: pnpm --filter @sonik-agent-ui/agent-observability build
+
+      - name: Build workflow tool contracts
+        run: pnpm --filter @sonik-agent-ui/tool-contracts build
+
+      - name: Check generated commands and committed source integrity
+        run: pnpm check:commands
+
+      - name: Verify PostgreSQL migration plan
+        run: pnpm db:migrate:dry-run
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable
+
+      - name: Test PostgreSQL migration dry run
+        run: pnpm test:postgres-migration-dry-run
+        env:
+          POSTGRES_TEST_URL: postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable
 
       - name: Typecheck
         run: pnpm check-types

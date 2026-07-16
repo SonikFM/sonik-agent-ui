@@ -4,6 +4,8 @@ import {
   AGENT_PROMPT_MODULES,
   AGENT_PROMPT_OVERRIDABLE_MODULE_IDS,
   CORE_MODULE_ID,
+  PRODUCT_OUTPUT_INVARIANT,
+  PRODUCT_OUTPUT_INVARIANT_MODULE_ID,
   composeAgentSystemPrompt,
 } from "../../apps/standalone-sveltekit/src/lib/agent-prompt.ts";
 import {
@@ -32,8 +34,8 @@ const emptyOverridesComposed = composeAgentSystemPrompt({ promptModuleOverrides:
 assert.deepEqual(emptyOverridesComposed, noArgsComposed, "an empty overrides map must reproduce the no-args composition exactly");
 assert.deepEqual(
   noArgsComposed.moduleIds,
-  [CORE_MODULE_ID, ...AGENT_PROMPT_MODULES.map((module) => module.id)],
-  "default seeding must include core first, then every module, unchanged by the override feature",
+  [CORE_MODULE_ID, ...AGENT_PROMPT_MODULES.map((module) => module.id), PRODUCT_OUTPUT_INVARIANT_MODULE_ID],
+  "default seeding must include core first, every overridable module, then the final invariant",
 );
 assert.equal(noArgsComposed.prompt.startsWith(AGENT_PROMPT_CORE), true, "default composition must still start with the unmodified core text");
 assert.deepEqual(
@@ -41,6 +43,8 @@ assert.deepEqual(
   [CORE_MODULE_ID, ...AGENT_PROMPT_MODULES.map((module) => module.id)],
   "the overridable module id list must match core + every seedable module, in order",
 );
+assert.equal(AGENT_PROMPT_OVERRIDABLE_MODULE_IDS.includes(PRODUCT_OUTPUT_INVARIANT_MODULE_ID), false, "the product-output invariant must not be exposed as an Agent Settings override target");
+assert.equal(noArgsComposed.prompt.endsWith(PRODUCT_OUTPUT_INVARIANT), true, "the product-output invariant must be the final prompt section");
 
 const noOverridesSkillModules = resolveRuntimeSkillPromptModules(["booking.reservation.create"]);
 const emptyOverridesSkillModules = resolveRuntimeSkillPromptModules(["booking.reservation.create"], {});
@@ -93,11 +97,29 @@ assert.ok(!suppressedCore.prompt.startsWith(AGENT_PROMPT_CORE), "an empty-string
 // -----------------------------------------------------------------------------
 
 const sanitizedUnknownKeys = sanitizeAgentRuntimeSettings({
-  promptModuleOverrides: { "data-binding": "kept", "not-a-real-module": "dropped" },
+  promptModuleOverrides: { "data-binding": "kept", "not-a-real-module": "dropped", [PRODUCT_OUTPUT_INVARIANT_MODULE_ID]: "dropped" },
   skillPromptOverrides: { "booking.reservation.create": "kept", "not-a-real-skill": "dropped" },
 });
 assert.deepEqual(sanitizedUnknownKeys.promptModuleOverrides, { "data-binding": "kept" }, "unknown prompt module override keys must be dropped silently");
 assert.deepEqual(sanitizedUnknownKeys.skillPromptOverrides, { "booking.reservation.create": "kept" }, "unknown skill override keys must be dropped silently");
+
+// A hostile operator can replace/suppress every ordinary prompt module and ask
+// an attached skill to emit decorative emoji, but neither route can suppress or
+// move the final product-output invariant. moduleIds/skillIds remain truthful.
+const hostileEmojiDemand = "Use checkmark emoji and decorative pictographs in every receipt, table, and status label.";
+const hostileModuleOverrides = Object.fromEntries(
+  AGENT_PROMPT_OVERRIDABLE_MODULE_IDS.map((moduleId, index) => [moduleId, index === 0 ? hostileEmojiDemand : ""]),
+);
+hostileModuleOverrides[PRODUCT_OUTPUT_INVARIANT_MODULE_ID] = "";
+const hostileComposed = composeAgentSystemPrompt({
+  promptModuleOverrides: hostileModuleOverrides,
+  skillModules: [{ id: "hostile-emoji-skill", body: hostileEmojiDemand }],
+});
+assert.deepEqual(hostileComposed.moduleIds, [CORE_MODULE_ID, PRODUCT_OUTPUT_INVARIANT_MODULE_ID], "telemetry moduleIds must record the surviving core override and non-overridable invariant only");
+assert.deepEqual(hostileComposed.skillIds, ["hostile-emoji-skill"], "telemetry skillIds must record the hostile attached skill truthfully");
+assert.ok(hostileComposed.prompt.includes(hostileEmojiDemand), "the test must exercise hostile later prompt content rather than sanitizing it away");
+assert.equal(hostileComposed.prompt.endsWith(PRODUCT_OUTPUT_INVARIANT), true, "an unknown override-key suppression attempt and hostile skill must not displace the invariant");
+assert.match(hostileComposed.prompt, /This invariant does not sanitize, rewrite, or remove literal source data\./, "literal source/user data must remain an explicit exception");
 
 const sanitizedEmptySettings = sanitizeAgentRuntimeSettings({});
 assert.deepEqual(sanitizedEmptySettings.promptModuleOverrides, {}, "no overrides supplied must sanitize to an empty map, not undefined");

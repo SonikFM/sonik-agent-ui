@@ -130,6 +130,24 @@ export interface AgentUiActionDescriptor {
   targetId?: string;
 }
 
+export type AgentUiCanvasControlId = "preview" | "document" | "fullscreen" | "clear";
+
+export type AgentUiCanvasControlDisabledReason =
+  | "streaming"
+  | "missing_active_artifact"
+  | "missing_active_document"
+  | "missing_workspace_content";
+
+export interface AgentUiCanvasControlState {
+  id: AgentUiCanvasControlId;
+  label: string;
+  enabled: boolean;
+  active: boolean;
+  disabledReason?: AgentUiCanvasControlDisabledReason;
+}
+
+export type AgentUiCanvasControlStateMap = Record<AgentUiCanvasControlId, AgentUiCanvasControlState>;
+
 export interface AgentUiTargetRegistrySnapshot {
   version: string;
   generatedAt: string;
@@ -177,6 +195,8 @@ export interface AgentUiPageControl {
   getTargetRegistry: () => AgentUiTargetRegistrySnapshot | null;
   getActiveWorkflowState: () => AgentUiWorkflowSnapshot;
   getApprovalState: () => AgentUiApprovalStateSnapshot;
+  /** Snapshot of the four presentation-only canvas controls. */
+  getCanvasControls?: () => AgentUiCanvasControlStateMap;
   /** Phase 5 (agent-creation-tool-plan-2026-07-13.md): optional snapshot of
    *  the workflow-builder mode's working state, when that mode is mounted.
    *  Additive/optional so hosts that predate the builder mode see no change. */
@@ -293,8 +313,8 @@ const SECRET_KEY_PATTERN = /(authorization|api[-_]?key|token|secret|password|coo
 const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
 const PROVIDER_PRIVATE_KEY_PATTERN = /^(?:provider(?:metadata|data|options|request|response|id|name|ref|reference|references)?|model(?:metadata|data|options|request|response|id|name)?)$/;
 const FAILURE_KEY_PATTERN = /(error|failure|exception)/i;
-const SAFE_FAILURE_STRING_KEYS = /^(schemaVersion|eventId|source|event|runId|phase|requestId|traceId|traceparent|sessionId|messageId|toolCallId|toolName|artifactId|documentId|commandId|familyId|operationId|stableInputHash|code|error_code|status|kind|type|manifestType|severity|effect|approval|method|at|surface|commandFamily|commandSource|commandEffect|runtimeStatus|hostSessionSource|loadMode|contextSource|mode|activeSessionId|activeArtifactId|activeDocumentId|pageType|conversationStatus)$/i;
-const SAFE_FAILURE_REASON_CODES = new Set(["duplicate", "busy", "blocked"]);
+const SAFE_FAILURE_STRING_KEYS = /^(schemaVersion|eventId|source|event|runId|workflowRunId|phase|requestId|traceId|traceparent|sessionId|messageId|toolCallId|toolName|artifactId|documentId|commandId|familyId|operationId|stableInputHash|code|error_code|status|kind|type|manifestType|severity|effect|approval|method|at|surface|commandFamily|commandSource|commandEffect|runtimeStatus|hostSessionSource|loadMode|contextSource|mode|activeSessionId|activeArtifactId|activeDocumentId|pageType|conversationStatus)$/i;
+const SAFE_FAILURE_REASON_CODES = new Set(["duplicate", "busy", "blocked", "ledger_read_failed", "ledger_write_failed"]);
 const SAFE_TELEMETRY_ERROR = "Run failed";
 
 export function createRequestId(prefix = "req"): string {
@@ -558,6 +578,23 @@ export function sanitizeTelemetryValue(value: unknown, depth = 0, errorBearing =
     return output;
   }
   return String(value);
+}
+
+/** Redacts durable JSON without telemetry's size/depth limits, so safe receipts
+ * remain replayable byte-for-byte while secret-bearing keys and values do not. */
+export function sanitizePersistenceValue(value: unknown): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value === "string") return value.replace(SECRET_VALUE_PATTERN, "[REDACTED]");
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map(sanitizePersistenceValue);
+  if (typeof value === "object") {
+    const output: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = SECRET_KEY_PATTERN.test(key) ? "[REDACTED]" : sanitizePersistenceValue(entry);
+    }
+    return output;
+  }
+  return value;
 }
 
 function containsFailureKey(value: unknown, depth = 0): boolean {

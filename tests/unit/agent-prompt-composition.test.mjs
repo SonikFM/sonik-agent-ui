@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {
   AGENT_PROMPT_CORE,
   AGENT_PROMPT_MODULES,
+  PRODUCT_OUTPUT_INVARIANT,
+  PRODUCT_OUTPUT_INVARIANT_MODULE_ID,
   composeAgentSystemPrompt,
 } from "../../apps/standalone-sveltekit/src/lib/agent-prompt.ts";
 import {
@@ -53,12 +55,17 @@ const MONOLITH_RULE_FRAGMENTS = [
   "Do NOT use booking.create.hold for reservation, booking, or tee-time intents unless the user explicitly asks for a temporary hold.",
   "A standalone fixture-backed read-only booking host command may be mounted for local testing;",
   // data-binding module
-  "For inline JSON-render responses outside createJsonArtifact, embed fetched data directly in /state paths so components can reference it.",
+  "For inline JSON-render responses, embed fetched data directly in /state paths so components can reference it.",
   "The state model is the single source of truth for inline/patch UI specs.",
   "Always use the { \"$state\": \"/foo\" } object syntax for inline/patch data binding.",
 ];
 
 const defaultComposed = composeAgentSystemPrompt();
+assert.equal(
+  AGENT_PROMPT_CORE.includes("createJsonArtifact"),
+  false,
+  "core must not advertise a tool that preview-only turns do not mount",
+);
 for (const fragment of MONOLITH_RULE_FRAGMENTS) {
   assert.ok(
     defaultComposed.prompt.includes(fragment),
@@ -88,10 +95,12 @@ assert.ok(
 // Default seeding records the always-on core plus every module and no skills.
 assert.deepEqual(
   defaultComposed.moduleIds,
-  ["core", ...AGENT_PROMPT_MODULES.map((module) => module.id)],
-  "default seeding must include the core and every module",
+  ["core", ...AGENT_PROMPT_MODULES.map((module) => module.id), PRODUCT_OUTPUT_INVARIANT_MODULE_ID],
+  "default seeding must include the core, every seedable module, and the final product-output invariant",
 );
 assert.deepEqual(defaultComposed.skillIds, [], "default seeding must not append any skills");
+assert.equal(defaultComposed.prompt.endsWith(PRODUCT_OUTPUT_INVARIANT), true, "the non-overridable product-output invariant must be the final composed prompt section");
+assert.match(defaultComposed.prompt, /Preserve literal source or user-provided data, code, identifiers, and URLs exactly/, "the invariant must preserve literal source and user data rather than sanitizing it");
 
 // Every module seeds under default (empty) context — reproduces today's monolith.
 for (const module of AGENT_PROMPT_MODULES) {
@@ -106,6 +115,8 @@ const coreIndex = composedWithSkills.prompt.indexOf(AGENT_PROMPT_CORE.slice(0, 8
 const skillHeaderIndex = composedWithSkills.prompt.indexOf("RUNTIME SKILLS (attached for this turn only):");
 assert.ok(coreIndex >= 0, "core block must be present when skills are appended");
 assert.ok(skillHeaderIndex > coreIndex, "skill bodies must be appended AFTER the core");
+assert.ok(composedWithSkills.prompt.indexOf(PRODUCT_OUTPUT_INVARIANT) > skillHeaderIndex, "the product-output invariant must remain after hostile or benign runtime skill bodies");
+assert.equal(composedWithSkills.prompt.endsWith(PRODUCT_OUTPUT_INVARIANT), true, "runtime skills must not displace the final product-output invariant");
 assert.ok(
   composedWithSkills.skillIds.includes(skillModules[0].id),
   "composed skillIds must record the appended skill",
@@ -150,6 +161,7 @@ const composedForIntake = composeAgentSystemPrompt({
 assert.ok(composedForIntake.skillIds.includes("booking.context.intake"), "intake skill must be appended");
 assert.ok(!composedForIntake.moduleIds.includes("booking-commands"), "preview-only intake turns must not seed booking command module");
 assert.ok(!composedForIntake.moduleIds.includes("json-artifact-authoring"), "preview-only intake turns should not seed hidden createJsonArtifact guidance");
+assert.ok(!composedForIntake.prompt.includes("createJsonArtifact"), "preview-only intake prompt must not mention the unmounted createJsonArtifact tool");
 assert.ok(composedForIntake.prompt.includes("call createBookingIntakeArtifact exactly once"), "intake prompt must require deterministic booking-intake artifact behavior");
 assert.ok(
   !composedForIntake.prompt.includes("The command catalog is CLI-first and context-efficient"),
@@ -162,7 +174,15 @@ const composedForReservation = composeAgentSystemPrompt({
   skillModules: reservationSkillModules,
 });
 assert.ok(composedForReservation.moduleIds.includes("booking-commands"), "reservation execution turns must keep booking command module");
+assert.ok(composedForReservation.moduleIds.includes("json-artifact-authoring"), "eligible turns must retain the gated JSON artifact authoring module");
+assert.ok(composedForReservation.prompt.includes("you MUST call createJsonArtifact exactly once"), "eligible turns must retain createJsonArtifact authoring guidance");
 assert.ok(composedForReservation.prompt.includes("booking.get.availability -> previewBookingReservationCommand"), "reservation prompt must retain command workflow guidance");
+
+const composedForDocument = composeAgentSystemPrompt({
+  context: { hasJsonArtifactTool: false, hasDocumentTools: true },
+});
+assert.ok(!composedForDocument.moduleIds.includes("json-artifact-authoring"), "document turns must not seed guidance for the unmounted JSON artifact tool");
+assert.ok(!composedForDocument.prompt.includes("createJsonArtifact"), "document turns must not mention the unmounted createJsonArtifact tool");
 
 const composedWithoutBookingRuntime = composeAgentSystemPrompt({
   context: { hasBookingRuntime: false },
@@ -190,6 +210,8 @@ assert.ok(composedWithRefinement.prompt.includes("REFINEMENT CONTRACT (active in
 assert.ok(composedWithRefinement.prompt.includes("submitIntakeAnswer(questionId, value)"), "refinement contract must direct the model to patch via submitIntakeAnswer");
 assert.ok(composedWithRefinement.prompt.includes("never call createBookingIntakeArtifact again"), "refinement contract must forbid recreating the artifact");
 assert.ok(composedWithRefinement.prompt.includes(JSON.stringify(activeIntakeSpec.state.answers.hours)) || composedWithRefinement.prompt.includes("Tuesday to Sunday"), "refinement contract must embed the current spec content");
+assert.ok(composedWithRefinement.prompt.indexOf("REFINEMENT CONTRACT") < composedWithRefinement.prompt.indexOf(PRODUCT_OUTPUT_INVARIANT), "refinement context must precede the final product-output invariant");
+assert.equal(composedWithRefinement.prompt.endsWith(PRODUCT_OUTPUT_INVARIANT), true, "refinement context must not displace the final product-output invariant");
 
 const composedWithoutRefinement = composeAgentSystemPrompt();
 assert.ok(!composedWithoutRefinement.prompt.includes("REFINEMENT CONTRACT"), "no active intake spec must omit the refinement contract section");

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { DEFAULT_WORKSPACE_SESSION_NAME, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
+  import { formatDateDisplay } from "$lib/date-display";
+  import type { AgentSessionHistoryState } from "@sonik-agent-ui/chat-surface";
   import { tick } from "svelte";
   interface WorkspaceSessionSummary {
     id: string;
@@ -19,6 +21,7 @@
     archivedSessions?: WorkspaceSessionSummary[];
     busy?: boolean;
     error?: string | null;
+    historyState?: AgentSessionHistoryState;
     collapsed?: boolean;
     onCreate: () => void;
     onSwitch: (sessionId: string) => void;
@@ -36,6 +39,7 @@
     archivedSessions = [],
     busy = false,
     error = null,
+    historyState = { status: "loading" },
     collapsed = false,
     onCreate,
     onSwitch,
@@ -77,16 +81,6 @@
     const useful = words.filter((word) => !/^(the|and|for|with|from|into|live|artifact|draft|intake)$/i.test(word));
     const selected = (useful.length > 0 ? useful : words).slice(0, 2);
     return selected.map((word) => word.slice(0, 4)).join(" ");
-  }
-
-  function formatSessionTime(value: string | null): string {
-    if (!value) return "No messages yet";
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(new Date(value));
   }
 
   function openContextMenu(event: MouseEvent, session: WorkspaceSessionSummary): void {
@@ -161,12 +155,12 @@
         <h2>Chats</h2>
       </div>
     {/if}
-    <button type="button" class="new-chat-button" class:new-chat-button--collapsed={collapsed} onclick={onCreate} disabled={busy} aria-label="New chat">
+    <button type="button" class="new-chat-button" class:new-chat-button--collapsed={collapsed} onclick={onCreate} disabled={busy} data-disabled-reason={busy ? "Another chat action is in progress." : undefined} aria-label="New chat">
       {collapsed ? "+" : "+ New chat"}
     </button>
   </div>
 
-  {#if error}
+  {#if error && (historyState.status !== "error" || error !== historyState.message)}
     <p class="session-rail-error">{error}</p>
   {/if}
 
@@ -184,7 +178,13 @@
           {#if collapsed}
             <small>{sessionKindShort(session)}</small>
           {:else}
-            <small>{formatSessionTime(session.last_message_at ?? session.updated_at)}</small>
+            <small>{formatDateDisplay(session.last_message_at ?? session.updated_at, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+              fallback: "No messages yet",
+            })}</small>
           {/if}
         </button>
         {#if collapsed}
@@ -214,7 +214,13 @@
         {/if}
       </article>
     {:else}
-      <p class="session-empty">No chats yet. Start one when you are ready.</p>
+      {#if historyState.status === "loading"}
+        <p class="session-empty">Loading chats…</p>
+      {:else if historyState.status === "empty"}
+        <p class="session-empty">No chats yet. Start one when you are ready.</p>
+      {:else if historyState.status === "error"}
+        <p class="session-empty">Your current chat is preserved. Refresh to try loading history again.</p>
+      {/if}
     {/each}
   </div>
 
@@ -264,10 +270,10 @@
     >
       <p>{contextMenu.sessionName}</p>
       {#if onToggleImportant}
-        <button type="button" role="menuitem" onclick={toggleImportantContextSession} disabled={busy}>{contextMenu.important ? "Unpin chat" : "Pin chat"}</button>
+        <button type="button" role="menuitem" onclick={toggleImportantContextSession} disabled={busy} data-disabled-reason={busy ? "Another chat action is in progress." : undefined}>{contextMenu.important ? "Unpin chat" : "Pin chat"}</button>
       {/if}
-      <button type="button" role="menuitem" onclick={archiveContextSession} disabled={busy}>Archive chat</button>
-      <button type="button" role="menuitem" class="danger-action" onclick={deleteContextSession} disabled={busy}>Delete chat</button>
+      <button type="button" role="menuitem" onclick={archiveContextSession} disabled={busy} data-disabled-reason={busy ? "Another chat action is in progress." : undefined}>Archive chat</button>
+      <button type="button" role="menuitem" class="danger-action" onclick={deleteContextSession} disabled={busy} data-disabled-reason={busy ? "Another chat action is in progress." : undefined}>Delete chat</button>
     </div>
   {/if}
 </div>
@@ -437,7 +443,7 @@
   .session-select span {
     overflow: hidden;
     font-size: 0.83rem;
-    font-weight: 750;
+    font-weight: 800;
     line-height: 1.2;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -127,6 +127,16 @@ function observe(page) {
   page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) pushBounded(evidence.console, { at: new Date().toISOString(), type: message.type(), text: redact(message.text()).slice(0, 2000) }); });
   page.on('pageerror', (error) => pushBounded(evidence.errors, redact(error.stack || error.message).slice(0, 4000)));
   page.on('requestfailed', (request) => pushBounded(evidence.requestFailures, { at: new Date().toISOString(), method: request.method(), url: redact(request.url()).slice(0, 800), error: request.failure()?.errorText ?? null }));
+  // Test-harness-only capture of the already-emitted opaque authority. Keep it
+  // out of evidence/logs and forward it byte-for-byte for the direct artifact
+  // probe; never reconstruct it from display page context.
+  page.on('request', (request) => {
+    try {
+      if (new URL(request.url()).origin !== agentOrigin) return;
+      const header = request.headers()['x-sonik-agent-ui-host-context'];
+      if (header) latestAgentHostContextHeader = header;
+    } catch {}
+  });
   page.on('response', async (response) => {
     try {
       const url = new URL(response.url());
@@ -136,6 +146,8 @@ function observe(page) {
     } catch {}
   });
 }
+
+let latestAgentHostContextHeader = null;
 async function findAgentFrame(page) {
   evidence.openAttempts ??= [];
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -247,33 +259,8 @@ try {
   await frame.waitForFunction(() => window.__sonikAgentUI.getAssertions().hasActiveSession === true && Boolean(window.__sonikAgentUI.getPageContext().activeSessionId), undefined, { timeout: 60000 });
   evidence.sessionId = createSession.expectedSessionId ?? createSession.activeSessionId ?? await frame.evaluate(() => window.__sonikAgentUI.getPageContext().activeSessionId);
 
-  const artifactUpsert = await frame.evaluate(async ({ artifactId, sessionId, contextName }) => {
-    const encode = (value) => btoa(unescape(encodeURIComponent(JSON.stringify(value)))).replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-    const pageContext = window.__sonikAgentUI.getPageContext();
-    const hostSession = pageContext.hostSession;
-    if (!hostSession?.authenticated) throw new Error('missing authenticated hostSession');
-    const organizationId = hostSession.organizationId ?? pageContext.organizationId;
-    const userId = hostSession.userId ?? hostSession.principalId;
-    const signedHeader = encode({
-      authenticated: true,
-      organizationId,
-      scopes: pageContext.scopes ?? hostSession.scopes ?? [],
-      signatureVersion: pageContext.signatureVersion ?? null,
-      issuedAt: pageContext.issuedAt ?? null,
-      expiresAt: pageContext.expiresAt ?? null,
-      signature: pageContext.signature ?? null,
-      hostSession: {
-        source: hostSession.source,
-        sessionId: hostSession.sessionId ?? null,
-        userId,
-        principalId: hostSession.principalId ?? userId,
-        organizationId,
-        authenticated: true,
-        scopes: hostSession.scopes ?? [],
-        expiresAt: hostSession.expiresAt ?? null,
-        ...(hostSession.metadata ? { metadata: hostSession.metadata } : {}),
-      },
-    });
+  if (!latestAgentHostContextHeader) throw new Error('opaque host authority was not observed on the session request');
+  const artifactUpsert = await frame.evaluate(async ({ artifactId, sessionId, contextName, signedHeader }) => {
     const spec = {
       root: 'main',
       elements: {
@@ -313,7 +300,7 @@ try {
     });
     const body = await response.text();
     return { ok: response.ok, status: response.status, headers: { policy: response.headers.get('x-sonik-agent-ui-persistence-policy'), mode: response.headers.get('x-sonik-agent-ui-persistence-mode'), hostAuthenticated: response.headers.get('x-sonik-agent-ui-host-authenticated'), hostOrg: response.headers.get('x-sonik-agent-ui-host-org'), hostUser: response.headers.get('x-sonik-agent-ui-host-user'), cloudError: response.headers.get('x-sonik-agent-ui-cloud-error') }, body: body.slice(0, 2000) };
-  }, { artifactId, sessionId: evidence.sessionId, contextName });
+  }, { artifactId, sessionId: evidence.sessionId, contextName, signedHeader: latestAgentHostContextHeader });
   evidence.artifactUpsert = artifactUpsert;
   if (!artifactUpsert.ok) throw new Error(`artifact upsert failed: ${JSON.stringify(artifactUpsert)}`);
   const reload = await frame.evaluate(async () => window.__sonikAgentUI.actions.reloadSession());

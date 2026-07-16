@@ -24,6 +24,7 @@ assert.equal(minimalSettings.requireZdr, true, "minimal definition defaults requ
 assert.deepEqual(minimalSettings.skillIds, [], "minimal definition has no required skills");
 assert.deepEqual(minimalSettings.promptModuleOverrides, {}, "minimal definition has no prompt overrides");
 assert.deepEqual(minimalSettings.customSkills, [], "minimal definition has no custom skills");
+assert.equal(minimalSettings.toolPermissionModes.bookings, "off", "persisted definitions default every mapped runtime family off");
 
 // 2. Extended definition -> toolPolicy maps to toolPermissionModes, promptModules
 // overrides map to promptModuleOverrides, inline modelPolicy maps to modelId/requireZdr.
@@ -86,6 +87,21 @@ assert.equal(isCapabilityPinned(pinnedWithUnregisteredId, "booking.get.availabil
 assert.equal(isCapabilityPinned(pinnedWithUnregisteredId, "booking.create.booking"), false, "off family denies its capability");
 assert.equal(pinnedWithUnregisteredId["not.a.real.capability"], undefined, "resolveEffectivePinnedCapabilities never fabricates an entry for an unregistered id");
 assert.equal(isCapabilityPinned(pinnedWithUnregisteredId, "not.a.real.capability"), false, "isCapabilityPinned treats an unregistered id as denied by default, not merely unknown");
+
+for (const mode of ["off", "ask", "allow"]) {
+  const definition = agentDefinitionSchema.parse({ agentId: `sonik.agent.booking-${mode}`, title: mode, toolPolicy: { bookings: mode } });
+  const settings = definitionToRuntimeSettings(definition);
+  const pin = resolveRunCapabilityPin({ capabilityFamilyIds: { "booking.create.booking": "bookings" }, familyModes: settings.toolPermissionModes });
+  assert.equal(settings.toolPermissionModes.bookings, mode, `canonical bookings ${mode} survives definition adaptation`);
+  assert.equal(pin["booking.create.booking"], mode, `canonical bookings ${mode} survives runtime pinning`);
+}
+const legacySettings = definitionToRuntimeSettings(agentDefinitionSchema.parse({
+  agentId: "sonik.agent.legacy-booking-create",
+  title: "Legacy",
+  toolPolicy: { "booking.create": "allow" },
+}));
+assert.equal(legacySettings.toolPermissionModes.bookings, "off", "legacy dotted Allow fails closed instead of widening to the canonical family");
+assert.equal(legacySettings.toolPermissionModes["booking-guests"], "ask", "non-catalog curated defaults remain unchanged");
 
 // 6. AC-3 (end to end): an agent whose definition grants only booking reads
 // cannot invoke an ungranted write through the real command-catalog enforcement.

@@ -25,6 +25,7 @@ import { stripReservationGuestApprovalFields, validateReservationGuestForBooking
 
 export interface ReservationCommitContext {
   sessionId?: string | null;
+  requestId?: string;
   pageContext?: AgentPageContext;
   hostSession?: HostSessionEnvelope | null;
   approvedCommandIds?: string[];
@@ -127,6 +128,7 @@ export async function commitBookingReservationCommand(context: ReservationCommit
         ...executionContext,
         action: "commit",
         source: "agent-ui",
+        requestId: context.requestId ?? executionContext.requestId,
         sessionId: executionContext.sessionId ?? context.sessionId,
         approved: context.approvedCommandIds?.includes(commandId) === true,
         toolPolicy: { familyModes: context.toolPermissionModes },

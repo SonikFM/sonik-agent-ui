@@ -17,6 +17,38 @@ function gridColumns(page: import("@playwright/test").Page): Promise<string> {
   return page.locator(".workspace-grid").evaluate((el) => getComputedStyle(el).gridTemplateColumns);
 }
 
+test("pane-split divider stays clear of the chat scrollbar and exposes hover and keyboard focus", async ({ page }) => {
+  await openTwoPaneWorkspace(page);
+
+  const divider = page.locator(".workspace-pane-divider");
+  const scrollbox = page.locator('.workspace-pane--chat [role="log"] > .overflow-auto');
+  await expect(scrollbox).toBeVisible();
+  const dividerBox = await divider.boundingBox();
+  const scrollboxBox = await scrollbox.boundingBox();
+  if (!dividerBox || !scrollboxBox) throw new Error("divider or transcript scrollbox not measurable");
+  expect(dividerBox.x - (scrollboxBox.x + scrollboxBox.width)).toBeGreaterThanOrEqual(4);
+
+  const restingColor = await divider.evaluate((element) => getComputedStyle(element, "::after").backgroundColor);
+  await divider.hover();
+  await expect.poll(() => divider.evaluate((element) => getComputedStyle(element, "::after").backgroundColor)).not.toBe(restingColor);
+
+  await page.mouse.move(0, 0);
+  await page.keyboard.press("Tab");
+  await divider.focus();
+  await expect(divider).toBeFocused();
+  const focusStyle = await divider.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      outlineStyle: style.outlineStyle,
+      outlineWidth: Number.parseFloat(style.outlineWidth),
+      dividerColor: getComputedStyle(element, "::after").backgroundColor,
+    };
+  });
+  expect(focusStyle.outlineStyle).not.toBe("none");
+  expect(focusStyle.outlineWidth).toBeGreaterThanOrEqual(2);
+  expect(focusStyle.dividerColor).not.toBe(restingColor);
+});
+
 test("pane-split divider drags the chat/artifact split and persists it", async ({ page }) => {
   await openTwoPaneWorkspace(page);
 

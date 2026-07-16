@@ -237,7 +237,7 @@
     justify-self: start;
     align-self: stretch;
     width: 0.75rem;
-    transform: translateX(calc(-50% - 0.25rem));
+    transform: translateX(-0.5rem);
     cursor: col-resize;
     touch-action: none;
     z-index: 2;
@@ -249,7 +249,7 @@
     display: block;
     width: 2px;
     height: 100%;
-    margin: 0 auto;
+    margin-left: 0.1875rem;
     border-radius: 1px;
     background: var(--sonik-border-color);
     transition: background 120ms ease-out;
@@ -329,6 +329,10 @@
 
     .workspace-pane-divider {
       display: block;
+    }
+
+    .workspace-grid--artifact-open .workspace-pane--chat :global([role="log"] > .overflow-auto) {
+      margin-inline-end: 0.5rem;
     }
   }
 </style>

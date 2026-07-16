@@ -11,6 +11,7 @@ import { agentDefinitionSchema, marketplacePackageVersionSchema } from "../../pa
 
 // 1. Publish round trip: draft -> package version -> adapter -> settings.
 const store = createInMemoryAgentDefinitionStore();
+const authority = { organizationId: "org-campaign", userId: "user-campaign", scopes: ["agent-definitions:*"] };
 const draftDefinition = agentDefinitionSchema.parse({
   agentId: "sonik.agent.campaign-drafter",
   title: "Campaign Drafter",
@@ -19,18 +20,18 @@ const draftDefinition = agentDefinitionSchema.parse({
   modelPolicy: { modelId: "anthropic/claude-haiku-4.5", requireZdr: true },
 });
 
-assert.equal(store.getDraft(draftDefinition.agentId), null, "no draft exists before saveDraft");
-const savedDraft = store.saveDraft(draftDefinition);
+assert.equal(store.getDraft(authority, draftDefinition.agentId), null, "no draft exists before saveDraft");
+const savedDraft = store.saveDraft(authority, draftDefinition);
 assert.equal(savedDraft.agentId, draftDefinition.agentId, "saveDraft returns the persisted record");
-assert.deepEqual(store.getDraft(draftDefinition.agentId)?.definition, draftDefinition, "getDraft round-trips the saved definition");
+assert.deepEqual(store.getDraft(authority, draftDefinition.agentId)?.definition, draftDefinition, "getDraft round-trips the saved definition");
 
 assert.throws(
-  () => store.publish({ agentId: "sonik.agent.no-such-draft", packageSemver: "0.1.0" }),
+  () => store.publish(authority, { agentId: "sonik.agent.no-such-draft", packageSemver: "0.1.0" }),
   /No draft agent definition found/,
   "publish requires an existing draft",
 );
 
-const version = store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.1.0" });
+const version = store.publish(authority, { agentId: draftDefinition.agentId, packageSemver: "0.1.0" });
 const parsedVersion = marketplacePackageVersionSchema.parse(version);
 assert.equal(parsedVersion.packageVersionId, "sonik.agent.campaign-drafter@0.1.0", "publish mints packageId@semver");
 assert.equal(parsedVersion.manifest.kind, "agent", "published version wraps kind:agent");
@@ -39,35 +40,35 @@ assert.equal("status" in parsedVersion.manifest, false, "no mutable draft/publis
 
 // D002: packageVersionId is immutable -- publishing the same version again is rejected.
 assert.throws(
-  () => store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.1.0" }),
+  () => store.publish(authority, { agentId: draftDefinition.agentId, packageSemver: "0.1.0" }),
   /already published/,
   "re-publishing the same packageSemver is rejected (immutable packageVersionId)",
 );
 
 // A version bump publishes cleanly and becomes the new "current" resolution.
 const editedDraft = agentDefinitionSchema.parse({ ...draftDefinition, title: "Campaign Drafter v2", toolPolicy: { "booking-resources": "allow", booking: "off" } });
-store.saveDraft(editedDraft);
+store.saveDraft(authority, editedDraft);
 
 // P1: publish rejects any packageSemver that doesn't advance past the latest published version,
 // not just an exact duplicate (D002 above only catches the identical-version case).
 assert.throws(
-  () => store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.0.9" }),
+  () => store.publish(authority, { agentId: draftDefinition.agentId, packageSemver: "0.0.9" }),
   /monotonic increase required/,
   "publishing a semver lower than the latest published version is rejected",
 );
 assert.throws(
-  () => store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.1.0" }),
+  () => store.publish(authority, { agentId: draftDefinition.agentId, packageSemver: "0.1.0" }),
   /already published/,
   "publishing the exact latest-published semver again still hits the D002 duplicate check",
 );
 
-const versionTwo = store.publish({ agentId: draftDefinition.agentId, packageSemver: "0.2.0" });
-assert.equal(store.listPublishedVersions(draftDefinition.agentId).length, 2, "both published versions are retained (append-only)");
-assert.deepEqual(store.resolvePublished(draftDefinition.agentId), editedDraft, "resolvePublished resolves the MOST RECENT published version");
+const versionTwo = store.publish(authority, { agentId: draftDefinition.agentId, packageSemver: "0.2.0" });
+assert.equal(store.listPublishedVersions(authority, draftDefinition.agentId).length, 2, "both published versions are retained (append-only)");
+assert.deepEqual(store.resolvePublished(authority, draftDefinition.agentId), editedDraft, "resolvePublished resolves the MOST RECENT published version");
 assert.notDeepEqual(versionTwo.manifest.payload.agent, version.manifest.payload.agent, "each published version is an immutable snapshot of the draft at publish time");
 
 // Adapter consumes the resolved published definition exactly like any other definition.
-const settingsFromPublished = definitionToRuntimeSettings(store.resolvePublished(draftDefinition.agentId));
+const settingsFromPublished = definitionToRuntimeSettings(store.resolvePublished(authority, draftDefinition.agentId));
 assert.equal(settingsFromPublished.toolPermissionModes.booking, "off", "adapter maps the newly published definition's toolPolicy");
 assert.equal(settingsFromPublished.modelId, "anthropic/claude-haiku-4.5", "adapter maps the newly published definition's modelPolicy");
 

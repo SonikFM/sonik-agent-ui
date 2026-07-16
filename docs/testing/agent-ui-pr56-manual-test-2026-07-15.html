@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Sonik Agent UI PR 56 Manual Test Console</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --brand: color(srgb 0.42 0.24 0.78);
+      --brand-strong: color(srgb 0.29 0.13 0.59);
+      --brand-soft: color(srgb 0.94 0.92 0.99);
+      --on-brand: color(srgb 1 1 1);
+      --page: color(srgb 0.975 0.978 0.985);
+      --surface: color(srgb 1 1 1);
+      --surface-muted: color(srgb 0.95 0.95 0.975);
+      --ink: color(srgb 0.09 0.08 0.13);
+      --muted: color(srgb 0.32 0.30 0.39);
+      --line: color(srgb 0.81 0.79 0.86);
+      --success: color(srgb 0.02 0.40 0.22);
+      --success-soft: color(srgb 0.91 0.98 0.94);
+      --danger: color(srgb 0.68 0.08 0.13);
+      --danger-soft: color(srgb 0.99 0.92 0.93);
+      --warning: color(srgb 0.58 0.34 0.01);
+      --warning-soft: color(srgb 0.99 0.96 0.88);
+      --focus: color(srgb 0.33 0.16 0.68);
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-6: 1.5rem;
+      --space-8: 2rem;
+      --space-12: 3rem;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 1rem;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select, textarea { font: inherit; }
+    button, input, select, textarea { max-width: 100%; }
+    button, select, input { min-height: 2.75rem; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+      padding: var(--space-2) var(--space-4);
+      font-weight: 600;
+    }
+    button:hover { border-color: var(--brand); color: var(--brand-strong); }
+    button.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+    button.danger { border-color: var(--danger); color: var(--danger); }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--ink);
+      padding: var(--space-2) var(--space-3);
+    }
+    textarea { min-height: 4.5rem; resize: vertical; }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.875rem;
+      overflow-wrap: anywhere;
+    }
+    h1, h2, h3 { margin: 0; text-wrap: balance; }
+    h1 { font-size: 1.75rem; line-height: 1.2; letter-spacing: -0.02em; }
+    h2 { font-size: 1.25rem; line-height: 1.25; }
+    h3 { font-size: 1rem; line-height: 1.35; }
+    p { margin: 0; text-wrap: pretty; }
+    a { color: var(--brand-strong); }
+
+    .skip-link {
+      position: fixed;
+      inset-block-start: var(--space-2);
+      inset-inline-start: var(--space-2);
+      z-index: 5;
+      translate: 0 -150%;
+      background: var(--surface);
+      color: var(--ink);
+      border: 1px solid var(--brand);
+      border-radius: 4px;
+      padding: var(--space-2) var(--space-3);
+    }
+    .skip-link:focus { translate: 0; }
+    .page-header { background: var(--brand); color: var(--on-brand); }
+    .page-header__inner, main, .control-bar__inner {
+      width: min(100% - 2rem, 84rem);
+      margin-inline: auto;
+    }
+    .page-header__inner {
+      display: grid;
+      gap: var(--space-3);
+      padding-block: var(--space-8);
+    }
+    .page-header p { max-width: 72ch; }
+    .page-header__ref { font-weight: 600; }
+    main { display: grid; gap: var(--space-12); padding-block: var(--space-8) var(--space-12); }
+    section { scroll-margin-top: 8rem; }
+    .section-heading { display: grid; gap: var(--space-2); margin-block-end: var(--space-4); }
+    .section-heading p { max-width: 72ch; color: var(--muted); }
+    .scope-grid, .signoff-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+      gap: var(--space-4);
+    }
+    .field { display: grid; align-content: start; gap: var(--space-2); }
+    .field label { color: var(--muted); font-weight: 600; }
+    .field output {
+      min-height: 2.75rem;
+      display: flex;
+      align-items: center;
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-muted);
+    }
+
+    .control-bar {
+      position: sticky;
+      inset-block-start: 0;
+      z-index: 3;
+      background: var(--brand-soft);
+      border-block-end: 1px solid var(--line);
+    }
+    .control-bar__inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-3) var(--space-4);
+      padding-block: var(--space-3);
+    }
+    .summary { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+    .summary span { white-space: nowrap; }
+    .verdict {
+      padding: var(--space-1) var(--space-3);
+      border: 1px solid var(--brand);
+      border-radius: 4px;
+      color: var(--brand-strong);
+      font-weight: 700;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-inline-start: auto; }
+    .status {
+      width: 100%;
+      min-height: 1.5rem;
+      color: var(--muted);
+      font-size: 0.875rem;
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--space-3);
+      padding: var(--space-4);
+      border-block: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .filters .field label { font-size: 0.875rem; }
+
+    .test-groups { display: grid; gap: var(--space-12); }
+    .test-group { display: grid; gap: var(--space-4); }
+    .test-group__header { display: grid; gap: var(--space-2); }
+    .test-group__header p { color: var(--muted); max-width: 72ch; }
+    .table-wrap {
+      overflow-x: auto;
+      border-block: 1px solid var(--line);
+      background: var(--surface);
+    }
+    table { width: 100%; min-width: 68rem; border-collapse: collapse; }
+    th, td {
+      padding: var(--space-3);
+      border-block-end: 1px solid var(--line);
+      vertical-align: top;
+      text-align: start;
+    }
+    thead th { color: var(--muted); font-size: 0.875rem; font-weight: 600; background: var(--surface-muted); }
+    tbody tr:last-child > * { border-block-end: 0; }
+    tbody tr[data-result="Pass"] { background: var(--success-soft); }
+    tbody tr[data-result="Fail"] { background: var(--danger-soft); }
+    tbody tr[data-result="Blocked"] { background: var(--warning-soft); }
+    .test-id { width: 9.5rem; }
+    .test-severity { width: 6.5rem; }
+    .test-result { width: 8rem; }
+    .test-notes { width: 14rem; }
+    .severity {
+      display: inline-block;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      padding: var(--space-1) var(--space-2);
+      font-size: 0.875rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .severity-critical { color: var(--danger); }
+    .severity-high { color: var(--warning); }
+    .severity-medium { color: var(--muted); }
+    .steps { margin: 0; padding-inline-start: 1.25rem; }
+    .steps li + li { margin-block-start: var(--space-1); }
+    .result-control, .notes-field { font-size: 0.875rem; }
+    .notes-field { min-height: 5rem; }
+    [hidden] { display: none !important; }
+
+    .boundary-list, .governance-list { margin: 0; padding-inline-start: 1.25rem; max-width: 76ch; }
+    .boundary-list li + li, .governance-list li + li { margin-block-start: var(--space-2); }
+    .signoff-grid { padding-block-start: var(--space-2); }
+    .governance {
+      padding-block: var(--space-6);
+      border-block: 1px solid var(--line);
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 58rem) {
+      .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .actions { width: 100%; margin-inline-start: 0; }
+    }
+    @media (max-width: 44rem) {
+      .page-header__inner, main, .control-bar__inner { width: min(100% - 1.5rem, 84rem); }
+      .page-header__inner { padding-block: var(--space-6); }
+      main { gap: var(--space-8); padding-block-start: var(--space-6); }
+      .control-bar { position: static; }
+      .filters { grid-template-columns: 1fr; padding-inline: 0; }
+      .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .table-wrap { overflow-x: visible; }
+      table, tbody, tr, th, td { display: block; width: 100%; min-width: 0; }
+      thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+      }
+      tbody tr { padding-block: var(--space-4); border-block-end: 1px solid var(--line); }
+      tbody tr:last-child { border-block-end: 0; }
+      tbody th, tbody td { border: 0; padding: var(--space-2) var(--space-3); }
+      tbody th { padding-block-end: var(--space-3); }
+      tbody td { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: var(--space-3); }
+      tbody td::before { content: attr(data-label); color: var(--muted); font-size: 0.875rem; font-weight: 600; }
+      .test-id, .test-severity, .test-result, .test-notes { width: 100%; }
+      .notes-field { min-height: 4.5rem; }
+    }
+    @media (max-width: 24rem) {
+      .actions { grid-template-columns: 1fr; }
+      tbody td { grid-template-columns: 1fr; gap: var(--space-1); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+    @media print {
+      @page { size: landscape; margin: 0.45in; }
+      .control-bar, .filters, .skip-link { display: none !important; }
+      body { background: var(--surface); font-size: 0.75rem; print-color-adjust: exact; }
+      .page-header { background: var(--surface); color: var(--ink); border-block-end: 2px solid var(--brand); }
+      .page-header__inner, main { width: 100%; }
+      main { gap: var(--space-6); padding-block: var(--space-4); }
+      .test-groups, .test-group { gap: var(--space-4); }
+      .table-wrap { overflow: visible; }
+      table { min-width: 0; }
+      tr[hidden] { display: table-row !important; }
+      section { break-inside: avoid-page; }
+      .test-group { break-inside: auto; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to test console</a>
+  <header class="page-header">
+    <div class="page-header__inner">
+      <p class="page-header__ref">PR #56 release evidence</p>
+      <h1>Sonik Agent UI manual test console</h1>
+      <p>Validate the repaired file-authority, session-history, workflow, responsive, and privacy contracts without deploying or writing to production services.</p>
+    </div>
+  </header>
+
+  <div class="control-bar" aria-label="Test progress and actions">
+    <div class="control-bar__inner">
+      <div class="summary" aria-label="Result summary">
+        <span>Not run <strong id="count-not-run">0</strong></span>
+        <span>Pass <strong id="count-pass">0</strong></span>
+        <span>Fail <strong id="count-fail">0</strong></span>
+        <span>Blocked <strong id="count-blocked">0</strong></span>
+        <span>N/A <strong id="count-na">0</strong></span>
+      </div>
+      <output class="verdict" id="verdict">In progress</output>
+      <div class="actions" aria-label="Test console actions">
+        <button type="button" class="primary" id="export-results">Export JSON</button>
+        <button type="button" id="copy-failures">Copy failures</button>
+        <button type="button" id="print-results">Print</button>
+        <button type="button" class="danger" id="reset-results">Reset</button>
+      </div>
+      <p class="status" id="status-message" role="status" aria-live="polite">Results save automatically in this browser.</p>
+    </div>
+  </div>
+
+  <main id="main-content">
+    <section aria-labelledby="scope-heading">
+      <div class="section-heading">
+        <h2 id="scope-heading">Scope and references</h2>
+        <p>Record the exact build under test. PR number is fixed; the remaining fields are editable and saved locally.</p>
+      </div>
+      <form id="scope-form" class="scope-grid">
+        <div class="field"><label for="ref-pr">Pull request</label><output id="ref-pr">PR #56</output></div>
+        <div class="field"><label for="ref-branch">Branch</label><input id="ref-branch" data-persist="branch" value="emdash/yellow-zebras-smell-txxjz"></div>
+        <div class="field"><label for="ref-commit">Commit</label><input id="ref-commit" data-persist="commit" placeholder="Git SHA"></div>
+        <div class="field"><label for="ref-build">Build or worker version</label><input id="ref-build" data-persist="build" placeholder="Build identifier"></div>
+        <div class="field"><label for="ref-base-url">Base URL</label><input id="ref-base-url" data-persist="baseUrl" type="url" value="http://localhost:5173"></div>
+        <div class="field"><label for="ref-tester">Tester</label><input id="ref-tester" data-persist="tester" autocomplete="name" placeholder="Name"></div>
+      </form>
+    </section>
+
+    <section aria-labelledby="filters-heading">
+      <div class="section-heading">
+        <h2 id="filters-heading">Find checks</h2>
+        <p>Filters change only what is visible. Hidden results remain saved and included in summary and export.</p>
+      </div>
+      <form class="filters" id="filter-form">
+        <div class="field"><label for="filter-query">Search</label><input id="filter-query" type="search" placeholder="ID, steps, or expected result"></div>
+        <div class="field"><label for="filter-group">Group</label><select id="filter-group"><option value="all">All groups</option></select></div>
+        <div class="field"><label for="filter-severity">Severity</label><select id="filter-severity"><option value="all">All severities</option><option>Critical</option><option>High</option><option>Medium</option></select></div>
+        <div class="field"><label for="filter-result">Result</label><select id="filter-result"><option value="all">All results</option><option>Not run</option><option>Pass</option><option>Fail</option><option>Blocked</option><option>N/A</option></select></div>
+      </form>
+    </section>
+
+    <div class="test-groups" id="test-groups" aria-label="PR 56 critical-path checks"></div>
+
+    <section aria-labelledby="boundaries-heading">
+      <div class="section-heading">
+        <h2 id="boundaries-heading">Safety boundaries</h2>
+        <p>Stop the run if any boundary cannot be guaranteed.</p>
+      </div>
+      <ul class="boundary-list">
+        <li>No deployment, production mutation, provider provisioning, or booking-service write is authorized by this test plan.</li>
+        <li>Use deterministic local fixtures and disposable test data only.</li>
+        <li>File, session, telemetry, and workflow evidence must contain safe typed categories rather than provider or storage error text.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="evidence-heading">
+      <div class="section-heading">
+        <h2 id="evidence-heading">Evidence and sign-off</h2>
+        <p>Record command receipts and screenshot locations, then identify the reviewer responsible for the verdict.</p>
+      </div>
+      <form id="signoff-form" class="signoff-grid">
+        <div class="field"><label for="evidence-links">Evidence paths or links</label><textarea id="evidence-links" data-persist="evidence" placeholder="Commands, logs, screenshots, or PR checks"></textarea></div>
+        <div class="field"><label for="signoff-reviewer">Reviewer</label><input id="signoff-reviewer" data-persist="reviewer" placeholder="Reviewer name"></div>
+        <div class="field"><label for="signoff-date">Review date</label><input id="signoff-date" data-persist="reviewDate" type="date"></div>
+        <div class="field"><label for="signoff-notes">Sign-off notes</label><textarea id="signoff-notes" data-persist="signoffNotes" placeholder="Decision, blockers, and follow-up"></textarea></div>
+      </form>
+    </section>
+
+    <section class="governance" aria-labelledby="governance-heading">
+      <div class="section-heading">
+        <h2 id="governance-heading">Governance</h2>
+        <p><code>MT-056-UX-001</code> records a new test-document composition only. It does not change or depart from production UI parity.</p>
+      </div>
+      <ul class="governance-list">
+        <li>Product truth remains the shipped Sonik Agent UI and its signed host, org/user, accessibility, and telemetry contracts.</li>
+        <li>This document adds no runtime route, provider effect, deployment behavior, or production visual treatment.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+
+    const SCHEMA_VERSION = "sonik.manual-test.pr56.v1";
+    const STORAGE_KEY = "sonik.manual-test.pr56.v1.state";
+    const RESULTS = Object.freeze(["Not run", "Pass", "Fail", "Blocked", "N/A"]);
+    const GROUPS = Object.freeze([
+      { id: "preflight", title: "Preflight and version", description: "Pin the exact revision and prove the local test boundary before any interaction." },
+      { id: "authority-history", title: "File authority and stable history", description: "Prove same-File recovery, exact-once attachment, stable org/user ownership, and transcript preservation." },
+      { id: "workflow-channels", title: "Workflow Builder and fixture-only Channels", description: "Cover workflow lifecycle and typed disabled reasons alongside honest channel fixtures with no provider effects." },
+      { id: "responsive", title: "Responsive and accessibility", description: "Validate keyboard paths, live status, mobile layout, and deliberate scroll gestures." },
+      { id: "privacy", title: "Privacy and telemetry", description: "Verify category-only operational evidence and fail-closed authority boundaries." },
+      { id: "release-safety", title: "Release safety and evidence", description: "Confirm the run stayed local and produced reviewable evidence." },
+    ]);
+    const TESTS = Object.freeze([
+      { id: "MT-056-PRE-001", group: "preflight", severity: "Critical", steps: ["Enter branch, commit, build, base URL, and tester.", "Confirm the PR #56 head matches the revision under test."], expected: "Every reference is explicit and the tested commit belongs to PR #56." },
+      { id: "MT-056-PRE-002", group: "preflight", severity: "Critical", steps: ["Start only local deterministic services and fixtures.", "Confirm no production, provider, or booking write credentials are in use."], expected: "The run is local or disposable and cannot deploy or mutate production or booking services." },
+      { id: "MT-056-FILE-001", group: "authority-history", severity: "Critical", steps: ["Open embedded chat with signed host context.", "Select a File and force the first upload to return an authority failure.", "Use Retry without choosing the file again."], expected: "The failure shows typed recovery copy; the exact same File remains retryable; no context chip is attached before success." },
+      { id: "MT-056-FILE-002", group: "authority-history", severity: "Critical", steps: ["Allow the retry to succeed.", "Send the next generation request and inspect its file context."], expected: "The successful file attaches exactly once and only that successful file is included in generation." },
+      { id: "MT-056-HIST-001", group: "authority-history", severity: "Critical", steps: ["Create or resume sessions under one organization and user.", "Refresh host authority so host session provenance changes.", "Reload history."], expected: "History remains owned by stable organization plus user scope; host session ID remains provenance only." },
+      { id: "MT-056-HIST-002", group: "authority-history", severity: "Critical", steps: ["Open canvas with the session rail hidden at desktop and mobile widths.", "Force a history load failure, then activate the visible Retry action."], expected: "The conversation header and chat-history switcher remain visible; Retry preserves the selected session and transcript and creates no new chat." },
+      { id: "MT-056-WFB-001", group: "workflow-channels", severity: "High", steps: ["Enter Workflow Builder from chat.", "Save a draft, open Canvas, then return to chat and re-enter."], expected: "Entry, chat round-trip, draft state, and Canvas state remain coherent without reloading the conversation." },
+      { id: "MT-056-WFB-002", group: "workflow-channels", severity: "Critical", steps: ["Run a signed fixture through Preview, Approve, and Commit.", "Repeat without the command grant and inspect the disabled controls."], expected: "The signed path commits once; unsigned approval and commit remain disabled with typed data-disabled-reason values and visible aria-describedby copy." },
+      { id: "MT-056-WFB-003", group: "workflow-channels", severity: "High", steps: ["Delay the Run request and inspect Run while busy.", "After start, delay Preview and inspect Reset while busy."], expected: "Run and Reset expose workflow_action_busy, remain natively disabled, and reference the visible message: Wait for the current workflow action to finish." },
+      { id: "MT-056-CHAN-001", group: "workflow-channels", severity: "Medium", steps: ["Open Channels.", "Inspect WhatsApp and Slack fixtures in unconfigured, pending, connected, and error states."], expected: "All states are explicitly labeled as local fixture data and no connection success is simulated." },
+      { id: "MT-056-CHAN-002", group: "workflow-channels", severity: "Critical", steps: ["Inspect provider and trigger activation controls.", "Attempt keyboard and pointer activation."], expected: "Controls remain disabled with integration_not_yet_available and perform no OAuth, webhook, provisioning, or provider effect." },
+      { id: "MT-056-RESP-001", group: "responsive", severity: "High", steps: ["Test at 320px, 390px, and desktop widths.", "Traverse the console and Agent UI using keyboard only."], expected: "No page-level horizontal overflow, clipped primary action, inaccessible focus target, or unlabeled control is present." },
+      { id: "MT-056-RESP-002", group: "responsive", severity: "High", steps: ["Stream enough chat content to overflow.", "In one browser callback set scrollTop to zero and dispatch a bubbling scroll event."], expected: "Auto-follow stops and the visible Scroll to bottom affordance appears without a synthetic gesture race." },
+      { id: "MT-056-RESP-003", group: "responsive", severity: "Critical", steps: ["Open the embedded canvas during an active session.", "Inspect the conversation chrome and rail state."], expected: "AgentConversation header and chat-history switcher are visible, the session rail is hidden, root hasRail is false, and session, stream, and artifact state are preserved." },
+      { id: "MT-056-PRIV-001", group: "privacy", severity: "Critical", steps: ["Force commit-ledger read and write failures with private sentinel text.", "Inspect the final sanitized telemetry events."], expected: "Reasons are exactly ledger_read_failed and ledger_write_failed; raw provider or storage text is absent." },
+      { id: "MT-056-PRIV-002", group: "privacy", severity: "Critical", steps: ["Force file and generation failures carrying provider detail.", "Inspect visible copy, diagnostics, and telemetry."], expected: "Users receive typed recovery copy rather than raw JSON, stack, provider, URL, credential, or storage detail." },
+      { id: "MT-056-SAFE-001", group: "release-safety", severity: "Critical", steps: ["Review network, database, and command receipts for this run.", "Confirm every mutable scenario used deterministic fixtures or disposable local state."], expected: "There was no deployment, production mutation, booking-service write, or provider integration effect." },
+      { id: "MT-056-EVID-001", group: "release-safety", severity: "High", steps: ["Attach command output and desktop/mobile screenshots in Evidence.", "Record reviewer, date, verdict, and any blocker."], expected: "Evidence is reproducible, scoped to the tested revision, and sufficient for PR sign-off." },
+    ]);
+
+    const escapeHtml = (value) => String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&apos;");
+
+    const resultOptions = () => RESULTS.map((result) => `<option value="${result}">${result}</option>`).join("");
+    const testRow = (test) => `
+      <tr data-test-row data-test-id="${test.id}" data-group="${test.group}" data-severity="${test.severity}" data-result="Not run">
+        <th scope="row" class="test-id"><code>${test.id}</code></th>
+        <td class="test-severity" data-label="Severity"><span class="severity severity-${test.severity.toLowerCase()}">${test.severity}</span></td>
+        <td data-label="Steps"><ol class="steps">${test.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></td>
+        <td data-label="Expected">${escapeHtml(test.expected)}</td>
+        <td class="test-result" data-label="Result">
+          <label class="visually-hidden" for="result-${test.id}">Result for ${test.id}</label>
+          <select class="result-control" id="result-${test.id}" data-result-for="${test.id}">${resultOptions()}</select>
+        </td>
+        <td class="test-notes" data-label="Notes">
+          <label class="visually-hidden" for="notes-${test.id}">Notes for ${test.id}</label>
+          <textarea class="notes-field" id="notes-${test.id}" data-notes-for="${test.id}" rows="2"></textarea>
+        </td>
+      </tr>`;
+
+    const groupHtml = (group) => {
+      const tests = TESTS.filter((test) => test.group === group.id);
+      return `
+        <section class="test-group" data-test-group="${group.id}" aria-labelledby="group-${group.id}">
+          <div class="test-group__header">
+            <h2 id="group-${group.id}">${escapeHtml(group.title)}</h2>
+            <p>${escapeHtml(group.description)}</p>
+          </div>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="${escapeHtml(group.title)} checks">
+            <table class="test-table">
+              <thead><tr><th scope="col">Test ID</th><th scope="col">Severity</th><th scope="col">Steps</th><th scope="col">Expected</th><th scope="col">Result</th><th scope="col">Notes</th></tr></thead>
+              <tbody>${tests.map(testRow).join("")}</tbody>
+            </table>
+          </div>
+        </section>`;
+    };
+
+    const groupsRoot = document.querySelector("#test-groups");
+    groupsRoot.innerHTML = GROUPS.map(groupHtml).join("");
+    document.querySelector("#filter-group").insertAdjacentHTML("beforeend", GROUPS.map((group) => `<option value="${group.id}">${escapeHtml(group.title)}</option>`).join(""));
+
+    const rows = () => [...document.querySelectorAll("[data-test-row]")];
+    const resultControl = (row) => row.querySelector("[data-result-for]");
+    const notesControl = (row) => row.querySelector("[data-notes-for]");
+    const persistedFields = () => [...document.querySelectorAll("[data-persist]")];
+    const announce = (message) => { document.querySelector("#status-message").textContent = message; };
+
+    function getResults() {
+      return rows().map((row) => ({
+        id: row.dataset.testId,
+        group: row.dataset.group,
+        severity: row.dataset.severity,
+        result: resultControl(row).value,
+        notes: notesControl(row).value,
+      }));
+    }
+
+    // summary-contract:start
+    function summarizeResults(results) {
+      const counts = Object.fromEntries(RESULTS.map((result) => [result, results.filter((entry) => entry.result === result).length]));
+      const criticalFailure = results.some((entry) => entry.severity === "Critical" && entry.result === "Fail");
+      const failed = counts.Fail > 0;
+      const blocked = counts.Blocked > 0;
+      const incomplete = counts["Not run"] > 0;
+      const criticalNotApplicable = results.some((entry) => entry.severity === "Critical" && entry.result === "N/A");
+      const noPassCoverage = counts.Pass === 0;
+      const verdict = criticalFailure
+        ? "No-go"
+        : failed
+          ? "Needs review"
+          : blocked
+            ? "Blocked"
+            : incomplete
+              ? "In progress"
+              : criticalNotApplicable || noPassCoverage
+                ? "Needs review"
+                : "Ready for sign-off";
+      return { schemaVersion: SCHEMA_VERSION, total: results.length, counts, verdict };
+    }
+    // summary-contract:end
+
+    function getSummary() {
+      return summarizeResults(getResults());
+    }
+
+    function captureState() {
+      return {
+        schemaVersion: SCHEMA_VERSION,
+        updatedAt: new Date().toISOString(),
+        fields: Object.fromEntries(persistedFields().map((field) => [field.dataset.persist, field.value])),
+        results: Object.fromEntries(getResults().map((entry) => [entry.id, { result: entry.result, notes: entry.notes }])),
+      };
+    }
+
+    function saveState(message = "Saved locally.") {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(captureState()));
+      updateSummary();
+      announce(message);
+    }
+
+    function restoreState() {
+      let state;
+      try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { state = null; }
+      if (!state || state.schemaVersion !== SCHEMA_VERSION) return;
+      for (const field of persistedFields()) if (typeof state.fields?.[field.dataset.persist] === "string") field.value = state.fields[field.dataset.persist];
+      for (const row of rows()) {
+        const saved = state.results?.[row.dataset.testId];
+        if (saved && RESULTS.includes(saved.result)) resultControl(row).value = saved.result;
+        if (saved && typeof saved.notes === "string") notesControl(row).value = saved.notes;
+        row.dataset.result = resultControl(row).value;
+      }
+      announce("Restored saved PR #56 results.");
+    }
+
+    function updateSummary() {
+      const summary = getSummary();
+      document.querySelector("#count-not-run").textContent = summary.counts["Not run"];
+      document.querySelector("#count-pass").textContent = summary.counts.Pass;
+      document.querySelector("#count-fail").textContent = summary.counts.Fail;
+      document.querySelector("#count-blocked").textContent = summary.counts.Blocked;
+      document.querySelector("#count-na").textContent = summary.counts["N/A"];
+      document.querySelector("#verdict").textContent = summary.verdict;
+    }
+
+    function applyFilters() {
+      const query = document.querySelector("#filter-query").value.trim().toLowerCase();
+      const group = document.querySelector("#filter-group").value;
+      const severity = document.querySelector("#filter-severity").value;
+      const result = document.querySelector("#filter-result").value;
+      let visible = 0;
+      for (const row of rows()) {
+        const match = (!query || row.textContent.toLowerCase().includes(query))
+          && (group === "all" || row.dataset.group === group)
+          && (severity === "all" || row.dataset.severity === severity)
+          && (result === "all" || resultControl(row).value === result);
+        row.hidden = !match;
+        if (match) visible += 1;
+      }
+      for (const section of document.querySelectorAll("[data-test-group]")) section.hidden = !section.querySelector("[data-test-row]:not([hidden])");
+      announce(`Showing ${visible} of ${rows().length} checks.`);
+    }
+
+    function setResult(id, result, notes) {
+      if (!RESULTS.includes(result)) throw new TypeError(`Unsupported result: ${result}`);
+      const row = rows().find((candidate) => candidate.dataset.testId === id);
+      if (!row) throw new RangeError(`Unknown test ID: ${id}`);
+      resultControl(row).value = result;
+      row.dataset.result = result;
+      if (typeof notes === "string") notesControl(row).value = notes;
+      saveState(`Updated ${id} to ${result}.`);
+      applyFilters();
+      return getResults().find((entry) => entry.id === id);
+    }
+
+    function exportResults() {
+      const payload = { ...captureState(), summary: getSummary() };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "sonik-agent-ui-pr56-manual-results.json";
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      announce("Exported PR #56 results as JSON.");
+    }
+
+    async function copyFailures() {
+      const failures = getResults().filter((entry) => entry.result === "Fail" || entry.result === "Blocked");
+      const text = failures.length
+        ? failures.map((entry) => `${entry.id} [${entry.result}] ${entry.notes || "No notes"}`).join("\n")
+        : "No failed or blocked PR #56 checks.";
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch {
+        const field = document.createElement("textarea");
+        field.value = text;
+        field.setAttribute("aria-hidden", "true");
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.append(field);
+        field.select();
+        try { copied = document.execCommand("copy"); } catch { copied = false; }
+        finally { field.remove(); }
+      }
+      if (!copied) {
+        announce("Copy failed. Select and copy the failure summary manually.");
+        return;
+      }
+      announce(failures.length ? `Copied ${failures.length} failed or blocked checks.` : "Copied the no-failures summary.");
+    }
+
+    function resetResults() {
+      if (!window.confirm("Reset all PR #56 results, notes, and editable references?")) {
+        announce("Reset cancelled.");
+        return;
+      }
+      localStorage.removeItem(STORAGE_KEY);
+      document.querySelector("#scope-form").reset();
+      document.querySelector("#signoff-form").reset();
+      document.querySelector("#filter-form").reset();
+      for (const row of rows()) {
+        resultControl(row).value = "Not run";
+        notesControl(row).value = "";
+        row.dataset.result = "Not run";
+        row.hidden = false;
+      }
+      for (const section of document.querySelectorAll("[data-test-group]")) section.hidden = false;
+      saveState("Reset complete. Defaults were restored and saved.");
+    }
+
+    for (const row of rows()) {
+      resultControl(row).addEventListener("change", () => {
+        row.dataset.result = resultControl(row).value;
+        saveState(`Saved ${row.dataset.testId}.`);
+        applyFilters();
+      });
+      notesControl(row).addEventListener("input", () => saveState(`Saved notes for ${row.dataset.testId}.`));
+    }
+    for (const field of persistedFields()) field.addEventListener("input", () => saveState("Saved references and sign-off fields."));
+    document.querySelector("#filter-form").addEventListener("input", applyFilters);
+    document.querySelector("#export-results").addEventListener("click", exportResults);
+    document.querySelector("#copy-failures").addEventListener("click", () => void copyFailures());
+    document.querySelector("#print-results").addEventListener("click", () => window.print());
+    document.querySelector("#reset-results").addEventListener("click", resetResults);
+
+    restoreState();
+    updateSummary();
+
+    Object.defineProperty(window, "__sonikManualTest", {
+      configurable: false,
+      enumerable: true,
+      writable: false,
+      value: Object.freeze({
+        schemaVersion: SCHEMA_VERSION,
+        getSummary: () => structuredClone(getSummary()),
+        getResults: () => structuredClone(getResults()),
+        setResult,
+      }),
+    });
+  </script>
+</body>
+</html>
