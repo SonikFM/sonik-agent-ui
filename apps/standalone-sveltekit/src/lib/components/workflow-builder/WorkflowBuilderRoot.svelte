@@ -126,6 +126,14 @@
     draftRevision: workflowDraft?.draftRevision ?? null,
     publishedRevision,
   }));
+  const publishedSource = $derived(workflowLifecycle === "published" && workflowPublishPins
+    ? {
+        kind: "published" as const,
+        organizationId: workflowPublishPins.organizationId,
+        workflowVersionId: workflowPublishPins.workflowVersionId,
+        definitionDigest: workflowPublishPins.definitionDigest,
+      }
+    : undefined);
   const organizerParameters = $derived<OrganizerParameter[]>(draftWorkflow.nodes.map((node) => ({
     path: `nodes.${node.nodeId}.config.title`,
     kind: "safe_patch",
@@ -571,6 +579,7 @@
               workflow={draftWorkflow}
               {workspaceFetch}
               {signedHostApprovedCommandIds}
+              {publishedSource}
               onRunStateChange={handleRunStateChange}
             />
           </Card.Content>
@@ -636,6 +645,7 @@
       workflow={draftWorkflow}
       {workspaceFetch}
       {signedHostApprovedCommandIds}
+      {publishedSource}
       onRunStateChange={handleRunStateChange}
     />
   {:else}
