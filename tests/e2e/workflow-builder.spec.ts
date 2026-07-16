@@ -392,7 +392,7 @@ test("builder exposes isolated preview, full keyboard canvas semantics, and grap
   await openWorkflowBuilder(page);
 
   await page.getByRole("tab", { name: "Canvas" }).click();
-  await page.getByRole("button", { name: "Add node" }).first().click();
+  await page.keyboard.press("Alt+Shift+A");
   const firstNode = page.locator('[data-workflow-node-index="0"]').first();
   await firstNode.focus();
   await firstNode.press("ArrowRight");
@@ -498,6 +498,8 @@ test("UI-04 keyboard path deletes, validates, publishes, starts, traces, and res
   await expect(page.getByText(/Workflow is invalid:/)).toBeAttached();
   await title.fill("Governed campaign author workflow");
   await expect(page.getByText("Workflow is valid.")).toBeAttached();
+  await page.keyboard.press("Alt+Shift+V");
+  await expect(page.getByText("Workflow is valid.")).toBeAttached();
 
   await page.getByRole("button", { name: "Save draft" }).focus();
   await page.keyboard.press("Enter");
@@ -515,7 +517,15 @@ test("UI-04 keyboard path deletes, validates, publishes, starts, traces, and res
   await page.keyboard.press("Enter");
   await expect(runPanel.locator("[data-workflow-run-waitpoint]")).toBeVisible();
   await page.keyboard.press("Alt+Shift+T");
-  await expect(runPanel.locator("[data-workflow-run-trace] summary")).toBeFocused();
+  const trace = runPanel.locator("[data-workflow-run-trace]");
+  await expect(trace).toHaveAttribute("open", "");
+  await expect(trace.locator("summary")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(trace.locator("[data-workflow-run-trace-row]").first()).toBeFocused();
+  const accessibilityTree = await page.locator('[data-agent-mode="workflow-builder"]').ariaSnapshot();
+  for (const label of ["Add node", "Validate", "Run trace", "Answer for the paused workflow", "Answer & resume"]) {
+    expect(accessibilityTree).toContain(label);
+  }
   await runPanel.getByPlaceholder("Answer").fill("Returning members");
   await page.keyboard.press("Alt+Shift+M");
   await expect(runPanel.getByRole("button", { name: "Answer & resume" })).toBeFocused();
