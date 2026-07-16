@@ -52,12 +52,13 @@ const sessionSummary = {
   last_message_at: null,
 };
 
-function workflowRun(phase: RunPhase, waiting = false) {
+function workflowRun(phase: RunPhase, waiting = false, workflowVersionId = workflowPublishPins.workflowVersionId) {
   const approved = phase === "approved" || phase === "committed";
   return {
     runId: "workflow-builder-host-fixture-run",
     workflowId: AMPLIFY_CAMPAIGN_COMMAND_ID,
-    workflowVersionId: "sonik.amplify.campaign.workflow@0.1.0",
+    workflowVersionId,
+    definitionDigest,
     artifactId: phase === "committed" ? "campaign-fixture-artifact" : null,
     phase,
     currentNodeId: phase === "intake" ? "trigger" : phase === "preview_ready" ? "preview" : "commit",
@@ -167,6 +168,15 @@ export async function installWorkflowBuilderHostFixture(
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown> & { action?: string };
     observation.workflowRunActions.push(body.action ?? "unknown");
     observation.workflowRunBodies.push(body);
+    if (body.action === "start" && body.source) {
+      const source = body.source as Record<string, unknown>;
+      if (source.kind !== "published"
+        || source.organizationId !== workflowPublishPins.organizationId
+        || source.workflowVersionId !== workflowPublishPins.workflowVersionId
+        || source.definitionDigest !== workflowPublishPins.definitionDigest) {
+        return fulfillJson(route, { ok: false, reason: "pinned_workflow_not_found" });
+      }
+    }
     if (options.workflowRunDelayMs) await new Promise((resolve) => setTimeout(resolve, options.workflowRunDelayMs));
     const phase: RunPhase = body.action === "preview"
       ? (options.previewPhase ?? "preview_ready")
@@ -175,7 +185,8 @@ export async function installWorkflowBuilderHostFixture(
         : body.action === "commit"
           ? "committed"
           : "intake";
-    await fulfillJson(route, { ok: true, run: workflowRun(phase, Boolean(options.waitOnStart && body.action === "start")) });
+    const source = body.source as { workflowVersionId?: string } | undefined;
+    await fulfillJson(route, { ok: true, run: workflowRun(phase, Boolean(options.waitOnStart && body.action === "start"), source?.workflowVersionId) });
   });
   await page.route("**/api/workflow-history?*", (route) => {
     const query = new URL(route.request().url()).searchParams;
@@ -218,6 +229,14 @@ export async function installWorkflowBuilderHostFixture(
     });
   });
 
+  await postWorkflowBuilderHostContext(page, options);
+  return observation;
+}
+
+export async function postWorkflowBuilderHostContext(
+  page: Page,
+  options: WorkflowBuilderHostFixtureOptions = {},
+): Promise<void> {
   await page.waitForFunction(() => Boolean((window as Window & { __sonikAgentUI?: unknown }).__sonikAgentUI));
   await page.evaluate(({ approvedCommandIds, workflowPublishPins }) => {
     const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
@@ -249,5 +268,4 @@ export async function installWorkflowBuilderHostFixture(
       },
     }, window.location.origin);
   }, { approvedCommandIds: options.approvedCommandIds ?? [AMPLIFY_CAMPAIGN_COMMAND_ID], workflowPublishPins });
-  return observation;
 }

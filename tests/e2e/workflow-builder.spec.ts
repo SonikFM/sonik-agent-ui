@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { amplifyCampaignWorkflowManifest } from "../../packages/tool-contracts/dist/marketplace-fixtures.js";
 import { gotoFreshWorkspace, smokeUrl, submitPrompt, WORKFLOW_DRAFT_SCENARIO } from "./support/dev-smoke";
-import { AMPLIFY_CAMPAIGN_COMMAND_ID, installWorkflowBuilderHostFixture, type WorkflowBuilderHostFixtureObservation } from "./support/workflow-builder-host-fixture";
+import { AMPLIFY_CAMPAIGN_COMMAND_ID, installWorkflowBuilderHostFixture, postWorkflowBuilderHostContext, type WorkflowBuilderHostFixtureObservation } from "./support/workflow-builder-host-fixture";
 
 // Slice D (production-readiness-agent-creation-2026-07-13.md P1 #7): the
 // workflow-builder mode's missing browser lane. Drives the real dev server
@@ -519,17 +519,22 @@ test("E2E-01 author journey reloads and governs trigger through correlated evide
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.locator('[data-workflow-lifecycle="saved"]')).toBeVisible();
 
-  await page.getByRole("button", { name: "Return to the chat workspace" }).click();
+  await page.reload();
+  await postWorkflowBuilderHostContext(page, { waitOnStart: true });
   await openWorkflowBuilder(page);
   await page.getByLabel("Saved workflows").selectOption(AMPLIFY_CAMPAIGN_COMMAND_ID);
   await expect(page.getByLabel("Workflow title").first()).toHaveValue("Create an Amplify campaign");
   await expect(page.locator('[data-workflow-lifecycle="saved"]')).toBeVisible();
+  await page.locator('[data-builder-action="validate"]').click();
+  await expect(page.getByText("Workflow is valid.")).toBeAttached();
   await page.locator('[data-builder-action="publish"]').click();
   await expect(page.locator('[data-workflow-lifecycle="published"]')).toBeVisible();
 
   await page.getByRole("tab", { name: "Canvas" }).click();
   const runPanel = page.locator(`[data-workflow-run-panel="${AMPLIFY_CAMPAIGN_COMMAND_ID}"]`).first();
   await runPanel.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(runPanel).toHaveAttribute("data-workflow-run-version", "amplify.campaign.create@0.1.0");
+  await expect(runPanel).toHaveAttribute("data-workflow-definition-digest", `sha256:${"a".repeat(64)}`);
   await runPanel.getByPlaceholder("Answer").fill("Returning members");
   await runPanel.getByRole("button", { name: "Answer & resume" }).click();
   await runPanel.getByRole("button", { name: "Preview", exact: true }).click();
@@ -546,9 +551,22 @@ test("E2E-01 author journey reloads and governs trigger through correlated evide
   await page.getByRole("button", { name: "campaign-fixture-receipt" }).click();
   await expect(page.getByText("Artifacts (1)", { exact: true })).toBeVisible();
   await expect(page.getByText("Receipts (1)", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /campaign-fixture-artifact.*workflow-builder-host-fixture-run\/commit/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /campaign-fixture-receipt.*workflow-builder-host-fixture-run\/commit/ })).toBeVisible();
   expect(fixture.workflowDefinitionActions).toEqual(expect.arrayContaining(["create", "get", "publish"]));
   expect(fixture.workflowRunActions).toEqual(["start", "resume_run", "preview", "approve", "commit"]);
   expect(fixture.historyQueries.at(-1)).toContain("receiptId=campaign-fixture-receipt");
+  expect(fixture.workflowRunBodies[0]).toMatchObject({
+    action: "start",
+    workflowId: AMPLIFY_CAMPAIGN_COMMAND_ID,
+    source: {
+      kind: "published",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      workflowVersionId: "amplify.campaign.create@0.1.0",
+      definitionDigest: `sha256:${"a".repeat(64)}`,
+    },
+  });
+  expect(fixture.workflowRunBodies[0].workflow).toBeUndefined();
 });
 
 test("E2E-03 Organizer edits allowlisted fields and preserves the P3 published schema", async ({ page }) => {
@@ -565,10 +583,15 @@ test("E2E-03 Organizer edits allowlisted fields and preserves the P3 published s
   await page.getByRole("button", { name: "Test", exact: true }).click();
   const runPanel = page.locator(`[data-workflow-run-panel="${AMPLIFY_CAMPAIGN_COMMAND_ID}"]`);
   await expect(runPanel.getByRole("button", { name: "Run", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "Builder", exact: true }).click();
+  await page.locator('[data-builder-action="validate"]').click();
+  await expect(page.getByText("Workflow is valid.")).toBeAttached();
+  await page.getByRole("button", { name: "Organizer", exact: true }).click();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await expect(page.locator('[data-workflow-lifecycle="published"]')).toBeVisible();
 
   await runPanel.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(runPanel).toHaveAttribute("data-workflow-run-version", "amplify.campaign.create@0.1.0");
   await runPanel.getByRole("button", { name: "Preview", exact: true }).click();
   await page.getByRole("button", { name: "Review approvals", exact: true }).click();
   await expect(runPanel.getByRole("button", { name: "Approve", exact: true })).toBeFocused();

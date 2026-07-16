@@ -35,6 +35,11 @@ export const POST: RequestHandler = async (event) => {
     });
     return json(response.result, { status: response.status });
   }
-  const result = await handleWorkflowRunsAction(action, { hostSession, store, env });
+  const result = await handleWorkflowRunsAction(action, {
+    hostSession,
+    store,
+    env,
+    repository: resolveWorkflowDefinitionRepository(env),
+  });
   return json(result, { status: 200 });
 };
