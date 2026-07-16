@@ -11,7 +11,7 @@ const AGENT_ACTION_CHANNEL_VERSION = "sonik.agent_ui.host_action.v1";
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
 const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
-const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds"]);
+const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds", "workflowPublishPins"]);
 const ALLOWED_CONTEXT_KEYS = new Set([
   "route", "surface", "pageType", "title", "theme", "mode", "activeSessionId",
   "activeArtifactId", "activeDocumentId", "artifactType", "conversationStatus", "messageCount",
@@ -406,7 +406,6 @@ function sanitizeHostSessionMetadata(value) {
       const pins = sanitizeWorkflowPublishPins(rawValue);
       if (pins) {
         entries.push([key, pins]);
-        publicMetadataCount += 1;
       }
       continue;
     }
