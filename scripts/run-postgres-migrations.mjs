@@ -249,6 +249,30 @@ const migrations = [
 			)::text
 		`,
 	},
+	{
+		version: "0018",
+		name: "org_scoped_external_effect_claims",
+		file: "packages/workspace-session/migrations/postgres/0018_org_scoped_external_effect_claims.sql",
+		baselineCheck: `
+			select (
+				(
+					select count(*) = 4
+					from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_effect_claims'
+						and column_name in ('effect_namespace', 'external_effect_key_digest', 'command_id', 'resolved_input_hash')
+						and is_nullable = 'NO'
+				)
+				and to_regclass('sonik_agent_ui.agent_workflow_effect_claims_external_identity_idx') is not null
+				and exists (
+					select 1 from pg_policies
+					where schemaname = 'sonik_agent_ui'
+						and tablename = 'agent_workflow_effect_claims'
+						and policyname = 'agent_workflow_effect_claims_scope'
+				)
+			)::text
+		`,
+	},
 ];
 
 if (!databaseUrl) {
