@@ -5,11 +5,11 @@ import type {
   WorkspaceRunRecord,
   WorkspaceToolCallRecord,
 } from "@sonik-agent-ui/workspace-session";
-import type { CanonicalWorkflowEvent } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import { isWorkflowNodeAttemptId, type CanonicalWorkflowEvent } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import type { AsyncWorkflowRunStore, WorkflowRunJournalStore, WorkflowRunOwner, WorkflowRunRow } from "./workflow-run-store.ts";
 
 export const WORKFLOW_HISTORY_QUERY_KEYS = [
-  "sessionId", "conversationRunId", "workflowRunId", "nodeId", "toolCallId", "approvalId", "artifactId", "receiptId", "requestId", "traceId",
+  "sessionId", "conversationRunId", "workflowRunId", "nodeId", "toolCallId", "approvalId", "artifactId", "receiptId", "requestId", "traceId", "attemptId",
 ] as const;
 export type WorkflowHistoryQuery = Partial<Record<(typeof WORKFLOW_HISTORY_QUERY_KEYS)[number], string>>;
 
@@ -85,6 +85,7 @@ function normalizeQuery(input: WorkflowHistoryQuery): WorkflowHistoryQuery {
 function matchesWorkflow(row: WorkflowRunRow, query: WorkflowHistoryQuery): boolean {
   if (query.workflowRunId) return row.runId === query.workflowRunId;
   if (query.nodeId && !row.state.nodeStates[query.nodeId]) return false;
+  if (query.attemptId && !Object.keys(row.state.nodeStates).some((nodeId) => isWorkflowNodeAttemptId(query.attemptId!, row.runId, nodeId))) return false;
   if (query.approvalId && !projectApprovals(row).some((approval) => approval.approvalId === query.approvalId)) return false;
   if (query.artifactId && row.state.artifactId !== query.artifactId) return false;
   if (query.receiptId && !row.state.receipts.some((receipt) => receipt.receiptRef === query.receiptId)) return false;
@@ -191,7 +192,7 @@ function projectWorkflowEvent(event: CanonicalWorkflowEvent) {
     type: event.eventType, sequence: event.sequence, nodeId: event.subject.kind === "node" ? event.subject.id : null,
     approvalId: event.eventType === "wait_created" && event.payload.waitpoint.kind === "approval" ? event.payload.waitpoint.waitpointId : null,
     artifactId: event.eventType === "node_completed" && event.payload.outputRef.storage === "artifact" ? event.payload.outputRef.artifact.artifactId : null,
-    correlationIds: event.correlationIds, timestamp: event.timestamp,
+    attemptId: event.attemptId ?? null, correlationIds: event.correlationIds, timestamp: event.timestamp,
   };
 }
 
