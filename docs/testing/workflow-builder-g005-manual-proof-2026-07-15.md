@@ -17,8 +17,8 @@
 | Organizer | Open Organizer and inspect identity, instructions, knowledge, curated capabilities, test, publish, approval, recent-run, and receipt affordances | PASS — rendered as a graph-free projection; no raw graph, MCP, or model-administration surface |
 | Debug context | Open Debug & Preview | PASS — persistent “Isolated preview context” and “read/preview only” truth are visible |
 | Governed run | Signed embedded fixture: save, run, preview, approve, commit, inspect receipt | PASS — existing product-path test keeps the signed host header on catalog, definition, and run requests and renders `campaign-fixture-receipt` |
-| Trace inspection | Start a run, press Alt+Shift+T | PASS — the trace disclosure opens and focus moves to the first trace row (or its summary when empty) |
-| Resume wait | Start a workflow paused at a human waitpoint, press Alt+Shift+M, enter an answer, then activate Answer & resume | PASS — focus moves to the named waitpoint answer field and the resumed status is announced |
+| Trace inspection | Start a run, press Alt+Shift+T | PASS — the trace disclosure opens and focus moves to its summary; trace rows are then available as named keyboard controls |
+| Resume wait | Start a workflow paused at a human waitpoint, enter an answer, then press Alt+Shift+M and activate Answer & resume | PASS — focus moves to the resume action and the resumed status is announced |
 | Correlation | Open History with the governed causal projection | PASS — session, conversation run, workflow run, node, tool call, approval, artifact, receipt, request, and trace identifiers are visible together |
 
 ## Accessibility smoke

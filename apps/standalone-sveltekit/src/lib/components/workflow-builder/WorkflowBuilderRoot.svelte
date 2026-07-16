@@ -405,16 +405,16 @@
       const trace = document.querySelector<HTMLDetailsElement>("[data-workflow-run-trace]");
       if (!trace) { builderAnnouncement = "trace control is not available."; return; }
       trace.open = true;
-      const target = trace.querySelector<HTMLElement>("[data-workflow-run-trace-row]") ?? trace.querySelector<HTMLElement>("summary");
+      const target = trace.querySelector<HTMLElement>("summary");
       target?.focus();
       builderAnnouncement = "Run trace opened for inspection.";
       return;
     }
     if (action === "resume") {
-      const target = document.querySelector<HTMLElement>("[data-workflow-run-resume-answer]");
+      const target = document.querySelector<HTMLElement>("[data-workflow-run-resume-action]");
       target?.focus();
       builderAnnouncement = target && document.activeElement === target
-        ? "Paused workflow answer focused."
+        ? "Paused workflow resume action focused."
         : "resume control is not available.";
       return;
     }
@@ -424,7 +424,7 @@
       publish: '[data-builder-action="publish"]',
       start: '[data-workflow-run-panel] button',
       trace: '[data-workflow-run-trace] summary',
-      resume: '[data-workflow-run-resume-answer]',
+      resume: '[data-workflow-run-resume-action]',
     };
     const target = document.querySelector<HTMLElement>(selectors[action]);
     if (action === "add" || action === "validate") target?.click();

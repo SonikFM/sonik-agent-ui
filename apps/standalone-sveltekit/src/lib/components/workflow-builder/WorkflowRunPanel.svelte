@@ -280,7 +280,7 @@
         <p class="text-sm font-medium">Run paused at a human waitpoint.</p>
         <textarea class="min-h-16 rounded-md border border-input bg-background p-2 text-sm" placeholder="Answer" bind:value={resumeAnswer} aria-label="Answer for the paused workflow" data-workflow-run-resume-answer></textarea>
         <div class="flex gap-2">
-          <Button size="sm" onclick={() => void resume("answer")} disabled={busy || !resumeAnswer.trim()}>Answer &amp; resume</Button>
+          <Button size="sm" onclick={() => void resume("answer")} disabled={busy || !resumeAnswer.trim()} data-workflow-run-resume-action aria-keyshortcuts="Alt+Shift+M">Answer &amp; resume</Button>
           <Button size="sm" variant="outline" onclick={() => void resume("approval")} disabled={busy}>Approve &amp; resume</Button>
         </div>
       </div>
@@ -356,7 +356,7 @@
         <summary class="cursor-pointer text-sm font-medium">Run trace ({traceRows.length} nodes)</summary>
         <ol class="mt-2 grid gap-1 text-xs">
           {#each traceRows as node}
-            <li tabindex={0} data-workflow-run-trace-row><span class="font-mono">{node.nodeId}</span> — {node.status}</li>
+            <li><button type="button" class="w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" data-workflow-run-trace-row><span class="font-mono">{node.nodeId}</span> — {node.status}</button></li>
           {/each}
         </ol>
       </details>
