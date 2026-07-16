@@ -263,7 +263,9 @@ export class WorkflowRunDriver {
   private next(nodeId: string): string[] { return this.deps.definition.edges.filter((edge) => edge.from === nodeId).map((edge) => edge.to); }
   private selectBranch(node: WorkflowVNextNode, state: WorkflowRunSnapshot): string[] {
     const edges = this.deps.definition.edges.filter((edge) => edge.from === node.nodeId);
-    const selected = edges.find((edge) => edge.predicate && this.predicate(edge.predicate, state)) ?? edges.find((edge) => edge.default);
+    const matches = edges.filter((edge) => edge.predicate && this.predicate(edge.predicate, state));
+    if (matches.length > 1) throw new Error("branch_ambiguous_match");
+    const selected = matches[0] ?? edges.find((edge) => edge.default);
     if (!selected) throw new Error("branch_no_matching_edge");
     return [selected.to];
   }
