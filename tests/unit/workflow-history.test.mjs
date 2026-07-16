@@ -30,7 +30,7 @@ const toolCall = {
 };
 const canonicalEvent = {
   eventId: "workflow-event-a", schemaVersion: "sonik.workflow.event.v1", eventVersion: 1, workflowRunId: "workflow-run-a", sequence: 1, revision: 1,
-  actor: { kind: "worker", id: "worker-a" }, subject: { kind: "node", id: "commit" }, causationId: "request-a", correlationIds: ["conversation-run-a", "request-a", "trace-a", "tool-a", "receipt-a"],
+  actor: { kind: "worker", id: "worker-a" }, subject: { kind: "node", id: "commit" }, causationId: "request-a", attemptId: "attempt-a", correlationIds: ["conversation-run-a", "request-a", "trace-a", "tool-a", "receipt-a", "attempt-a"],
   timestamp: "2026-07-15T20:00:11.000Z", eventType: "node_completed",
   payload: { nodeId: "commit", outputRef: { storage: "artifact", artifact: { artifactId: "artifact-a", organizationId: "org-a", contentType: "application/json", byteLength: 10, digest: `sha256:${"a".repeat(64)}`, createdByNodeId: "commit" } } },
 };
@@ -81,6 +81,7 @@ const queryValues = {
   receiptId: "receipt-a",
   requestId: "request-a",
   traceId: "trace-a",
+  attemptId: "attempt-a",
 };
 assert.deepEqual(Object.keys(queryValues), [...WORKFLOW_HISTORY_QUERY_KEYS]);
 
@@ -129,12 +130,13 @@ for (const key of WORKFLOW_HISTORY_QUERY_KEYS) {
   assert.equal(identifierResult.ok, true, `${key} query succeeds`);
   assert.deepEqual(identifierResult.history.conversations.map((run) => run.conversationRunId), ["conversation-run-a"], `${key} resolves the correlated conversation`);
   assert.deepEqual(identifierResult.history.workflows.map((run) => run.workflowRunId), ["workflow-run-a"], `${key} never selects the unrelated first workflow session`);
-  assert.deepEqual(identifierResult.history.nodes.map((node) => node.nodeId), ["approval", "commit"].filter((nodeId) => key !== "nodeId" || nodeId === "commit"), `${key} resolves the correlated nodes`);
+  assert.deepEqual(identifierResult.history.nodes.map((node) => node.nodeId), ["approval", "commit"].filter((nodeId) => !["nodeId", "attemptId"].includes(key) || nodeId === "commit"), `${key} resolves the correlated nodes`);
   assert.deepEqual(identifierResult.history.toolCalls.map((call) => call.toolCallId), ["tool-a"], `${key} resolves the correlated tool call`);
   assert.deepEqual(identifierResult.history.approvals.map((approval) => approval.approvalId), ["approval"], `${key} resolves the correlated approval`);
   assert.deepEqual(identifierResult.history.artifacts.map((artifactEntry) => artifactEntry.artifactId), ["artifact-a"], `${key} resolves the correlated artifact`);
   assert.deepEqual(identifierResult.history.receipts.map((receipt) => receipt.receiptId), ["receipt-a"], `${key} resolves the correlated receipt`);
   assert.deepEqual(identifierResult.history.events.map((event) => event.eventId), ["conversation-event-a", "workflow-event-a"], `${key} resolves the same causal event path`);
+  assert.equal(identifierResult.history.events.find((event) => event.eventId === "workflow-event-a")?.attemptId, "attempt-a", `${key} projects the canonical node attempt`);
   assert.equal(JSON.stringify(identifierResult).includes("must-not-leak"), false, `${key} projection remains redacted`);
   assert.equal(Object.values(identifierCalls).every((count) => count <= 1), true, `${key} performs at most one call per authoritative store`);
 }
