@@ -452,6 +452,14 @@ export const workflowNodeAttemptSchema = z.object({
   status: z.enum(["started", "waiting", "succeeded", "failed", "cancelled"]), inputHash: sha256DigestSchema,
   idempotencyKey: z.string().min(1), startedAt: z.string().datetime(), finishedAt: z.string().datetime().optional(), errorCode: z.string().min(1).optional(),
 }).strict();
+export function workflowNodeAttemptId(workflowRunId: string, nodeId: string, attempt: number): string {
+  if (!workflowRunId || !nodeId || !Number.isSafeInteger(attempt) || attempt < 1) throw new Error("invalid_workflow_node_attempt_id");
+  return `${workflowRunId}:${nodeId}:${attempt}`;
+}
+export function isWorkflowNodeAttemptId(attemptId: string, workflowRunId: string, nodeId: string): boolean {
+  const prefix = `${workflowRunId}:${nodeId}:`;
+  return attemptId.startsWith(prefix) && /^[1-9]\d*$/.test(attemptId.slice(prefix.length));
+}
 export const workflowEventOutputRefSchema = z.discriminatedUnion("storage", [
   z.object({ storage: z.literal("inline_redacted"), digest: sha256DigestSchema, byteLength: z.number().int().nonnegative().max(MAX_INLINE_OUTPUT_BYTES), redactedSummary: z.string().min(1).max(256) }).strict(),
   z.object({ storage: z.literal("artifact"), artifact: artifactRefSchema }).strict(),
@@ -513,7 +521,7 @@ const canonicalEventBase = {
   workflowRunId: z.string().min(1), sequence: z.number().int().positive(), revision: z.number().int().positive(),
   actor: z.object({ kind: z.enum(["user", "system", "worker"]), id: z.string().min(1) }).strict(),
   subject: z.object({ kind: z.enum(["run", "node", "waitpoint", "effect"]), id: z.string().min(1) }).strict(),
-  causationId: z.string().min(1), correlationIds: z.array(z.string().min(1)).min(1), timestamp: z.string().datetime(),
+  causationId: z.string().min(1), attemptId: z.string().min(1).optional(), correlationIds: z.array(z.string().min(1)).min(1), timestamp: z.string().datetime(),
 } as const;
 export const canonicalWorkflowEventSchema = z.discriminatedUnion("eventType", [
   z.object({ ...canonicalEventBase, eventType: z.literal("run_started"), payload: z.object({ source: workflowRunSourceSchema }).strict() }).strict(),
@@ -530,6 +538,7 @@ export const canonicalWorkflowEventSchema = z.discriminatedUnion("eventType", [
         ? { kind: "effect", id: event.payload.logicalEffectId }
         : { kind: "run", id: event.workflowRunId };
   if (event.subject.kind !== expectedSubject.kind || event.subject.id !== expectedSubject.id) ctx.addIssue({ code: "custom", path: ["subject"], message: "Event subject must match its redacted payload reference" });
+  if (event.attemptId && !event.correlationIds.includes(event.attemptId)) ctx.addIssue({ code: "custom", path: ["correlationIds"], message: "Node attempt identity must be a canonical correlation identifier" });
 });
 export type CanonicalWorkflowEvent = z.infer<typeof canonicalWorkflowEventSchema>;
 export type CanonicalWorkflowEventUpcaster = (value: Readonly<Record<string, unknown>>) => unknown;
