@@ -28,6 +28,16 @@ const toolCall = {
   input: { secret: "must-not-leak" }, output: { private: "must-not-leak" }, error: null, artifact_id: "artifact-a", document_id: null, request_id: "request-a",
   created_at: "2026-07-15T20:00:10.000Z", completed_at: "2026-07-15T20:00:11.000Z",
 };
+const decoyConversation = {
+  ...conversation,
+  id: "conversation-run-decoy", session_id: "session-decoy", message_id: "assistant-message-decoy",
+  request_id: "request-decoy", trace_id: "trace-decoy",
+};
+const decoyToolCall = {
+  ...toolCall,
+  id: "tool-decoy", session_id: "session-decoy", message_id: "assistant-message-decoy",
+  artifact_id: "artifact-decoy", request_id: "request-decoy",
+};
 const canonicalEvent = {
   eventId: "workflow-event-a", schemaVersion: "sonik.workflow.event.v1", eventVersion: 1, workflowRunId: "workflow-run-a", sequence: 1, revision: 1,
   actor: { kind: "worker", id: "worker-a" }, subject: { kind: "node", id: "commit" }, causationId: "request-a", attemptId: "workflow-run-a:commit:1", correlationIds: ["conversation-run-a", "request-a", "trace-a", "tool-a", "receipt-a", "workflow-run-a:commit:1"],
@@ -122,9 +132,9 @@ const identifierDeps = (identifierCalls, workflowEvents = [canonicalEvent]) => (
   journal: { listEvents: async (_owner, runId) => (identifierCalls.journal++, runId === workflowRow.runId ? workflowEvents : []) },
   workspace: {
     getRun: async (runId) => (identifierCalls.conversationGet++, runId === conversation.id ? conversation : null),
-    listRuns: async (sessionId) => (identifierCalls.conversationList++, sessionId === conversation.session_id ? [conversation] : []),
-    listRunEvents: async (runId) => (identifierCalls.conversationEvents++, runId === conversation.id ? [{ id: "conversation-event-a", run_id: conversation.id, session_id: conversation.session_id, seq: 0, kind: "tool_result", event: { secret: "must-not-leak" }, created_at: "2026-07-15T20:00:11.000Z" }] : []),
-    listToolCalls: async (sessionId) => (identifierCalls.tools++, sessionId === toolCall.session_id ? [toolCall] : []),
+    listRuns: async (sessionId) => (identifierCalls.conversationList++, sessionId === conversation.session_id ? [conversation] : sessionId === decoyConversation.session_id ? [decoyConversation] : []),
+    listRunEvents: async (runId) => (identifierCalls.conversationEvents++, runId === conversation.id ? [{ id: "conversation-event-a", run_id: conversation.id, session_id: conversation.session_id, seq: 0, kind: "tool_result", event: { secret: "must-not-leak" }, created_at: "2026-07-15T20:00:11.000Z" }] : runId === decoyConversation.id ? [{ id: "conversation-event-decoy", run_id: decoyConversation.id, session_id: decoyConversation.session_id, seq: 0, kind: "tool_result", event: { secret: "decoy-must-not-leak" }, created_at: "2026-07-15T20:00:11.000Z" }] : []),
+    listToolCalls: async (sessionId) => (identifierCalls.tools++, sessionId === toolCall.session_id ? [toolCall] : sessionId === decoyToolCall.session_id ? [decoyToolCall] : []),
     getArtifact: async (artifactId) => (identifierCalls.artifact++, artifactId === "artifact-a" ? { id: "artifact-a", session_id: "session-a", kind: "json-render", title: "Safe title", content: { secret: "must-not-leak" }, version: 2, created_at: "2026-07-15T20:00:00.000Z", updated_at: "2026-07-15T20:00:11.000Z" } : null),
   },
 });
@@ -185,6 +195,19 @@ const currentSessionDeps = identifierDeps(currentSessionCalls);
 currentSessionDeps.owner = rotatedOwner;
 const currentSessionHistory = await getWorkflowHistory({ sessionId: rotatedOwner.hostSessionId }, currentSessionDeps);
 assert.deepEqual(currentSessionHistory.history.workflows.map((run) => run.workflowRunId), [decoyWorkflow.runId], "session-scoped history still filters workflow rows to the requested current session");
+
+for (const [workflowRunId, message] of [
+  [workflowRow.runId, "an exact workflow constrained to a mismatched populated session"],
+  ["workflow-run-missing", "a missing exact workflow constrained to a populated session"],
+]) {
+  const failedCausalLookup = await getWorkflowHistory(
+    { workflowRunId, sessionId: decoyConversation.session_id },
+    identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+  );
+  for (const entries of Object.values(failedCausalLookup.history)) {
+    if (Array.isArray(entries)) assert.deepEqual(entries, [], `${message} fails closed`);
+  }
+}
 
 for (const key of WORKFLOW_HISTORY_QUERY_KEYS) {
   const identifierCalls = { workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 };

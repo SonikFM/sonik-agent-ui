@@ -51,13 +51,14 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
     correlatedWorkflowId ? deps.journal.listEvents(deps.owner, correlatedWorkflowId) : Promise.resolve([]),
     sessionId ? deps.workspace.listToolCalls(sessionId) : Promise.resolve([]),
   ]);
-  const hasExactAttempt = !query.attemptId || workflowEvents.some((event) => event.attemptId === query.attemptId);
-  const causalWorkflowRows = hasExactAttempt ? workflowRows : [];
-  const causalWorkflowEvents = hasExactAttempt ? workflowEvents : [];
+  const hasCausalMatch = (!query.workflowRunId || workflowRows.length === 1)
+    && (!query.attemptId || workflowEvents.some((event) => event.attemptId === query.attemptId));
+  const causalWorkflowRows = hasCausalMatch ? workflowRows : [];
+  const causalWorkflowEvents = hasCausalMatch ? workflowEvents : [];
   const correlationIds = new Set(causalWorkflowEvents.flatMap((event) => event.correlationIds));
-  const conversations = hasExactAttempt ? conversationCandidates.filter((run) => matchesConversation(run, query, correlationIds)) : [];
+  const conversations = hasCausalMatch ? conversationCandidates.filter((run) => matchesConversation(run, query, correlationIds)) : [];
   const conversationRequestIds = new Set(conversations.flatMap((run) => run.request_id ? [run.request_id] : []));
-  const filteredToolCalls = hasExactAttempt ? toolCalls.filter((call) => matchesToolCall(call, query, correlationIds, conversationRequestIds)) : [];
+  const filteredToolCalls = hasCausalMatch ? toolCalls.filter((call) => matchesToolCall(call, query, correlationIds, conversationRequestIds)) : [];
   const correlatedConversationId = conversations.length === 1 ? conversations[0]?.id : undefined;
   const conversationEvents = correlatedConversationId
     ? await deps.workspace.listRunEvents(correlatedConversationId)
@@ -79,7 +80,7 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
       toolCalls: filteredToolCalls.map(projectToolCall),
       approvals: dedupeById([...causalWorkflowRows.flatMap(projectApprovals), ...causalWorkflowEvents.flatMap(projectEventApproval)], "approvalId")
         .filter((approval) => !query.approvalId || approval.approvalId === query.approvalId),
-      artifacts: projectArtifacts(causalWorkflowRows, causalWorkflowEvents, hasExactAttempt ? artifact : null).filter((entry) => !query.artifactId || entry.artifactId === query.artifactId),
+      artifacts: projectArtifacts(causalWorkflowRows, causalWorkflowEvents, hasCausalMatch ? artifact : null).filter((entry) => !query.artifactId || entry.artifactId === query.artifactId),
       receipts: causalWorkflowRows.flatMap(projectReceipts).filter((receipt) => !query.receiptId || receipt.receiptId === query.receiptId),
       events: [
         ...conversationEvents.map(projectConversationEvent),
