@@ -3,11 +3,13 @@ import {
   workflowDependencyPinsSchema,
   workflowOrganizerPatchSchema,
   workflowVNextDefinitionSchema,
+  validateWorkflowForPublish,
   type CapabilityReadiness,
   type JsonValue,
   type WorkflowVNextDefinition,
 } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import { type WorkflowDefinitionOwner, type WorkflowDefinitionPin, type WorkflowDefinitionRepository } from "./workflow-definition-repository.ts";
+import { workflowNodeExecutorRuntimeRegistry } from "./workflow-node-executors.ts";
 
 export type WorkflowDefinitionsAction =
   | { action: "create"; definition: unknown }
@@ -68,6 +70,8 @@ export async function handleWorkflowDefinitionsAction(action: WorkflowDefinition
         const dependencyPins = workflowDependencyPinsSchema.parse(action.dependencyPins);
         if (dependencyPins.organizationId !== owner.organizationId || dependencyPins.workflowVersionId !== workflowVersionId || dependencyPins.definitionDigest !== draft.definitionDigest) throw new Error("dependency_pins_mismatch");
         if (deps.capabilityReadiness) assertPublishableCapabilities(draft.definition, deps.capabilityReadiness);
+        const validation = validateWorkflowForPublish(draft.definition, workflowNodeExecutorRuntimeRegistry);
+        if (!validation.ok) return { ok: false as const, reason: validation.issues[0]?.code ?? "workflow_not_publishable", issues: validation.issues };
         const version = await deps.repository.publish(owner, { workflowId, expectedRevision: action.expectedRevision, workflowVersionId, definitionDigest: draft.definitionDigest, dependencyPins, actorId });
         return version ? { ok: true as const, version } : { ok: false as const, reason: "revision_conflict_or_version_exists" };
       }

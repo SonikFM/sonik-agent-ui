@@ -26,6 +26,39 @@ assert.throws(
 assert.equal(runStore.getRun(owner, runId), null, "rejected in-memory run input creates no row");
 assert.deepEqual(runStore.createRun(owner, safeRunInput).input, safeRunInput.input, "safe run input remains exact");
 
+const isolationRunId = "run-isolation";
+const isolationInput = {
+  workflowId: "workflow-isolation",
+  workflowVersionId: "workflow-isolation@1",
+  definition: { metadata: { label: "safe" } },
+  input: { campaign: { name: "safe" } },
+  state: { runId: isolationRunId, output: { status: "safe" } },
+};
+const isolationStore = createInMemoryWorkflowRunStore();
+const createdRow = isolationStore.createRun(owner, isolationInput);
+isolationInput.definition.metadata.label = sentinel;
+isolationInput.input.campaign.name = sentinel;
+isolationInput.state.output.status = sentinel;
+createdRow.definition.metadata.label = sentinel;
+createdRow.input.campaign.name = sentinel;
+createdRow.state.output.status = sentinel;
+const fetchedRow = isolationStore.getRun(owner, isolationRunId);
+assert.equal(fetchedRow.definition.metadata.label, "safe", "create input and return are isolated from persisted definition");
+assert.equal(fetchedRow.input.campaign.name, "safe", "create input and return are isolated from persisted input");
+assert.equal(fetchedRow.state.output.status, "safe", "create input and return are isolated from persisted state");
+fetchedRow.input.campaign.name = sentinel;
+const listedRow = isolationStore.listRuns(owner).find(({ runId: listedRunId }) => listedRunId === isolationRunId);
+assert.equal(listedRow.input.campaign.name, "safe", "get returns are isolated from persisted rows");
+listedRow.definition.metadata.label = sentinel;
+assert.equal(isolationStore.getRun(owner, isolationRunId).definition.metadata.label, "safe", "list returns are isolated from persisted rows");
+const nextState = { runId: isolationRunId, output: { status: "updated" } };
+const updatedRow = isolationStore.updateRunState(owner, isolationRunId, nextState);
+nextState.output.status = sentinel;
+updatedRow.state.output.status = sentinel;
+const canonicalRow = isolationStore.getRun(owner, isolationRunId);
+assert.equal(canonicalRow.state.output.status, "updated", "update input and return are isolated from persisted state");
+serializedSafe(canonicalRow, "canonical in-memory workflow run");
+
 const cloudRunQueries = [];
 const cloudRunStore = createCloudWorkflowRunStore({
   async transaction(operation) {

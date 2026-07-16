@@ -98,7 +98,7 @@ export function createInMemoryWorkflowRunStore(): WorkflowRunStore {
     const key = workflowRunKey(owner, input.state.runId);
     if (rows.has(key)) throw workflowRunConflictError(input.state.runId);
     const now = new Date().toISOString();
-    const row: WorkflowRunRow = {
+    const row: WorkflowRunRow = structuredClone({
       organizationId: owner.organizationId,
       userId: owner.userId,
       hostSessionId: owner.hostSessionId ?? null,
@@ -110,31 +110,34 @@ export function createInMemoryWorkflowRunStore(): WorkflowRunStore {
       state: input.state,
       createdAt: now,
       updatedAt: now,
-    };
+    });
     rows.set(key, row);
-    return row;
+    return structuredClone(row);
   }
 
   function getRun(ownerInput: WorkflowRunOwner, runId: string): WorkflowRunRow | null {
     const owner = normalizeWorkflowRunOwner(ownerInput);
-    return rows.get(workflowRunKey(owner, runId)) ?? null;
+    const row = rows.get(workflowRunKey(owner, runId));
+    return row ? structuredClone(row) : null;
   }
 
   function listRuns(ownerInput: WorkflowRunOwner): WorkflowRunRow[] {
     const owner = normalizeWorkflowRunOwner(ownerInput);
     return [...rows.values()]
       .filter((row) => row.organizationId === owner.organizationId && row.userId === owner.userId)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map((row) => structuredClone(row));
   }
 
   function updateRunState(ownerInput: WorkflowRunOwner, runId: string, state: WorkflowRunState): WorkflowRunRow | null {
+    assertWorkflowPersistenceSafe(state);
     const owner = normalizeWorkflowRunOwner(ownerInput);
     const key = workflowRunKey(owner, runId);
     const existing = rows.get(key);
     if (!existing) return null;
-    const updated: WorkflowRunRow = { ...existing, state, updatedAt: new Date().toISOString() };
+    const updated: WorkflowRunRow = structuredClone({ ...existing, state, updatedAt: new Date().toISOString() });
     rows.set(key, updated);
-    return updated;
+    return structuredClone(updated);
   }
 
   return { createRun, getRun, listRuns, updateRunState };

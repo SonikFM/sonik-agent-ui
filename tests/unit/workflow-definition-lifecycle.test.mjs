@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { train0WorkflowFixtures } from "../../packages/tool-contracts/dist/workflow-vnext-fixtures.js";
+import { train0InvalidWorkflowFixtures, train0WorkflowFixtures } from "../../packages/tool-contracts/dist/workflow-vnext-fixtures.js";
 import { createInMemoryWorkflowDefinitionRepository, workflowDefinitionDigest } from "../../apps/standalone-sveltekit/src/lib/server/workflow-definition-repository.ts";
 import { handleWorkflowDefinitionsAction } from "../../apps/standalone-sveltekit/src/lib/server/workflow-definitions.ts";
 
@@ -9,6 +9,34 @@ const otherUser = { ...host, sessionId: "session-b", userId: "user-b", principal
 const repository = createInMemoryWorkflowDefinitionRepository();
 const call = (action, hostSession = host) => handleWorkflowDefinitionsAction(action, { hostSession, repository });
 const digest = (character) => `sha256:${character.repeat(64)}`;
+
+async function assertPublishRejected(definition, expectedIssue) {
+  const rejectedRepository = createInMemoryWorkflowDefinitionRepository();
+  const rejectedCall = (action) => handleWorkflowDefinitionsAction(action, { hostSession: host, repository: rejectedRepository });
+  assert.equal((await rejectedCall({ action: "create", definition })).ok, true);
+  const draft = (await rejectedCall({ action: "get", workflowId: definition.workflowId })).draft;
+  const workflowVersionId = `${definition.workflowId}@1`;
+  const result = await rejectedCall({
+    action: "publish",
+    workflowId: definition.workflowId,
+    expectedRevision: 0,
+    workflowVersionId,
+    dependencyPins: {
+      organizationId: host.organizationId,
+      workflowVersionId,
+      definitionDigest: draft.definitionDigest,
+      agentPublishedVersionId: "agent@1",
+      nodeDescriptorsDigest: digest("a"),
+      capabilityVersionsDigest: digest("b"),
+      toolPackVersionsDigest: digest("c"),
+      skillVersionsDigest: digest("d"),
+      runtimePolicyDigest: digest("e"),
+    },
+  });
+  assert.equal(result.ok, false, `${expectedIssue} must block publication`);
+  assert.ok(result.issues.some(({ code }) => code === expectedIssue), `canonical validation must report ${expectedIssue}`);
+  assert.deepEqual(await rejectedRepository.listPublished({ organizationId: host.organizationId, userId: host.userId }, definition.workflowId), []);
+}
 
 const definition = structuredClone(train0WorkflowFixtures.linear);
 const reorderedDefinition = Object.fromEntries(Object.entries(definition).reverse());
@@ -84,6 +112,24 @@ assert.deepEqual(published.version.dependencyPins, pins, "publication stores the
 assert.equal((await call({ action: "publish", workflowId: definition.workflowId, expectedRevision: 1, workflowVersionId, dependencyPins: pins })).ok, false, "published ids are immutable");
 assert.equal((await call({ action: "resolve", pin: { kind: "published", workflowVersionId, definitionDigest: draft.definitionDigest } })).definition.workflowVersionId, workflowVersionId);
 assert.equal((await call({ action: "resolve", pin: { kind: "published", workflowVersionId, definitionDigest: digest("f") } })).definition, null, "digest is part of the exact published pin");
+
+const unsupportedVersion = structuredClone(train0WorkflowFixtures.linear);
+unsupportedVersion.workflowId = "train0.unsupported-version";
+unsupportedVersion.nodes[0].typeVersion = 2;
+const cycle = structuredClone(train0WorkflowFixtures.linear);
+cycle.workflowId = "train0.cycle";
+cycle.edges.push({ edgeId: "cycle", from: "work", to: "start", default: false });
+const missingApprovalBinding = structuredClone(train0WorkflowFixtures.approval);
+missingApprovalBinding.workflowId = "train0.missing-approval-binding";
+delete missingApprovalBinding.nodes.find(({ nodeType }) => nodeType === "tool_commit").effectBinding;
+const invalidDescriptorConfig = structuredClone(train0WorkflowFixtures.linear);
+invalidDescriptorConfig.workflowId = "train0.invalid-descriptor-config";
+invalidDescriptorConfig.nodes[0].config = [];
+await assertPublishRejected(train0InvalidWorkflowFixtures.unsupportedNode, "node_not_publishable");
+await assertPublishRejected(unsupportedVersion, "unsupported_node_version");
+await assertPublishRejected(cycle, "cycle");
+await assertPublishRejected(missingApprovalBinding, "effect_binding_required");
+await assertPublishRejected(invalidDescriptorConfig, "config_schema_invalid");
 
 const next = await call({ action: "update", workflowId: definition.workflowId, expectedRevision: 1, definition: { ...edited, title: "post-publish edit", definitionVersion: 3 } });
 assert.equal(next.ok, true);
