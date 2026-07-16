@@ -29,9 +29,9 @@
     /** Fired when the drafting agent returns a validated workflow, so the shell
      *  can load it onto the canvas (describe -> draft -> canvas). */
     onWorkflowDrafted?: (workflow: WorkflowDefinition) => void;
-    capabilityReadiness?: CapabilityReadiness[];
+    capabilityReadiness?: CapabilityReadiness[] | null;
   }
-  let { draftAgentId, workspaceFetch, prepareDraft, onWorkflowDrafted, capabilityReadiness = [] }: Props = $props();
+  let { draftAgentId, workspaceFetch, prepareDraft, onWorkflowDrafted, capabilityReadiness = null }: Props = $props();
 
   let input = $state("");
   let preparationMessage = $state("");
@@ -74,7 +74,7 @@
   });
 
   const isStreaming = $derived(preview.status === "streaming" || preview.status === "submitted");
-  const callableCapabilityCount = $derived(capabilityReadiness.filter((entry) => entry.callable).length);
+  const callableCapabilityCount = $derived((capabilityReadiness ?? []).filter((entry) => entry.callable).length);
 
   async function submit(): Promise<void> {
     const trimmed = input.trim();

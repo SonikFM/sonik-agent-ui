@@ -10,10 +10,15 @@ export function resolveStandaloneCapabilityReadiness(input: StandaloneHostRuntim
   capabilityVersionPins?: CapabilityVersionPins;
   requireVersionPins?: boolean;
   toolPermissionModes?: Record<string, "off" | "ask" | "allow">;
+  defaultToolPermissionMode?: "off" | "ask" | "allow";
 } = {}): CapabilityReadiness[] {
   const bundle = createStandaloneHostCommandRuntimeBundle(input);
   const registry = sonikBookingCapabilityRegistry;
   const familyIds = Object.fromEntries(bundle.catalog.commands.map((command) => [command.id, command.familyId]));
+  const toolPermissionModes = resolveCapabilityToolPermissionModes({ registry, capabilityFamilyIds: familyIds, familyModes: input.toolPermissionModes });
+  if (input.defaultToolPermissionMode) {
+    for (const capability of registry.capabilities) toolPermissionModes[capability.capabilityId] ??= input.defaultToolPermissionMode;
+  }
   return resolveCapabilityReadiness({
     catalog: bundle.catalog,
     runtimeAdapters: bundle.runtimeAdapters,
@@ -24,6 +29,6 @@ export function resolveStandaloneCapabilityReadiness(input: StandaloneHostRuntim
     capabilityVersionPins: input.capabilityVersionPins,
     requireVersionPins: input.requireVersionPins,
     approvedCommandIds: input.approvedCommandIds,
-    toolPermissionModes: resolveCapabilityToolPermissionModes({ registry, capabilityFamilyIds: familyIds, familyModes: input.toolPermissionModes }),
+    toolPermissionModes,
   });
 }

@@ -66,11 +66,12 @@ assert.notEqual(workflowHistoryItemKey("run-a", "shared"), workflowHistoryItemKe
 assert.notEqual(workflowHistoryItemKey("a:b", "c"), workflowHistoryItemKey("a", "b:c"), "history keys cannot collide through ambiguous concatenation");
 
 const componentRoot = new URL("../../apps/standalone-sveltekit/src/lib/components/workflow-builder/", import.meta.url);
-const [configSource, organizerSource, historySource, rootSource] = await Promise.all([
+const [configSource, organizerSource, historySource, rootSource, guideSource] = await Promise.all([
   readFile(new URL("AgentConfigPanel.svelte", componentRoot), "utf8"),
   readFile(new URL("OrganizerPanel.svelte", componentRoot), "utf8"),
   readFile(new URL("RunHistoryPanel.svelte", componentRoot), "utf8"),
   readFile(new URL("WorkflowBuilderRoot.svelte", componentRoot), "utf8"),
+  readFile(new URL("../../../../../../docs/guides/workflow-builder-user-guide.md", componentRoot), "utf8"),
 ]);
 
 assert.match(configSource, /role="listbox"/);
@@ -80,6 +81,9 @@ assert.match(configSource, /ArrowDown/);
 for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) assert.match(configSource, new RegExp(key));
 assert.match(configSource, /Selected model:/, "screen readers receive selection changes");
 assert.match(configSource, /disabled=\{mode !== "off"/, "non-callable families cannot be saved runnable");
+assert.match(configSource, /Readiness unavailable\. Ask and Allow stay disabled\./, "missing authority explicitly fails closed");
+assert.match(configSource, /rows\.some\(\(readiness\) => !readiness\)/, "a missing capability row cannot enable a family");
+assert.match(configSource, /effectiveFamilyMode\(definition, familyId\) === "off" \? policyChangeReadinessById : readinessById/, "leaving Off requires separate policy-neutral server proof");
 assert.match(configSource, /max-h-\[50rem\]/, "ten h-20 rows define the collapsed scrolling viewport");
 assert.match(configSource, /h-20 shrink-0/, "catalog rows have a fixed height so the viewport cap is deterministic");
 assert.match(organizerSource, /createOrganizerPatchRequest\(workflow, revision/);
@@ -100,5 +104,19 @@ assert.match(rootSource, /<OrganizerPanel/, "the root mounts the graph-free P2 o
 assert.match(rootSource, /<RunHistoryPanel/, "the root mounts redacted operator history without merging stores");
 assert.match(rootSource, /workflowDefinitions\(request as unknown as Record<string, unknown>\)/, "organizer_patch crosses the root boundary unchanged");
 assert.match(rootSource, /workspaceFetch\(`\/api\/workflow-history\?\$\{query\}`\)/, "history uses the shared workspace fetch with active correlation filters");
+
+for (const obsolete of [
+  /Workflow drafts are in-memory/i,
+  /No Publish control/i,
+  /Capability truth is a future contract/i,
+]) assert.doesNotMatch(guideSource, obsolete, `guide rejects obsolete claim ${obsolete}`);
+for (const current of [
+  /Save draft.*workflow draft/is,
+  /saved workflows.*reload/is,
+  /expected revision/i,
+  /immutable published version/i,
+  /dependency pins/i,
+  /readiness unavailable.*default deny/is,
+]) assert.match(guideSource, current, `guide documents shipped contract ${current}`);
 
 console.log("organizer component unit and accessibility checks passed");

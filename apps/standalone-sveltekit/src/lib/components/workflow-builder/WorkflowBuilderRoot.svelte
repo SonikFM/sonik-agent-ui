@@ -59,7 +59,7 @@
   import { bookingReservationWorkflowManifest, amplifyCampaignWorkflowManifest } from "@sonik-agent-ui/tool-contracts/marketplace-fixtures";
   import type { AgentDefinition, WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
   import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
-  import type { CapabilityReadiness, WorkflowDependencyPins, WorkflowVNextDefinition } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+  import { capabilityReadinessSchema, type CapabilityReadiness, type WorkflowDependencyPins, type WorkflowVNextDefinition } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
   import { AGENT_MODEL_OPTIONS, type AgentModelOption } from "$lib/agent-settings";
 
   interface Props {
@@ -153,7 +153,9 @@
   let modelOptions = $state<AgentModelOption[]>(AGENT_MODEL_OPTIONS);
   let modelCatalogStatus = $state<"idle" | "loading" | "ready" | "fallback" | "error">("idle");
   let modelCatalogMessage = $state<string | null>(null);
-  let capabilityReadiness = $state<CapabilityReadiness[]>([]);
+  let capabilityReadiness = $state<CapabilityReadiness[] | null>(null);
+  let capabilityPolicyChangeReadiness = $state<CapabilityReadiness[] | null>(null);
+  let capabilityReadinessRequest = 0;
 
   async function refreshModelCatalog(): Promise<void> {
     if (!workspaceContextReady) {
@@ -179,11 +181,26 @@
     }
   }
 
-  async function refreshCapabilityReadiness(): Promise<void> {
-    if (!workspaceContextReady) { capabilityReadiness = []; return; }
-    const response = await workspaceFetch("/api/capability-readiness");
-    const body = await response.json().catch(() => null) as { readiness?: CapabilityReadiness[] } | null;
-    capabilityReadiness = response.ok && Array.isArray(body?.readiness) ? body.readiness : [];
+  async function refreshCapabilityReadiness(toolPolicy: AgentDefinition["toolPolicy"]): Promise<void> {
+    const requestId = ++capabilityReadinessRequest;
+    capabilityReadiness = null;
+    capabilityPolicyChangeReadiness = null;
+    if (!workspaceContextReady) return;
+    try {
+      const response = await workspaceFetch("/api/capability-readiness", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolPolicy }),
+      });
+      const body = await response.json().catch(() => null) as { readiness?: unknown; policyChangeReadiness?: unknown } | null;
+      const readiness = capabilityReadinessSchema.array().safeParse(body?.readiness);
+      const policyChangeReadiness = capabilityReadinessSchema.array().safeParse(body?.policyChangeReadiness);
+      if (requestId !== capabilityReadinessRequest || !response.ok || !readiness.success || !policyChangeReadiness.success) return;
+      capabilityReadiness = readiness.data;
+      capabilityPolicyChangeReadiness = policyChangeReadiness.data;
+    } catch {
+      // Null is the explicit fail-closed state consumed by AgentConfigPanel.
+    }
   }
 
   async function saveDraft(): Promise<{ ok: boolean; message: string }> {
@@ -480,8 +497,11 @@
 
   $effect(() => {
     void refreshModelCatalog();
-    void refreshCapabilityReadiness();
     void refreshPersistedWorkflows();
+  });
+
+  $effect(() => {
+    void refreshCapabilityReadiness({ ...definition.toolPolicy });
   });
 
   $effect(() => {
@@ -559,6 +579,7 @@
         bind:definition
         validationIssues={definitionValidation.issues ?? []}
         {capabilityReadiness}
+        {capabilityPolicyChangeReadiness}
         {modelOptions}
         {modelCatalogStatus}
         {modelCatalogMessage}

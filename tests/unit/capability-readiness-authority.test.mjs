@@ -39,6 +39,12 @@ assert.equal(missingGrant.contextReady, true);
 assert.equal(missingGrant.grantReady, false);
 assert.deepEqual(missingGrant.reasonCodes, ["missing_host_grant"]);
 
+const policyOff = resolveCapabilityReadiness({ ...base, toolPermissionModes: { [capabilityId]: "off" } })[0];
+assert.equal(policyOff.callable, false, "an explicit draft policy Off must override otherwise-ready runtime axes");
+assert.equal(policyOff.grantReady, false);
+assert.ok(policyOff.reasonCodes.includes("missing_host_grant"));
+assert.throws(() => requireCallableCapability([policyOff], capabilityId), /missing_host_grant/, "dispatch uses the same policy-aware readiness result");
+
 const blockers = resolveCapabilityReadiness({
   ...base,
   catalog: { ...base.catalog, commands: [] },
@@ -64,10 +70,18 @@ const wiredFiles = {
   config: "apps/standalone-sveltekit/src/lib/components/workflow-builder/AgentConfigPanel.svelte",
   preview: "apps/standalone-sveltekit/src/lib/components/workflow-builder/DebugPreviewPane.svelte",
   publish: "apps/standalone-sveltekit/src/lib/server/workflow-definitions.ts",
+  endpoint: "apps/standalone-sveltekit/src/routes/api/capability-readiness/+server.ts",
 };
 for (const [consumer, path] of Object.entries(wiredFiles)) {
   const source = await readFile(new URL(`../../${path}`, import.meta.url), "utf8");
   assert.match(source, /capabilityReadiness|resolveStandaloneCapabilityReadiness|requireCallableCapability/, `${consumer} consumes server readiness`);
 }
+
+const endpointSource = await readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/capability-readiness/+server.ts", import.meta.url), "utf8");
+assert.match(endpointSource, /agentDefinitionSchema\.shape\.toolPolicy\.safeParse/, "the readiness request validates the draft policy at the server trust boundary");
+assert.match(endpointSource, /invalid_tool_policy[\s\S]*status: 400/, "missing or malformed policy input fails closed");
+assert.match(endpointSource, /toolPermissionModes: parsed\.data/, "validated policy reaches the sole readiness resolver");
+assert.match(endpointSource, /defaultToolPermissionMode: "off"/, "unspecified builder families default deny rather than implying allow");
+assert.match(endpointSource, /policyChangeReadiness/, "the endpoint supplies separate policy-neutral evidence to avoid an Off edit deadlock");
 
 console.log("authoritative capability readiness tests passed");

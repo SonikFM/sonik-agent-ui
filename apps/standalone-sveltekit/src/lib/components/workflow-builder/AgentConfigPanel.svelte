@@ -29,7 +29,8 @@
     modelCatalogStatus?: "idle" | "loading" | "ready" | "fallback" | "error";
     modelCatalogMessage?: string | null;
     onModelCatalogRefresh?: () => void;
-    capabilityReadiness?: CapabilityReadiness[];
+    capabilityReadiness?: CapabilityReadiness[] | null;
+    capabilityPolicyChangeReadiness?: CapabilityReadiness[] | null;
   }
   let {
     definition = $bindable(),
@@ -38,12 +39,14 @@
     modelCatalogStatus = "idle",
     modelCatalogMessage = null,
     onModelCatalogRefresh,
-    capabilityReadiness = [],
+    capabilityReadiness = null,
+    capabilityPolicyChangeReadiness = null,
   }: Props = $props();
 
   const TOOL_MODES: AgentToolPermissionMode[] = ["off", "ask", "allow"];
   const capabilityFamilies = groupCapabilitiesByFamily();
-  const readinessById = $derived(new Map(capabilityReadiness.map((entry) => [entry.capabilityId, entry])));
+  const readinessById = $derived(new Map((capabilityReadiness ?? []).map((entry) => [entry.capabilityId, entry])));
+  const policyChangeReadinessById = $derived(new Map((capabilityPolicyChangeReadiness ?? []).map((entry) => [entry.capabilityId, entry])));
 
   let expandedFamilyIds = $state<string[]>([]);
   let modelQuery = $state("");
@@ -87,11 +90,12 @@
   }
 
   function familyDisabledReason(familyId: string): string | null {
-    if (capabilityReadiness.length === 0) return null;
-    const blocked = capabilityFamilies
-      .find((family) => family.familyId === familyId)
-      ?.capabilities.map((capability) => readinessById.get(capability.capabilityId))
-      .filter((readiness) => readiness && !readiness.callable) ?? [];
+    if (!capabilityReadiness || !capabilityPolicyChangeReadiness) return "Readiness unavailable. Ask and Allow stay disabled.";
+    const capabilities = capabilityFamilies.find((family) => family.familyId === familyId)?.capabilities ?? [];
+    const authority = effectiveFamilyMode(definition, familyId) === "off" ? policyChangeReadinessById : readinessById;
+    const rows = capabilities.map((capability) => authority.get(capability.capabilityId));
+    if (rows.length === 0 || rows.some((readiness) => !readiness)) return "Readiness unavailable. Ask and Allow stay disabled.";
+    const blocked = rows.filter((readiness) => !readiness?.callable);
     return blocked.length > 0 ? `Not runnable: ${[...new Set(blocked.flatMap((readiness) => readiness?.reasonCodes ?? []))].join(", ")}` : null;
   }
 
@@ -307,6 +311,9 @@
       <Card.Description>Family &rarr; per-command rows from the generated capability registry (115 capabilities). This panel reflects `toolPolicy` grants; it never issues them -- enforcement lives in command-catalog.ts's registry-live pin.</Card.Description>
     </Card.Header>
     <Card.Content>
+      {#if !capabilityReadiness || !capabilityPolicyChangeReadiness}
+        <p class="mb-3 text-sm text-destructive" role="alert">Capability readiness is unavailable. Ask and Allow remain disabled until authoritative readiness returns.</p>
+      {/if}
       <Accordion.Root type="multiple" bind:value={expandedFamilyIds} class="w-full">
         {#each capabilityFamilies as family (family.familyId)}
           {@const policyDisabledReason = familyDisabledReason(family.familyId)}

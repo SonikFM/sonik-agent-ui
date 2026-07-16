@@ -468,6 +468,12 @@ assert.equal(
   true,
   "WorkflowBuilderRoot must pass the fetched model catalog down into AgentConfigPanel",
 );
+const readinessRefreshSource = builderRootSource.match(/async function refreshCapabilityReadiness[\s\S]*?\n  }/)?.[0] ?? "";
+assert.match(readinessRefreshSource, /workspaceFetch\("\/api\/capability-readiness", \{[\s\S]*method: "POST"/, "readiness uses an explicit policy-bearing request");
+assert.match(readinessRefreshSource, /JSON\.stringify\(\{ toolPolicy \}\)/, "the current draft toolPolicy is wired into readiness authority");
+assert.match(readinessRefreshSource, /capabilityReadinessSchema\.array\(\)\.safeParse/, "malformed readiness rows never become authority");
+assert.match(readinessRefreshSource, /requestId !== capabilityReadinessRequest/, "stale policy responses cannot overwrite newer authority");
+assert.match(builderRootSource, /refreshCapabilityReadiness\(\{ \.\.\.definition\.toolPolicy \}\)/, "policy edits reactively refresh readiness");
 const refreshAgentModelCatalogSource = pageSource.match(/async function refreshAgentModelCatalog\(\)[\s\S]*?\n  }/)?.[0] ?? "";
 assert.match(refreshAgentModelCatalogSource, /workspaceFetch\("\/api\/agent-models"\)/,
   "the page model catalog must use the authority-waiting and one-replay workspace fetch path");
