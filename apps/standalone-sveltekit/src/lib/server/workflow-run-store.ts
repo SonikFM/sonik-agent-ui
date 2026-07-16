@@ -213,7 +213,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       const current = claims.get(key);
       if (current) {
         assertSameExternalEffect(current.externalEffectIdentity, input.externalEffectIdentity);
-        return { created: false, claim: current };
+        return { created: false, claim: structuredClone(current) };
       }
       const now = new Date().toISOString();
       const claim = effectClaimSchema.parse({ ...input, status: "claimed", createdAt: now, updatedAt: now });
@@ -230,7 +230,7 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       if (!current || current.status !== from) return null;
       const updated = { ...current, status: to, updatedAt: new Date().toISOString(), ...(result === undefined ? {} : { result: sanitizeWorkflowPersistenceValue(result) }) };
       claims.set(key, updated);
-      return updated;
+      return structuredClone(updated);
     },
   };
 }
