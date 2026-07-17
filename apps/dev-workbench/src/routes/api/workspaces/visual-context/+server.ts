@@ -23,7 +23,7 @@ export const GET: RequestHandler = async ({ cookies, request, url }) => {
   const result = await readWorkspaceVisualContext(sessionId, wantsPng, request.signal);
   if (!result.ok) return json({ error: result.error }, { status: 404, headers: NO_STORE });
   if (wantsPng && result.value.png) {
-    return new Response(result.value.png, { headers: { ...NO_STORE, "content-type": "image/png" } });
+    return new Response(new Uint8Array(result.value.png), { headers: { ...NO_STORE, "content-type": "image/png" } });
   }
   return json({ snapshot: result.value.snapshot }, { headers: NO_STORE });
 };
