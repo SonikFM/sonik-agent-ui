@@ -36,7 +36,7 @@ try {
     viewport: { width: 800, height: 600 },
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
-  const page = context.pages()[0] ?? await context.newPage();
+  let page = context.pages()[0] ?? await context.newPage();
   await page.goto(`${origin(host)}/booking`);
   await page.locator("iframe").waitFor();
   await page.bringToFront();
@@ -46,11 +46,12 @@ try {
   const { extensions } = await cdp.send("Extensions.getExtensions");
   const loadedExtension = extensions.find((candidate) => candidate.name === "Sonik Exact Active Tab");
   assert.ok(loadedExtension?.enabled, "Canonical unpacked extension is enabled");
-  const { targetInfos } = await cdp.send("Target.getTargets");
-  const bookingTarget = targetInfos.find((candidate) => candidate.type === "page" && candidate.url === `${origin(host)}/booking`);
+  const { targetInfos } = await cdp.send("Target.getTargets", { filter: [{ type: "tab", exclude: false }] });
+  const bookingTarget = targetInfos.find((candidate) => candidate.type === "tab" && candidate.url === `${origin(host)}/booking`);
   assert.ok(bookingTarget, "Booking active-tab target is available");
   await cdp.send("Extensions.triggerAction", { id: loadedExtension.id, targetId: bookingTarget.targetId });
   await page.waitForTimeout(500);
+  page = context.pages().find((candidate) => candidate.url() === `${origin(host)}/booking`) ?? page;
 
   const frame = page.frames().find((candidate) => candidate.url().startsWith(origin(workbench)));
   assert.ok(frame, "Workbench fixture frame loaded");
