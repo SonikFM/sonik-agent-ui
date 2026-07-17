@@ -460,14 +460,14 @@ async function acquireVisualContextLease(sandbox: Sandbox, owner: string, signal
   return result.exitCode === 0;
 }
 
-export function createVisualContextLeaseCommand(lease: string, owner: string, expires: number) {
+export function createVisualContextLeaseCommand(lease: string, owner: string, expires: number, attempts = 50) {
   const script = `set -eu
-lease="$1"; owner="$2"; expires="$3"; mkdir -p "$(dirname "$lease")"
+lease="$1"; owner="$2"; expires="$3"; attempts="$4"; mkdir -p "$(dirname "$lease")"
 candidate="$lease.candidate.$owner"; stale="$lease.stale.$owner"
 cleanup() { rm -f "$candidate"; }
 trap cleanup EXIT
 printf '%s\\n%s\\n' "$owner" "$expires" > "$candidate"
-for attempt in $(seq 1 50); do
+for attempt in $(seq 1 "$attempts"); do
   if ln "$candidate" "$lease" 2>/dev/null; then exit 0; fi
   current_expires=$(sed -n '2p' "$lease" 2>/dev/null || true)
   case "$current_expires" in
@@ -481,7 +481,7 @@ for attempt in $(seq 1 50); do
   rm -f "$stale"
 done
 exit 75`;
-  return { cmd: "bash" as const, args: ["-lc", script, "_", lease, owner, String(expires)] };
+  return { cmd: "bash" as const, args: ["-lc", script, "_", lease, owner, String(expires), String(attempts)] };
 }
 
 async function releaseVisualContextLease(sandbox: Sandbox, owner: string, signal?: AbortSignal): Promise<void> {
