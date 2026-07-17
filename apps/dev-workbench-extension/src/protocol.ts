@@ -5,7 +5,7 @@ export const VISUAL_VERSION = "sonik.visual-context.v1";
 const operations = new Set(["get-capabilities", "capture", "pair-extension", "unpair-extension"]);
 const maxPngBytes = 10 * 1024 * 1024;
 const maxPngBase64Length = Math.ceil(maxPngBytes / 3) * 4;
-const redactionKinds = new Set(["Sensitive form controls", "Embedded frame pixels"]);
+const redactionKinds = new Set(["Sensitive form controls", "Embedded frame pixels", "Sonik capture chrome"]);
 
 export function isSafeCapturePreparation(value) {
   const viewport = value?.viewport;
