@@ -264,7 +264,13 @@ for (const scenario of historyModes) {
     });
 
     failRefresh = true;
+    const actionsTrigger = page.getByTestId("agent-chat-actions-trigger");
+    await actionsTrigger.focus();
+    await expect(actionsTrigger).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("agent-chat-actions-popover")).toBeVisible();
     await page.getByTestId("session-history-refresh").click();
+    await expect(page.getByTestId("agent-chat-actions-popover")).toBeHidden();
     const alert = page.getByTestId("session-history-error");
     await expect(alert).toBeVisible();
     await expect(switcher).toHaveValue(historicalSession.id);

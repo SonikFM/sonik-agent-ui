@@ -72,3 +72,8 @@ export async function submitPrompt(page: Page, text: string): Promise<void> {
   await textarea.fill(text);
   await textarea.press("Enter");
 }
+
+export async function openChatActions(page: Page): Promise<void> {
+  await page.getByTestId("agent-chat-actions-trigger").click();
+  await page.getByTestId("agent-chat-actions-popover").waitFor({ state: "visible" });
+}

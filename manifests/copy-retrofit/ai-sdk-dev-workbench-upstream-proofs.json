@@ -1,0 +1,181 @@
+{
+	"name": "ai-sdk-dev-workbench-upstream-proofs",
+	"upstream": {
+		"repoPath": "${AI_SDK_REPO_PATH:-/Users/danielletterio/Documents/GitHub/ai}",
+		"gitRemote": "https://github.com/vercel/ai.git",
+		"revision": "91a3d6e9f1e2e948dcffc5bec1b38b1c96d0b373",
+		"license": "Apache-2.0"
+	},
+	"entries": [
+		{
+			"source": "LICENSE",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/LICENSE",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-next/agent/harness/ai-sdk-coding-repo.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-next/agent/harness/ai-sdk-coding-repo.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "63d4cf6f62725630364a7e72e2eff48796ba23533230db708b7c0926b43af320"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-next/agent/harness/codex/ai-sdk-coding-agent.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-next/agent/harness/codex/ai-sdk-coding-agent.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "c15862a39ff9b52dbecd2707726796ca5072ce30cdfa1a177e40f04f7b64e3ef"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-next/app/api/harness/codex/ai-sdk-coding/route.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-next/app/api/harness/codex/ai-sdk-coding/route.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "7733a47f9464aa212bd6f33de4056666109181411eda4788ceed0cc220d355f6"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-next/util/harness-resume-store.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-next/util/harness-resume-store.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "a33920372cea57a3a592b429edcf692d6835a1aa77e5155b61c1ea1cd5ddc314"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/harness-codex/src/codex-harness.test.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/packages/harness-codex/src/codex-harness.test.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "ff2c14943fb97fe920cc34028130a5fa0c1dfb3c42afbbe3bda169b169ab2603"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/sandbox-vercel/src/vercel-sandbox.test.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/packages/sandbox-vercel/src/vercel-sandbox.test.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "bda207e50c768a82f5d8251ab8dea544783e4b3ade2af86463db9d898e378fc2"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-next/app/api/harness/codex/workflow/run-slice-step.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-next/app/api/harness/codex/workflow/run-slice-step.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "b04be06aa6dc0f17df020227db354b4b9672d1e686f6150ca72cce108bbff196"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-next/app/api/harness/codex/workflow/workflow.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-next/app/api/harness/codex/workflow/workflow.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "e5b597f667d2031e43994b2a001b120e57443bfcc2beabde4c6848d9f7d5522e"
+					}
+				]
+			}
+		},
+		{
+			"source": "packages/workflow-harness/src/run-harness-agent-slice.test.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/packages/workflow-harness/src/run-harness-agent-slice.test.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "297bf3e7799b964367246547eb33eb1f5b9f9cdaa295cecc30e6feb734aecdb2"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-tui/agents/codex/ai-sdk-coding-agent.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-tui/agents/codex/ai-sdk-coding-agent.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "4b237b6296ae61d7102def601f97783f9d8ce53cd20101800a3e2d72b8e01014"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-tui/harness/codex/ai-sdk-coding.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-tui/harness/codex/ai-sdk-coding.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "751c61cbc6e2cc9901380a788650916af2035cbec960d5b33105c427d962b259"
+					}
+				]
+			}
+		},
+		{
+			"source": "examples/harness-e2e-tui/lib/run-tui.ts",
+			"destination": "docs/upstream-proofs/ai-sdk-dev-workbench/upstream/examples/harness-e2e-tui/lib/run-tui.ts",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "7b19f33592b1c25b9e8a22009030002b7e0888ee10f9c58718a6ecc715113180"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": []
+}

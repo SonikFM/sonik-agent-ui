@@ -1,0 +1,619 @@
+.dev-workbench {
+  --dw-shell: var(--app-shell-bg, Canvas);
+  --dw-panel: var(--app-panel-bg, color-mix(in oklab, Canvas 96%, CanvasText));
+  --dw-raised: var(--app-control-bg, color-mix(in oklab, Canvas 91%, CanvasText));
+  --dw-border: var(--sonik-border-color, color-mix(in oklab, CanvasText 18%, transparent));
+  --dw-muted: var(--app-ink-muted, color-mix(in oklab, CanvasText 72%, transparent));
+  --dw-faint: var(--app-ink-faint, color-mix(in oklab, CanvasText 55%, transparent));
+  --dw-accent: var(--color-primary, Highlight);
+  --dw-danger: var(--color-error, LinkText);
+  --dw-success: var(--color-success, var(--dw-accent));
+  --dw-warning: var(--color-warning, var(--dw-accent));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) minmax(5.25rem, auto);
+  width: 100%;
+  min-width: 320px;
+  height: 100svh;
+  min-height: 32rem;
+  overflow: hidden;
+  background: var(--dw-shell);
+  color: var(--color-base-content, CanvasText);
+}
+
+.dev-workbench[data-terminal-dock="fullscreen"] {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.dev-workbench__toolbar,
+.dev-workbench__panel-header,
+.dev-workbench__details-nav,
+.dev-workbench__panel-tools,
+.dev-workbench__status,
+.dev-workbench__actions,
+.dev-workbench__dock-controls {
+  display: flex;
+  align-items: center;
+}
+
+.dev-workbench__toolbar {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(15rem, auto) minmax(16rem, 1fr) auto;
+  gap: 0.45rem 1rem;
+  min-height: 3.5rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--dw-border);
+  background: var(--dw-panel);
+}
+
+.dev-workbench__identity,
+.dev-workbench__panel-title,
+.dev-workbench__status-copy {
+  min-width: 0;
+}
+
+.dev-workbench h1,
+.dev-workbench h2,
+.dev-workbench p {
+  margin-block: 0;
+}
+
+.dev-workbench h1 {
+  font-size: 0.93rem;
+  line-height: 1.2;
+}
+
+.dev-workbench h2 {
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.dev-workbench__meta,
+.dev-workbench__terminal-command,
+.dev-workbench__file-status {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+.dev-workbench__meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.65rem;
+  color: var(--dw-muted);
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+
+.dev-workbench__status {
+  min-width: 0;
+  gap: 0.45rem;
+  color: var(--dw-muted);
+  font-size: 0.75rem;
+}
+
+.dev-workbench__status-copy {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.dev-workbench__status-copy > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dw-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-workbench__status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dev-workbench__status[data-status="ready"] {
+  color: var(--dw-success);
+}
+
+.dev-workbench__status[data-status="starting"],
+.dev-workbench__status[data-status="connecting"] {
+  color: var(--dw-warning);
+}
+
+.dev-workbench__status[data-status="error"] {
+  color: var(--dw-danger);
+}
+
+.dev-workbench__actions,
+.dev-workbench__panel-tools {
+  gap: 0.4rem;
+}
+
+.dev-workbench__button,
+.dev-workbench__tab,
+.dev-workbench__dock-controls button,
+.dev-workbench__overflow-menu button {
+  border: 1px solid var(--dw-border);
+  border-radius: var(--radius-field, 0.4rem);
+  background: var(--dw-raised);
+  color: inherit;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dev-workbench__button {
+  min-height: 2rem;
+  padding: 0.32rem 0.62rem;
+}
+
+.dev-workbench__button--compact {
+  min-height: 1.75rem;
+  padding: 0.22rem 0.5rem;
+  font-size: 0.7rem;
+}
+
+.dev-workbench__button--primary:not(:disabled) {
+  border-color: color-mix(in oklab, var(--dw-accent) 70%, var(--dw-border));
+  background: color-mix(in oklab, var(--dw-accent) 20%, var(--dw-raised));
+}
+
+.dev-workbench__button:hover:not(:disabled),
+.dev-workbench__tab:hover,
+.dev-workbench__tab[aria-selected="true"],
+.dev-workbench__dock-controls button:hover:not(:disabled),
+.dev-workbench__dock-controls button[aria-pressed="true"],
+.dev-workbench__overflow-menu button:hover:not(:disabled),
+.dev-workbench__overflow[open] > summary {
+  border-color: var(--dw-accent);
+  background: color-mix(in oklab, var(--dw-accent) 12%, var(--dw-raised));
+}
+
+.dev-workbench button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dev-workbench__overflow {
+  position: relative;
+}
+
+.dev-workbench__overflow > summary {
+  display: list-item;
+  min-width: 4.4rem;
+  white-space: nowrap;
+}
+
+.dev-workbench__overflow-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 3;
+  display: grid;
+  width: max-content;
+  min-width: 12rem;
+  padding: 0.35rem;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--radius-box, 0.55rem);
+  background: var(--dw-panel);
+}
+
+.dev-workbench__overflow-menu button {
+  min-height: 2.2rem;
+  padding: 0.45rem 0.55rem;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.dev-workbench__danger-action:not(:disabled) {
+  color: var(--dw-danger);
+}
+
+.dev-workbench__readiness {
+  grid-column: 1 / -1;
+  width: fit-content;
+  color: var(--dw-muted);
+  font-size: 0.7rem;
+}
+
+.dev-workbench__readiness summary {
+  cursor: pointer;
+}
+
+.dev-workbench__readiness ul {
+  max-width: 70ch;
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.dev-workbench__split {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--dw-border);
+}
+
+.dev-workbench__split[data-terminal-dock="right"] {
+  grid-template-columns: minmax(0, 1fr) 0.45rem minmax(20rem, var(--dw-terminal-size, 38%));
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "preview divider terminal";
+}
+
+.dev-workbench__split[data-terminal-dock="bottom"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(14rem, 1fr) 0.45rem minmax(12rem, var(--dw-terminal-size, 38%));
+  grid-template-areas: "preview" "divider" "terminal";
+}
+
+.dev-workbench__split[data-terminal-dock="fullscreen"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "terminal";
+}
+
+.dev-workbench__panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--dw-panel);
+}
+
+.dev-workbench__panel--preview {
+  grid-area: preview;
+}
+
+.dev-workbench__panel--terminal {
+  grid-area: terminal;
+}
+
+.dev-workbench__split[data-terminal-dock="fullscreen"] .dev-workbench__panel--preview {
+  display: none;
+}
+
+.dev-workbench__panel-header {
+  min-height: 2.35rem;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--dw-border);
+}
+
+.dev-workbench__panel-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+
+.dev-workbench__panel-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dev-workbench__preview-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: Canvas;
+}
+
+.dev-workbench__empty {
+  display: grid;
+  height: 100%;
+  min-height: 12rem;
+  place-content: center;
+  gap: 0.45rem;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.dev-workbench__empty strong {
+  font-size: 0.9rem;
+}
+
+.dev-workbench__empty p,
+.dev-workbench__terminal-note,
+.dev-workbench__detail-empty {
+  color: var(--dw-muted);
+  font-size: 0.78rem;
+}
+
+.dev-workbench__divider {
+  grid-area: divider;
+  position: relative;
+  z-index: 1;
+  background: var(--dw-border);
+  touch-action: none;
+}
+
+.dev-workbench__divider::before {
+  content: "";
+  position: absolute;
+}
+
+.dev-workbench__split[data-terminal-dock="right"] .dev-workbench__divider::before {
+  inset: 0 -0.55rem;
+}
+
+.dev-workbench__split[data-terminal-dock="bottom"] .dev-workbench__divider::before {
+  inset: -0.55rem 0;
+}
+
+.dev-workbench__split[data-terminal-dock="right"] .dev-workbench__divider {
+  cursor: col-resize;
+}
+
+.dev-workbench__split[data-terminal-dock="bottom"] .dev-workbench__divider {
+  cursor: row-resize;
+}
+
+.dev-workbench__divider::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 999px;
+  background: var(--dw-faint);
+}
+
+.dev-workbench__split[data-terminal-dock="right"] .dev-workbench__divider::after {
+  width: 2px;
+  height: 2.75rem;
+}
+
+.dev-workbench__split[data-terminal-dock="bottom"] .dev-workbench__divider::after {
+  width: 2.75rem;
+  height: 2px;
+}
+
+.dev-workbench__divider:hover::after,
+.dev-workbench__divider:focus-visible::after,
+.dev-workbench__split[data-resizing="true"] .dev-workbench__divider::after {
+  background: var(--dw-accent);
+}
+
+.dev-workbench__terminal {
+  height: 100%;
+  min-height: 12rem;
+  overflow: auto;
+  padding: 0.75rem;
+  background: var(--color-neutral, var(--dw-raised));
+  color: var(--color-neutral-content, CanvasText);
+}
+
+.dev-workbench__terminal-command {
+  margin: 0 0 0.75rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 0.78rem;
+}
+
+.dev-workbench__dock-controls {
+  gap: 0;
+}
+
+.dev-workbench__dock-controls button {
+  min-height: 1.75rem;
+  padding: 0.2rem 0.42rem;
+  border-radius: 0;
+  border-right-width: 0;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.dev-workbench__dock-controls button:first-child {
+  border-radius: var(--radius-field, 0.4rem) 0 0 var(--radius-field, 0.4rem);
+}
+
+.dev-workbench__dock-controls button:last-child {
+  border-right-width: 1px;
+  border-radius: 0 var(--radius-field, 0.4rem) var(--radius-field, 0.4rem) 0;
+}
+
+.dev-workbench__details {
+  max-height: 11rem;
+  overflow: auto;
+  border-top: 1px solid var(--dw-border);
+  background: var(--dw-panel);
+}
+
+.dev-workbench[data-terminal-dock="fullscreen"] .dev-workbench__details {
+  display: none;
+}
+
+.dev-workbench__details-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  gap: 0.1rem;
+  min-height: 2.1rem;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--dw-border);
+  background: var(--dw-panel);
+}
+
+.dev-workbench__tab {
+  min-height: 1.7rem;
+  padding: 0.2rem 0.5rem;
+  border-color: transparent;
+  background: transparent;
+}
+
+.dev-workbench__count {
+  color: var(--dw-faint);
+  font-size: 0.68rem;
+}
+
+.dev-workbench__detail-panel {
+  min-height: 3.25rem;
+  padding: 0.55rem 0.75rem 0.75rem;
+}
+
+.dev-workbench__detail-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dev-workbench__detail-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--dw-border);
+  font-size: 0.76rem;
+}
+
+.dev-workbench__detail-row:last-child {
+  border-bottom: 0;
+}
+
+.dev-workbench__problem[data-severity="error"] {
+  color: var(--dw-danger);
+}
+
+.dev-workbench__problem[data-severity="warning"] {
+  color: var(--dw-warning);
+}
+
+.dev-workbench__file-status {
+  color: var(--dw-muted);
+  font-size: 0.7rem;
+}
+
+.dev-workbench__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 980px) {
+  .dev-workbench__toolbar {
+    grid-template-columns: minmax(14rem, auto) minmax(0, 1fr);
+  }
+
+  .dev-workbench__actions {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+
+  .dev-workbench__status {
+    grid-column: 1 / -1;
+  }
+
+  .dev-workbench__panel-header {
+    align-items: flex-start;
+  }
+
+  .dev-workbench__panel-tools {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 760px) {
+  .dev-workbench {
+    height: auto;
+    min-height: 100svh;
+    overflow: auto;
+  }
+
+  .dev-workbench[data-terminal-dock="fullscreen"] {
+    height: 100svh;
+    overflow: hidden;
+  }
+
+  .dev-workbench__toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .dev-workbench__status-copy > span {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .dev-workbench__split[data-terminal-dock="bottom"],
+  .dev-workbench__split[data-terminal-dock="right"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(22rem, 55svh) 0.45rem minmax(18rem, var(--dw-terminal-size, 38%));
+    grid-template-areas: "preview" "divider" "terminal";
+  }
+
+  .dev-workbench__details {
+    max-height: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .dev-workbench__toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dev-workbench__actions {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+
+  .dev-workbench__status {
+    grid-column: 1;
+  }
+
+  .dev-workbench__panel-header,
+  .dev-workbench__panel-tools {
+    align-items: flex-start;
+  }
+
+  .dev-workbench__panel-header {
+    flex-wrap: wrap;
+  }
+
+  .dev-workbench__panel-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .dev-workbench__details-nav {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .dev-workbench__tab {
+    flex: none;
+  }
+
+  .dev-workbench__detail-row {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dev-workbench *,
+  .dev-workbench *::before,
+  .dev-workbench *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .dev-workbench__status-dot,
+  .dev-workbench__divider::after {
+    border: 1px solid currentColor;
+  }
+}

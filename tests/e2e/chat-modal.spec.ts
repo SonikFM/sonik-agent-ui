@@ -19,7 +19,7 @@ test("chat-modal: chat pane starts docked (in-grid), not floating", async ({ pag
 test("chat-modal: dragging the header grip undocks the window and persists position across reload", async ({ page }) => {
   await gotoFreshWorkspace(page, smokeUrl(null));
 
-  const grip = page.locator(".chat-window__grip");
+  const grip = page.locator(".chat-window__drag-region");
   await expect(grip).toBeVisible();
   const gripBox = await grip.boundingBox();
   if (!gripBox) throw new Error("chat window grip has no bounding box");
@@ -34,6 +34,12 @@ test("chat-modal: dragging the header grip undocks the window and persists posit
 
   const chatWindow = page.locator(".chat-window");
   await expect(chatWindow).toHaveClass(/chat-window--floating/);
+  await expect(chatWindow.locator(".chat-window__grip--floating")).toBeVisible();
+
+  const windowBox = await chatWindow.boundingBox();
+  const conversationHeaderBox = await chatWindow.locator("[data-agent-conversation-header]").boundingBox();
+  if (!windowBox || !conversationHeaderBox) throw new Error("floating chat chrome was not measurable");
+  expect(conversationHeaderBox.y - windowBox.y).toBeLessThan(3);
 
   const styleAfterDrag = await chatWindow.getAttribute("style");
   expect(styleAfterDrag).toBeTruthy();
@@ -50,7 +56,7 @@ test("chat-modal: dragging the header grip undocks the window and persists posit
 test("chat-modal: Reset layout re-docks the window and clears the persisted rect", async ({ page }) => {
   await gotoFreshWorkspace(page, smokeUrl(null));
 
-  const grip = page.locator(".chat-window__grip");
+  const grip = page.locator(".chat-window__drag-region");
   const gripBox = await grip.boundingBox();
   if (!gripBox) throw new Error("chat window grip has no bounding box");
 

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { DOCUMENT_FAILURE_SCENARIO, DOCUMENT_INTENT_SCENARIO, gotoFreshWorkspace, smokeUrl, submitPrompt } from "./support/dev-smoke";
+import { DOCUMENT_FAILURE_SCENARIO, DOCUMENT_INTENT_SCENARIO, gotoFreshWorkspace, openChatActions, smokeUrl, submitPrompt } from "./support/dev-smoke";
 
 const DOCUMENT_PROMPT = "create an HTML document in the document workspace/editor";
 
@@ -12,6 +12,7 @@ test("document-artifact-intent: explicit document transcript phrase creates and 
 
   await expect(page.locator(".workspace-root")).toHaveAttribute("data-artifact-open", "true", { timeout: 10_000 });
   await expect(page.locator('[data-canvas-panel="document"]')).toBeVisible();
+  await openChatActions(page);
   await expect(page.getByRole("button", { name: "Open or create a workspace document" })).toBeVisible();
   await expect(page.locator('[data-tool-phase="document"]')).toHaveAttribute("data-tool-state", "output-available", { timeout: 10_000 });
   await expect(page.locator('[data-tool-phase="canvas"]')).toHaveCount(0);
