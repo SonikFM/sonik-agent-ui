@@ -3,6 +3,9 @@
 .omc
 .codex
 .agents
+.env
+.env.*
+!**/.env.example
 node_modules
 **/node_modules
 **/.svelte-kit
