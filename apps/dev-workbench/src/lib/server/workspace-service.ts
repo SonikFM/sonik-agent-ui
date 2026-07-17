@@ -52,7 +52,7 @@ import {
 } from "./visual-context-coordinator";
 import { visualContextSnapshotSchema, type VisualContextSnapshot } from "@sonik-agent-ui/tool-contracts/visual-context";
 import { capturePlaywrightPreview } from "./playwright-preview-capture";
-import { visualBrowserStateFromResult, type VisualBrowserState } from "../contracts/workbench";
+import { visualBrowserStateFromResult, visualContextOperationPromotesStableArtifact, type VisualBrowserState } from "../contracts/workbench";
 import { visualContextRequestSchema, type VisualContextRequest, type VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
 
 export type WorkspaceServiceResult<T> =
@@ -339,7 +339,7 @@ export async function runWorkspacePlaywrightVisualContext(
       previewUrl: resumed.value.domain(DEV_WORKBENCH_PREVIEW_PORT),
       signal,
     });
-    if (request.data.operation !== "capture") {
+    if (!visualContextOperationPromotesStableArtifact(request.data.operation)) {
       return { ok: true, value: { browser: visualBrowserStateFromResult(result), result, snapshot: null } };
     }
     const submitted = await submitWorkspaceVisualContext(sessionId, { workspaceSessionId: sessionId, request: request.data, result }, signal);

@@ -12,6 +12,7 @@ import {
   terminalConnectionDescriptorSchema,
   visualBrowserStateSchema,
   visualBrowserStateFromResult,
+  visualContextOperationPromotesStableArtifact,
   workspaceContextSyncSchema,
   workbenchVisualContextStateSchema,
 } from "../../apps/dev-workbench/src/lib/contracts/workbench.ts";
@@ -56,6 +57,9 @@ assert.equal(DEV_WORKBENCH_PERSISTENT, true, "developer workspaces retain one pr
 
 assert.throws(() => visualBrowserStateSchema.parse({ capability: "missing", setup: "idle", disabledReason: null }), /requires a reason/);
 assert.doesNotThrow(() => visualBrowserStateSchema.parse({ capability: "missing", setup: "pending", disabledReason: "Controlled browser capture is not installed." }));
+assert.equal(visualContextOperationPromotesStableArtifact("get-capabilities"), false);
+assert.equal(visualContextOperationPromotesStableArtifact("setup-browser"), false);
+assert.equal(visualContextOperationPromotesStableArtifact("capture"), true, "capture alone may enter the G009 stable artifact coordinator");
 
 const visualSources = discoverVisualSources({
   previewUrl: "https://preview.example.test/?private=ignored",
@@ -126,7 +130,7 @@ assert.match(visualBrowserRouteSource, /visualContextRequestSchema\.safeParse/, 
 assert.match(visualBrowserRouteSource, /runWorkspacePlaywrightVisualContext/, "the endpoint delegates to the canonical provider/coordinator service seam");
 const workspaceServiceSource = readFileSync("apps/dev-workbench/src/lib/server/workspace-service.ts", "utf8");
 assert.equal(workspaceServiceSource.indexOf("capturePlaywrightPreview") < workspaceServiceSource.indexOf("submitWorkspaceVisualContext(sessionId"), true, "provider temp output reaches the G009 coordinator before any stable artifact promotion");
-assert.match(workspaceServiceSource, /if \(request\.data\.operation !== "capture"\)[^]*snapshot: null[^]*submitWorkspaceVisualContext/, "probe/setup return state without taking the stable artifact coordinator lease");
+assert.match(workspaceServiceSource, /if \(!visualContextOperationPromotesStableArtifact\(request\.data\.operation\)\)[^]*snapshot: null[^]*submitWorkspaceVisualContext/, "probe/setup return state without taking the stable artifact coordinator lease");
 assert.deepEqual(
   Object.keys(createVisualContextSubmission("workspace-1", pendingVisualRequest, validVisualResult)),
   ["workspaceSessionId", "request", "result"],

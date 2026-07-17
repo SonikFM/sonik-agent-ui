@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   PLAYWRIGHT_VISUAL_CONTEXT_SCRIPT,
-  capturePlaywrightVisualContext,
-  playwrightVisualContextPaths,
+  capturePlaywrightPreview,
+  playwrightPreviewCapturePaths,
 } from "../../apps/dev-workbench/src/lib/server/playwright-preview-capture.ts";
-import { probeBrowserCapabilities, setupBrowser } from "../../apps/dev-workbench/scripts/capture-visual-context.mjs";
+import {
+  PLAYWRIGHT_PREVIEW_READINESS_RULE,
+  appliedRedactions,
+  probeBrowserCapabilities,
+  setupBrowser,
+} from "../../apps/dev-workbench/scripts/capture-visual-context.mjs";
+
+assert.equal(PLAYWRIGHT_PREVIEW_READINESS_RULE, "domcontentloaded+bounded-networkidle+document-fonts-ready");
+assert.deepEqual(appliedRedactions({ sensitiveCount: 0, declaredSensitiveCount: 0, crossOriginFrameCount: 0, rawAriaSnapshot: "- main", ariaSnapshot: "- main" }), []);
+assert.deepEqual(appliedRedactions({ sensitiveCount: 1, declaredSensitiveCount: 1, crossOriginFrameCount: 1, rawAriaSnapshot: "secret@example.com", ariaSnapshot: "[redacted email]" }), [
+  "sensitive form fields", "declared sensitive content", "cross-origin frames", "AI accessibility sensitive content", "AI accessibility text",
+]);
+assert.match(await readFile("apps/dev-workbench/scripts/capture-visual-context.mjs", "utf8"), /mask: \[mask\]/, "Playwright screenshot masks are always passed as a Locator array");
 
 const request = {
   requestId: "capture-1",
@@ -21,7 +34,7 @@ const request = {
   targetInstanceId: "primary",
   viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
 };
-const paths = playwrightVisualContextPaths(request.requestId);
+const paths = playwrightPreviewCapturePaths(request.requestId);
 const result = {
   ...request,
   messageSource: "sonik-agent-host",
@@ -46,13 +59,13 @@ const sandbox = {
     return command.cmd === "bash" ? { exitCode: 0, async stdout() { return JSON.stringify(result); } } : { exitCode: 0, async stdout() { return ""; } };
   },
 };
-assert.deepEqual(await capturePlaywrightVisualContext({ sandbox, request, previewUrl: "https://preview.example.com/ignored" }), result);
+assert.deepEqual(await capturePlaywrightPreview({ sandbox, request, previewUrl: "https://preview.example.com/ignored" }), result);
 assert.equal(Buffer.from(commands[0].args[4], "base64").toString("utf8"), JSON.stringify(request));
 assert.equal(commands[0].args[3], PLAYWRIGHT_VISUAL_CONTEXT_SCRIPT);
 assert.equal(commands.length, 1, "successful operations do not create cleanup metadata");
 
 const failingCommands = [];
-await assert.rejects(() => capturePlaywrightVisualContext({
+await assert.rejects(() => capturePlaywrightPreview({
   sandbox: {
     async runCommand(command) {
       failingCommands.push(command);
@@ -78,7 +91,7 @@ for (const operation of ["get-capabilities", "setup-browser"]) {
     ...(operation === "get-capabilities" ? { capabilities: [{ operation: "capture", status: "available", provider: "playwright" }] } : {}),
   };
   const operationCommands = [];
-  assert.deepEqual(await capturePlaywrightVisualContext({
+  assert.deepEqual(await capturePlaywrightPreview({
     sandbox: { async runCommand(command) { operationCommands.push(command); return { exitCode: 0, async stdout() { return JSON.stringify(operationResult); } }; } },
     request: operationRequest,
   }), operationResult);

@@ -17,6 +17,16 @@ const phonePattern = /(?<!\d)(?:\+?\d[\d ().-]{7,}\d)(?!\d)/g;
 const sensitiveSelector = "input,textarea,select,[contenteditable],[data-sonik-sensitive]";
 export const PLAYWRIGHT_PREVIEW_READINESS_RULE = "domcontentloaded+bounded-networkidle+document-fonts-ready";
 
+export function appliedRedactions(input) {
+  return [
+    ...(input.sensitiveCount ? ["sensitive form fields"] : []),
+    ...(input.declaredSensitiveCount ? ["declared sensitive content"] : []),
+    ...(input.crossOriginFrameCount ? ["cross-origin frames"] : []),
+    ...((input.sensitiveCount || input.declaredSensitiveCount) ? ["AI accessibility sensitive content"] : []),
+    ...(input.ariaSnapshot !== input.rawAriaSnapshot ? ["AI accessibility text"] : []),
+  ];
+}
+
 function sanitizeAria(value) {
   return value.split("\n").map((line) => line
     .replace(secretPattern, "[redacted credential]")
@@ -108,7 +118,7 @@ export async function captureVisualContext(request, options = {}) {
       visibleCount(sensitive), visibleCount(declaredSensitive), visibleCount(crossOriginFrames),
     ]);
     const mask = page.locator(`${sensitiveSelector},[data-sonik-capture-cross-origin]`);
-    const screenshotOptions = { path: outputPath, type: "png", animations: "disabled", caret: "hide", scale: "css", mask };
+    const screenshotOptions = { path: outputPath, type: "png", animations: "disabled", caret: "hide", scale: "css", mask: [mask] };
     if (stableTarget) await capture.screenshot(screenshotOptions);
     else await page.screenshot(screenshotOptions);
 
@@ -125,13 +135,7 @@ export async function captureVisualContext(request, options = {}) {
     }
     const rawAriaSnapshot = await ariaRoot.ariaSnapshot({ timeout: 5_000 });
     const ariaSnapshot = sanitizeAria(rawAriaSnapshot);
-    const redactionsApplied = [
-      ...(sensitiveCount ? ["sensitive form fields"] : []),
-      ...(declaredSensitiveCount ? ["declared sensitive content"] : []),
-      ...(crossOriginFrameCount ? ["cross-origin frames"] : []),
-      ...((sensitiveCount || declaredSensitiveCount) ? ["AI accessibility sensitive content"] : []),
-      ...(ariaSnapshot !== rawAriaSnapshot ? ["AI accessibility text"] : []),
-    ];
+    const redactionsApplied = appliedRedactions({ sensitiveCount, declaredSensitiveCount, crossOriginFrameCount, ariaSnapshot, rawAriaSnapshot });
     completed = true;
     return resultFor(request, {
       status: "completed",
