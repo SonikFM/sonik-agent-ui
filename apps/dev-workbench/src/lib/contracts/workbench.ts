@@ -284,6 +284,33 @@ export const workspaceContextSyncSchema = z.object({
 }).strict();
 export type WorkspaceContextSync = z.infer<typeof workspaceContextSyncSchema>;
 
+export const workbenchVisualSourceSchema = z.object({
+  id: z.enum(["preview", "host"]),
+  label: z.string().trim().min(1).max(160),
+  surface: identifierSchema,
+  route: z.string().min(1).max(2_048).startsWith("/")
+    .refine((value) => !value.includes("?") && !value.includes("#") && !value.startsWith("//"), "Expected a sanitized route"),
+}).strict();
+export type WorkbenchVisualSource = z.infer<typeof workbenchVisualSourceSchema>;
+
+export const workbenchVisualContextStateSchema = z.object({
+  sources: z.array(workbenchVisualSourceSchema).max(2),
+  selectedSourceId: z.enum(["preview", "host"]).nullable(),
+  sourceContextRevision: z.number().int().nonnegative(),
+  routeRevision: z.number().int().nonnegative(),
+  status: z.enum(["idle", "picking", "capturing", "invalidated", "error"]),
+  statusMessage: z.string().min(1).max(512).nullable(),
+  staleReason: z.enum(["source-changed", "route-changed", "navigation", "cancelled", "provider-lost"]).nullable(),
+}).strict().superRefine((state, ctx) => {
+  if (state.selectedSourceId && !state.sources.some((source) => source.id === state.selectedSourceId)) {
+    ctx.addIssue({ code: "custom", path: ["selectedSourceId"], message: "Selected visual source must be discovered." });
+  }
+  if (state.status === "invalidated" && !state.staleReason) {
+    ctx.addIssue({ code: "custom", path: ["staleReason"], message: "Invalidated visual context requires a reason." });
+  }
+});
+export type WorkbenchVisualContextState = z.infer<typeof workbenchVisualContextStateSchema>;
+
 const realtimePayloadSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("status.changed"), status: devWorkbenchLifecycleStatusSchema }).strict(),
   z.object({ type: z.literal("preview.available"), expiresAt: isoDateSchema }).strict(),
