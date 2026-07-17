@@ -115,7 +115,7 @@ export function discoverVisualSources(input: {
 }
 
 export function defaultVisualSourceId(sources: readonly DiscoveredVisualSource[]): "preview" | "host" | null {
-  return sources.some((source) => source.id === "preview") ? "preview" : sources[0]?.id ?? null;
+  return sources.some((source) => source.id === "host") ? "host" : sources[0]?.id ?? null;
 }
 
 export function isVisualContextResultMessage(value: unknown): boolean {

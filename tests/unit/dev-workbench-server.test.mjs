@@ -57,7 +57,7 @@ assert.deepEqual(visualSources, [
   { id: "preview", label: "Preview", surface: "workbench-preview", route: "/reservations" },
   { id: "host", label: "Host · booking.example.test", surface: "embedded-host", route: "/booking/42" },
 ]);
-assert.equal(defaultVisualSourceId(visualSources), "preview", "Preview is the safe controlled default when both sources exist");
+assert.equal(defaultVisualSourceId(visualSources), "host", "Connected Host is the default source");
 assert.equal(defaultVisualSourceId(visualSources.slice(1)), "host");
 assert.doesNotThrow(() => workbenchVisualContextStateSchema.parse({
   sources: visualSources,

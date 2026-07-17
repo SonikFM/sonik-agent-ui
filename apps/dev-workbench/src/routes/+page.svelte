@@ -182,6 +182,8 @@
           : { enabled: true, disabledReason: null },
         captureVisualContext: sourceUnavailable
           ? { enabled: false, disabledReason: sourceUnavailable }
+          : visualSourceId === "host"
+            ? { enabled: false, disabledReason: "Pair the active-tab extension before capturing the Host source." }
           : operation === "idle"
             ? { enabled: true, disabledReason: null }
             : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
@@ -422,9 +424,15 @@
 
   function pairVisualExtension(): WorkbenchSemanticActionResult {
     if (!view.actions.pairVisualExtension.enabled) return unavailable("pairVisualExtension");
-    visualStatusMessage = "Extension pairing requires the optional extension adoption slice.";
-    announcement = visualStatusMessage;
-    return unavailableAction(visualStatusMessage);
+    if (!embeddedHostOrigin || window.parent === window) return unavailableAction("The embedded Host cannot receive extension pairing requests.");
+    const source = discoveredVisualSources().find((candidate) => candidate.id === "host");
+    if (!source) return unavailableAction("Host source is not connected.");
+    window.parent.postMessage({
+      messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
+      requestId: crypto.randomUUID(), operation: "pair-extension", origin: workbenchOrigin,
+      sourceContextRevision, routeRevision, source, provider: "chrome-active-tab",
+    }, embeddedHostOrigin);
+    return accepted("Active-tab extension pairing requested.");
   }
 
   async function runVisualServerOperation(operationName: "capture" | "setup-browser"): Promise<void> {
