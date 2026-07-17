@@ -36,6 +36,7 @@ import {
   VISUAL_CONTEXT_LEASE_PATH,
   VISUAL_CONTEXT_PATH,
   VISUAL_CONTEXT_STAGE_ROOT,
+  createVisualContextLeaseAcquireScript,
   decodeCanonicalBase64,
   invalidatedVisualContextSnapshot,
   isStaleVisualContextResult,
@@ -454,7 +455,7 @@ async function resumeVerifiedWorkspace(sessionId: string, signal?: AbortSignal):
 
 async function acquireVisualContextLease(sandbox: Sandbox, owner: string, signal?: AbortSignal): Promise<boolean> {
   const expires = Date.now() + 60_000;
-  const command = createVisualContextLeaseCommand(VISUAL_CONTEXT_LEASE_PATH, owner, expires);
+  const script = createVisualContextLeaseAcquireScript();
   const result = await sandbox.runCommand({ ...command, ...(signal ? { signal } : {}) });
   return result.exitCode === 0;
 }
