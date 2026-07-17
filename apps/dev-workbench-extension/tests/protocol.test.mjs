@@ -24,6 +24,8 @@ const request = {
 };
 assert.equal(isExactWorkbenchRequest(request, new Set([request.origin]), "/bookings"), true);
 assert.equal(allowedWorkbenchOrigins.has("https://arbitrary.example.com"), false, "page markup cannot expand the configured origin authority");
+assert.equal(allowedWorkbenchOrigins.has("https://dev-workbench-sooty.vercel.app"), true);
+assert.equal(allowedWorkbenchOrigins.has("https://random-projects.vercel.app"), false);
 assert.equal(isExactWorkbenchRequest({ ...request, requestId: "" }, new Set([request.origin]), "/bookings"), false);
 assert.equal(isExactWorkbenchRequest({ ...request, routeRevision: -1 }, new Set([request.origin]), "/bookings"), false);
 assert.equal(isExactWorkbenchRequest(request, new Set(["https://other.example.com"]), "/bookings"), false);
@@ -31,6 +33,7 @@ assert.equal(isExactWorkbenchRequest(request, new Set([request.origin]), "/other
 assert.equal(createResult(request).messageSource, "sonik-agent-host");
 const preparation = { viewport: { width: 1280, height: 720, deviceScaleFactor: 2 }, redactionsApplied: ["Sensitive form controls", "Embedded frame pixels"] };
 assert.equal(isSafeCapturePreparation(preparation), true);
+assert.equal(isSafeCapturePreparation({ ...preparation, redactionsApplied: ["Sonik capture chrome"] }), true);
 assert.equal(isSafeCapturePreparation({ ...preparation, redactionsApplied: ["No sensitive fields detected"] }), false);
 assert.equal(isSafeCapturePreparation({ ...preparation, viewport: { ...preparation.viewport, width: 0 } }), false);
 
