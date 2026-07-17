@@ -93,8 +93,8 @@
       && request.provider === "chrome-active-tab"
       && request.source?.id === "host"
       && request.source.route === sanitizedRoute()
-      && Number.isInteger(request.sourceContextRevision)
-      && Number.isInteger(request.routeRevision)
+      && Number.isInteger(request.sourceContextRevision) && request.sourceContextRevision >= 0
+      && Number.isInteger(request.routeRevision) && request.routeRevision >= 0
       && typeof request.requestId === "string"
       && request.requestId.length > 0
       && request.requestId.length <= 128;
