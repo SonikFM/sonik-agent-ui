@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   DEFAULT_REPOSITORY_COMMANDS,
   DEV_WORKBENCH_MIRROR_PATHS,
@@ -25,6 +26,7 @@ import { readDevWorkbenchConfig } from "../../apps/dev-workbench/src/lib/server/
 import { authorizeDevWorkbenchRequest } from "../../apps/dev-workbench/src/lib/server/basic-auth.ts";
 import { devWorkbenchSessionCookieOptions } from "../../apps/dev-workbench/src/lib/server/session-cookie.ts";
 import {
+  classifyVisualContextResult,
   createEmbeddedPreviewUrl,
   createVisualContextSubmission,
   defaultVisualSourceId,
@@ -35,6 +37,7 @@ import {
   isVisualContextResultMessage,
   resolveEmbeddedHostColorScheme,
   resolveEmbeddedHostOrigin,
+  visualPickDisabledReason,
 } from "../../apps/dev-workbench/src/lib/client/host-context-bridge.ts";
 import { resolveAgentUiDevApiProxyTarget } from "../../apps/standalone-sveltekit/src/lib/server/dev-api-proxy.ts";
 
@@ -61,18 +64,51 @@ assert.deepEqual(visualSources, [
 ]);
 assert.equal(defaultVisualSourceId(visualSources), "host", "Connected Host is the default source");
 assert.equal(defaultVisualSourceId(visualSources.slice(1)), "host");
-assert.equal(isVisualContextResultMessage({
+const pendingVisualRequest = {
+  requestId: "request-1",
+  operation: "get-capabilities",
+  sourceContextRevision: 2,
+  routeRevision: 3,
+  source: visualSources[1],
+  messageSource: "sonik-agent-ui",
+  type: "sonik:visual-context:request",
+  version: "sonik.visual-context.v1",
+  origin: "https://workbench.example.test",
+};
+const validVisualResult = {
+  ...pendingVisualRequest,
   messageSource: "sonik-agent-host",
   type: "sonik:visual-context:result",
-  version: "sonik.visual-context.v1",
-}), true, "Workbench accepts the neutral Agent Embed visual result source");
+  status: "completed",
+  capabilities: [{ operation: "pick", status: "available", provider: "host" }],
+};
+assert.equal(isVisualContextResultMessage(validVisualResult), true, "Workbench accepts strict neutral Agent Embed results");
 assert.equal(isVisualContextResultMessage({
   messageSource: "sonik-agent-ui-host",
   type: "sonik:visual-context:result",
   version: "sonik.visual-context.v1",
 }), false, "page-context message provenance must not be accepted as visual-result provenance");
+assert.equal(isVisualContextResultMessage({ ...validVisualResult, secret: "Bearer abcdefghijklmnop" }), false, "extra or secret-bearing generic payloads fail closed");
+assert.equal(visualPickDisabledReason("host"), null);
+assert.match(visualPickDisabledReason("preview") ?? "", /only.*Host/i, "Preview cannot post Host-only picker requests");
+assert.equal(classifyVisualContextResult({
+  pending: pendingVisualRequest,
+  result: { ...validVisualResult, requestId: "old-request" },
+  sourceContextRevision: 2,
+  routeRevision: 3,
+  source: visualSources[1],
+}), "ignore", "a late result cannot clear the newer active request");
+assert.equal(classifyVisualContextResult({
+  pending: pendingVisualRequest,
+  result: validVisualResult,
+  sourceContextRevision: 2,
+  routeRevision: 3,
+  source: { ...visualSources[1], route: "/other" },
+}), "invalidate", "the active result must exactly match the current full source");
+const workbenchPageSource = readFileSync("apps/dev-workbench/src/routes/+page.svelte", "utf8");
+assert.match(workbenchPageSource, /if \(source\?\.id !== "host"[^]*return unavailableAction/, "Preview is rejected before the Host picker postMessage seam");
 assert.deepEqual(
-  Object.keys(createVisualContextSubmission("workspace-1", { requestId: "request-1" }, { requestId: "request-1" })),
+  Object.keys(createVisualContextSubmission("workspace-1", pendingVisualRequest, validVisualResult)),
   ["workspaceSessionId", "request", "result"],
   "visual coordinator submissions preserve the exact pending request beside its result",
 );
