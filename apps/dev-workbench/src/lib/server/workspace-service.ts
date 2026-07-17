@@ -179,6 +179,21 @@ async function rehydrateRuntime(
   }
 
   if (hasExpectedWindows) {
+    try {
+      const panes = await sandbox.runCommand({
+        cmd: "tmux",
+        args: ["list-panes", "-a", "-t", record.tmuxSession, "-F", "#{pane_start_command}"],
+        ...(signal ? { signal } : {}),
+      });
+      const commands = await panes.stdout(signal ? { signal } : undefined);
+      hasExpectedWindows = panes.exitCode === 0
+        && commands.split(`SONIK_VISUAL_CONTEXT_PATH=${VISUAL_CONTEXT_PATH}`).length - 1 >= expectedWindows.size;
+    } catch {
+      hasExpectedWindows = false;
+    }
+  }
+
+  if (hasExpectedWindows) {
     const expectedAgentApiMarker = config?.agentApiOrigin
       ? `SONIK_AGENT_UI_DEV_API_ORIGIN=${config.agentApiOrigin}`
       : null;
@@ -300,6 +315,195 @@ export async function writeWorkspacePageContext(
   } catch {
     return { ok: false, error: workspaceError("unknown", "page-context-write", true) };
   }
+}
+
+export async function submitWorkspaceVisualContext(
+  sessionId: string,
+  input: VisualContextSubmission,
+  signal?: AbortSignal,
+): Promise<WorkspaceServiceResult<{ accepted: boolean; snapshot: VisualContextSnapshot | null }>> {
+  const parsed = visualContextSubmissionSchema.safeParse(input);
+  if (!parsed.success || parsed.data.workspaceSessionId !== sessionId) {
+    return { ok: false, error: workspaceError("unknown", "visual-context-validate", false) };
+  }
+  let temporaryPath: string | null = null;
+  try {
+    validateVisualContextSubmission(parsed.data);
+    temporaryPath = requestTemporaryPath(parsed.data.result);
+  } catch {
+    return { ok: false, error: workspaceError("unknown", "visual-context-validate", false) };
+  }
+  const resumed = await resumeVerifiedWorkspace(sessionId, signal);
+  if (!resumed.ok) return resumed;
+  const leaseOwner = randomUUID();
+  const lease = await acquireVisualContextLease(resumed.value, leaseOwner, signal);
+  if (!lease) return { ok: false, error: workspaceError("unknown", "visual-context-lease", true) };
+  try {
+    const result = parsed.data.result;
+    if (result.status !== "completed") {
+      if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
+      return { ok: true, value: { accepted: false, snapshot: null } };
+    }
+    if (result.operation === "get-capabilities" || result.operation === "setup-browser" || result.operation === "pair-extension" || result.operation === "unpair-extension") {
+      return { ok: true, value: { accepted: true, snapshot: null } };
+    }
+    if (result.operation === "clear") {
+      const invalidation = visualContextInvalidationSchema.parse({
+        workspaceSessionId: sessionId,
+        sourceContextRevision: result.sourceContextRevision,
+        routeRevision: result.routeRevision,
+        source: result.source,
+        staleReason: "cancelled",
+      });
+      const snapshot = invalidatedVisualContextSnapshot(invalidation);
+      await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
+      return { ok: true, value: { accepted: true, snapshot } };
+    }
+    const current = await readVisualContextSnapshot(resumed.value, signal);
+    if (isStaleVisualContextResult(current, result)) {
+      if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
+      return { ok: true, value: { accepted: false, snapshot: null } };
+    }
+    let png: Buffer | null = null;
+    if (result.screenshot?.temporaryPath) {
+      png = await resumed.value.readFileToBuffer({ path: result.screenshot.temporaryPath }, signal ? { signal } : undefined);
+      if (!png) throw new Error("Visual context temporary PNG was not found.");
+    } else if (result.screenshot?.pngBase64) {
+      png = decodeCanonicalBase64(result.screenshot.pngBase64);
+    }
+    if (result.operation === "capture") {
+      if (!png) throw new Error("Visual context capture did not produce PNG bytes.");
+      validateVisualContextPng(png, result);
+    }
+    const snapshot = visualContextSnapshotFromResult(result);
+    await promoteVisualContextManifest(resumed.value, snapshot, png, signal);
+    if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
+    return { ok: true, value: { accepted: true, snapshot } };
+  } catch {
+    if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal).catch(() => undefined);
+    return { ok: false, error: workspaceError("unknown", "visual-context-promote", true) };
+  } finally {
+    await releaseVisualContextLease(resumed.value, leaseOwner, signal).catch(() => undefined);
+  }
+}
+
+export async function invalidateWorkspaceVisualContext(
+  sessionId: string,
+  input: VisualContextInvalidation,
+  signal?: AbortSignal,
+): Promise<WorkspaceServiceResult<{ snapshot: VisualContextSnapshot }>> {
+  const parsed = visualContextInvalidationSchema.safeParse(input);
+  if (!parsed.success || parsed.data.workspaceSessionId !== sessionId) {
+    return { ok: false, error: workspaceError("unknown", "visual-context-validate", false) };
+  }
+  const resumed = await resumeVerifiedWorkspace(sessionId, signal);
+  if (!resumed.ok) return resumed;
+  const leaseOwner = randomUUID();
+  if (!await acquireVisualContextLease(resumed.value, leaseOwner, signal)) {
+    return { ok: false, error: workspaceError("unknown", "visual-context-lease", true) };
+  }
+  try {
+    const snapshot = invalidatedVisualContextSnapshot(parsed.data);
+    await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
+    return { ok: true, value: { snapshot } };
+  } catch {
+    return { ok: false, error: workspaceError("unknown", "visual-context-invalidate", true) };
+  } finally {
+    await releaseVisualContextLease(resumed.value, leaseOwner, signal).catch(() => undefined);
+  }
+}
+
+export async function readWorkspaceVisualContext(
+  sessionId: string,
+  includePng: boolean,
+  signal?: AbortSignal,
+): Promise<WorkspaceServiceResult<{ snapshot: VisualContextSnapshot; png: Buffer | null }>> {
+  const resumed = await resumeVerifiedWorkspace(sessionId, signal);
+  if (!resumed.ok) return resumed;
+  try {
+    const snapshot = await readVisualContextSnapshot(resumed.value, signal);
+    if (!snapshot || snapshot.status !== "current") throw new Error("No current visual context.");
+    const png = includePng && snapshot.screenshot
+      ? await resumed.value.readFileToBuffer({ path: DEV_WORKBENCH_MIRROR_PATHS.latestScreenshot }, signal ? { signal } : undefined)
+      : null;
+    if (includePng) {
+      if (!png) throw new Error("No current visual context PNG.");
+      validateVisualContextSnapshotPng(png, snapshot);
+    }
+    return { ok: true, value: { snapshot, png } };
+  } catch {
+    return { ok: false, error: workspaceError("unknown", "visual-context-read", false) };
+  }
+}
+
+async function resumeVerifiedWorkspace(sessionId: string, signal?: AbortSignal): Promise<WorkspaceServiceResult<Sandbox>> {
+  const resumed = await resumeVercelDevWorkbenchSandbox({ sessionId, signal });
+  if (!resumed.ok) return resumed;
+  try {
+    const record = await readPersistenceRecord(resumed.value, signal);
+    return record.sessionId === sessionId
+      ? { ok: true, value: resumed.value }
+      : { ok: false, error: workspaceError("sandbox_resume_failed", "session-mismatch", false) };
+  } catch {
+    return { ok: false, error: workspaceError("sandbox_resume_failed", "read-workspace", false) };
+  }
+}
+
+async function acquireVisualContextLease(sandbox: Sandbox, owner: string, signal?: AbortSignal): Promise<boolean> {
+  const expires = Date.now() + 60_000;
+  const script = `set -eu
+lease="$1"; owner="$2"; expires="$3"; mkdir -p "$(dirname "$lease")"
+for attempt in $(seq 1 50); do
+  if mkdir "$lease" 2>/dev/null; then printf '%s\\n%s\\n' "$owner" "$expires" > "$lease/owner"; exit 0; fi
+  current_expires=$(sed -n '2p' "$lease/owner" 2>/dev/null || printf '0')
+  if [ "$current_expires" -lt "$(date +%s%3N)" ]; then mv "$lease" "$lease.stale.$owner" 2>/dev/null || true; rm -rf "$lease.stale.$owner"; continue; fi
+  sleep 0.1
+done
+exit 75`;
+  const result = await sandbox.runCommand({ cmd: "bash", args: ["-lc", script, "_", VISUAL_CONTEXT_LEASE_PATH, owner, String(expires)], ...(signal ? { signal } : {}) });
+  return result.exitCode === 0;
+}
+
+async function releaseVisualContextLease(sandbox: Sandbox, owner: string, signal?: AbortSignal): Promise<void> {
+  const script = `set -eu
+lease="$1"; owner="$2"
+[ "$(sed -n '1p' "$lease/owner" 2>/dev/null || true)" = "$owner" ] && rm -rf "$lease" || true`;
+  await sandbox.runCommand({ cmd: "bash", args: ["-lc", script, "_", VISUAL_CONTEXT_LEASE_PATH, owner], ...(signal ? { signal } : {}) });
+}
+
+async function readVisualContextSnapshot(sandbox: Sandbox, signal?: AbortSignal): Promise<VisualContextSnapshot | null> {
+  const buffer = await sandbox.readFileToBuffer({ path: VISUAL_CONTEXT_PATH }, signal ? { signal } : undefined);
+  if (!buffer) return null;
+  return visualContextSnapshotSchema.parse(JSON.parse(buffer.toString("utf8")));
+}
+
+async function promoteVisualContextManifest(
+  sandbox: Sandbox,
+  snapshot: VisualContextSnapshot,
+  png: Buffer | null,
+  signal?: AbortSignal,
+): Promise<void> {
+  const stageManifest = `${VISUAL_CONTEXT_STAGE_ROOT}/${snapshot.generation}.json`;
+  const stagePng = `${VISUAL_CONTEXT_STAGE_ROOT}/${snapshot.generation}.png`;
+  await sandbox.writeFiles([
+    { path: stageManifest, content: JSON.stringify(snapshot, null, 2) },
+    ...(png ? [{ path: stagePng, content: png }] : []),
+  ], signal ? { signal } : undefined);
+  const script = `set -eu
+manifest="$1"; png="$2"; stable_manifest="$3"; stable_png="$4"; has_png="$5"
+if [ "$has_png" = 1 ]; then mv "$png" "$stable_png"; fi
+mv "$manifest" "$stable_manifest"
+if [ "$has_png" = 0 ]; then rm -f "$stable_png"; fi`;
+  const result = await sandbox.runCommand({
+    cmd: "bash",
+    args: ["-lc", script, "_", stageManifest, stagePng, VISUAL_CONTEXT_PATH, DEV_WORKBENCH_MIRROR_PATHS.latestScreenshot, png ? "1" : "0"],
+    ...(signal ? { signal } : {}),
+  });
+  if (result.exitCode !== 0) throw new Error("Visual context promotion failed.");
+}
+
+async function removeSandboxPath(sandbox: Sandbox, path: string, signal?: AbortSignal): Promise<void> {
+  await sandbox.runCommand({ cmd: "rm", args: ["-f", path], ...(signal ? { signal } : {}) });
 }
 
 async function collectSitemap(

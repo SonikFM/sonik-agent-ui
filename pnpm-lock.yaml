@@ -26,6 +26,9 @@ importers:
       '@sonik-agent-ui/agent-embed':
         specifier: workspace:*
         version: link:../../packages/agent-embed
+      '@sonik-agent-ui/tool-contracts':
+        specifier: workspace:*
+        version: link:../../packages/tool-contracts
       '@vercel/sandbox':
         specifier: 2.7.0
         version: 2.7.0
