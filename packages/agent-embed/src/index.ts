@@ -806,15 +806,16 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
       options.onError?.(error);
     }
   };
+  const onMessage = (event: MessageEvent) => {
+    onRequestPageContext(event);
+    onRequestHostAction(event);
+    onRequestVisualContext(event);
+  };
   iframe.addEventListener("load", onLoad);
-  ownerWindow.addEventListener("message", onRequestPageContext);
-  ownerWindow.addEventListener("message", onRequestHostAction);
-  ownerWindow.addEventListener("message", onRequestVisualContext);
+  ownerWindow.addEventListener("message", onMessage);
   disposers.push(() => {
     iframe.removeEventListener("load", onLoad);
-    ownerWindow.removeEventListener("message", onRequestPageContext);
-    ownerWindow.removeEventListener("message", onRequestHostAction);
-    ownerWindow.removeEventListener("message", onRequestVisualContext);
+    ownerWindow.removeEventListener("message", onMessage);
   });
 
   addClick(options.elements.openChat, () => open("chat"));
