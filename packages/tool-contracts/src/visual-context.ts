@@ -6,7 +6,7 @@ export const maxVisualContextAriaLength = 32_000;
 export const maxVisualContextImageBytes = 10 * 1024 * 1024;
 
 const boundedIdSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/);
-const likelySecretPattern = /(?:\b(?:bearer|api[_ -]?key|access[_ -]?token|client[_ -]?secret|password)\b\s*[:=]\s*\S+|\beyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{10,}|\bsk_(?:live|test)_[a-zA-Z0-9]{12,})/i;
+const likelySecretPattern = /(?:\bbearer\s+[a-zA-Z0-9._-]{12,}|\b(?:bearer|api[_ -]?key|access[_ -]?token|client[_ -]?secret|password)\b\s*[:=]\s*\S+|\beyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{10,}|\bsk_(?:live|test)_[a-zA-Z0-9]{12,})/i;
 const selectorOnlyPattern = /^(?:[#.][a-zA-Z_-][\w-]*|\[[^\]]+\]|\/\/|\/html\b)/;
 const boundedPublicTextSchema = z.string().trim().min(1).max(160)
   .refine((value) => !likelySecretPattern.test(value), "Public visual context must not contain credential-like values.")

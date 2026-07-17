@@ -58,6 +58,10 @@ assert.throws(() => visualContextResultSchema.parse({
 }), /credential-like/);
 assert.throws(() => visualContextResultSchema.parse({
   ...visualContextFixture.result,
+  selection: { ...visualContextFixture.result.selection, accessibleName: "Bearer secret-token" },
+}), /credential-like/);
+assert.throws(() => visualContextResultSchema.parse({
+  ...visualContextFixture.result,
   selection: { ...visualContextFixture.result.selection, label: "#reservation-card" },
 }), /selectors/);
 assert.throws(() => assertVisualContextResultMatchesRequest(visualRequest, { ...visualResult, routeRevision: visualResult.routeRevision + 1 }), /routeRevision/);
