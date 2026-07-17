@@ -5,6 +5,7 @@ export const SONIK_AGENT_UI_HOST_ACTION_REQUEST = "sonik:agent-ui:action-request
 export const SONIK_AGENT_UI_HOST_ACTION_RESULT = "sonik:agent-ui:action-result";
 export const SONIK_VISUAL_CONTEXT_REQUEST = "sonik:visual-context:request";
 export const SONIK_VISUAL_CONTEXT_RESULT = "sonik:visual-context:result";
+export const SONIK_VISUAL_CONTEXT_RESULT_SOURCE = "sonik-agent-host";
 
 export type DiscoveredVisualSource = {
   id: "preview" | "host";
@@ -121,7 +122,7 @@ export function defaultVisualSourceId(sources: readonly DiscoveredVisualSource[]
 export function isVisualContextResultMessage(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
-  return record.messageSource === SONIK_AGENT_UI_HOST_MESSAGE_SOURCE
+  return record.messageSource === SONIK_VISUAL_CONTEXT_RESULT_SOURCE
     && record.type === SONIK_VISUAL_CONTEXT_RESULT
     && record.version === "sonik.visual-context.v1";
 }

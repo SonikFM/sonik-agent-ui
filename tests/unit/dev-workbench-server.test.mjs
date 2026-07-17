@@ -32,6 +32,7 @@ import {
   isAgentHostActionRequestMessage,
   isAgentHostActionResultMessage,
   isAgentHostPageContextMessage,
+  isVisualContextResultMessage,
   resolveEmbeddedHostColorScheme,
   resolveEmbeddedHostOrigin,
 } from "../../apps/dev-workbench/src/lib/client/host-context-bridge.ts";
@@ -60,6 +61,16 @@ assert.deepEqual(visualSources, [
 ]);
 assert.equal(defaultVisualSourceId(visualSources), "host", "Connected Host is the default source");
 assert.equal(defaultVisualSourceId(visualSources.slice(1)), "host");
+assert.equal(isVisualContextResultMessage({
+  messageSource: "sonik-agent-host",
+  type: "sonik:visual-context:result",
+  version: "sonik.visual-context.v1",
+}), true, "Workbench accepts the neutral Agent Embed visual result source");
+assert.equal(isVisualContextResultMessage({
+  messageSource: "sonik-agent-ui-host",
+  type: "sonik:visual-context:result",
+  version: "sonik.visual-context.v1",
+}), false, "page-context message provenance must not be accepted as visual-result provenance");
 assert.deepEqual(
   Object.keys(createVisualContextSubmission("workspace-1", { requestId: "request-1" }, { requestId: "request-1" })),
   ["workspaceSessionId", "request", "result"],
