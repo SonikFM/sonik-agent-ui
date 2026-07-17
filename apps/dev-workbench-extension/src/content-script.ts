@@ -2,7 +2,7 @@
 (() => {
   if (globalThis.__sonikExactActiveTab) return;
 
-  const state = { nonce: null, tabId: null, windowId: null, frames: new Map(), overlays: [] };
+  const state = { nonce: null, tabId: null, windowId: null, frames: new Map(), overlays: [], captureChrome: [] };
   globalThis.__sonikExactActiveTab = state;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -16,8 +16,15 @@
     }
     if (!state.nonce || message?.nonce !== state.nonce || message.version !== "sonik.active-tab.v1") return;
     if (message.type === "prepare-capture") {
+      clearCaptureChrome();
       clearOverlays();
       const redactionsApplied = [];
+      for (const element of document.querySelectorAll("[data-sonik-capture-chrome]")) {
+        if (!(element instanceof HTMLElement)) continue;
+        state.captureChrome.push({ element, style: element.getAttribute("style") });
+        element.style.setProperty("visibility", "hidden", "important");
+      }
+      if (state.captureChrome.length) redactionsApplied.push("Sonik capture chrome");
       const selectors = "input[type=password],input[type=email],input[type=tel],input[autocomplete*=cc-],input[autocomplete*=token],input[autocomplete=one-time-code],input[name*=secret i],input[name*=token i],input[name*=password i],textarea[name*=secret i],textarea[name*=token i],textarea[name*=password i],[data-sonik-redact]";
       for (const element of document.querySelectorAll(selectors)) {
         const bounds = element.getBoundingClientRect();
@@ -45,6 +52,7 @@
       return;
     }
     if (message.type === "clear-capture") {
+      clearCaptureChrome();
       clearOverlays();
       sendResponse({ ok: true });
       return;
@@ -107,6 +115,14 @@
   function clearOverlays() {
     for (const overlay of state.overlays) overlay.remove();
     state.overlays = [];
+  }
+
+  function clearCaptureChrome() {
+    for (const { element, style } of state.captureChrome) {
+      if (style === null) element.removeAttribute("style");
+      else element.setAttribute("style", style);
+    }
+    state.captureChrome = [];
   }
 
   function addOverlay(bounds) {
