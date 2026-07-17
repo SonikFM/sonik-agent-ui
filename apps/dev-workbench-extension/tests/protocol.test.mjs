@@ -25,6 +25,7 @@ const request = {
 assert.equal(isExactWorkbenchRequest(request, new Set([request.origin]), "/bookings"), true);
 assert.equal(allowedWorkbenchOrigins.has("https://arbitrary.example.com"), false, "page markup cannot expand the configured origin authority");
 assert.equal(allowedWorkbenchOrigins.has("https://dev-workbench-sooty.vercel.app"), true);
+assert.equal(allowedWorkbenchOrigins.has("https://dev-workbench-danletterio-5975s-projects.vercel.app"), true);
 assert.equal(allowedWorkbenchOrigins.has("https://random-projects.vercel.app"), false);
 assert.equal(isExactWorkbenchRequest({ ...request, requestId: "" }, new Set([request.origin]), "/bookings"), false);
 assert.equal(isExactWorkbenchRequest({ ...request, routeRevision: -1 }, new Set([request.origin]), "/bookings"), false);
