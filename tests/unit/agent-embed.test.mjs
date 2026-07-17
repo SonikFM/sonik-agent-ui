@@ -711,7 +711,7 @@ function createPickerHarness({ timeoutMs = 25, helperVersion = 1 } = {}) {
   };
   const controller = helperVersion === 1 ? mountVisualContextPicker({
     origin: "https://agent.example",
-    requestOrigin: "https://host.example",
+    requestOrigin: "https://agent.example",
     source,
     window,
     document,
@@ -751,7 +751,7 @@ function pickerRequest(requestId, overrides = {}) {
     messageSource: "sonik-agent-ui",
     type: "sonik:visual-context:request",
     version: "sonik.visual-context.v1",
-    origin: "https://host.example",
+    origin: "https://agent.example",
     ...overrides,
   };
 }
@@ -761,12 +761,12 @@ function pickerMessage(source, data, overrides = {}) {
 }
 
 assert.throws(
-  () => mountVisualContextPicker({ origin: "https://agent.example", requestOrigin: "https://host.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {}, helper: { version: 2 } }),
+  () => mountVisualContextPicker({ origin: "https://agent.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {}, helper: { version: 2 } }),
   /version 1/,
   "the picker must fail closed when the copied helper version is unavailable or unsupported",
 );
 assert.throws(
-  () => mountVisualContextPicker({ origin: "https://agent.example", requestOrigin: "https://host.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {} }),
+  () => mountVisualContextPicker({ origin: "https://agent.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {} }),
   /version 1/,
   "the picker must fail closed when the copied helper is missing",
 );
@@ -775,8 +775,8 @@ assert.throws(
   const harness = createPickerHarness();
   harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("foreign"), { origin: "https://evil.example" }));
   harness.controller.handleMessage(pickerMessage({}, pickerRequest("wrong-source")));
-  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("wrong-host", { origin: "https://other-host.example" })));
-  assert.equal(harness.controller.isActive(), false, "foreign window/origin and mismatched host-origin requests must be ignored");
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("wrong-request-origin", { origin: "https://other-agent.example" })));
+  assert.equal(harness.controller.isActive(), false, "foreign window/origin and mismatched request-origin messages must be ignored");
   assert.equal(harness.source.messages.length, 0, "rejected visual requests must not receive an oracle response");
   harness.controller.destroy();
 }

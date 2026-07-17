@@ -44,7 +44,7 @@ type PickerWindow = Window & { __IMPECCABLE_LIVE_DOM__?: LiveDomApi };
 export type VisualContextPickerOptions = {
   /** Exact origin of the requesting Agent UI window. */
   origin: string;
-  /** Exact host origin carried by the neutral visual-context request/result. */
+  /** Exact requester origin carried by the neutral visual-context request/result. */
   requestOrigin?: string;
   source: Window;
   window?: Window;
@@ -80,7 +80,7 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   }
   const expectedOrigin = new URL(options.origin).origin;
   if (expectedOrigin !== options.origin) throw new Error("Visual context picker origin must be an exact origin.");
-  const requestOrigin = new URL(options.requestOrigin ?? ownerWindow.location.origin).origin;
+  const requestOrigin = new URL(options.requestOrigin ?? expectedOrigin).origin;
   const helper = helperApi.createLiveBrowserDomHelpers({
     prefix: PICKER_PREFIX,
     skipTags: SKIP_TAGS,

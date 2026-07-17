@@ -794,7 +794,7 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
     try {
       visualContextPicker ??= mountVisualContextPicker({
         origin: agentOrigin,
-        requestOrigin: options.hostOrigin ?? ownerWindow.location.origin,
+        requestOrigin: agentOrigin,
         source: iframe.contentWindow as Window,
         window: ownerWindow,
         document: ownerDocument,
