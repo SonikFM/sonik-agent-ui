@@ -456,32 +456,12 @@ async function resumeVerifiedWorkspace(sessionId: string, signal?: AbortSignal):
 async function acquireVisualContextLease(sandbox: Sandbox, owner: string, signal?: AbortSignal): Promise<boolean> {
   const expires = Date.now() + 60_000;
   const script = createVisualContextLeaseAcquireScript();
-  const result = await sandbox.runCommand({ ...command, ...(signal ? { signal } : {}) });
+  const result = await sandbox.runCommand({
+    cmd: "bash",
+    args: ["-lc", script, "_", VISUAL_CONTEXT_LEASE_PATH, owner, String(expires)],
+    ...(signal ? { signal } : {}),
+  });
   return result.exitCode === 0;
-}
-
-export function createVisualContextLeaseCommand(lease: string, owner: string, expires: number, attempts = 50) {
-  const script = `set -eu
-lease="$1"; owner="$2"; expires="$3"; attempts="$4"; mkdir -p "$(dirname "$lease")"
-candidate="$lease.candidate.$owner"; stale="$lease.stale.$owner"
-cleanup() { rm -f "$candidate"; }
-trap cleanup EXIT
-printf '%s\\n%s\\n' "$owner" "$expires" > "$candidate"
-for attempt in $(seq 1 "$attempts"); do
-  if ln "$candidate" "$lease" 2>/dev/null; then exit 0; fi
-  current_expires=$(sed -n '2p' "$lease" 2>/dev/null || true)
-  case "$current_expires" in
-    ''|*[!0-9]*)
-      modified=$(stat -c %Y "$lease" 2>/dev/null || printf '0')
-      [ "$modified" -lt "$(($(date +%s) - 60))" ] || { sleep 0.1; continue; }
-      ;;
-    *) [ "$current_expires" -lt "$(date +%s%3N)" ] || { sleep 0.1; continue; } ;;
-  esac
-  mv "$lease" "$stale" 2>/dev/null || continue
-  rm -f "$stale"
-done
-exit 75`;
-  return { cmd: "bash" as const, args: ["-lc", script, "_", lease, owner, String(expires), String(attempts)] };
 }
 
 async function releaseVisualContextLease(sandbox: Sandbox, owner: string, signal?: AbortSignal): Promise<void> {

@@ -160,7 +160,13 @@ printf '%s\n%s\n' "$owner" "$expires" > "$candidate"
 for attempt in $(seq 1 ${attempts}); do
   if ln "$candidate" "$lease" 2>/dev/null; then exit 0; fi
   current_expires=$(sed -n '2p' "$lease" 2>/dev/null || true)
-  case "$current_expires" in ''|*[!0-9]*) sleep ${sleepSeconds}; continue;; esac
+  case "$current_expires" in
+    ''|*[!0-9]*)
+      modified=$(stat -c %Y "$lease" 2>/dev/null || printf '0')
+      if [ "$modified" -ge "$(($(date +%s) - 60))" ]; then sleep ${sleepSeconds}; continue; fi
+      current_expires=0
+      ;;
+  esac
   now_ms=$(( $(date +%s) * 1000 ))
   if [ "$current_expires" -lt "$now_ms" ]; then rm -f "$lease"; continue; fi
   sleep ${sleepSeconds}
