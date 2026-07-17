@@ -4,8 +4,16 @@ import { createResult, isExactWorkbenchRequest, isSafeCapturePreparation, matche
 import { allowedWorkbenchOrigins } from "../src/config.ts";
 
 const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
+const serviceWorker = await readFile(new URL("../src/service-worker.ts", import.meta.url), "utf8");
+const contentScript = await readFile(new URL("../src/content-script.ts", import.meta.url), "utf8");
 assert.deepEqual(manifest.permissions, ["activeTab", "scripting"]);
 assert.equal("host_permissions" in manifest, false);
+assert.match(serviceWorker, /fidelity: "exact-active-tab"/);
+assert.match(serviceWorker, /captureBasis: "native-active-tab-redacted"/);
+assert.match(serviceWorker, /redactionsApplied: prepared\.redactionsApplied/);
+assert.match(contentScript, /redactionsApplied\.push\("Sensitive form controls"\)/);
+assert.match(contentScript, /redactionsApplied\.push\("Embedded frame pixels"\)/);
+assert.doesNotMatch(contentScript, /No sensitive fields detected/);
 
 const request = {
   messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
