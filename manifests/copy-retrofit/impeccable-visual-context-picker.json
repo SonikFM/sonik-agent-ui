@@ -1,0 +1,64 @@
+{
+	"name": "impeccable-visual-context-picker",
+	"upstream": {
+		"repoPath": "${IMPECCABLE_REPO_PATH:-/Users/danielletterio/Documents/GitHub/impeccable}",
+		"gitRemote": "https://github.com/pbakaus/impeccable.git",
+		"revision": "8259c28209b92792005cec14dad573df39f68eaf",
+		"license": "Apache-2.0"
+	},
+	"entries": [
+		{
+			"source": "skill/scripts/live-browser-dom.js",
+			"destination": "packages/agent-embed/src/vendor/impeccable/visual-context-picker/skill/scripts/live-browser-dom.js",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "bcfa4022e741f8034b841aed76b9ea3f6a64a8e08e4dfa43ba99f8be65a73393"
+					}
+				]
+			}
+		},
+		{
+			"source": "tests/live-browser-dom.test.mjs",
+			"destination": "packages/agent-embed/src/vendor/impeccable/visual-context-picker/tests/live-browser-dom.test.mjs",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "626d2b41ddd51a1849f66c3146889d74828661a9bf1c763404497743d9e8a742"
+					}
+				]
+			}
+		},
+		{
+			"source": "LICENSE",
+			"destination": "packages/agent-embed/src/vendor/impeccable/visual-context-picker/LICENSE",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "02bb8c3b4e70190e3986c0404ad2fd8d639b4f534252d82379cc1b502b6d1812"
+					}
+				]
+			}
+		},
+		{
+			"source": "NOTICE.md",
+			"destination": "packages/agent-embed/src/vendor/impeccable/visual-context-picker/NOTICE.md",
+			"ignore": [],
+			"integrity": {
+				"files": [
+					{
+						"path": "",
+						"sha256": "c60a093c2845fd9fb82f9c6f742ece31f379f8190b535309d32d66c45ccffdcb"
+					}
+				]
+			}
+		}
+	],
+	"allowedLocalModifications": []
+}
