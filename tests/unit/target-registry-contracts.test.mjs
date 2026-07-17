@@ -12,6 +12,7 @@ import {
   hostUiTargetSchema,
   normalizeHostUiTarget,
   hostActionRequestSchema,
+  hostActionResultSchema,
   resolveHostUiTargetBounds,
   targetRegistryVersion,
 } from "../../packages/tool-contracts/src/target-registry.ts";
@@ -58,6 +59,17 @@ assert.throws(() => visualContextResultSchema.parse({
 }), /selectors/);
 assert.throws(() => assertVisualContextResultMatchesRequest(visualRequest, { ...visualResult, routeRevision: visualResult.routeRevision + 1 }), /routeRevision/);
 assert.throws(() => assertVisualContextResultMatchesRequest(visualRequest, { ...visualResult, provider: "playwright" }), /provider/);
+assert.throws(() => hostActionResultSchema.parse({
+  source: "sonik-agent-host",
+  type: "sonik:agent-ui:action-result",
+  version: "sonik.agent_ui.host_action.v1",
+  requestId: "host-action-1",
+  actionKey: "tour.clear",
+  ok: true,
+  status: "executed",
+  policyMode: "allow",
+  output: visualContextFixture.result,
+}), /unrecognized key/i, "generic host-action results remain closed to arbitrary visual output");
 
 assert.equal(targetRegistryVersion, "sonik-agent-ui.target-registry.v0");
 assert.equal(agentActionChannelVersion, "sonik.agent_ui.host_action.v1");
