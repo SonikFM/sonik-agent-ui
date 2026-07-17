@@ -10,6 +10,15 @@ const listen = (handler) => new Promise((resolve) => {
   server.listen(0, "127.0.0.1", () => resolve(server));
 });
 const origin = (server) => `http://127.0.0.1:${server.address().port}`;
+const sendHostRequest = (frame, request, hostOrigin) => frame.evaluate(({ request, hostOrigin }) => new Promise((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${request.operation}.`)), 15_000);
+  addEventListener("message", (event) => {
+    if (event.origin !== hostOrigin || event.data?.requestId !== request.requestId) return;
+    clearTimeout(timeout);
+    resolve(event.data);
+  }, { once: true });
+  parent.postMessage(request, hostOrigin);
+}), { request, hostOrigin });
 
 const extension = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-extension-"));
 const profile = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-profile-"));
@@ -57,18 +66,12 @@ try {
   assert.ok(frame, "Workbench fixture frame loaded");
   const request = {
     messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
-    requestId: crypto.randomUUID(), operation: "capture", origin: origin(workbench), sourceContextRevision: 1, routeRevision: 1,
+    requestId: crypto.randomUUID(), operation: "pair-extension", origin: origin(workbench), sourceContextRevision: 1, routeRevision: 1,
     source: { id: "host", label: "Host", surface: "embedded-host", route: "/booking" }, provider: "chrome-active-tab",
   };
-  const result = await frame.evaluate(({ request, hostOrigin }) => new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Timed out waiting for active-tab capture.")), 15_000);
-    addEventListener("message", (event) => {
-      if (event.origin !== hostOrigin || event.data?.requestId !== request.requestId) return;
-      clearTimeout(timeout);
-      resolve(event.data);
-    }, { once: true });
-    parent.postMessage(request, hostOrigin);
-  }), { request, hostOrigin: origin(host) });
+  const paired = await sendHostRequest(frame, request, origin(host));
+  assert.equal(paired.status, "completed");
+  const result = await sendHostRequest(frame, { ...request, requestId: crypto.randomUUID(), operation: "capture" }, origin(host));
 
   assert.equal(result.screenshot.fidelity, "exact-active-tab");
   assert.equal(result.screenshot.captureBasis, "native-active-tab-redacted");
