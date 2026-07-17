@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const workbenchDetailSchema = z.enum(["problems", "changes", "console", "network"]);
 export type WorkbenchDetail = z.infer<typeof workbenchDetailSchema>;
+export const workbenchVisualSourceIdSchema = z.enum(["preview", "host"]);
+export type WorkbenchVisualSourceId = z.infer<typeof workbenchVisualSourceIdSchema>;
 
 export const workbenchActionStateSchema = z.strictObject({
   enabled: z.boolean(),
@@ -35,6 +37,19 @@ export const devWorkbenchSchema = z.strictObject({
     transport: z.string().min(1),
     disabledReason: z.string().min(1).nullable(),
   }),
+  visualContext: z.strictObject({
+    sources: z.array(z.strictObject({
+      id: workbenchVisualSourceIdSchema,
+      label: z.string().min(1).max(160),
+      route: z.string().min(1),
+    })).max(2),
+    selectedSourceId: workbenchVisualSourceIdSchema.nullable(),
+    sourceContextRevision: z.number().int().nonnegative(),
+    routeRevision: z.number().int().nonnegative(),
+    status: z.enum(["idle", "picking", "capturing", "invalidated", "error"]),
+    statusMessage: z.string().min(1).nullable(),
+    staleReason: z.enum(["source-changed", "route-changed", "navigation", "cancelled", "provider-lost"]).nullable(),
+  }),
   activeDetail: workbenchDetailSchema,
   problems: z.array(
     z.strictObject({
@@ -58,6 +73,10 @@ export const devWorkbenchSchema = z.strictObject({
     reconnectTerminal: workbenchActionStateSchema,
     restartPreview: workbenchActionStateSchema,
     captureSnapshot: workbenchActionStateSchema,
+    pickVisualTarget: workbenchActionStateSchema,
+    captureVisualContext: workbenchActionStateSchema,
+    setupVisualBrowser: workbenchActionStateSchema,
+    pairVisualExtension: workbenchActionStateSchema,
     openPreview: workbenchActionStateSchema,
     stopWorkspace: workbenchActionStateSchema,
   }),
