@@ -52,7 +52,3 @@ export async function capturePlaywrightPreview(input: {
     throw error;
   }
 }
-
-export const capturePlaywrightVisualContext = capturePlaywrightPreview;
-export const runPlaywrightPreviewOperation = capturePlaywrightPreview;
-export const playwrightVisualContextPaths = playwrightPreviewCapturePaths;

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
+import type { VisualContextOperation, VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
 
 export const DEV_WORKBENCH_SCHEMA_VERSION = "sonik.dev-workbench.v1" as const;
 export const DEV_WORKBENCH_ROOT = "/vercel/sandbox/workspace" as const;
@@ -336,6 +336,10 @@ export function visualBrowserStateFromResult(result: VisualContextResult): Visua
       ? "Controlled browser capture is not installed."
       : "Controlled browser capture could not launch.",
   });
+}
+
+export function visualContextOperationPromotesStableArtifact(operation: VisualContextOperation): boolean {
+  return operation === "capture";
 }
 
 const realtimePayloadSchema = z.discriminatedUnion("type", [
