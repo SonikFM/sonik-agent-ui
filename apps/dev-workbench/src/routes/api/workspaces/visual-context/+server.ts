@@ -1,3 +1,4 @@
+import { env } from "$env/dynamic/private";
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import {
@@ -5,6 +6,7 @@ import {
   visualContextSubmissionSchema,
 } from "$lib/server/visual-context-coordinator";
 import { DEV_WORKBENCH_SESSION_COOKIE } from "$lib/server/session-cookie";
+import { readDevWorkbenchConfig } from "$lib/server/workbench-config";
 import {
   invalidateWorkspaceVisualContext,
   readWorkspaceVisualContext,
@@ -17,6 +19,8 @@ const MAX_BODY_BYTES = 14 * 1_024 * 1_024;
 export const config = { runtime: "nodejs24.x", maxDuration: 60 };
 
 export const GET: RequestHandler = async ({ cookies, request, url }) => {
+  const configuration = readDevWorkbenchConfig(env);
+  if (!configuration.ok) return json({ error: configuration.reason }, { status: 503, headers: NO_STORE });
   const sessionId = cookies.get(DEV_WORKBENCH_SESSION_COOKIE);
   if (!sessionId) return json({ error: "No Dev Workbench session is attached." }, { status: 404, headers: NO_STORE });
   const wantsPng = url.searchParams.get("asset") === "png" || request.headers.get("accept") === "image/png";
@@ -29,6 +33,8 @@ export const GET: RequestHandler = async ({ cookies, request, url }) => {
 };
 
 export const POST: RequestHandler = async ({ cookies, request }) => {
+  const configuration = readDevWorkbenchConfig(env);
+  if (!configuration.ok) return json({ error: configuration.reason }, { status: 503, headers: NO_STORE });
   const sessionId = cookies.get(DEV_WORKBENCH_SESSION_COOKIE);
   if (!sessionId) return json({ error: "No Dev Workbench session is attached." }, { status: 404, headers: NO_STORE });
   const input = await parseBoundedJson(request);
@@ -41,6 +47,8 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
 };
 
 export const DELETE: RequestHandler = async ({ cookies, request }) => {
+  const configuration = readDevWorkbenchConfig(env);
+  if (!configuration.ok) return json({ error: configuration.reason }, { status: 503, headers: NO_STORE });
   const sessionId = cookies.get(DEV_WORKBENCH_SESSION_COOKIE);
   if (!sessionId) return json({ error: "No Dev Workbench session is attached." }, { status: 404, headers: NO_STORE });
   const input = await parseBoundedJson(request);
