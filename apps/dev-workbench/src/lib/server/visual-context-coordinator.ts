@@ -44,6 +44,9 @@ export function validateVisualContextSubmission(input: VisualContextSubmission):
   if (input.request.targetId !== input.result.selection?.targetId && input.request.targetId !== undefined) {
     throw new Error("Visual context result target does not match the pending request.");
   }
+  if (input.request.targetInstanceId !== input.result.selection?.targetInstanceId && input.request.targetInstanceId !== undefined) {
+    throw new Error("Visual context result target instance does not match the pending request.");
+  }
 }
 
 export function requestTemporaryPath(result: VisualContextResult): string | null {

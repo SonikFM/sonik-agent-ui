@@ -491,9 +491,19 @@ async function promoteVisualContextManifest(
   ], signal ? { signal } : undefined);
   const script = `set -eu
 manifest="$1"; png="$2"; stable_manifest="$3"; stable_png="$4"; has_png="$5"
+manifest_backup="$manifest.backup"; png_backup="$png.backup"
+[ ! -e "$stable_manifest" ] || cp -p "$stable_manifest" "$manifest_backup"
+[ ! -e "$stable_png" ] || cp -p "$stable_png" "$png_backup"
+rollback() {
+  if [ -e "$manifest_backup" ]; then mv "$manifest_backup" "$stable_manifest"; else rm -f "$stable_manifest"; fi
+  if [ -e "$png_backup" ]; then mv "$png_backup" "$stable_png"; else rm -f "$stable_png"; fi
+}
+trap rollback ERR
 if [ "$has_png" = 1 ]; then mv "$png" "$stable_png"; fi
 mv "$manifest" "$stable_manifest"
-if [ "$has_png" = 0 ]; then rm -f "$stable_png"; fi`;
+if [ "$has_png" = 0 ]; then rm -f "$stable_png"; fi
+trap - ERR
+rm -f "$manifest_backup" "$png_backup"`;
   const result = await sandbox.runCommand({
     cmd: "bash",
     args: ["-lc", script, "_", stageManifest, stagePng, VISUAL_CONTEXT_PATH, DEV_WORKBENCH_MIRROR_PATHS.latestScreenshot, png ? "1" : "0"],
