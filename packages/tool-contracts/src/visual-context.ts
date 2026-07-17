@@ -6,7 +6,11 @@ export const maxVisualContextAriaLength = 32_000;
 export const maxVisualContextImageBytes = 10 * 1024 * 1024;
 
 const boundedIdSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/);
-const boundedPublicTextSchema = z.string().trim().min(1).max(160);
+const likelySecretPattern = /(?:\b(?:bearer|api[_ -]?key|access[_ -]?token|client[_ -]?secret|password)\b\s*[:=]\s*\S+|\beyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{10,}|\bsk_(?:live|test)_[a-zA-Z0-9]{12,})/i;
+const selectorOnlyPattern = /^(?:[#.][a-zA-Z_-][\w-]*|\[[^\]]+\]|\/\/|\/html\b)/;
+const boundedPublicTextSchema = z.string().trim().min(1).max(160)
+  .refine((value) => !likelySecretPattern.test(value), "Public visual context must not contain credential-like values.")
+  .refine((value) => !selectorOnlyPattern.test(value), "Public visual context must not expose selectors or DOM paths.");
 
 export const visualContextOriginSchema = z.string().url().refine((value) => {
   const url = new URL(value);
@@ -116,7 +120,7 @@ export const visualContextRequestSchema = visualContextCorrelationSchema.extend(
   targetId: semanticTargetIdSchema.optional(),
   targetInstanceId: boundedIdSchema.optional(),
   viewport: visualContextViewportSchema.optional(),
-}).strict();
+}).strict().superRefine((request, ctx) => validateOperationProvider(request.operation, request.provider, ctx));
 
 export const visualContextResultStatusSchema = z.enum(["completed", "cancelled", "unavailable", "invalid-request", "failed"]);
 
@@ -128,11 +132,12 @@ export const visualContextResultSchema = visualContextCorrelationSchema.extend({
   status: visualContextResultStatusSchema,
   capabilities: z.array(visualContextCapabilitySchema).max(16).optional(),
   selection: visualContextSelectionSchema.nullable().optional(),
-  ariaSnapshot: z.string().max(maxVisualContextAriaLength).nullable().optional(),
+  ariaSnapshot: z.string().max(maxVisualContextAriaLength).refine((value) => !likelySecretPattern.test(value), "ARIA snapshot must be sanitized before crossing the public boundary.").nullable().optional(),
   selectionResolution: visualContextSelectionResolutionSchema.optional(),
   screenshot: visualContextScreenshotSchema.nullable().optional(),
   disabledReason: boundedPublicTextSchema.optional(),
 }).strict().superRefine((result, ctx) => {
+  validateOperationProvider(result.operation, result.provider, ctx);
   if (result.status !== "completed" && !result.disabledReason) {
     ctx.addIssue({ code: "custom", path: ["disabledReason"], message: "Non-completed results require a bounded reason." });
   }
@@ -144,6 +149,12 @@ export const visualContextResultSchema = visualContextCorrelationSchema.extend({
   }
   if (result.status === "completed" && result.operation === "capture" && !result.screenshot) {
     ctx.addIssue({ code: "custom", path: ["screenshot"], message: "Successful capture results require screenshot metadata." });
+  }
+  if (result.status === "completed" && result.operation === "capture" && !result.selectionResolution) {
+    ctx.addIssue({ code: "custom", path: ["selectionResolution"], message: "Successful capture results require selection resolution." });
+  }
+  if (result.screenshot && result.provider !== result.screenshot.provider) {
+    ctx.addIssue({ code: "custom", path: ["screenshot", "provider"], message: "Screenshot provider must match the result provider." });
   }
 });
 
@@ -165,5 +176,31 @@ export function assertVisualContextResultMatchesRequest(request: VisualContextRe
   }
   if (request.provider && request.provider !== result.provider) {
     throw new Error("Visual context result provider does not match the pending request.");
+  }
+}
+
+function validateOperationProvider(
+  operation: VisualContextOperation,
+  provider: VisualContextProvider | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  const requiredProvider = operation === "pick" || operation === "clear"
+    ? "host"
+    : operation === "capture"
+      ? null
+      : operation === "setup-browser"
+        ? "playwright"
+        : operation === "pair-extension" || operation === "unpair-extension"
+          ? "chrome-active-tab"
+          : undefined;
+  if (requiredProvider === undefined) return;
+  if (requiredProvider === null) {
+    if (provider !== "playwright" && provider !== "chrome-active-tab") {
+      ctx.addIssue({ code: "custom", path: ["provider"], message: "Capture requires a screenshot provider." });
+    }
+    return;
+  }
+  if (provider !== requiredProvider) {
+    ctx.addIssue({ code: "custom", path: ["provider"], message: `${operation} requires provider ${requiredProvider}.` });
   }
 }

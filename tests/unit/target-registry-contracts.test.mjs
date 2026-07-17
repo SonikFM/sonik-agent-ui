@@ -48,6 +48,14 @@ assert.throws(() => visualContextResultSchema.parse({
   ...visualContextFixture.result,
   selection: { ...visualContextFixture.result.selection, label: "x".repeat(161) },
 }));
+assert.throws(() => visualContextResultSchema.parse({
+  ...visualContextFixture.result,
+  selection: { ...visualContextFixture.result.selection, accessibleName: "password=do-not-leak" },
+}), /credential-like/);
+assert.throws(() => visualContextResultSchema.parse({
+  ...visualContextFixture.result,
+  selection: { ...visualContextFixture.result.selection, label: "#reservation-card" },
+}), /selectors/);
 assert.throws(() => assertVisualContextResultMatchesRequest(visualRequest, { ...visualResult, routeRevision: visualResult.routeRevision + 1 }), /routeRevision/);
 assert.throws(() => assertVisualContextResultMatchesRequest(visualRequest, { ...visualResult, provider: "playwright" }), /provider/);
 
