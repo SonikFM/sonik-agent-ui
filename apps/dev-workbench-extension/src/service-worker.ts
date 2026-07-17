@@ -2,7 +2,7 @@
 import { captureVisibleTabWithoutSonikChrome } from "./capture-visible-tab.js";
 import { createPairingLifecycle } from "./pairing-lifecycle.js";
 import { allowedWorkbenchOrigins } from "./config.js";
-import { TRANSPORT_VERSION, createResult, isExactWorkbenchRequest, pngMetadata } from "./protocol.js";
+import { TRANSPORT_VERSION, createResult, isExactWorkbenchRequest, isSafeCapturePreparation, pngMetadata } from "./protocol.js";
 
 const pairings = new Map();
 const lifecycle = createPairingLifecycle();
@@ -85,6 +85,7 @@ async function handleRequest(message, sender) {
     dataUrl = await captureVisibleTabWithoutSonikChrome({
       async hideCaptureChrome() {
         prepared = await chrome.tabs.sendMessage(tabId, { type: "prepare-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce });
+        if (!isSafeCapturePreparation(prepared)) throw new Error("Capture redaction preparation failed closed.");
       },
       captureVisibleTab: () => chrome.tabs.captureVisibleTab(pairing.windowId, { format: "png" }),
       restoreCaptureChrome: () => chrome.tabs.sendMessage(tabId, { type: "clear-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce }),
