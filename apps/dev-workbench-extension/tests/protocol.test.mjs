@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createResult, isExactWorkbenchRequest, isSafeCapturePreparation, pngMetadata } from "../src/protocol.ts";
+import { createResult, isExactWorkbenchRequest, isSafeCapturePreparation, matchesCaptureViewport, pngMetadata } from "../src/protocol.ts";
 import { allowedWorkbenchOrigins } from "../src/config.ts";
 
 const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
@@ -17,6 +17,7 @@ const request = {
 assert.equal(isExactWorkbenchRequest(request, new Set([request.origin]), "/bookings"), true);
 assert.equal(allowedWorkbenchOrigins.has("https://arbitrary.example.com"), false, "page markup cannot expand the configured origin authority");
 assert.equal(isExactWorkbenchRequest({ ...request, requestId: "" }, new Set([request.origin]), "/bookings"), false);
+assert.equal(isExactWorkbenchRequest({ ...request, routeRevision: -1 }, new Set([request.origin]), "/bookings"), false);
 assert.equal(isExactWorkbenchRequest(request, new Set(["https://other.example.com"]), "/bookings"), false);
 assert.equal(isExactWorkbenchRequest(request, new Set([request.origin]), "/other"), false);
 assert.equal(createResult(request).messageSource, "sonik-agent-host");
@@ -33,9 +34,17 @@ assert.deepEqual(
   { ...pngMetadata(`data:image/png;base64,${png.toString("base64")}`), bytes: undefined, pngBase64: undefined },
   { bytes: undefined, width: 2, height: 3, pngBase64: undefined },
 );
+assert.equal(matchesCaptureViewport({ width: 2, height: 3 }, { width: 2, height: 3, deviceScaleFactor: 1 }), true);
+assert.equal(matchesCaptureViewport({ width: 2, height: 3 }, { width: 2, height: 2, deviceScaleFactor: 1 }), false);
 assert.throws(() => pngMetadata("data:image/png;base64,bm90LXBuZw=="), /invalid PNG/);
 const oversized = Buffer.alloc(10 * 1024 * 1024 + 1);
 Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(oversized);
 assert.throws(() => pngMetadata(`data:image/png;base64,${oversized.toString("base64")}`), /10 MiB/);
+let decoded = false;
+const originalAtob = globalThis.atob;
+globalThis.atob = () => { decoded = true; throw new Error("decoded"); };
+assert.throws(() => pngMetadata(`data:image/png;base64,${"A".repeat(Math.ceil(10 * 1024 * 1024 / 3) * 4 + 1)}`), /10 MiB/);
+assert.equal(decoded, false, "oversized base64 is rejected before decode/allocation");
+globalThis.atob = originalAtob;
 
 console.log("active-tab extension protocol: ok");

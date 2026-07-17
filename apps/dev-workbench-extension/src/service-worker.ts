@@ -2,7 +2,7 @@
 import { captureVisibleTabWithoutSonikChrome } from "./capture-visible-tab.js";
 import { createPairingLifecycle } from "./pairing-lifecycle.js";
 import { allowedWorkbenchOrigins } from "./config.js";
-import { TRANSPORT_VERSION, createResult, isExactWorkbenchRequest, isSafeCapturePreparation, pngMetadata } from "./protocol.js";
+import { TRANSPORT_VERSION, createResult, isExactWorkbenchRequest, isSafeCapturePreparation, matchesCaptureViewport, pngMetadata } from "./protocol.js";
 
 const pairings = new Map();
 const lifecycle = createPairingLifecycle();
@@ -101,6 +101,11 @@ async function handleRequest(message, sender) {
     throw new Error("The paired tab stopped being active during capture.");
   }
   const png = pngMetadata(dataUrl);
+  if (!matchesCaptureViewport(png, prepared.viewport)) {
+    pairings.delete(tabId);
+    lifecycle.revoke(tabId);
+    throw new Error("Active-tab capture dimensions do not match the prepared viewport.");
+  }
   const sha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", png.bytes))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
