@@ -184,12 +184,8 @@
           ? { enabled: false, disabledReason: sourceUnavailable }
           : visualSourceId === "host"
             ? { enabled: false, disabledReason: "Pair the active-tab extension before capturing the Host source." }
-          : operation === "idle"
-            ? { enabled: true, disabledReason: null }
-            : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
-        setupVisualBrowser: visualSources.some((source) => source.id === "preview")
-          ? { enabled: true, disabledReason: null }
-          : { enabled: false, disabledReason: "A Preview source is required for controlled browser setup." },
+            : { enabled: false, disabledReason: "Set up the controlled browser before capturing the Preview source." },
+        setupVisualBrowser: { enabled: false, disabledReason: "Controlled browser setup is not connected in this release." },
         pairVisualExtension: visualSources.some((source) => source.id === "host")
           ? { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "Connect an embedded Host source before pairing the extension." },
@@ -232,6 +228,7 @@
     visualStaleReason = reason;
     visualStatusMessage = message;
     announcement = message;
+    if (workspace) void persistVisualInvalidation(reason);
   }
 
   function createPageContext() {
@@ -348,6 +345,7 @@
     announcement = visualStatusMessage;
     visualActionFocus?.focus();
     visualActionFocus = null;
+    if (workspace) void submitVisualResult(record);
   }
 
   function snapshotPageContext() {
@@ -412,14 +410,12 @@
 
   function captureVisualContext(): WorkbenchSemanticActionResult {
     if (!view.actions.captureVisualContext.enabled) return unavailable("captureVisualContext");
-    void runVisualServerOperation("capture");
-    return accepted("Visual context capture started.");
+    return unavailableAction("No capture provider is ready.");
   }
 
   function setupVisualBrowser(): WorkbenchSemanticActionResult {
     if (!view.actions.setupVisualBrowser.enabled) return unavailable("setupVisualBrowser");
-    void runVisualServerOperation("setup-browser");
-    return accepted("Controlled browser setup started.");
+    return unavailableAction("Controlled browser setup is not connected in this release.");
   }
 
   function pairVisualExtension(): WorkbenchSemanticActionResult {
@@ -435,22 +431,34 @@
     return accepted("Active-tab extension pairing requested.");
   }
 
-  async function runVisualServerOperation(operationName: "capture" | "setup-browser"): Promise<void> {
-    visualStatus = operationName === "capture" ? "capturing" : "idle";
+  async function submitVisualResult(result: Record<string, unknown>): Promise<void> {
+    if (!workspace) return;
     try {
       const response = await fetch("/api/workspaces/visual-context", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ operation: operationName, sourceId: view.visualContext.selectedSourceId, sourceContextRevision, routeRevision }),
+        body: JSON.stringify({ workspaceSessionId: workspace.sessionId, result }),
       });
       if (!response.ok) throw new Error(await publicError(response));
-      visualStatus = "idle";
-      visualStaleReason = null;
-      visualStatusMessage = operationName === "capture" ? "Visual context captured." : "Controlled browser is ready.";
     } catch (error) {
       visualStatus = "error";
-      visualStatusMessage = safeMessage(error, "The visual operation failed.");
+      visualStatusMessage = safeMessage(error, "The visual result could not be saved.");
+      announcement = visualStatusMessage;
     }
-    announcement = visualStatusMessage;
+  }
+
+  async function persistVisualInvalidation(staleReason: NonNullable<typeof visualStaleReason>): Promise<void> {
+    const source = discoveredVisualSources().find((candidate) => candidate.id === view.visualContext.selectedSourceId);
+    if (!workspace || !source) return;
+    try {
+      const response = await fetch("/api/workspaces/visual-context", {
+        method: "DELETE", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceSessionId: workspace.sessionId, sourceContextRevision, routeRevision, source, staleReason }),
+      });
+      if (!response.ok) throw new Error(await publicError(response));
+    } catch (error) {
+      visibleError = safeMessage(error, "Stale visual context could not be cleared.");
+      announcement = visibleError;
+    }
   }
 
   function openPreview(): WorkbenchSemanticActionResult {
