@@ -66,6 +66,7 @@
   let visualActionFocus: HTMLElement | null = null;
   let pendingVisualRequest: VisualContextRequest | null = null;
   let visualBrowser = $state<VisualBrowserState | null>(null);
+  let visualExtensionPaired = $state(false);
 
   const terminalOnly = $derived(page.url.searchParams.get("surface") === "terminal");
   const view = $derived<DevWorkbenchViewProps>(createView());
@@ -192,7 +193,9 @@
         captureVisualContext: sourceUnavailable
           ? { enabled: false, disabledReason: sourceUnavailable }
           : visualSourceId === "host"
-            ? { enabled: false, disabledReason: "Pair the active-tab extension before capturing the Host source." }
+            ? visualExtensionPaired
+              ? { enabled: true, disabledReason: null }
+              : { enabled: false, disabledReason: "Pair the active-tab extension before capturing the Host source." }
             : visualBrowser?.capability === "installed"
               ? { enabled: operation === "idle", disabledReason: operation === "idle" ? null : "Wait for the current workspace operation to finish." }
               : { enabled: false, disabledReason: visualBrowser?.disabledReason ?? "Checking controlled browser capture readiness." },
@@ -202,7 +205,9 @@
             ? { enabled: false, disabledReason: "Controlled browser capture is ready." }
             : { enabled: operation === "idle", disabledReason: operation === "idle" ? null : "Wait for the current workspace operation to finish." },
         pairVisualExtension: visualSources.some((source) => source.id === "host")
-          ? { enabled: true, disabledReason: null }
+          ? visualExtensionPaired
+            ? { enabled: false, disabledReason: "The exact active tab is paired." }
+            : { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "Connect an embedded Host source before pairing the extension." },
         openPreview: workspace.preview
           ? { enabled: true, disabledReason: null }
@@ -362,13 +367,22 @@
     const request = pendingVisualRequest!;
     pendingVisualRequest = null;
     const completed = result.status === "completed";
+    if (completed && result.operation === "pair-extension") visualExtensionPaired = true;
     visualStatus = completed ? "idle" : result.status === "cancelled" ? "invalidated" : "error";
     visualStaleReason = result.status === "cancelled" ? "cancelled" : null;
-    visualStatusMessage = completed ? "Visual target selected." : result.disabledReason ?? "Visual operation ended.";
+    visualStatusMessage = completed
+      ? result.operation === "pair-extension"
+        ? "Exact active-tab extension paired."
+        : result.operation === "capture"
+          ? "Host Capture is current."
+          : "Visual target selected."
+      : result.disabledReason ?? "Visual operation ended.";
     announcement = visualStatusMessage;
     visualActionFocus?.focus();
     visualActionFocus = null;
-    if (workspace) void submitVisualResult(request, result);
+    if (workspace && (request.operation === "pick" || request.operation === "capture" || request.operation === "clear")) {
+      void submitVisualResult(request, result);
+    }
   }
 
   function snapshotPageContext() {
@@ -434,6 +448,18 @@
 
   function captureVisualContext(): WorkbenchSemanticActionResult {
     if (!view.actions.captureVisualContext.enabled) return unavailable("captureVisualContext");
+    const source = discoveredVisualSources().find((candidate) => candidate.id === view.visualContext.selectedSourceId);
+    if (source?.id === "host" && embeddedHostOrigin && workbenchOrigin && window.parent !== window) {
+      visualStatus = "capturing";
+      visualStatusMessage = "Capturing the exact active Host tab.";
+      pendingVisualRequest = {
+        messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
+        requestId: crypto.randomUUID(), operation: "capture", origin: workbenchOrigin,
+        sourceContextRevision, routeRevision, source, provider: "chrome-active-tab",
+      };
+      window.parent.postMessage(pendingVisualRequest, embeddedHostOrigin);
+      return accepted(visualStatusMessage);
+    }
     visualStatus = "capturing";
     visualStatusMessage = "Capturing Preview in the controlled browser.";
     announcement = visualStatusMessage;
