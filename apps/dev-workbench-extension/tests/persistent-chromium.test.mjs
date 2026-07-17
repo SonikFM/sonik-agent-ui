@@ -139,13 +139,14 @@ try {
 
   const currentWorker = context.serviceWorkers().find((worker) => worker.url().startsWith(`chrome-extension://${loadedExtension.id}/`));
   assert.ok(currentWorker);
-  const closed = currentWorker.waitForEvent("close");
-  await currentWorker.evaluate(() => self.close());
-  await closed;
-  const restarted = context.waitForEvent("serviceworker");
+  const workerTargets = await cdp.send("Target.getTargets", { filter: [{ type: "service_worker", exclude: false }] });
+  const workerTarget = workerTargets.targetInfos.find((candidate) => candidate.url === currentWorker.url());
+  assert.ok(workerTarget, "Extension service-worker target is available");
+  assert.equal((await cdp.send("Target.closeTarget", { targetId: workerTarget.targetId })).success, true);
   await expectRejected(frame, requestFor("capture"), origin(host));
-  const restartedWorker = await restarted;
-  assert.equal(await restartedWorker.evaluate(() => chrome.runtime.id), loadedExtension.id);
+  const restartedTargets = await cdp.send("Target.getTargets", { filter: [{ type: "service_worker", exclude: false }] });
+  const restartedTarget = restartedTargets.targetInfos.find((candidate) => candidate.url === currentWorker.url());
+  assert.ok(restartedTarget && restartedTarget.targetId !== workerTarget.targetId, "Service worker restarted with empty memory");
   await pair();
   assert.equal((await sendHostRequest(frame, requestFor("get-capabilities"), origin(host))).status, "completed");
 
