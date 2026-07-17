@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { captureVisibleTabWithoutSonikChrome } from "./capture-visible-tab.js";
 import { createPairingLifecycle } from "./pairing-lifecycle.js";
+import { allowedWorkbenchOrigins } from "./config.js";
 import { TRANSPORT_VERSION, createResult, isExactWorkbenchRequest, pngMetadata } from "./protocol.js";
 
 const pairings = new Map();
@@ -18,10 +19,11 @@ chrome.action.onClicked.addListener(async (tab) => {
     tabId: tab.id,
     windowId: tab.windowId,
   });
-  if (!response?.allowedOrigins?.length) return;
+  const configuredOrigins = response?.allowedOrigins?.filter((origin) => allowedWorkbenchOrigins.has(origin)) ?? [];
+  if (!configuredOrigins.length) return;
   const documentId = injection[0]?.documentId;
   if (!documentId) return;
-  pairings.set(tab.id, { windowId: tab.windowId, documentId, nonce, allowedOrigins: new Set(response.allowedOrigins) });
+  pairings.set(tab.id, { windowId: tab.windowId, documentId, nonce, allowedOrigins: new Set(configuredOrigins) });
   lifecycle.establish({ tabId: tab.id, windowId: tab.windowId, documentId, nonce });
 });
 
@@ -78,13 +80,20 @@ async function handleRequest(message, sender) {
   }
 
   let prepared;
-  const dataUrl = await captureVisibleTabWithoutSonikChrome({
-    async hideCaptureChrome() {
-      prepared = await chrome.tabs.sendMessage(tabId, { type: "prepare-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce });
-    },
-    captureVisibleTab: () => chrome.tabs.captureVisibleTab(pairing.windowId, { format: "png" }),
-    restoreCaptureChrome: () => chrome.tabs.sendMessage(tabId, { type: "clear-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce }),
-  });
+  let dataUrl;
+  try {
+    dataUrl = await captureVisibleTabWithoutSonikChrome({
+      async hideCaptureChrome() {
+        prepared = await chrome.tabs.sendMessage(tabId, { type: "prepare-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce });
+      },
+      captureVisibleTab: () => chrome.tabs.captureVisibleTab(pairing.windowId, { format: "png" }),
+      restoreCaptureChrome: () => chrome.tabs.sendMessage(tabId, { type: "clear-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce }),
+    });
+  } catch (error) {
+    pairings.delete(tabId);
+    lifecycle.revoke(tabId);
+    throw error;
+  }
   const stillActive = await chrome.tabs.query({ active: true, windowId: pairing.windowId });
   if (stillActive[0]?.id !== tabId || !lifecycle.isCurrent(lease, identity)) {
     pairings.delete(tabId);

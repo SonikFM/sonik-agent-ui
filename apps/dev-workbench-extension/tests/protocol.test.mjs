@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createResult, isExactWorkbenchRequest, pngMetadata } from "../src/protocol.ts";
+import { allowedWorkbenchOrigins } from "../src/config.ts";
 
 const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
 assert.deepEqual(manifest.permissions, ["activeTab", "scripting"]);
@@ -14,6 +15,7 @@ const request = {
   provider: "chrome-active-tab",
 };
 assert.equal(isExactWorkbenchRequest(request, new Set([request.origin]), "/bookings"), true);
+assert.equal(allowedWorkbenchOrigins.has("https://arbitrary.example.com"), false, "page markup cannot expand the configured origin authority");
 assert.equal(isExactWorkbenchRequest({ ...request, requestId: "" }, new Set([request.origin]), "/bookings"), false);
 assert.equal(isExactWorkbenchRequest(request, new Set(["https://other.example.com"]), "/bookings"), false);
 assert.equal(isExactWorkbenchRequest(request, new Set([request.origin]), "/other"), false);
