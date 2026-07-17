@@ -337,7 +337,10 @@ export async function submitWorkspaceVisualContext(
   if (!resumed.ok) return resumed;
   const leaseOwner = randomUUID();
   const lease = await acquireVisualContextLease(resumed.value, leaseOwner, signal);
-  if (!lease) return { ok: false, error: workspaceError("unknown", "visual-context-lease", true) };
+  if (!lease) {
+    if (temporaryPath) await removeVisualContextTemporaryPath(resumed.value, temporaryPath, signal);
+    return { ok: false, error: workspaceError("unknown", "visual-context-lease", true) };
+  }
   try {
     const result = parsed.data.result;
     if (result.status !== "completed") {
@@ -451,23 +454,39 @@ async function resumeVerifiedWorkspace(sessionId: string, signal?: AbortSignal):
 
 async function acquireVisualContextLease(sandbox: Sandbox, owner: string, signal?: AbortSignal): Promise<boolean> {
   const expires = Date.now() + 60_000;
+  const command = createVisualContextLeaseCommand(VISUAL_CONTEXT_LEASE_PATH, owner, expires);
+  const result = await sandbox.runCommand({ ...command, ...(signal ? { signal } : {}) });
+  return result.exitCode === 0;
+}
+
+export function createVisualContextLeaseCommand(lease: string, owner: string, expires: number) {
   const script = `set -eu
 lease="$1"; owner="$2"; expires="$3"; mkdir -p "$(dirname "$lease")"
+candidate="$lease.candidate.$owner"; stale="$lease.stale.$owner"
+cleanup() { rm -f "$candidate"; }
+trap cleanup EXIT
+printf '%s\\n%s\\n' "$owner" "$expires" > "$candidate"
 for attempt in $(seq 1 50); do
-  if mkdir "$lease" 2>/dev/null; then printf '%s\\n%s\\n' "$owner" "$expires" > "$lease/owner"; exit 0; fi
-  current_expires=$(sed -n '2p' "$lease/owner" 2>/dev/null || printf '0')
-  if [ "$current_expires" -lt "$(date +%s%3N)" ]; then mv "$lease" "$lease.stale.$owner" 2>/dev/null || true; rm -rf "$lease.stale.$owner"; continue; fi
-  sleep 0.1
+  if ln "$candidate" "$lease" 2>/dev/null; then exit 0; fi
+  current_expires=$(sed -n '2p' "$lease" 2>/dev/null || true)
+  case "$current_expires" in
+    ''|*[!0-9]*)
+      modified=$(stat -c %Y "$lease" 2>/dev/null || printf '0')
+      [ "$modified" -lt "$(($(date +%s) - 60))" ] || { sleep 0.1; continue; }
+      ;;
+    *) [ "$current_expires" -lt "$(date +%s%3N)" ] || { sleep 0.1; continue; } ;;
+  esac
+  mv "$lease" "$stale" 2>/dev/null || continue
+  rm -f "$stale"
 done
 exit 75`;
-  const result = await sandbox.runCommand({ cmd: "bash", args: ["-lc", script, "_", VISUAL_CONTEXT_LEASE_PATH, owner, String(expires)], ...(signal ? { signal } : {}) });
-  return result.exitCode === 0;
+  return { cmd: "bash" as const, args: ["-lc", script, "_", lease, owner, String(expires)] };
 }
 
 async function releaseVisualContextLease(sandbox: Sandbox, owner: string, signal?: AbortSignal): Promise<void> {
   const script = `set -eu
 lease="$1"; owner="$2"
-[ "$(sed -n '1p' "$lease/owner" 2>/dev/null || true)" = "$owner" ] && rm -rf "$lease" || true`;
+[ "$(sed -n '1p' "$lease" 2>/dev/null || true)" = "$owner" ] && rm -f "$lease" || true`;
   await sandbox.runCommand({ cmd: "bash", args: ["-lc", script, "_", VISUAL_CONTEXT_LEASE_PATH, owner], ...(signal ? { signal } : {}) });
 }
 
@@ -514,6 +533,10 @@ rm -f "$manifest_backup" "$png_backup"`;
 
 async function removeSandboxPath(sandbox: Sandbox, path: string, signal?: AbortSignal): Promise<void> {
   await sandbox.runCommand({ cmd: "rm", args: ["-f", path], ...(signal ? { signal } : {}) });
+}
+
+export async function removeVisualContextTemporaryPath(sandbox: Sandbox, path: string, signal?: AbortSignal): Promise<void> {
+  await removeSandboxPath(sandbox, path, signal);
 }
 
 async function collectSitemap(
