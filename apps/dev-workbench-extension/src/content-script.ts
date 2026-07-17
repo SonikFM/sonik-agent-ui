@@ -18,7 +18,7 @@
     if (message.type === "prepare-capture") {
       clearOverlays();
       const redactionsApplied = [];
-      const selectors = "input[type=password],input[type=email],input[type=tel],[data-sonik-redact]";
+      const selectors = "input[type=password],input[type=email],input[type=tel],input[autocomplete*=cc-],input[autocomplete*=token],input[name*=secret i],input[name*=token i],input[name*=password i],textarea[name*=secret i],[data-sonik-redact]";
       for (const element of document.querySelectorAll(selectors)) {
         const bounds = element.getBoundingClientRect();
         if (bounds.width <= 0 || bounds.height <= 0) continue;
