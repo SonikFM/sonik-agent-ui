@@ -1,0 +1,58 @@
+{
+  "version": "sonik.visual-context.v1",
+  "capability": {
+    "operation": "pick",
+    "status": "available",
+    "provider": "host"
+  },
+  "request": {
+    "requestId": "visual-request-1",
+    "operation": "pick",
+    "sourceContextRevision": 3,
+    "routeRevision": 7,
+    "source": {
+      "id": "host",
+      "label": "Example host",
+      "surface": "example-host",
+      "route": "/reservations"
+    },
+    "provider": "host",
+    "messageSource": "sonik-agent-ui",
+    "type": "sonik:visual-context:request",
+    "version": "sonik.visual-context.v1",
+    "origin": "https://example.test"
+  },
+  "result": {
+    "requestId": "visual-request-1",
+    "operation": "pick",
+    "sourceContextRevision": 3,
+    "routeRevision": 7,
+    "source": {
+      "id": "host",
+      "label": "Example host",
+      "surface": "example-host",
+      "route": "/reservations"
+    },
+    "provider": "host",
+    "messageSource": "sonik-agent-host",
+    "type": "sonik:visual-context:result",
+    "version": "sonik.visual-context.v1",
+    "origin": "https://example.test",
+    "status": "completed",
+    "selection": {
+      "targetId": "example.reservation.card",
+      "targetInstanceId": "reservation-123",
+      "label": "Reservation card",
+      "role": "article",
+      "accessibleName": "Reservation details",
+      "bounds": {
+        "x": 24,
+        "y": 80,
+        "width": 640,
+        "height": 320,
+        "coordinateSpace": "viewport"
+      },
+      "selectedAt": "2026-07-17T12:00:00.000Z"
+    }
+  }
+}

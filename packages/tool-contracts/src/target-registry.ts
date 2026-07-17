@@ -8,6 +8,7 @@ export const semanticTargetIdSchema = z.string()
   .regex(/^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$/i, "Target ids must be stable semantic ids, not raw selectors or DOM paths.");
 
 export const hostUiTargetCapabilitySchema = z.enum([
+  "select",
   "highlight",
   "focus",
   "scroll",

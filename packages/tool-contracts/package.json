@@ -19,6 +19,11 @@
       "types": "./dist/target-registry.d.ts",
       "default": "./dist/target-registry.js"
     },
+    "./visual-context": {
+      "types": "./dist/visual-context.d.ts",
+      "default": "./dist/visual-context.js"
+    },
+    "./fixtures/visual-context-v1.json": "./fixtures/visual-context-v1.json",
     "./capability-registry": {
       "types": "./dist/capability-registry.d.ts",
       "default": "./dist/capability-registry.js"
@@ -68,7 +73,7 @@
       "default": "./dist/marketplace-fixtures.js"
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "fixtures"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"

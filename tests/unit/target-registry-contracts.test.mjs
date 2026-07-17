@@ -15,6 +15,41 @@ import {
   resolveHostUiTargetBounds,
   targetRegistryVersion,
 } from "../../packages/tool-contracts/src/target-registry.ts";
+import {
+  assertVisualContextResultMatchesRequest,
+  visualContextCapabilitySchema,
+  visualContextRequestSchema,
+  visualContextResultSchema,
+} from "../../packages/tool-contracts/src/visual-context.ts";
+import visualContextFixture from "../../packages/tool-contracts/fixtures/visual-context-v1.json" with { type: "json" };
+
+assert.equal(visualContextFixture.version, "sonik.visual-context.v1");
+const visualCapability = visualContextCapabilitySchema.parse(visualContextFixture.capability);
+const visualRequest = visualContextRequestSchema.parse(visualContextFixture.request);
+const visualResult = visualContextResultSchema.parse(visualContextFixture.result);
+assert.equal(visualCapability.provider, "host");
+assert.doesNotThrow(() => assertVisualContextResultMatchesRequest(visualRequest, visualResult));
+
+for (const invalidRequest of [
+  { ...visualContextFixture.request, version: "sonik.visual-context.v2" },
+  { ...visualContextFixture.request, extra: true },
+  { ...visualContextFixture.request, origin: "https://example.test/path" },
+  { ...visualContextFixture.request, source: { ...visualContextFixture.request.source, route: "/reservations?token=secret" } },
+  { ...visualContextFixture.request, provider: "unknown-provider" },
+]) {
+  assert.throws(() => visualContextRequestSchema.parse(invalidRequest));
+}
+
+for (const forbiddenField of ["selector", "outerHTML", "value", "credentials"]) {
+  assert.throws(() => visualContextResultSchema.parse({ ...visualContextFixture.result, [forbiddenField]: "secret" }));
+}
+
+assert.throws(() => visualContextResultSchema.parse({
+  ...visualContextFixture.result,
+  selection: { ...visualContextFixture.result.selection, label: "x".repeat(161) },
+}));
+assert.throws(() => assertVisualContextResultMatchesRequest(visualRequest, { ...visualResult, routeRevision: visualResult.routeRevision + 1 }), /routeRevision/);
+assert.throws(() => assertVisualContextResultMatchesRequest(visualRequest, { ...visualResult, provider: "playwright" }), /provider/);
 
 assert.equal(targetRegistryVersion, "sonik-agent-ui.target-registry.v0");
 assert.equal(agentActionChannelVersion, "sonik.agent_ui.host_action.v1");
