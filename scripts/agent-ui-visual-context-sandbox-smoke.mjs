@@ -165,5 +165,7 @@ async function runProvider(input, extraEnv = {}) {
     child.once("exit", resolve);
   });
   assert.equal(code, 0, Buffer.concat(stderr).toString("utf8"));
-  return JSON.parse(Buffer.concat(stdout).toString("utf8"));
+  const result = JSON.parse(Buffer.concat(stdout).toString("utf8"));
+  if (result.status === "failed" && stderr.length) process.stderr.write(Buffer.concat(stderr));
+  return result;
 }
