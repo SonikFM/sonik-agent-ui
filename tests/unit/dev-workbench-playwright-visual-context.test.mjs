@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   PLAYWRIGHT_VISUAL_CONTEXT_SCRIPT,
   capturePlaywrightVisualContext,
@@ -16,6 +17,7 @@ assert.deepEqual(appliedRedactions({ sensitiveCount: 0, declaredSensitiveCount: 
 assert.deepEqual(appliedRedactions({ sensitiveCount: 1, declaredSensitiveCount: 1, crossOriginFrameCount: 1, rawAriaSnapshot: "secret@example.com", ariaSnapshot: "[redacted email]" }), [
   "sensitive form fields", "declared sensitive content", "cross-origin frames", "AI accessibility sensitive content", "AI accessibility text",
 ]);
+assert.match(await readFile("apps/dev-workbench/scripts/capture-visual-context.mjs", "utf8"), /mask: \[mask\]/, "Playwright screenshot masks are always passed as a Locator array");
 
 const request = {
   requestId: "capture-1",

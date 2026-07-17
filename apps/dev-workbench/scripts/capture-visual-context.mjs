@@ -118,7 +118,7 @@ export async function captureVisualContext(request, options = {}) {
       visibleCount(sensitive), visibleCount(declaredSensitive), visibleCount(crossOriginFrames),
     ]);
     const mask = page.locator(`${sensitiveSelector},[data-sonik-capture-cross-origin]`);
-    const screenshotOptions = { path: outputPath, type: "png", animations: "disabled", caret: "hide", scale: "css", mask };
+    const screenshotOptions = { path: outputPath, type: "png", animations: "disabled", caret: "hide", scale: "css", mask: [mask] };
     if (stableTarget) await capture.screenshot(screenshotOptions);
     else await page.screenshot(screenshotOptions);
 
