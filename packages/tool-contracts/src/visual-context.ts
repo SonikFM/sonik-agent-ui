@@ -158,6 +158,54 @@ export const visualContextResultSchema = visualContextCorrelationSchema.extend({
   }
 });
 
+export const visualContextSnapshotScreenshotSchema = z.strictObject({
+  path: z.literal("/vercel/sandbox/workspace/.sonik/screenshots/latest.png"),
+  mime: z.literal("image/png"),
+  width: z.number().int().positive().max(8_192),
+  height: z.number().int().positive().max(8_192),
+  bytes: z.number().int().positive().max(maxVisualContextImageBytes),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  provider: visualContextProviderSchema.exclude(["host"]),
+  fidelity: visualContextFidelitySchema,
+  captureBasis: visualContextCaptureBasisSchema,
+  viewport: visualContextViewportSchema,
+  redactionsApplied: z.array(boundedPublicTextSchema).max(64),
+  capturedAt: z.string().datetime(),
+}).superRefine((screenshot, ctx) => {
+  const expectedFidelity = screenshot.provider === "playwright" ? "controlled-preview" : "exact-active-tab";
+  const expectedBasis = screenshot.provider === "playwright" ? "fresh-playwright-navigation" : "native-active-tab-redacted";
+  if (screenshot.fidelity !== expectedFidelity) ctx.addIssue({ code: "custom", path: ["fidelity"], message: "Fidelity must match the capture provider." });
+  if (screenshot.captureBasis !== expectedBasis) ctx.addIssue({ code: "custom", path: ["captureBasis"], message: "Capture basis must match the capture provider." });
+});
+
+export const visualContextSnapshotSchema = z.strictObject({
+  schemaVersion: z.literal(visualContextVersion),
+  status: z.enum(["current", "invalidated"]),
+  generation: boundedIdSchema,
+  requestId: boundedIdSchema.nullable(),
+  sourceContextRevision: z.number().int().nonnegative(),
+  routeRevision: z.number().int().nonnegative(),
+  source: visualContextSourceSchema,
+  selection: visualContextSelectionSchema.nullable(),
+  ariaSnapshot: z.string().max(maxVisualContextAriaLength).refine((value) => !likelySecretPattern.test(value), "ARIA snapshot must be sanitized before persistence.").nullable(),
+  selectionResolution: visualContextSelectionResolutionSchema,
+  screenshot: visualContextSnapshotScreenshotSchema.nullable(),
+  invalidatedAt: z.string().datetime().nullable(),
+  staleReason: z.enum(["source-changed", "route-changed", "navigation", "cancelled", "provider-lost"]).nullable(),
+}).superRefine((snapshot, ctx) => {
+  if (snapshot.status === "current" && (snapshot.invalidatedAt || snapshot.staleReason)) {
+    ctx.addIssue({ code: "custom", path: ["status"], message: "Current snapshots cannot carry invalidation state." });
+  }
+  if (snapshot.status === "invalidated") {
+    if (!snapshot.invalidatedAt || !snapshot.staleReason) {
+      ctx.addIssue({ code: "custom", path: ["invalidatedAt"], message: "Invalidated snapshots require time and reason." });
+    }
+    if (snapshot.selection || snapshot.ariaSnapshot || snapshot.screenshot) {
+      ctx.addIssue({ code: "custom", path: ["selection"], message: "Invalidated snapshots must clear visual artifacts." });
+    }
+  }
+});
+
 export type VisualContextOperation = z.infer<typeof visualContextOperationSchema>;
 export type VisualContextProvider = z.infer<typeof visualContextProviderSchema>;
 export type VisualContextSource = z.infer<typeof visualContextSourceSchema>;
@@ -165,6 +213,7 @@ export type VisualContextSelection = z.infer<typeof visualContextSelectionSchema
 export type VisualContextCapability = z.infer<typeof visualContextCapabilitySchema>;
 export type VisualContextRequest = z.infer<typeof visualContextRequestSchema>;
 export type VisualContextResult = z.infer<typeof visualContextResultSchema>;
+export type VisualContextSnapshot = z.infer<typeof visualContextSnapshotSchema>;
 
 export function assertVisualContextResultMatchesRequest(request: VisualContextRequest, result: VisualContextResult): void {
   const fields = ["requestId", "operation", "sourceContextRevision", "routeRevision"] as const;

@@ -21,6 +21,7 @@ import {
   visualContextCapabilitySchema,
   visualContextRequestSchema,
   visualContextResultSchema,
+  visualContextSnapshotSchema,
 } from "../../packages/tool-contracts/src/visual-context.ts";
 import visualContextFixture from "../../packages/tool-contracts/fixtures/visual-context-v1.json" with { type: "json" };
 
@@ -28,7 +29,9 @@ assert.equal(visualContextFixture.version, "sonik.visual-context.v1");
 const visualCapability = visualContextCapabilitySchema.parse(visualContextFixture.capability);
 const visualRequest = visualContextRequestSchema.parse(visualContextFixture.request);
 const visualResult = visualContextResultSchema.parse(visualContextFixture.result);
+const visualSnapshot = visualContextSnapshotSchema.parse(visualContextFixture.snapshot);
 assert.equal(visualCapability.provider, "host");
+assert.equal(visualSnapshot.screenshot?.path, "/vercel/sandbox/workspace/.sonik/screenshots/latest.png");
 assert.doesNotThrow(() => assertVisualContextResultMatchesRequest(visualRequest, visualResult));
 
 for (const invalidRequest of [
@@ -70,6 +73,21 @@ assert.throws(() => hostActionResultSchema.parse({
   policyMode: "allow",
   output: visualContextFixture.result,
 }), /unrecognized key/i, "generic host-action results remain closed to arbitrary visual output");
+assert.throws(() => visualContextSnapshotSchema.parse({ ...visualContextFixture.snapshot, selector: "#private" }), /unrecognized key/i);
+assert.throws(() => visualContextSnapshotSchema.parse({
+  ...visualContextFixture.snapshot,
+  source: { ...visualContextFixture.snapshot.source, route: "/reservations?token=secret" },
+}));
+assert.throws(() => visualContextSnapshotSchema.parse({
+  ...visualContextFixture.snapshot,
+  screenshot: { ...visualContextFixture.snapshot.screenshot, path: "/tmp/foreign.png" },
+}));
+assert.throws(() => visualContextSnapshotSchema.parse({
+  ...visualContextFixture.snapshot,
+  status: "invalidated",
+  invalidatedAt: "2026-07-17T12:02:00.000Z",
+  staleReason: "source-changed",
+}), /clear visual artifacts/);
 
 assert.equal(targetRegistryVersion, "sonik-agent-ui.target-registry.v0");
 assert.equal(agentActionChannelVersion, "sonik.agent_ui.host_action.v1");
