@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -10,15 +10,18 @@ const listen = (handler, port = 0) => new Promise((resolve) => {
   server.listen(port, "127.0.0.1", () => resolve(server));
 });
 const origin = (server) => `http://127.0.0.1:${server.address().port}`;
-const sendHostRequest = (frame, request, hostOrigin) => frame.evaluate(({ request, hostOrigin }) => new Promise((resolve, reject) => {
-  const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${request.operation}.`)), 15_000);
+const sendHostRequest = (frame, request, hostOrigin, timeoutMs = 15_000) => frame.evaluate(({ request, hostOrigin, timeoutMs }) => new Promise((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${request.operation}.`)), timeoutMs);
   addEventListener("message", (event) => {
     if (event.origin !== hostOrigin || event.data?.requestId !== request.requestId) return;
     clearTimeout(timeout);
     resolve(event.data);
   }, { once: true });
   parent.postMessage(request, hostOrigin);
-}), { request, hostOrigin });
+}), { request, hostOrigin, timeoutMs });
+const expectRejected = async (frame, request, hostOrigin) => {
+  await assert.rejects(sendHostRequest(frame, request, hostOrigin, 500), /Timed out waiting/);
+};
 
 const extension = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-extension-"));
 const profile = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-profile-"));
@@ -27,23 +30,24 @@ let workbench;
 let context;
 
 try {
-  await cp(new URL("..", import.meta.url), extension, { recursive: true });
-
-  workbench = await listen((_request, response) => response.end("<!doctype html><title>Workbench fixture</title>"), 5173);
+  workbench = await listen((_request, response) => response.end("<!doctype html><title>Workbench fixture</title>"));
   host = await listen((_request, response) => {
     const hostOrigin = origin(host);
     const workbenchOrigin = origin(workbench);
     response.end(`<!doctype html>
       <style>body{margin:0}.secret{position:fixed;left:40px;top:40px;width:200px;height:40px}.workbench{position:fixed;left:300px;top:40px;width:250px;height:180px}</style>
       <input class="secret" type="password" value="never-capture">
+      <div data-sonik-capture-chrome style="position:fixed;left:600px;top:40px;width:100px;height:40px;background:#00ff00"></div>
       <iframe class="workbench" data-sonik-dev-workbench-origin="${workbenchOrigin}" src="${workbenchOrigin}/?agentUiHostOrigin=${encodeURIComponent(hostOrigin)}"></iframe>`);
   });
+  await cp(new URL("..", import.meta.url), extension, { recursive: true });
+  await writeFile(join(extension, "dist/config.js"), `export const allowedWorkbenchOrigins = new Set([${JSON.stringify(origin(workbench))}]);\n`);
 
   context = await chromium.launchPersistentContext(profile, {
     channel: "chromium",
     headless: false,
-    viewport: { width: 800, height: 600 },
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    viewport: null,
+    args: ["--window-size=800,600", `--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
   let page = context.pages()[0] ?? await context.newPage();
   await page.goto(`${origin(host)}/booking`);
@@ -55,27 +59,42 @@ try {
   const { extensions } = await cdp.send("Extensions.getExtensions");
   const loadedExtension = extensions.find((candidate) => candidate.name === "Sonik Exact Active Tab");
   assert.ok(loadedExtension?.enabled, "Canonical unpacked extension is enabled");
-  const { targetInfos } = await cdp.send("Target.getTargets", { filter: [{ type: "tab", exclude: false }] });
-  const bookingTarget = targetInfos.find((candidate) => candidate.type === "tab" && candidate.url === `${origin(host)}/booking`);
-  assert.ok(bookingTarget, "Booking active-tab target is available");
-  await cdp.send("Extensions.triggerAction", { id: loadedExtension.id, targetId: bookingTarget.targetId });
-  await page.waitForTimeout(500);
-  page = context.pages().find((candidate) => candidate.url() === `${origin(host)}/booking`) ?? page;
-
-  const frame = page.frames().find((candidate) => candidate.url().startsWith(origin(workbench)));
-  assert.ok(frame, "Workbench fixture frame loaded");
-  const request = {
-    messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
-    requestId: crypto.randomUUID(), operation: "pair-extension", origin: origin(workbench), sourceContextRevision: 1, routeRevision: 1,
-    source: { id: "host", label: "Host", surface: "embedded-host", route: "/booking" }, provider: "chrome-active-tab",
+  const serviceWorker = context.serviceWorkers().find((worker) => worker.url().startsWith(`chrome-extension://${loadedExtension.id}/`));
+  assert.ok(serviceWorker, "Canonical extension service worker is running");
+  assert.equal(await serviceWorker.evaluate(() => chrome.runtime.id), loadedExtension.id);
+  const triggerAction = async () => {
+    const { targetInfos } = await cdp.send("Target.getTargets", { filter: [{ type: "tab", exclude: false }] });
+    const target = targetInfos.find((candidate) => candidate.type === "tab" && candidate.url === page.url());
+    assert.ok(target, `Active tab target is available for ${page.url()}`);
+    await cdp.send("Extensions.triggerAction", { id: loadedExtension.id, targetId: target.targetId });
+    await page.waitForTimeout(500);
   };
-  const paired = await sendHostRequest(frame, request, origin(host));
-  assert.equal(paired.status, "completed");
-  const result = await sendHostRequest(frame, { ...request, requestId: crypto.randomUUID(), operation: "capture" }, origin(host));
+  const fixtureFrame = () => {
+    const frame = page.frames().find((candidate) => candidate.url().startsWith(origin(workbench)));
+    assert.ok(frame, "Workbench fixture frame loaded");
+    return frame;
+  };
+  const requestFor = (operation, route = new URL(page.url()).pathname) => ({
+    messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
+    requestId: crypto.randomUUID(), operation, origin: origin(workbench), sourceContextRevision: 1, routeRevision: 1,
+    source: { id: "host", label: "Host", surface: "embedded-host", route }, provider: "chrome-active-tab",
+  });
+  const pair = async () => {
+    await triggerAction();
+    const paired = await sendHostRequest(fixtureFrame(), requestFor("pair-extension"), origin(host));
+    assert.equal(paired.status, "completed");
+  };
+
+  await pair();
+  let frame = fixtureFrame();
+  const captureChrome = page.locator("[data-sonik-capture-chrome]");
+  const captureChromeStyle = await captureChrome.getAttribute("style");
+  const captureRequest = requestFor("capture");
+  const result = await sendHostRequest(frame, captureRequest, origin(host));
 
   assert.equal(result.screenshot.fidelity, "exact-active-tab");
   assert.equal(result.screenshot.captureBasis, "native-active-tab-redacted");
-  assert.deepEqual(result.screenshot.redactionsApplied, ["Sensitive form controls", "Embedded frame pixels"]);
+  assert.deepEqual(result.screenshot.redactionsApplied, ["Sonik capture chrome", "Sensitive form controls", "Embedded frame pixels"]);
   assert.equal(result.screenshot.width, result.screenshot.viewport.width * result.screenshot.viewport.deviceScaleFactor);
   assert.equal(result.screenshot.height, result.screenshot.viewport.height * result.screenshot.viewport.deviceScaleFactor);
 
@@ -89,13 +108,48 @@ try {
     const context = canvas.getContext("2d");
     context.drawImage(image, 0, 0);
     const sample = (x, y) => [...context.getImageData(x * deviceScaleFactor, y * deviceScaleFactor, 1, 1).data.slice(0, 3)];
-    return { sensitive: sample(140, 60), embeddedFrame: sample(425, 130) };
+    return { sensitive: sample(140, 60), embeddedFrame: sample(425, 130), captureChrome: sample(650, 60) };
   }, { pngBase64: result.screenshot.pngBase64, deviceScaleFactor: result.screenshot.viewport.deviceScaleFactor });
   assert.deepEqual(samples.sensitive, [17, 17, 17]);
   assert.deepEqual(samples.embeddedFrame, [17, 17, 17]);
+  assert.deepEqual(samples.captureChrome, [255, 255, 255]);
+  assert.equal(await captureChrome.getAttribute("style"), captureChromeStyle);
   await assert.doesNotReject(page.waitForFunction(() => ![...document.querySelectorAll("div")].some((element) => element.style.zIndex === "2147483647")));
 
-  console.log("dev-workbench extension persistent Chromium active-tab capture: ok");
+  await expectRejected(frame, captureRequest, origin(host));
+  await expectRejected(frame, { ...requestFor("capture"), origin: "https://foreign.invalid" }, origin(host));
+
+  const otherPage = await context.newPage();
+  await otherPage.goto(`${origin(host)}/background`);
+  await otherPage.bringToFront();
+  await expectRejected(frame, requestFor("capture"), origin(host));
+  await otherPage.close();
+  await page.bringToFront();
+  await pair();
+
+  assert.equal((await sendHostRequest(frame, requestFor("unpair-extension"), origin(host))).status, "completed");
+  await expectRejected(frame, requestFor("capture"), origin(host));
+  await pair();
+
+  await page.goto(`${origin(host)}/booking-next`);
+  await page.locator("iframe").waitFor();
+  frame = fixtureFrame();
+  await expectRejected(frame, requestFor("pair-extension"), origin(host));
+  await pair();
+
+  const currentWorker = context.serviceWorkers().find((worker) => worker.url().startsWith(`chrome-extension://${loadedExtension.id}/`));
+  assert.ok(currentWorker);
+  const closed = currentWorker.waitForEvent("close");
+  await currentWorker.evaluate(() => self.close());
+  await closed;
+  const restarted = context.waitForEvent("serviceworker");
+  await expectRejected(frame, requestFor("capture"), origin(host));
+  const restartedWorker = await restarted;
+  assert.equal(await restartedWorker.evaluate(() => chrome.runtime.id), loadedExtension.id);
+  await pair();
+  assert.equal((await sendHostRequest(frame, requestFor("get-capabilities"), origin(host))).status, "completed");
+
+  console.log("dev-workbench extension persistent Chromium security lifecycle: ok");
 } finally {
   await context?.close().catch(() => undefined);
   await Promise.all([host, workbench].filter(Boolean).map((server) => new Promise((resolve) => server.close(resolve))));
