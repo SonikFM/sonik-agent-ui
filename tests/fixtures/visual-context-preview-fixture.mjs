@@ -32,6 +32,9 @@ export async function startVisualContextPreviewFixture() {
           </section>
           <section data-sonik-target="reservation.card" data-sonik-target-instance="secondary" aria-label="Secondary reservation"></section>
           <div data-sonik-target="reservation.unique" aria-label="Unique reservation">Safe visible content</div>
+          <div data-sonik-target="reservation.duplicate" data-sonik-target-instance="same">Duplicate one</div>
+          <div data-sonik-target="reservation.duplicate" data-sonik-target-instance="same">Duplicate two</div>
+          <p>${"bounded safe text ".repeat(2_500)}</p>
         </main>
         <script>window.visibleIframeClientState = "not-present-in-fresh-navigation";</script>
       </body></html>`);

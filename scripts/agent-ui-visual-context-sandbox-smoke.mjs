@@ -62,6 +62,8 @@ try {
   assert.equal(stable.screenshot.provider, "playwright");
   assert.equal(stable.screenshot.fidelity, "controlled-preview");
   assert.equal(stable.screenshot.captureBasis, "fresh-playwright-navigation");
+  assert.ok(stable.screenshot.redactionsApplied.includes("cross-origin frames"));
+  assert.ok(stable.screenshot.redactionsApplied.includes("sensitive form fields"));
   assert.equal(stable.screenshot.temporaryPath, `${outputRoot}/${stable.requestId}.png`);
   assert.match(stable.ariaSnapshot, /Primary reservation/);
   assert.doesNotMatch(stable.ariaSnapshot, /never-emit|secret_password|access_token/i);
@@ -87,10 +89,21 @@ try {
   assert.deepEqual(ephemeral.screenshot.viewport, { width: 960, height: 640, deviceScaleFactor: 1 });
   assert.match(ephemeral.ariaSnapshot, /fresh-navigation-[3-9]/);
   assert.doesNotMatch(ephemeral.ariaSnapshot, /fresh-navigation-1/, "capture comes from a later fresh navigation, not the visible iframe");
+  assert.ok(ephemeral.ariaSnapshot.length <= 32_000, "AI ARIA output is independently capped");
 
   const ambiguous = await runProvider(request("ambiguous", { targetId: "reservation.card" }));
   assert.equal(ambiguous.status, "failed");
   assert.equal(await readFile(`${outputRoot}/${ambiguous.requestId}.png`).catch(() => null), null);
+  const missingInstance = await runProvider(request("missing-instance", {
+    targetId: "reservation.card",
+    targetInstanceId: "missing",
+  }));
+  assert.equal(missingInstance.status, "failed");
+  const duplicateInstance = await runProvider(request("duplicate-instance", {
+    targetId: "reservation.duplicate",
+    targetInstanceId: "same",
+  }));
+  assert.equal(duplicateInstance.status, "failed");
 
   const publicEvidence = JSON.stringify({ stable, ephemeral, manifest });
   assert.doesNotMatch(publicEvidence, /never-emit|current[- ]iframe|pngBase64|cookie|bearer/i);
