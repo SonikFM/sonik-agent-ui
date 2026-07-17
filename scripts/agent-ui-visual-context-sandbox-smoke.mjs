@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   VISUAL_CONTEXT_PATH,
+  isStaleVisualContextResult,
   validateVisualContextPng,
   visualContextSnapshotFromResult,
 } from "../apps/dev-workbench/src/lib/server/visual-context-coordinator.ts";
@@ -67,6 +68,8 @@ try {
 
   const png = await readFile(stable.screenshot.temporaryPath);
   validateVisualContextPng(png, stable);
+  assert.throws(() => validateVisualContextPng(Buffer.from("not-png"), stable), /byte length|PNG/);
+  assert.throws(() => validateVisualContextPng(Buffer.alloc(10 * 1024 * 1024 + 1), stable), /byte length/);
   assert.equal(createHash("sha256").update(png).digest("hex"), stable.screenshot.sha256);
   const manifest = visualContextSnapshotFromResult(stable);
   assert.equal(VISUAL_CONTEXT_PATH, "/vercel/sandbox/workspace/.sonik/visual-context.json");
@@ -75,6 +78,8 @@ try {
   assert.equal(manifest.screenshot.path, "/vercel/sandbox/workspace/.sonik/screenshots/latest.png");
   assert.equal(manifest.screenshot.sha256, stable.screenshot.sha256);
   assert.equal(JSON.stringify(manifest).includes(stable.screenshot.temporaryPath), false);
+  assert.equal(isStaleVisualContextResult(manifest, { ...stable, requestId: `${requestId}-race` }), true);
+  assert.equal(isStaleVisualContextResult(manifest, { ...stable, sourceContextRevision: 0 }), true);
 
   const ephemeral = await runProvider(request("ephemeral", { targetId: "ephemeral:viewport" }));
   assert.equal(ephemeral.status, "completed");
