@@ -1,9 +1,10 @@
 // @ts-nocheck
 import { captureVisibleTabWithoutSonikChrome } from "./capture-visible-tab.js";
+import { createPairingLifecycle } from "./pairing-lifecycle.js";
 import { TRANSPORT_VERSION, createResult, isExactWorkbenchRequest, pngMetadata } from "./protocol.js";
 
 const pairings = new Map();
-const pairingLifetimeMs = 5 * 60_000;
+const lifecycle = createPairingLifecycle();
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !Number.isInteger(tab.windowId) || !tab.active || !/^https?:/.test(tab.url ?? "")) return;
@@ -18,24 +19,20 @@ chrome.action.onClicked.addListener(async (tab) => {
     windowId: tab.windowId,
   });
   if (!response?.allowedOrigins?.length) return;
-  pairings.set(tab.id, {
-    windowId: tab.windowId,
-    documentId: injection[0]?.documentId,
-    nonce,
-    expiresAt: Date.now() + pairingLifetimeMs,
-    requestIds: new Set(),
-    allowedOrigins: new Set(response.allowedOrigins),
-  });
+  const documentId = injection[0]?.documentId;
+  if (!documentId) return;
+  pairings.set(tab.id, { windowId: tab.windowId, documentId, nonce, allowedOrigins: new Set(response.allowedOrigins) });
+  lifecycle.establish({ tabId: tab.id, windowId: tab.windowId, documentId, nonce });
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === "loading" || changeInfo.url) pairings.delete(tabId);
+  if (changeInfo.status === "loading" || changeInfo.url) { pairings.delete(tabId); lifecycle.revoke(tabId); }
 });
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  for (const pairedTabId of pairings.keys()) if (pairedTabId !== tabId) pairings.delete(pairedTabId);
+  for (const pairedTabId of pairings.keys()) if (pairedTabId !== tabId) { pairings.delete(pairedTabId); lifecycle.revoke(pairedTabId); }
 });
 chrome.windows.onFocusChanged.addListener((windowId) => {
-  for (const [tabId, pairing] of pairings) if (pairing.windowId !== windowId) pairings.delete(tabId);
+  for (const [tabId, pairing] of pairings) if (pairing.windowId !== windowId) { pairings.delete(tabId); lifecycle.revoke(tabId); }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -52,24 +49,26 @@ async function handleRequest(message, sender) {
     throw new Error("This tab is not paired with Sonik Dev Workbench.");
   }
   const activeTabs = await chrome.tabs.query({ active: true, windowId: pairing.windowId });
-  if (sender.tab?.windowId !== pairing.windowId
-    || activeTabs[0]?.id !== tabId
-    || message.nonce !== pairing.nonce
-    || sender.documentId !== pairing.documentId
-    || Date.now() >= pairing.expiresAt) {
+  const identity = { tabId, windowId: pairing.windowId, documentId: sender.documentId, nonce: message.nonce };
+  if (sender.tab?.windowId !== pairing.windowId || activeTabs[0]?.id !== tabId) {
     pairings.delete(tabId);
+    lifecycle.revoke(tabId);
     throw new Error("The active-tab pairing is no longer valid.");
   }
   const request = message.request;
   if (!isExactWorkbenchRequest(request, pairing.allowedOrigins, message.route)) {
     throw new Error("The Workbench origin, route, revision, or request is invalid.");
   }
-  if (pairing.requestIds.has(request.requestId)) throw new Error("The Workbench request id was already used.");
-  pairing.requestIds.add(request.requestId);
+  const lease = lifecycle.authorize({
+    ...identity, operation: request.operation, requestId: request.requestId, origin: request.origin, route: message.route,
+    sourceContextRevision: request.sourceContextRevision, routeRevision: request.routeRevision,
+  });
+  if (!lease) throw new Error("The pairing expired, changed context, or replayed a request.");
 
   if (request.operation === "pair-extension") return createResult(request);
   if (request.operation === "unpair-extension") {
     pairings.delete(tabId);
+    lifecycle.revoke(tabId);
     return createResult(request);
   }
   if (request.operation === "get-capabilities") {
@@ -87,7 +86,7 @@ async function handleRequest(message, sender) {
     restoreCaptureChrome: () => chrome.tabs.sendMessage(tabId, { type: "clear-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce }),
   });
   const stillActive = await chrome.tabs.query({ active: true, windowId: pairing.windowId });
-  if (stillActive[0]?.id !== tabId) {
+  if (stillActive[0]?.id !== tabId || !lifecycle.isCurrent(lease, identity)) {
     pairings.delete(tabId);
     throw new Error("The paired tab stopped being active during capture.");
   }
