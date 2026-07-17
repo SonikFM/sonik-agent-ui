@@ -195,7 +195,9 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   const onNavigation = () => cancelPending("Navigation cancelled the element picker.");
   if (options.listen !== false) ownerWindow.addEventListener("message", onMessage);
   ownerWindow.addEventListener("pagehide", onNavigation);
+  ownerWindow.addEventListener("beforeunload", onNavigation);
   ownerWindow.addEventListener("popstate", onNavigation);
+  ownerWindow.addEventListener("hashchange", onNavigation);
 
   function onPointerMove(event: Event): void {
     const element = pickableElement(event.target);
@@ -222,9 +224,13 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
     if (!element || (textSelection && !textSelection.isCollapsed)) return;
     event.preventDefault();
     event.stopPropagation();
-    const selection = selectionForElement(element, pending.request);
-    if (!selection) return;
-    pending.settle("completed", selection);
+    try {
+      const selection = selectionForElement(element, pending.request);
+      if (!selection) return;
+      pending.settle("completed", selection);
+    } catch {
+      pending.settle("failed", undefined, "Element selection failed.");
+    }
   }
 
   function onKeyDown(event: Event): void {
@@ -280,7 +286,9 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
       privateTargets.clear();
       if (options.listen !== false) ownerWindow.removeEventListener("message", onMessage);
       ownerWindow.removeEventListener("pagehide", onNavigation);
+      ownerWindow.removeEventListener("beforeunload", onNavigation);
       ownerWindow.removeEventListener("popstate", onNavigation);
+      ownerWindow.removeEventListener("hashchange", onNavigation);
     },
     isActive: () => Boolean(pending),
     resolvePrivateTarget: (targetId) => privateTargets.get(targetId),

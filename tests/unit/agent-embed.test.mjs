@@ -765,6 +765,11 @@ assert.throws(
   /version 1/,
   "the picker must fail closed when the copied helper version is unavailable or unsupported",
 );
+assert.throws(
+  () => mountVisualContextPicker({ origin: "https://agent.example", requestOrigin: "https://host.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {} }),
+  /version 1/,
+  "the picker must fail closed when the copied helper is missing",
+);
 
 {
   const harness = createPickerHarness();
@@ -824,6 +829,18 @@ assert.throws(
   assert.equal(harness.source.messages.at(-1).message.requestId, "destroy");
   assert.equal(harness.controller.isActive(), false, "destroy must settle and clear pending picker state");
   assert.equal(harness.windowListeners.size, 0, "destroy must remove navigation lifecycle listeners");
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("exception")));
+  const target = new PickerElement("DIV");
+  target.getBoundingClientRect = () => { throw new Error("private DOM failure"); };
+  harness.document.dispatch("click", target);
+  assert.equal(harness.source.messages.at(-1).message.status, "failed", "picker exceptions must settle as a bounded failure");
+  assert.equal(harness.source.messages.at(-1).message.disabledReason, "Element selection failed.");
+  assert.equal(harness.documentListeners.size, 0, "picker exceptions must still clean up listeners");
+  harness.controller.destroy();
 }
 
 console.log("agent-embed tests passed");
