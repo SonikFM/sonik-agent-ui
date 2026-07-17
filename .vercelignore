@@ -17,18 +17,15 @@ scripts
 vendor
 manifests
 
-apps/*
-!apps/dev-workbench/
-!apps/dev-workbench/**
+apps/standalone-sveltekit
 
-packages/*
-!packages/agent-embed/
-!packages/agent-embed/**
-!packages/agent-observability/
-!packages/agent-observability/**
-!packages/platform-adapters/
-!packages/platform-adapters/**
-!packages/tool-contracts/
-!packages/tool-contracts/**
-!packages/typescript-config/
-!packages/typescript-config/**
+packages/artifact-model
+packages/chat-surface
+packages/command-generator
+packages/core
+packages/devtools
+packages/devtools-svelte
+packages/json-ui-runtime
+packages/svelte
+packages/workspace-core
+packages/workspace-session
