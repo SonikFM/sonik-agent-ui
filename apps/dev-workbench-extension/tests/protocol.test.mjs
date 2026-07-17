@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createResult, isExactWorkbenchRequest, pngMetadata } from "../../apps/active-tab-extension/protocol.js";
+import { createResult, isExactWorkbenchRequest, pngMetadata } from "../src/protocol.ts";
 
-const manifest = JSON.parse(await readFile("apps/active-tab-extension/manifest.json", "utf8"));
+const manifest = JSON.parse(await readFile("apps/dev-workbench-extension/manifest.json", "utf8"));
 assert.deepEqual(manifest.permissions, ["activeTab", "scripting"]);
 assert.equal("host_permissions" in manifest, false);
 
