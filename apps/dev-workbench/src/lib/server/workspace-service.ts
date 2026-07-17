@@ -32,6 +32,24 @@ import {
   waitForVercelPreview,
 } from "./vercel-sandbox";
 import type { DevWorkbenchServerConfig } from "./workbench-config";
+import {
+  VISUAL_CONTEXT_LEASE_PATH,
+  VISUAL_CONTEXT_PATH,
+  VISUAL_CONTEXT_STAGE_ROOT,
+  decodeCanonicalBase64,
+  invalidatedVisualContextSnapshot,
+  isStaleVisualContextResult,
+  requestTemporaryPath,
+  validateVisualContextPng,
+  validateVisualContextSnapshotPng,
+  validateVisualContextSubmission,
+  visualContextInvalidationSchema,
+  visualContextSnapshotFromResult,
+  visualContextSubmissionSchema,
+  type VisualContextInvalidation,
+  type VisualContextSubmission,
+} from "./visual-context-coordinator";
+import { visualContextSnapshotSchema, type VisualContextSnapshot } from "@sonik-agent-ui/tool-contracts/visual-context";
 
 export type WorkspaceServiceResult<T> =
   | { ok: true; value: T }

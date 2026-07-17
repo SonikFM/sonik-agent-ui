@@ -10,6 +10,7 @@ import {
   type RepositoryManifest,
   type TmuxWindow,
 } from "../contracts/workbench";
+import { VISUAL_CONTEXT_PATH, VISUAL_CONTEXT_STAGE_ROOT } from "./visual-context-coordinator";
 
 export const sandboxCommandSchema = z.object({
   id: z.string().min(1).max(128).regex(/^[a-z0-9-]+$/),
@@ -57,6 +58,7 @@ export function createTmuxWindows(
     `SONIK_HOST_CONTEXT_PATH=${DEV_WORKBENCH_MIRROR_PATHS.hostContext}`,
     `SONIK_HOST_AUTHORITY_PATH=${DEV_WORKBENCH_MIRROR_PATHS.hostAuthority}`,
     `SONIK_OPENAPI_PATH=${DEV_WORKBENCH_MIRROR_PATHS.openApi}`,
+    `SONIK_VISUAL_CONTEXT_PATH=${VISUAL_CONTEXT_PATH}`,
     `SONIK_PIPE_B_WORKER=${pipeBWorker}`,
   ];
   const devEnvironment = [
@@ -103,7 +105,7 @@ export function createDevWorkbenchBootstrapPlan(input: {
     {
       id: "prepare-workspace",
       cmd: "mkdir",
-      args: ["-p", DEV_WORKBENCH_ROOT, DEV_WORKBENCH_STATE_ROOT, `${DEV_WORKBENCH_STATE_ROOT}/screenshots`],
+      args: ["-p", DEV_WORKBENCH_ROOT, DEV_WORKBENCH_STATE_ROOT, `${DEV_WORKBENCH_STATE_ROOT}/screenshots`, `${DEV_WORKBENCH_STATE_ROOT}/screenshots/requests`, VISUAL_CONTEXT_STAGE_ROOT],
     },
     {
       id: "clone-repository",
