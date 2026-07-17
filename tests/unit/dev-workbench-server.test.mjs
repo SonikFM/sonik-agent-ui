@@ -26,6 +26,7 @@ import { authorizeDevWorkbenchRequest } from "../../apps/dev-workbench/src/lib/s
 import { devWorkbenchSessionCookieOptions } from "../../apps/dev-workbench/src/lib/server/session-cookie.ts";
 import {
   createEmbeddedPreviewUrl,
+  createVisualContextSubmission,
   defaultVisualSourceId,
   discoverVisualSources,
   isAgentHostActionRequestMessage,
@@ -59,6 +60,11 @@ assert.deepEqual(visualSources, [
 ]);
 assert.equal(defaultVisualSourceId(visualSources), "host", "Connected Host is the default source");
 assert.equal(defaultVisualSourceId(visualSources.slice(1)), "host");
+assert.deepEqual(
+  Object.keys(createVisualContextSubmission("workspace-1", { requestId: "request-1" }, { requestId: "request-1" })),
+  ["workspaceSessionId", "request", "result"],
+  "visual coordinator submissions preserve the exact pending request beside its result",
+);
 assert.doesNotThrow(() => workbenchVisualContextStateSchema.parse({
   sources: visualSources,
   selectedSourceId: "preview",

@@ -126,6 +126,14 @@ export function isVisualContextResultMessage(value: unknown): boolean {
     && record.version === "sonik.visual-context.v1";
 }
 
+export function createVisualContextSubmission(
+  workspaceSessionId: string,
+  request: Record<string, unknown>,
+  result: Record<string, unknown>,
+) {
+  return { workspaceSessionId, request, result } as const;
+}
+
 export function isOriginAllowed(origin: string, allowlist?: string): boolean {
   const parsed = parseOrigin(origin);
   if (!parsed) return false;

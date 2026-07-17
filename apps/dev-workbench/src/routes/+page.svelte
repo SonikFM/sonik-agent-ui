@@ -25,6 +25,7 @@
   import {
     createAgentPageContextRequest,
     createEmbeddedPreviewUrl,
+    createVisualContextSubmission,
     defaultVisualSourceId,
     discoverVisualSources,
     isAgentHostActionRequestMessage,
@@ -58,6 +59,7 @@
   let visualStatusMessage = $state("Start a workspace to discover visual sources.");
   let visualStaleReason = $state<"source-changed" | "route-changed" | "navigation" | "cancelled" | "provider-lost" | null>(null);
   let visualActionFocus: HTMLElement | null = null;
+  let pendingVisualRequest: Record<string, unknown> | null = null;
 
   const terminalOnly = $derived(page.url.searchParams.get("surface") === "terminal");
   const view = $derived<DevWorkbenchViewProps>(createView());
@@ -224,6 +226,7 @@
   }
 
   function invalidateVisualContext(reason: NonNullable<typeof visualStaleReason>, message: string): void {
+    pendingVisualRequest = null;
     visualStatus = "invalidated";
     visualStaleReason = reason;
     visualStatusMessage = message;
@@ -338,6 +341,15 @@
 
   function finishVisualOperation(value: unknown): void {
     const record = value as Record<string, unknown>;
+    if (!pendingVisualRequest || record.requestId !== pendingVisualRequest.requestId
+      || record.sourceContextRevision !== sourceContextRevision
+      || record.routeRevision !== routeRevision
+      || (record.source as { id?: unknown } | undefined)?.id !== view.visualContext.selectedSourceId) {
+      invalidateVisualContext("navigation", "A stale visual result was discarded after the source changed.");
+      return;
+    }
+    const request = pendingVisualRequest;
+    pendingVisualRequest = null;
     const completed = record.status === "completed";
     visualStatus = completed ? "idle" : record.status === "cancelled" ? "invalidated" : "error";
     visualStaleReason = record.status === "cancelled" ? "cancelled" : null;
@@ -345,7 +357,7 @@
     announcement = visualStatusMessage;
     visualActionFocus?.focus();
     visualActionFocus = null;
-    if (workspace) void submitVisualResult(record);
+    if (workspace) void submitVisualResult(request, record);
   }
 
   function snapshotPageContext() {
@@ -400,11 +412,12 @@
     visualStatus = "picking";
     visualStaleReason = null;
     visualStatusMessage = `Choose an element in ${source.label}; press Escape to cancel.`;
-    target.postMessage({
+    pendingVisualRequest = {
       messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
       requestId: crypto.randomUUID(), operation: "pick", origin: workbenchOrigin,
       sourceContextRevision, routeRevision, source, provider: "host",
-    }, origin);
+    };
+    target.postMessage(pendingVisualRequest, origin);
     return accepted(visualStatusMessage);
   }
 
@@ -423,20 +436,21 @@
     if (!embeddedHostOrigin || window.parent === window) return unavailableAction("The embedded Host cannot receive extension pairing requests.");
     const source = discoveredVisualSources().find((candidate) => candidate.id === "host");
     if (!source) return unavailableAction("Host source is not connected.");
-    window.parent.postMessage({
+    pendingVisualRequest = {
       messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
       requestId: crypto.randomUUID(), operation: "pair-extension", origin: workbenchOrigin,
       sourceContextRevision, routeRevision, source, provider: "chrome-active-tab",
-    }, embeddedHostOrigin);
+    };
+    window.parent.postMessage(pendingVisualRequest, embeddedHostOrigin);
     return accepted("Active-tab extension pairing requested.");
   }
 
-  async function submitVisualResult(result: Record<string, unknown>): Promise<void> {
+  async function submitVisualResult(request: Record<string, unknown>, result: Record<string, unknown>): Promise<void> {
     if (!workspace) return;
     try {
       const response = await fetch("/api/workspaces/visual-context", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspaceSessionId: workspace.sessionId, result }),
+        body: JSON.stringify(createVisualContextSubmission(workspace.sessionId, request, result)),
       });
       if (!response.ok) throw new Error(await publicError(response));
     } catch (error) {
