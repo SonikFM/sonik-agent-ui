@@ -22,6 +22,7 @@
     "smoke:agent-ui:run-reattach": "node scripts/agent-ui-run-reattach-smoke.mjs",
     "gate:agent-ui": "node scripts/agent-ui-release-gate.mjs",
     "smoke:agent-ui:embed": "node scripts/agent-ui-embed-smoke.mjs",
+    "smoke:agent-ui:visual-context:sandbox": "node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs scripts/agent-ui-visual-context-sandbox-smoke.mjs",
     "smoke:agent-ui:embed:real-model": "AGENT_UI_EMBED_SMOKE_REAL_MODEL=true node scripts/agent-ui-embed-smoke.mjs",
     "db:migrate": "node scripts/run-postgres-migrations.mjs",
     "db:migrate:dry-run": "node scripts/run-postgres-migrations.mjs --dry-run",
