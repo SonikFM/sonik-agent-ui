@@ -4,6 +4,16 @@ export const VISUAL_VERSION = "sonik.visual-context.v1";
 
 const operations = new Set(["get-capabilities", "capture", "pair-extension", "unpair-extension"]);
 const maxPngBytes = 10 * 1024 * 1024;
+const redactionKinds = new Set(["Sensitive form controls", "Embedded frame pixels"]);
+
+export function isSafeCapturePreparation(value) {
+  const viewport = value?.viewport;
+  return Array.isArray(value?.redactionsApplied)
+    && value.redactionsApplied.every((item) => redactionKinds.has(item))
+    && Number.isInteger(viewport?.width) && viewport.width > 0 && viewport.width <= 16_384
+    && Number.isInteger(viewport?.height) && viewport.height > 0 && viewport.height <= 16_384
+    && Number.isFinite(viewport?.deviceScaleFactor) && viewport.deviceScaleFactor > 0 && viewport.deviceScaleFactor <= 8;
+}
 
 export function isExactWorkbenchRequest(request, allowedOrigins, route) {
   return Boolean(request)

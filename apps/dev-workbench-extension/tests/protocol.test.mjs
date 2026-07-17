@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createResult, isExactWorkbenchRequest, pngMetadata } from "../src/protocol.ts";
+import { createResult, isExactWorkbenchRequest, isSafeCapturePreparation, pngMetadata } from "../src/protocol.ts";
 import { allowedWorkbenchOrigins } from "../src/config.ts";
 
 const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
@@ -20,6 +20,10 @@ assert.equal(isExactWorkbenchRequest({ ...request, requestId: "" }, new Set([req
 assert.equal(isExactWorkbenchRequest(request, new Set(["https://other.example.com"]), "/bookings"), false);
 assert.equal(isExactWorkbenchRequest(request, new Set([request.origin]), "/other"), false);
 assert.equal(createResult(request).messageSource, "sonik-agent-host");
+const preparation = { viewport: { width: 1280, height: 720, deviceScaleFactor: 2 }, redactionsApplied: ["Sensitive form controls", "Embedded frame pixels"] };
+assert.equal(isSafeCapturePreparation(preparation), true);
+assert.equal(isSafeCapturePreparation({ ...preparation, redactionsApplied: ["No sensitive fields detected"] }), false);
+assert.equal(isSafeCapturePreparation({ ...preparation, viewport: { ...preparation.viewport, width: 0 } }), false);
 
 const png = Buffer.alloc(24);
 Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
