@@ -107,6 +107,7 @@ assert.equal(classifyVisualContextResult({
 }), "invalidate", "the active result must exactly match the current full source");
 const workbenchPageSource = readFileSync("apps/dev-workbench/src/routes/+page.svelte", "utf8");
 assert.match(workbenchPageSource, /if \(source\?\.id !== "host"[^]*return unavailableAction/, "Preview is rejected before the Host picker postMessage seam");
+assert.equal(workbenchPageSource.match(/isVisualContextResultMessage\(event\.data\)/g)?.length, 1, "only the exact embedded Host window may return picker results");
 assert.deepEqual(
   Object.keys(createVisualContextSubmission("workspace-1", pendingVisualRequest, validVisualResult)),
   ["workspaceSessionId", "request", "result"],

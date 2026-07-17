@@ -340,7 +340,6 @@
     if (isAgentHostActionRequestMessage(event.data) && embeddedHostOrigin) {
       window.parent.postMessage(event.data, embeddedHostOrigin);
     }
-    if (isVisualContextResultMessage(event.data)) finishVisualOperation(event.data);
   }
 
   function finishVisualOperation(result: VisualContextResult): void {
