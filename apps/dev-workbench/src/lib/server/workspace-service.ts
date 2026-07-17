@@ -7,11 +7,11 @@ import {
   DEV_WORKBENCH_SCHEMA_VERSION,
   devWorkbenchPersistenceRecordSchema,
   devWorkbenchSessionDescriptorSchema,
-  pageContextMirrorSchema,
+  workspaceContextSyncSchema,
   sanitizedWorkbenchErrorSchema,
   type DevWorkbenchPersistenceRecord,
   type DevWorkbenchSessionDescriptor,
-  type PageContextMirror,
+  type WorkspaceContextSync,
   type PreviewConnectionDescriptor,
   type SanitizedWorkbenchError,
   type TerminalConnectionDescriptor,
@@ -42,7 +42,12 @@ export async function provisionWorkspace(
   signal?: AbortSignal,
 ): Promise<WorkspaceServiceResult<DevWorkbenchSessionDescriptor>> {
   const sessionId = randomUUID();
-  const created = await createVercelDevWorkbenchSandbox({ sessionId, timeoutMs: config.timeoutMs, signal });
+  const created = await createVercelDevWorkbenchSandbox({
+    sessionId,
+    timeoutMs: config.timeoutMs,
+    env: sandboxEnvironment(config),
+    signal,
+  });
   if (!created.ok) return created;
   const sandbox = created.value;
   const createdAt = new Date().toISOString();
@@ -53,6 +58,8 @@ export async function provisionWorkspace(
       repository: config.repository,
       previewHost: sandboxPreviewHost(sandbox),
       agentApiOrigin: config.agentApiOrigin,
+      pipeBWorker: config.pipeBWorker,
+      pipeBLogsEnabled: Boolean(config.cloudflareApiToken),
     });
     const bootstrapped = await runVercelBootstrapPlan({ sandbox, plan, signal });
     if (!bootstrapped.ok) {
@@ -79,6 +86,10 @@ export async function provisionWorkspace(
       { path: DEV_WORKBENCH_MIRROR_PATHS.workspace, content: JSON.stringify(record, null, 2) },
       { path: DEV_WORKBENCH_MIRROR_PATHS.sitemap, content: JSON.stringify(sitemap, null, 2) },
       { path: DEV_WORKBENCH_MIRROR_PATHS.pageContext, content: JSON.stringify({ authority: "display-only" }, null, 2) },
+      { path: DEV_WORKBENCH_MIRROR_PATHS.hostContext, content: JSON.stringify({ status: "awaiting-host-context" }, null, 2) },
+      { path: DEV_WORKBENCH_MIRROR_PATHS.hostAuthority, content: JSON.stringify({ status: "awaiting-host-authority" }, null, 2) },
+      { path: DEV_WORKBENCH_MIRROR_PATHS.openApi, content: JSON.stringify({ status: "awaiting-host-openapi" }, null, 2) },
+      { path: DEV_WORKBENCH_MIRROR_PATHS.guide, content: createSandboxContextGuide(config.pipeBWorker, Boolean(config.cloudflareApiToken)) },
       { path: DEV_WORKBENCH_MIRROR_PATHS.consoleEvents, content: "" },
       { path: DEV_WORKBENCH_MIRROR_PATHS.networkEvents, content: "" },
     ], signal ? { signal } : undefined);
@@ -90,7 +101,7 @@ export async function provisionWorkspace(
     }
     return {
       ok: true,
-      value: descriptorFromRecord(record, sandbox, connections.value, createdAt),
+      value: descriptorFromRecord(record, sandbox, connections.value, createdAt, config),
     };
   } catch {
     await cleanupSandbox(sandbox);
@@ -120,7 +131,7 @@ export async function reconnectWorkspace(
     if (!connections.ok) return connections;
     return {
       ok: true,
-      value: descriptorFromRecord(record, resumed.value, connections.value, new Date().toISOString()),
+      value: descriptorFromRecord(record, resumed.value, connections.value, new Date().toISOString(), config),
     };
   } catch {
     return { ok: false, error: workspaceError("sandbox_resume_failed", "read-workspace", false) };
@@ -133,7 +144,7 @@ async function rehydrateRuntime(
   config?: DevWorkbenchServerConfig,
   signal?: AbortSignal,
 ): Promise<WorkspaceServiceResult<{ running: true }>> {
-  const expectedWindows = new Set(["codex", "dev", "shell"]);
+  const expectedWindows = new Set(["codex", "dev", "shell", "logs"]);
   let hasExpectedWindows = false;
   try {
     const existing = await sandbox.runCommand({
@@ -173,6 +184,8 @@ async function rehydrateRuntime(
         repository: record.repository,
         previewHost: sandboxPreviewHost(sandbox),
         agentApiOrigin: config?.agentApiOrigin,
+        pipeBWorker: config?.pipeBWorker,
+        pipeBLogsEnabled: Boolean(config?.cloudflareApiToken),
       });
       const refreshed = await runVercelBootstrapPlan({ sandbox, plan: refreshPlan, signal });
       if (!refreshed.ok) return refreshed;
@@ -194,6 +207,8 @@ async function rehydrateRuntime(
     repository: record.repository,
     previewHost: sandboxPreviewHost(sandbox),
     agentApiOrigin: config?.agentApiOrigin,
+    pipeBWorker: config?.pipeBWorker,
+    pipeBLogsEnabled: Boolean(config?.cloudflareApiToken),
   });
   const restarted = await runVercelBootstrapPlan({ sandbox, plan: runtimePlan, signal });
   if (!restarted.ok) return restarted;
@@ -226,10 +241,11 @@ export async function stopWorkspace(
 
 export async function writeWorkspacePageContext(
   sessionId: string,
-  pageContext: PageContextMirror,
+  context: WorkspaceContextSync,
+  openApiDocument: unknown | null,
   signal?: AbortSignal,
-): Promise<WorkspaceServiceResult<{ written: true }>> {
-  const parsed = pageContextMirrorSchema.safeParse(pageContext);
+): Promise<WorkspaceServiceResult<{ written: true; openApiWritten: boolean }>> {
+  const parsed = workspaceContextSyncSchema.safeParse(context);
   if (!parsed.success) {
     return { ok: false, error: workspaceError("unknown", "page-context-validate", false) };
   }
@@ -240,10 +256,29 @@ export async function writeWorkspacePageContext(
     if (record.sessionId !== sessionId) {
       return { ok: false, error: workspaceError("sandbox_resume_failed", "session-mismatch", false) };
     }
+    const authority = parsed.data.host?.authority ?? null;
     await resumed.value.writeFiles([
-      { path: DEV_WORKBENCH_MIRROR_PATHS.pageContext, content: JSON.stringify(parsed.data, null, 2) },
+      { path: DEV_WORKBENCH_MIRROR_PATHS.pageContext, content: JSON.stringify(parsed.data.pageContext, null, 2) },
+      {
+        path: DEV_WORKBENCH_MIRROR_PATHS.hostContext,
+        content: JSON.stringify(parsed.data.host
+          ? { origin: parsed.data.host.origin, pageContext: parsed.data.host.pageContext }
+          : { status: "host-context-unavailable" }, null, 2),
+      },
+      {
+        path: DEV_WORKBENCH_MIRROR_PATHS.hostAuthority,
+        content: JSON.stringify(authority ?? { status: "host-authority-unavailable" }, null, 2),
+      },
+      ...(openApiDocument === null
+        ? []
+        : [{ path: DEV_WORKBENCH_MIRROR_PATHS.openApi, content: JSON.stringify(openApiDocument, null, 2) }]),
     ], signal ? { signal } : undefined);
-    return { ok: true, value: { written: true } };
+    await resumed.value.runCommand({
+      cmd: "chmod",
+      args: ["600", DEV_WORKBENCH_MIRROR_PATHS.hostAuthority],
+      ...(signal ? { signal } : {}),
+    });
+    return { ok: true, value: { written: true, openApiWritten: openApiDocument !== null } };
   } catch {
     return { ok: false, error: workspaceError("unknown", "page-context-write", true) };
   }
@@ -279,8 +314,15 @@ function descriptorFromRecord(
   sandbox: Sandbox,
   connections: { preview: PreviewConnectionDescriptor; terminal: TerminalConnectionDescriptor },
   updatedAt: string,
+  config?: DevWorkbenchServerConfig,
 ): DevWorkbenchSessionDescriptor {
-  const plan = createDevWorkbenchBootstrapPlan({ sessionId: record.sessionId, repository: record.repository });
+  const plan = createDevWorkbenchBootstrapPlan({
+    sessionId: record.sessionId,
+    repository: record.repository,
+    agentApiOrigin: config?.agentApiOrigin,
+    pipeBWorker: config?.pipeBWorker,
+    pipeBLogsEnabled: Boolean(config?.cloudflareApiToken),
+  });
   return devWorkbenchSessionDescriptorSchema.parse({
     schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
     sessionId: record.sessionId,
@@ -299,6 +341,30 @@ function descriptorFromRecord(
     updatedAt,
     error: null,
   });
+}
+
+function sandboxEnvironment(config: DevWorkbenchServerConfig): Record<string, string> {
+  return {
+    ...(config.cloudflareApiToken ? { CLOUDFLARE_API_TOKEN: config.cloudflareApiToken } : {}),
+    ...(config.cloudflareAccountId ? { CLOUDFLARE_ACCOUNT_ID: config.cloudflareAccountId } : {}),
+  };
+}
+
+function createSandboxContextGuide(pipeBWorker: string, pipeBEnabled: boolean): string {
+  return `# Sonik Agent UI Dev Context
+
+This directory is host-written runtime context for the isolated Agent UI checkout.
+
+- \`page-context.json\`: redacted Workbench state.
+- \`host-context.json\`: booking-host origin plus redacted page context.
+- \`host-authority.json\`: short-lived opaque host authorization. Treat it as a credential.
+- \`openapi.json\`: the booking host OpenAPI document fetched with that authority.
+- \`sitemap.json\`: tracked source and route map for the checkout.
+
+The primary Codex window receives \`SONIK_*_PATH\` environment variables for these files.
+Pipe B uses tmux window \`logs\` (${pipeBWorker}); access is ${pipeBEnabled ? "configured" : "not configured"} for this workspace.
+Use \`tmux capture-pane -p -S -200 -t \"$TMUX_PANE\"\` only for the current pane; switch to the logs window with the normal tmux window controls when evidence is needed.
+`;
 }
 
 function sandboxPreviewHost(sandbox: Sandbox): string {

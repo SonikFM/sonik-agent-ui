@@ -24,6 +24,22 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.dev-workbench[data-terminal-only="true"] {
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__toolbar,
+.dev-workbench[data-terminal-only="true"] .dev-workbench__dock-controls {
+  display: none;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__panel-header {
+  min-height: 2rem;
+  padding-block: 0.25rem;
+}
+
 .dev-workbench__toolbar,
 .dev-workbench__panel-header,
 .dev-workbench__details-nav,

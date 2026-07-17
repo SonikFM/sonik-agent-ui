@@ -97,8 +97,8 @@ export const repositorySitemapSchema = z.object({
 export type RepositorySitemap = z.infer<typeof repositorySitemapSchema>;
 
 export const tmuxWindowSchema = z.object({
-  name: z.enum(["codex", "dev", "shell"]),
-  index: z.number().int().min(0).max(2),
+  name: z.enum(["codex", "dev", "shell", "logs"]),
+  index: z.number().int().min(0).max(3),
   command: commandSchema,
   workingDirectory: z.literal(DEV_WORKBENCH_REPOSITORY_ROOT),
 }).strict();
@@ -106,6 +106,10 @@ export type TmuxWindow = z.infer<typeof tmuxWindowSchema>;
 
 export const pageContextMirrorPathsSchema = z.object({
   pageContext: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/page-context.json`),
+  hostContext: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/host-context.json`),
+  hostAuthority: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/host-authority.json`),
+  openApi: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/openapi.json`),
+  guide: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/README.md`),
   consoleEvents: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/console.jsonl`),
   networkEvents: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/network.jsonl`),
   latestScreenshot: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/screenshots/latest.png`),
@@ -116,6 +120,10 @@ export type PageContextMirrorPaths = z.infer<typeof pageContextMirrorPathsSchema
 
 export const DEV_WORKBENCH_MIRROR_PATHS = pageContextMirrorPathsSchema.parse({
   pageContext: `${DEV_WORKBENCH_STATE_ROOT}/page-context.json`,
+  hostContext: `${DEV_WORKBENCH_STATE_ROOT}/host-context.json`,
+  hostAuthority: `${DEV_WORKBENCH_STATE_ROOT}/host-authority.json`,
+  openApi: `${DEV_WORKBENCH_STATE_ROOT}/openapi.json`,
+  guide: `${DEV_WORKBENCH_STATE_ROOT}/README.md`,
   consoleEvents: `${DEV_WORKBENCH_STATE_ROOT}/console.jsonl`,
   networkEvents: `${DEV_WORKBENCH_STATE_ROOT}/network.jsonl`,
   latestScreenshot: `${DEV_WORKBENCH_STATE_ROOT}/screenshots/latest.png`,
@@ -194,7 +202,7 @@ export const devWorkbenchSessionDescriptorSchema = z.object({
   repository: repositoryManifestSchema,
   repositoryRoot: z.literal(DEV_WORKBENCH_REPOSITORY_ROOT),
   tmuxSession: identifierSchema,
-  tmuxWindows: z.array(tmuxWindowSchema).length(3),
+  tmuxWindows: z.array(tmuxWindowSchema).length(4),
   mirrorPaths: pageContextMirrorPathsSchema,
   preview: previewConnectionDescriptorSchema.nullable(),
   terminal: terminalConnectionDescriptorSchema.nullable(),
@@ -255,6 +263,26 @@ export const pageContextMirrorSchema = z.object({
   browserContextAuthority: z.literal("display-only"),
 }).strict();
 export type PageContextMirror = z.infer<typeof pageContextMirrorSchema>;
+
+export const hostAuthorityMirrorSchema = z.object({
+  header: z.string().min(1).max(16_384).regex(/^[A-Za-z0-9_-]+$/),
+  revision: z.number().int().nonnegative(),
+  expiresAt: isoDateSchema,
+}).strict();
+export type HostAuthorityMirror = z.infer<typeof hostAuthorityMirrorSchema>;
+
+export const workspaceContextSyncSchema = z.object({
+  pageContext: pageContextMirrorSchema,
+  host: z.object({
+    origin: httpsUrlSchema.refine((value) => {
+      const url = new URL(value);
+      return url.pathname === "/" && !url.search && !url.hash;
+    }, "Expected an HTTPS origin"),
+    pageContext: z.record(z.string().min(1).max(256), z.unknown()),
+    authority: hostAuthorityMirrorSchema.nullable(),
+  }).strict().nullable(),
+}).strict();
+export type WorkspaceContextSync = z.infer<typeof workspaceContextSyncSchema>;
 
 const realtimePayloadSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("status.changed"), status: devWorkbenchLifecycleStatusSchema }).strict(),

@@ -18,6 +18,8 @@
   type Props = DevWorkbenchViewProps & DevWorkbenchCallbacks & {
     /** Host-owned xterm mount. The renderer never receives the PTY token. */
     terminalContent?: Snippet;
+    /** Compact embed surface used when Dev Mode replaces an Agent UI chat rail. */
+    terminalOnly?: boolean;
   };
 
   let {
@@ -40,6 +42,7 @@
     onStopWorkspace,
     onDetailChange,
     terminalContent,
+    terminalOnly = false,
   }: Props = $props();
 
   let splitElement: HTMLDivElement;
@@ -50,7 +53,7 @@
 
   const revisionLabel = $derived(repository.revision.length > 12 ? repository.revision.slice(0, 12) : repository.revision);
   const effectiveDock = $derived<TerminalDock>(
-    terminalDock === "fullscreen" ? "fullscreen" : narrowViewport ? "bottom" : terminalDock,
+    terminalOnly || terminalDock === "fullscreen" ? "fullscreen" : narrowViewport ? "bottom" : terminalDock,
   );
   const terminalSizePercent = $derived(Math.round(terminalSize * 100));
   const splitStyle = $derived(`--dw-terminal-size: ${terminalSizePercent}%;`);
@@ -181,8 +184,10 @@
 <main
   class="dev-workbench"
   data-terminal-dock={effectiveDock}
+  data-terminal-only={terminalOnly}
   data-resizing={resizing}
-  aria-labelledby="dev-workbench-title"
+  aria-labelledby={terminalOnly ? undefined : "dev-workbench-title"}
+  aria-label={terminalOnly ? title : undefined}
 >
   <header class="dev-workbench__toolbar">
     <div class="dev-workbench__identity">
@@ -383,6 +388,13 @@ $ tmux attach -t {terminal.sessionName}</pre>
             <p class="dev-workbench__terminal-note">
               {terminal.disabledReason ?? "The authenticated PTY is ready for the xterm renderer."}
             </p>
+            {#if terminalOnly && actions.startWorkspace.enabled}
+              <button
+                class="dev-workbench__button dev-workbench__button--primary"
+                type="button"
+                onclick={() => onStartWorkspace?.()}
+              >Start workspace</button>
+            {/if}
           </div>
         {/if}
       </div>

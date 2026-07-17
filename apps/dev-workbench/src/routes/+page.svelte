@@ -1,5 +1,11 @@
 <script lang="ts">
   import { env as publicEnv } from "$env/dynamic/public";
+  import { page } from "$app/state";
+  import {
+    createAgentHostAuthorityDonationFromLegacyPayload,
+    sanitizeAgentHostAuthorityDonation,
+    sanitizeAgentHostPageContext,
+  } from "@sonik-agent-ui/agent-embed";
   import { onMount } from "svelte";
   import TerminalHost from "$lib/client/TerminalHost.svelte";
   import {
@@ -41,7 +47,9 @@
   let embeddedHostOrigin = $state<string | null>(null);
   let workbenchOrigin = $state<string | null>(null);
   let hostColorScheme = $state<"light" | "dark" | null>(null);
+  let hostContextRefreshTimer: number | null = null;
 
+  const terminalOnly = $derived(page.url.searchParams.get("surface") === "terminal");
   const view = $derived<DevWorkbenchViewProps>(createView());
   const capability = $derived(createDevWorkbenchCapability(view));
   const assertions = $derived({
@@ -228,6 +236,7 @@
         postHostContextToPreview();
         window.setTimeout(postHostContextToPreview, 250);
         if (workspace) void synchronizePageContext();
+        scheduleHostContextRefresh();
         return;
       }
       if (isAgentHostActionResultMessage(event.data)) {
@@ -333,29 +342,60 @@
     operation = "idle";
   }
 
-  async function reconnectWorkspaceRequest(): Promise<void> {
+  async function reconnectWorkspaceRequest(startIfMissing = false): Promise<void> {
     visibleError = null;
     const next = await requestWorkspace("GET");
     if (next) {
       workspace = next;
       if (hostContextMessage) void synchronizePageContext();
     }
+    else if (startIfMissing && !visibleError) await startWorkspaceRequest();
     else terminalState = "error";
   }
 
   async function synchronizePageContext(): Promise<void> {
     try {
+      const authority = hostContextMessage
+        ? sanitizeAgentHostAuthorityDonation(hostContextMessage.authority)
+          ?? createAgentHostAuthorityDonationFromLegacyPayload(hostContextMessage.payload)
+          ?? null
+        : null;
+      const host = embeddedHostOrigin && hostContextMessage
+        ? {
+            origin: embeddedHostOrigin,
+            pageContext: sanitizeAgentHostPageContext(hostContextMessage.payload),
+            authority,
+          }
+        : null;
       const response = await fetch("/api/workspaces/context", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(snapshotPageContext()),
+        body: JSON.stringify({ pageContext: snapshotPageContext(), host }),
       });
       if (!response.ok) throw new Error(await publicError(response));
-      announcement = "Sanitized page context is available inside the sandbox.";
+      const result = await response.json() as { openApiWritten?: unknown };
+      announcement = result.openApiWritten === true
+        ? "Host context, signed authority, and OpenAPI are available inside the sandbox."
+        : "Host context is available inside the sandbox; OpenAPI could not be refreshed.";
     } catch (error) {
       visibleError = safeMessage(error, "Page context could not be synchronized.");
       announcement = visibleError;
     }
+  }
+
+  function scheduleHostContextRefresh(): void {
+    if (hostContextRefreshTimer !== null) window.clearTimeout(hostContextRefreshTimer);
+    const authority = hostContextMessage
+      ? sanitizeAgentHostAuthorityDonation(hostContextMessage.authority)
+        ?? createAgentHostAuthorityDonationFromLegacyPayload(hostContextMessage.payload)
+      : undefined;
+    const expiresAt = authority ? Date.parse(authority.expiresAt) : Number.NaN;
+    const untilRefresh = Number.isFinite(expiresAt)
+      ? Math.max(30_000, Math.min(4 * 60_000, expiresAt - Date.now() - 60_000))
+      : 30_000;
+    hostContextRefreshTimer = window.setTimeout(() => {
+      requestHostContext("dev_workbench_authority_refresh");
+    }, untilRefresh);
   }
 
   async function stopWorkspaceRequest(): Promise<void> {
@@ -434,7 +474,7 @@
     });
     window.addEventListener("message", handleBridgeMessage);
     requestHostContext("dev_workbench_mounted");
-    void reconnectWorkspaceRequest().finally(() => { operation = "idle"; });
+    void reconnectWorkspaceRequest(terminalOnly).finally(() => { operation = "idle"; });
     const target = window as Window & { __sonikAgentUI?: unknown };
     const control = {
       schemaVersion: "sonik.agent_ui.page_control.v1" as const,
@@ -464,6 +504,7 @@
     target.__sonikAgentUI = control;
     return () => {
       window.removeEventListener("message", handleBridgeMessage);
+      if (hostContextRefreshTimer !== null) window.clearTimeout(hostContextRefreshTimer);
       if (target.__sonikAgentUI === control) delete target.__sonikAgentUI;
     };
   });
@@ -483,6 +524,7 @@
 
 <DevWorkbench
   {...view}
+  terminalOnly={terminalOnly}
   terminalContent={workspace?.terminal ? terminalContent : undefined}
   onStartWorkspace={startWorkspace}
   onReconnectTerminal={reconnectTerminal}

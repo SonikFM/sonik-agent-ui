@@ -9,6 +9,7 @@ import {
   pageContextMirrorSchema,
   repositoryManifestSchema,
   terminalConnectionDescriptorSchema,
+  workspaceContextSyncSchema,
 } from "../../apps/dev-workbench/src/lib/contracts/workbench.ts";
 import {
   createDevWindowRefreshPlan,
@@ -115,7 +116,7 @@ assert.throws(
 const plan = createDevWorkbenchBootstrapPlan({ sessionId: "session_123", repository });
 assert.equal(plan.repositoryRoot, DEV_WORKBENCH_REPOSITORY_ROOT);
 assert.equal(plan.previewPort, 3000);
-assert.deepEqual(plan.windows.map((window) => window.name), ["codex", "dev", "shell"]);
+assert.deepEqual(plan.windows.map((window) => window.name), ["codex", "dev", "shell", "logs"]);
 assert.deepEqual(plan.commands.map((command) => command.id), [
   "install-tmux",
   "prepare-workspace",
@@ -125,9 +126,12 @@ assert.deepEqual(plan.commands.map((command) => command.id), [
   "start-codex-window",
   "start-dev-window",
   "start-shell-window",
+  "start-logs-window",
   "select-codex-window",
 ]);
 assert.equal(plan.commands[2].args.at(-1), DEV_WORKBENCH_REPOSITORY_ROOT);
+assert.equal(plan.windows[0].command.includes(`SONIK_HOST_AUTHORITY_PATH=${DEV_WORKBENCH_MIRROR_PATHS.hostAuthority}`), true);
+assert.equal(plan.windows[3].command.join(" ").includes("Pipe B access is not configured"), true);
 assert.equal(DEFAULT_REPOSITORY_COMMANDS.dev.includes("--"), false, "Vite flags must reach the dev script without a positional delimiter");
 const hostedPlan = createDevWorkbenchBootstrapPlan({
   sessionId: "session_123",
@@ -135,16 +139,15 @@ const hostedPlan = createDevWorkbenchBootstrapPlan({
   previewHost: "sb-example.vercel.run",
   agentApiOrigin: "https://agent.example.com",
 });
-assert.deepEqual(hostedPlan.windows[1].command.slice(0, 3), [
-  "env",
-  "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=sb-example.vercel.run",
-  "SONIK_AGENT_UI_DEV_API_ORIGIN=https://agent.example.com",
-]);
+assert.equal(hostedPlan.windows[1].command[0], "env");
+assert.equal(hostedPlan.windows[1].command.includes("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=sb-example.vercel.run"), true);
+assert.equal(hostedPlan.windows[1].command.includes("SONIK_AGENT_UI_DEV_API_ORIGIN=https://agent.example.com"), true);
 assert.deepEqual(createRuntimeRehydrationPlan({ sessionId: "session_123", repository }).commands.map((command) => command.id), [
   "install-tmux",
   "start-codex-window",
   "start-dev-window",
   "start-shell-window",
+  "start-logs-window",
   "select-codex-window",
 ]);
 const devRefreshPlan = createDevWindowRefreshPlan({
@@ -223,6 +226,8 @@ if (configured.ok) {
   assert.equal(configured.value.repository.repositoryId, "github.com.sonikfm.sonik-agent-ui");
   assert.deepEqual(configured.value.repository.commands.codex, ["npx", "--yes", "@openai/codex@0.144.5"]);
   assert.equal(configured.value.agentApiOrigin, "https://sonik-agent-ui.liam-trampota.workers.dev");
+  assert.equal(configured.value.pipeBWorker, "sonik-dev-observability-pipe-b");
+  assert.equal(configured.value.cloudflareApiToken, null);
 }
 assert.deepEqual(devWorkbenchSessionCookieOptions(new URL("https://workbench.example.com")), {
   httpOnly: true,
@@ -317,6 +322,24 @@ assert.equal(JSON.stringify(mirroredContext).includes("accessToken"), false);
 assert.throws(
   () => pageContextMirrorSchema.parse({ ...mirroredContext, accessToken: "must-not-pass" }),
   /Unrecognized key/,
+);
+const syncedContext = workspaceContextSyncSchema.parse({
+  pageContext: mirroredContext,
+  host: {
+    origin: "https://booking.sonik.fm",
+    pageContext: { route: "/reservations", authenticated: true },
+    authority: {
+      header: "opaque_signed_host_authority",
+      revision: 1,
+      expiresAt: "2026-07-16T12:30:00.000Z",
+    },
+  },
+});
+assert.equal(syncedContext.host?.authority?.header, "opaque_signed_host_authority");
+assert.throws(
+  () => workspaceContextSyncSchema.parse({ ...syncedContext, host: { ...syncedContext.host, origin: "http://localhost:3000" } }),
+  /Expected an HTTPS URL/,
+  "server-side OpenAPI synchronization only accepts an allowlisted HTTPS host origin",
 );
 
 console.log("dev-workbench server contracts: ok");
