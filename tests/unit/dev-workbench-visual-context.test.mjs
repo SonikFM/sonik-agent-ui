@@ -105,6 +105,8 @@ const [routeSource, serviceSource, hookSource] = await Promise.all([
 assert.match(routeSource, /cache-control.*no-store/si, "PNG and JSON responses are not cacheable");
 assert.match(routeSource, /DEV_WORKBENCH_SESSION_COOKIE/, "the endpoint requires its authenticated workspace binding");
 assert.match(hookSource, /authorizeDevWorkbenchRequest/, "global Basic Auth covers the endpoint");
+assert.match(serviceSource, /workspaceSessionId !== sessionId/, "the submitted workspace must match the cookie session");
+assert.match(serviceSource, /record\.sessionId === sessionId/, "the cookie session must match the persisted workspace record");
 assert.match(serviceSource, /if mkdir \"\$lease\"/, "lease acquisition uses atomic mkdir rather than an in-memory lock");
 assert.match(serviceSource, /sed -n '1p'.*\$owner/s, "only the current lease owner can release it");
 assert.match(serviceSource, /mv \"\$manifest\" \"\$stable_manifest\"/, "the manifest is the stable commit marker");
