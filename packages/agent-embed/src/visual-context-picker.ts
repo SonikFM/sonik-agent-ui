@@ -42,7 +42,10 @@ type LiveDomApi = {
 type PickerWindow = Window & { __IMPECCABLE_LIVE_DOM__?: LiveDomApi };
 
 export type VisualContextPickerOptions = {
+  /** Exact origin of the requesting Agent UI window. */
   origin: string;
+  /** Exact host origin carried by the neutral visual-context request/result. */
+  requestOrigin?: string;
   source: Window;
   window?: Window;
   document?: Document;
@@ -50,6 +53,8 @@ export type VisualContextPickerOptions = {
   getTargetRegistry?: () => HostUiTargetRegistry | null | undefined;
   now?: () => Date;
   helper?: LiveDomApi;
+  listen?: boolean;
+  isOriginAllowed?: (origin: string) => boolean;
 };
 
 export type VisualContextPickerController = {
@@ -57,6 +62,7 @@ export type VisualContextPickerController = {
   destroy: () => void;
   isActive: () => boolean;
   resolvePrivateTarget: (targetId: string) => Element | undefined;
+  handleMessage: (event: MessageEvent) => void;
 };
 
 type PendingPick = {
@@ -74,6 +80,7 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   }
   const expectedOrigin = new URL(options.origin).origin;
   if (expectedOrigin !== options.origin) throw new Error("Visual context picker origin must be an exact origin.");
+  const requestOrigin = new URL(options.requestOrigin ?? ownerWindow.location.origin).origin;
   const helper = helperApi.createLiveBrowserDomHelpers({
     prefix: PICKER_PREFIX,
     skipTags: SKIP_TAGS,
@@ -160,9 +167,9 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   };
 
   const onMessage = (event: MessageEvent) => {
-    if (destroyed || event.origin !== expectedOrigin || event.source !== options.source) return;
+    if (destroyed || event.origin !== expectedOrigin || event.source !== options.source || options.isOriginAllowed?.(event.origin) === false) return;
     const parsed = visualContextRequestSchema.safeParse(event.data);
-    if (!parsed.success || parsed.data.origin !== expectedOrigin) return;
+    if (!parsed.success || parsed.data.origin !== requestOrigin) return;
     const request = parsed.data;
     if (request.operation === "pick" && request.provider === "host") {
       startPick(request);
@@ -187,7 +194,7 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   };
 
   const onNavigation = () => cancelPending("Navigation cancelled the element picker.");
-  ownerWindow.addEventListener("message", onMessage);
+  if (options.listen !== false) ownerWindow.addEventListener("message", onMessage);
   ownerWindow.addEventListener("pagehide", onNavigation);
   ownerWindow.addEventListener("popstate", onNavigation);
 
@@ -212,7 +219,8 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   function onClick(event: Event): void {
     if (!pending) return;
     const element = pickableElement(event.target);
-    if (!element || !ownerWindow.getSelection()?.isCollapsed) return;
+    const textSelection = ownerWindow.getSelection?.();
+    if (!element || (textSelection && !textSelection.isCollapsed)) return;
     event.preventDefault();
     event.stopPropagation();
     const selection = selectionForElement(element, pending.request);
@@ -270,12 +278,13 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
       destroyed = true;
       cleanup();
       privateTargets.clear();
-      ownerWindow.removeEventListener("message", onMessage);
+      if (options.listen !== false) ownerWindow.removeEventListener("message", onMessage);
       ownerWindow.removeEventListener("pagehide", onNavigation);
       ownerWindow.removeEventListener("popstate", onNavigation);
     },
     isActive: () => Boolean(pending),
     resolvePrivateTarget: (targetId) => privateTargets.get(targetId),
+    handleMessage: onMessage,
   };
 }
 
