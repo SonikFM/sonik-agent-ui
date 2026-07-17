@@ -204,23 +204,24 @@
   font-size: 0.7rem;
 }
 
-.dev-workbench__button--primary:not(:disabled) {
+.dev-workbench__button--primary:not(:disabled):not([aria-disabled="true"]) {
   border-color: color-mix(in oklab, var(--dw-accent) 70%, var(--dw-border));
   background: color-mix(in oklab, var(--dw-accent) 20%, var(--dw-raised));
 }
 
-.dev-workbench__button:hover:not(:disabled),
+.dev-workbench__button:hover:not(:disabled):not([aria-disabled="true"]),
 .dev-workbench__tab:hover,
 .dev-workbench__tab[aria-selected="true"],
 .dev-workbench__dock-controls button:hover:not(:disabled),
 .dev-workbench__dock-controls button[aria-pressed="true"],
-.dev-workbench__overflow-menu button:hover:not(:disabled),
+.dev-workbench__overflow-menu button:hover:not(:disabled):not([aria-disabled="true"]),
 .dev-workbench__overflow[open] > summary {
   border-color: var(--dw-accent);
   background: color-mix(in oklab, var(--dw-accent) 12%, var(--dw-raised));
 }
 
-.dev-workbench button:disabled {
+.dev-workbench button:disabled,
+.dev-workbench button[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.55;
 }

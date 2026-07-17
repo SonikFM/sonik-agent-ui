@@ -99,3 +99,7 @@ export const workbenchActionDescriptors = {
 export function unavailableAction(message: string): WorkbenchSemanticActionResult {
   return { ok: false, state: "unavailable", message, disabledReason: message };
 }
+
+export function runEnabledAction(enabled: boolean, action: (() => unknown) | undefined): void {
+  if (enabled) action?.();
+}
