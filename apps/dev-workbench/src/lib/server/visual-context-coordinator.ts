@@ -149,21 +149,3 @@ export function decodeCanonicalBase64(value: string): Buffer {
   if (bytes.toString("base64") !== value) throw new Error("Visual context PNG data must be canonical base64.");
   return bytes;
 }
-
-export function createVisualContextLeaseAcquireScript(attempts = 50, sleepSeconds = 0.1): string {
-  if (!Number.isInteger(attempts) || attempts < 1 || sleepSeconds < 0) throw new TypeError("Invalid visual context lease retry policy.");
-  return `set -eu
-lease="$1"; owner="$2"; expires="$3"; candidate="$lease.$owner.tmp"
-mkdir -p "$(dirname "$lease")"
-trap 'rm -f "$candidate"' EXIT
-printf '%s\n%s\n' "$owner" "$expires" > "$candidate"
-for attempt in $(seq 1 ${attempts}); do
-  if ln "$candidate" "$lease" 2>/dev/null; then exit 0; fi
-  current_expires=$(sed -n '2p' "$lease" 2>/dev/null || true)
-  case "$current_expires" in ''|*[!0-9]*) sleep ${sleepSeconds}; continue;; esac
-  now_ms=$(( $(date +%s) * 1000 ))
-  if [ "$current_expires" -lt "$now_ms" ]; then rm -f "$lease"; continue; fi
-  sleep ${sleepSeconds}
-done
-exit 75`;
-}
