@@ -19,9 +19,9 @@ import {
   type HostUiTarget,
   type HostUiTargetRegistry,
 } from "@sonik-agent-ui/tool-contracts/target-registry";
-import { mountVisualContextPicker, type VisualContextPickerController } from "./visual-context-picker.js";
+import { mountVisualContextPicker, type VisualContextPickerController } from "./visual-context-picker.ts";
 
-export * from "./visual-context-picker.js";
+export * from "./visual-context-picker.ts";
 
 export const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
