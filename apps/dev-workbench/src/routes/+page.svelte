@@ -25,10 +25,13 @@
   import {
     createAgentPageContextRequest,
     createEmbeddedPreviewUrl,
+    defaultVisualSourceId,
+    discoverVisualSources,
     isAgentHostActionRequestMessage,
     isAgentHostActionResultMessage,
     isAgentHostPageContextMessage,
     isAgentPageContextRequestMessage,
+    isVisualContextResultMessage,
     resolveEmbeddedHostColorScheme,
     resolveEmbeddedHostOrigin,
     type AgentHostPageContextMessage,
@@ -48,6 +51,13 @@
   let workbenchOrigin = $state<string | null>(null);
   let hostColorScheme = $state<"light" | "dark" | null>(null);
   let hostContextRefreshTimer: number | null = null;
+  let selectedVisualSourceId = $state<"preview" | "host" | null>(null);
+  let sourceContextRevision = $state(0);
+  let routeRevision = $state(0);
+  let visualStatus = $state<"idle" | "picking" | "capturing" | "invalidated" | "error">("idle");
+  let visualStatusMessage = $state("Start a workspace to discover visual sources.");
+  let visualStaleReason = $state<"source-changed" | "route-changed" | "navigation" | "cancelled" | "provider-lost" | null>(null);
+  let visualActionFocus: HTMLElement | null = null;
 
   const terminalOnly = $derived(page.url.searchParams.get("surface") === "terminal");
   const view = $derived<DevWorkbenchViewProps>(createView());
@@ -91,6 +101,11 @@
     }
 
     const terminalReady = terminalState === "ready";
+    const visualSources = discoveredVisualSources();
+    const visualSourceId = selectedVisualSourceId && visualSources.some((source) => source.id === selectedVisualSourceId)
+      ? selectedVisualSourceId
+      : defaultVisualSourceId(visualSources);
+    const sourceUnavailable = visualSourceId ? null : "No Preview or Host visual source is connected.";
     const terminalReason = terminalReady
       ? null
       : terminalState === "connecting"
@@ -137,6 +152,15 @@
         transport: "Vercel interactive PTY · tmux",
         disabledReason: terminalReason,
       },
+      visualContext: {
+        sources: visualSources.map(({ id, label, route }) => ({ id, label, route })),
+        selectedSourceId: visualSourceId,
+        sourceContextRevision,
+        routeRevision,
+        status: visualStatus,
+        statusMessage: visualStatusMessage,
+        staleReason: visualStaleReason,
+      },
       activeDetail,
       problems: visibleError
         ? [{ id: "workspace-error", severity: "error", message: visibleError, file: null, line: null }]
@@ -153,6 +177,20 @@
         captureSnapshot: operation === "idle"
           ? { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
+        pickVisualTarget: sourceUnavailable
+          ? { enabled: false, disabledReason: sourceUnavailable }
+          : { enabled: true, disabledReason: null },
+        captureVisualContext: sourceUnavailable
+          ? { enabled: false, disabledReason: sourceUnavailable }
+          : operation === "idle"
+            ? { enabled: true, disabledReason: null }
+            : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
+        setupVisualBrowser: visualSources.some((source) => source.id === "preview")
+          ? { enabled: true, disabledReason: null }
+          : { enabled: false, disabledReason: "A Preview source is required for controlled browser setup." },
+        pairVisualExtension: visualSources.some((source) => source.id === "host")
+          ? { enabled: true, disabledReason: null }
+          : { enabled: false, disabledReason: "Connect an embedded Host source before pairing the extension." },
         openPreview: workspace.preview
           ? { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "No preview URL is available." },
@@ -161,6 +199,37 @@
           : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
       },
     };
+  }
+
+  function discoveredVisualSources() {
+    return discoverVisualSources({
+      previewUrl: workspace?.preview?.url,
+      previewRoute: viewPreviewPath(),
+      hostOrigin: embeddedHostOrigin && hostContextMessage ? embeddedHostOrigin : null,
+      hostRoute: hostContextMessage?.payload.route,
+    });
+  }
+
+  function viewPreviewPath(): string {
+    return "/";
+  }
+
+  function selectVisualSource(sourceId: "preview" | "host"): WorkbenchSemanticActionResult {
+    const source = discoveredVisualSources().find((candidate) => candidate.id === sourceId);
+    if (!source) return unavailableAction("That visual source is no longer connected.");
+    if (selectedVisualSourceId !== sourceId) {
+      selectedVisualSourceId = sourceId;
+      sourceContextRevision += 1;
+      invalidateVisualContext("source-changed", `${source.label} selected. Previous visual context was cleared.`);
+    }
+    return accepted(`${source.label} selected.`);
+  }
+
+  function invalidateVisualContext(reason: NonNullable<typeof visualStaleReason>, message: string): void {
+    visualStatus = "invalidated";
+    visualStaleReason = reason;
+    visualStatusMessage = message;
+    announcement = message;
   }
 
   function createPageContext() {
@@ -229,7 +298,13 @@
   function handleBridgeMessage(event: MessageEvent): void {
     if (event.source === window.parent && event.origin === embeddedHostOrigin) {
       if (isAgentHostPageContextMessage(event.data)) {
+        const previousRoute = discoveredVisualSources().find((source) => source.id === "host")?.route;
         hostContextMessage = event.data;
+        const nextRoute = discoveredVisualSources().find((source) => source.id === "host")?.route;
+        if (previousRoute && nextRoute && previousRoute !== nextRoute) {
+          routeRevision += 1;
+          invalidateVisualContext("route-changed", "Host navigation cleared the previous visual context.");
+        }
         const theme = hostTheme();
         if (theme) document.documentElement.dataset.hostTheme = theme;
         announcement = "Booking session context connected.";
@@ -244,6 +319,7 @@
         const targetOrigin = currentPreviewOrigin();
         if (frame?.contentWindow && targetOrigin) frame.contentWindow.postMessage(event.data, targetOrigin);
       }
+      if (isVisualContextResultMessage(event.data)) finishVisualOperation(event.data);
       return;
     }
 
@@ -258,6 +334,18 @@
     if (isAgentHostActionRequestMessage(event.data) && embeddedHostOrigin) {
       window.parent.postMessage(event.data, embeddedHostOrigin);
     }
+    if (isVisualContextResultMessage(event.data)) finishVisualOperation(event.data);
+  }
+
+  function finishVisualOperation(value: unknown): void {
+    const record = value as Record<string, unknown>;
+    const completed = record.status === "completed";
+    visualStatus = completed ? "idle" : record.status === "cancelled" ? "invalidated" : "error";
+    visualStaleReason = record.status === "cancelled" ? "cancelled" : null;
+    visualStatusMessage = completed ? "Visual target selected." : typeof record.disabledReason === "string" ? record.disabledReason : "Visual operation ended.";
+    announcement = visualStatusMessage;
+    visualActionFocus?.focus();
+    visualActionFocus = null;
   }
 
   function snapshotPageContext() {
@@ -300,6 +388,61 @@
     if (!view.actions.captureSnapshot.enabled) return unavailable("captureSnapshot");
     void synchronizePageContext();
     return accepted("Page context synchronization started.");
+  }
+
+  function pickVisualTarget(): WorkbenchSemanticActionResult {
+    if (!view.actions.pickVisualTarget.enabled) return unavailable("pickVisualTarget");
+    const source = discoveredVisualSources().find((candidate) => candidate.id === view.visualContext.selectedSourceId);
+    const target = source?.id === "host" ? window.parent : previewFrame()?.contentWindow;
+    const origin = source?.id === "host" ? embeddedHostOrigin : currentPreviewOrigin();
+    if (!source || !target || !origin) return unavailableAction("The selected visual source cannot receive picker requests.");
+    visualActionFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    visualStatus = "picking";
+    visualStaleReason = null;
+    visualStatusMessage = `Choose an element in ${source.label}; press Escape to cancel.`;
+    target.postMessage({
+      messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
+      requestId: crypto.randomUUID(), operation: "pick", origin: workbenchOrigin,
+      sourceContextRevision, routeRevision, source, provider: "host",
+    }, origin);
+    return accepted(visualStatusMessage);
+  }
+
+  function captureVisualContext(): WorkbenchSemanticActionResult {
+    if (!view.actions.captureVisualContext.enabled) return unavailable("captureVisualContext");
+    void runVisualServerOperation("capture");
+    return accepted("Visual context capture started.");
+  }
+
+  function setupVisualBrowser(): WorkbenchSemanticActionResult {
+    if (!view.actions.setupVisualBrowser.enabled) return unavailable("setupVisualBrowser");
+    void runVisualServerOperation("setup-browser");
+    return accepted("Controlled browser setup started.");
+  }
+
+  function pairVisualExtension(): WorkbenchSemanticActionResult {
+    if (!view.actions.pairVisualExtension.enabled) return unavailable("pairVisualExtension");
+    visualStatusMessage = "Extension pairing requires the optional extension adoption slice.";
+    announcement = visualStatusMessage;
+    return unavailableAction(visualStatusMessage);
+  }
+
+  async function runVisualServerOperation(operationName: "capture" | "setup-browser"): Promise<void> {
+    visualStatus = operationName === "capture" ? "capturing" : "idle";
+    try {
+      const response = await fetch("/api/workspaces/visual-context", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operation: operationName, sourceId: view.visualContext.selectedSourceId, sourceContextRevision, routeRevision }),
+      });
+      if (!response.ok) throw new Error(await publicError(response));
+      visualStatus = "idle";
+      visualStaleReason = null;
+      visualStatusMessage = operationName === "capture" ? "Visual context captured." : "Controlled browser is ready.";
+    } catch (error) {
+      visualStatus = "error";
+      visualStatusMessage = safeMessage(error, "The visual operation failed.");
+    }
+    announcement = visualStatusMessage;
   }
 
   function openPreview(): WorkbenchSemanticActionResult {
@@ -496,6 +639,10 @@
         reconnectTerminal,
         restartPreview,
         captureSnapshot,
+        pickVisualTarget,
+        captureVisualContext,
+        setupVisualBrowser,
+        pairVisualExtension,
         openPreview,
         stopWorkspace,
         setDetail: ({ detail }: { detail?: unknown }) => setDetail(detail),
@@ -530,6 +677,11 @@
   onReconnectTerminal={reconnectTerminal}
   onRestartPreview={restartPreview}
   onCaptureSnapshot={captureSnapshot}
+  onVisualSourceChange={selectVisualSource}
+  onPickVisualTarget={pickVisualTarget}
+  onCaptureVisualContext={captureVisualContext}
+  onSetupVisualBrowser={setupVisualBrowser}
+  onPairVisualExtension={pairVisualExtension}
   onOpenPreview={openPreview}
   onStopWorkspace={stopWorkspace}
   onDetailChange={setDetail}

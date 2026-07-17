@@ -28,6 +28,7 @@
     workspace,
     preview,
     terminal,
+    visualContext,
     activeDetail,
     problems,
     changedFiles,
@@ -38,6 +39,11 @@
     onReconnectTerminal,
     onRestartPreview,
     onCaptureSnapshot,
+    onVisualSourceChange,
+    onPickVisualTarget,
+    onCaptureVisualContext,
+    onSetupVisualBrowser,
+    onPairVisualExtension,
     onOpenPreview,
     onStopWorkspace,
     onDetailChange,
@@ -206,6 +212,34 @@
     </div>
 
     <div class="dev-workbench__actions" aria-label="Workspace controls">
+      <label class="dev-workbench__source-control">
+        <span>Source</span>
+        <select
+          aria-label="Visual context source"
+          value={visualContext.selectedSourceId ?? ""}
+          disabled={!visualContext.sources.length}
+          onchange={(event) => onVisualSourceChange?.((event.currentTarget as HTMLSelectElement).value as "preview" | "host")}
+        >
+          {#if !visualContext.sources.length}<option value="">No source</option>{/if}
+          {#each visualContext.sources as source (source.id)}
+            <option value={source.id}>{source.label}</option>
+          {/each}
+        </select>
+      </label>
+      <button
+        class="dev-workbench__button dev-workbench__button--compact"
+        type="button"
+        disabled={!actions.pickVisualTarget.enabled}
+        title={actions.pickVisualTarget.disabledReason ?? "Pick an element"}
+        onclick={() => onPickVisualTarget?.()}
+      >Pick</button>
+      <button
+        class="dev-workbench__button dev-workbench__button--compact"
+        type="button"
+        disabled={!actions.captureVisualContext.enabled}
+        title={actions.captureVisualContext.disabledReason ?? "Capture visual context"}
+        onclick={() => onCaptureVisualContext?.()}
+      >Capture</button>
       <button
         class="dev-workbench__button dev-workbench__button--primary"
         type="button"
@@ -219,6 +253,22 @@
       <details class="dev-workbench__overflow">
         <summary class="dev-workbench__button">More</summary>
         <div class="dev-workbench__overflow-menu" aria-label="More workspace actions">
+          <button
+            type="button"
+            disabled={!actions.setupVisualBrowser.enabled}
+            title={actions.setupVisualBrowser.disabledReason ?? "Set up controlled browser capture"}
+            onclick={(event) => runMenuAction(event, onSetupVisualBrowser)}
+          >
+            Set up browser capture
+          </button>
+          <button
+            type="button"
+            disabled={!actions.pairVisualExtension.enabled}
+            title={actions.pairVisualExtension.disabledReason ?? "Pair active-tab extension"}
+            onclick={(event) => runMenuAction(event, onPairVisualExtension)}
+          >
+            Pair active-tab extension
+          </button>
           <button
             type="button"
             disabled={!actions.captureSnapshot.enabled}
@@ -256,6 +306,9 @@
         </ul>
       </details>
     {/if}
+    <span class="dev-workbench__visual-status" aria-hidden="true">
+      {visualContext.statusMessage}
+    </span>
   </header>
 
   <div

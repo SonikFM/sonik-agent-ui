@@ -147,6 +147,38 @@
   gap: 0.4rem;
 }
 
+.dev-workbench__source-control {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--dw-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.dev-workbench__source-control select {
+  min-height: 2.75rem;
+  max-width: 11rem;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--radius-field, 0.4rem);
+  background: var(--dw-raised);
+  color: inherit;
+}
+
+.dev-workbench__visual-status {
+  grid-column: 2 / 3;
+  overflow: hidden;
+  color: var(--dw-muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-workbench :is(button, select, summary):focus-visible {
+  outline: 2px solid var(--dw-accent);
+  outline-offset: 2px;
+}
+
 .dev-workbench__button,
 .dev-workbench__tab,
 .dev-workbench__dock-controls button,
