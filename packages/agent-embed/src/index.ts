@@ -1,6 +1,7 @@
 import { sanitizePageContext, type AgentUiPageContextSnapshot } from "@sonik-agent-ui/agent-observability";
 import type { HostSessionEnvelope, PlatformAdapterContext } from "@sonik-agent-ui/platform-adapters";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
+import { visualContextSelectionSchema } from "@sonik-agent-ui/tool-contracts/visual-context";
 import { workflowDependencyPinsSchema, type WorkflowDependencyPins } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import {
   agentActionChannelVersion,
@@ -221,6 +222,7 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "workflow",
   "hostUiTargets",
   "hostUiTargetRegistry",
+  "visualSelection",
   "commandFamilies",
   "skillFamilies",
   "activeEntity",
@@ -539,12 +541,14 @@ export function sanitizeAgentHostPageContext(value: unknown): AgentHostMergedPag
   const activeEntity = sanitizeAgentHostActiveEntity(record.activeEntity);
   const hostUiTargets = sanitizeHostUiTargets(record.hostUiTargets);
   const hostUiTargetRegistry = sanitizeHostUiTargetRegistry(record.hostUiTargetRegistry);
+  const visualSelection = visualContextSelectionSchema.safeParse(record.visualSelection).data;
   const trusted = sanitizeTrustedHostContext(record as AgentTrustedHostContext);
   const context: AgentHostMergedPageContext = {
     ...(base ?? {}),
     ...(activeEntity ? { activeEntity } : {}),
     ...(hostUiTargets ? { hostUiTargets } : {}),
     ...(hostUiTargetRegistry ? { hostUiTargetRegistry } : {}),
+    ...(visualSelection ? { visualSelection } : {}),
     ...trusted,
   };
   return Object.keys(context).length > 0 ? context : undefined;

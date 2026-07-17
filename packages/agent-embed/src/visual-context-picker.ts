@@ -85,7 +85,7 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
     prefix: PICKER_PREFIX,
     skipTags: SKIP_TAGS,
     document: ownerDocument,
-    css: ownerWindow.CSS,
+    css: (ownerWindow as Window & { CSS?: typeof CSS }).CSS,
     crypto: ownerWindow.crypto,
   });
   const privateTargets = new Map<string, Element>();
@@ -149,7 +149,6 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
       pending = undefined;
       postResult(request, {
         status,
-        provider: "host",
         ...(selection !== undefined ? { selection } : {}),
         ...(disabledReason ? { disabledReason } : {}),
       });
@@ -178,7 +177,7 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
     if (request.operation === "clear" && request.provider === "host") {
       cancelPending("Element selection cleared.");
       privateTargets.clear();
-      postResult(request, { status: "completed", provider: "host", selection: null });
+      postResult(request, { status: "completed", selection: null });
       return;
     }
     if (request.operation === "get-capabilities") {
@@ -236,8 +235,9 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   }
 
   function pickableElement(target: EventTarget | null): Element | undefined {
-    if (!(target instanceof ownerWindow.Element)) return undefined;
-    const element = target.closest("[data-sonik-target]") ?? target;
+    if (!target || typeof (target as Element).closest !== "function") return undefined;
+    const targetElement = target as Element;
+    const element = targetElement.closest("[data-sonik-target]") ?? targetElement;
     if (element.hasAttribute("contenteditable") || helper.own(element) || !helper.pickable(element)) return undefined;
     return element;
   }
@@ -250,7 +250,7 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
       : `ephemeral:${helper.id8()}`;
     const targetInstanceId = registeredTarget?.getAttribute("data-sonik-target-instance")?.trim() || undefined;
     const registry = hostUiTargetRegistrySchema.safeParse(options.getTargetRegistry?.()).data;
-    const registered = registry?.targets.find((target) => target.targetId === targetId && (!targetInstanceId || target.targetInstanceId === targetInstanceId));
+    const registered = registry?.targets.find((target: HostUiTargetRegistry["targets"][number]) => target.targetId === targetId && (!targetInstanceId || target.targetInstanceId === targetInstanceId));
     const role = safePublicText(element.getAttribute("role")) ?? semanticRole(element);
     const accessibleName = safePublicText(element.getAttribute("aria-label") ?? element.getAttribute("alt") ?? element.getAttribute("title"));
     const label = safePublicText(registered?.label) ?? accessibleName ?? safePublicText(role) ?? "Page element";
