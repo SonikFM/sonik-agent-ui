@@ -3,6 +3,15 @@ export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context"
 export const SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST = "sonik:agent-ui:request-page-context";
 export const SONIK_AGENT_UI_HOST_ACTION_REQUEST = "sonik:agent-ui:action-request";
 export const SONIK_AGENT_UI_HOST_ACTION_RESULT = "sonik:agent-ui:action-result";
+export const SONIK_VISUAL_CONTEXT_REQUEST = "sonik:visual-context:request";
+export const SONIK_VISUAL_CONTEXT_RESULT = "sonik:visual-context:result";
+
+export type DiscoveredVisualSource = {
+  id: "preview" | "host";
+  label: string;
+  surface: string;
+  route: string;
+};
 
 export type AgentHostPageContextMessage = {
   source: typeof SONIK_AGENT_UI_HOST_MESSAGE_SOURCE;
@@ -83,6 +92,40 @@ export function createEmbeddedPreviewUrl(input: {
   return url.toString();
 }
 
+export function discoverVisualSources(input: {
+  previewUrl?: string | null;
+  previewRoute?: string | null;
+  hostOrigin?: string | null;
+  hostRoute?: unknown;
+}): DiscoveredVisualSource[] {
+  const sources: DiscoveredVisualSource[] = [];
+  if (input.previewUrl) {
+    sources.push({ id: "preview", label: "Preview", surface: "workbench-preview", route: sanitizeRoute(input.previewRoute) });
+  }
+  const hostOrigin = input.hostOrigin ? parseOrigin(input.hostOrigin) : null;
+  if (hostOrigin) {
+    sources.push({
+      id: "host",
+      label: `Host · ${new URL(hostOrigin).hostname.slice(0, 120)}`,
+      surface: "embedded-host",
+      route: sanitizeRoute(input.hostRoute),
+    });
+  }
+  return sources;
+}
+
+export function defaultVisualSourceId(sources: readonly DiscoveredVisualSource[]): "preview" | "host" | null {
+  return sources.some((source) => source.id === "preview") ? "preview" : sources[0]?.id ?? null;
+}
+
+export function isVisualContextResultMessage(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.messageSource === SONIK_AGENT_UI_HOST_MESSAGE_SOURCE
+    && record.type === SONIK_VISUAL_CONTEXT_RESULT
+    && record.version === "sonik.visual-context.v1";
+}
+
 export function isOriginAllowed(origin: string, allowlist?: string): boolean {
   const parsed = parseOrigin(origin);
   if (!parsed) return false;
@@ -113,4 +156,9 @@ function parseOrigin(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function sanitizeRoute(value: unknown): string {
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) return "/";
+  return value.split(/[?#]/, 1)[0]!.slice(0, 2_048) || "/";
 }
