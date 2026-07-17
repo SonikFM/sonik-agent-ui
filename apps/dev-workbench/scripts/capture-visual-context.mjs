@@ -27,6 +27,23 @@ export function appliedRedactions(input) {
   ];
 }
 
+export async function crossOriginFrameLocators(page) {
+  const pageOrigin = new URL(page.url()).origin;
+  const locators = [];
+  for (const [index, frame] of page.frames().entries()) {
+    if (frame === page.mainFrame() || new URL(frame.url()).origin === pageOrigin) continue;
+    const parent = frame.parentFrame();
+    if (!parent) throw new Error("Cross-origin frame attribution failed.");
+    const marker = `frame-${index}`;
+    const element = await frame.frameElement();
+    await element.evaluate((node, value) => node.setAttribute("data-sonik-capture-cross-origin", value), marker);
+    const locator = parent.locator(`[data-sonik-capture-cross-origin="${marker}"]`);
+    if (await locator.count() !== 1) throw new Error("Cross-origin frame attribution failed.");
+    locators.push(locator);
+  }
+  return locators;
+}
+
 function sanitizeAria(value) {
   return value.split("\n").map((line) => line
     .replace(secretPattern, "[redacted credential]")
@@ -93,32 +110,24 @@ export async function captureVisualContext(request, options = {}) {
       ])),
     ]);
     await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;scroll-behavior:auto!important}" });
-    await page.locator("iframe").evaluateAll((frames) => {
-      for (const frame of frames) {
-        try {
-          if (new URL(frame.getAttribute("src") || location.href, location.href).origin !== location.origin) frame.setAttribute("data-sonik-capture-cross-origin", "");
-        } catch {
-          frame.setAttribute("data-sonik-capture-cross-origin", "");
-        }
-      }
-    });
+    const crossOriginFrames = await crossOriginFrameLocators(page);
 
     const stableTarget = request.targetId && !request.targetId.startsWith("ephemeral:");
     const capture = stableTarget ? await exactTarget(page, request.targetId, request.targetInstanceId) : page;
     const ariaRoot = stableTarget ? capture : page.locator("body");
     const sensitive = page.locator("input,textarea,select,[contenteditable]");
     const declaredSensitive = page.locator("[data-sonik-sensitive]");
-    const crossOriginFrames = page.locator("[data-sonik-capture-cross-origin]");
     const visibleCount = (locator) => locator.evaluateAll((elements) => elements.filter((element) => {
       const bounds = element.getBoundingClientRect();
       const style = getComputedStyle(element);
       return bounds.width > 0 && bounds.height > 0 && style.visibility !== "hidden" && style.display !== "none";
     }).length);
     const [sensitiveCount, declaredSensitiveCount, crossOriginFrameCount] = await Promise.all([
-      visibleCount(sensitive), visibleCount(declaredSensitive), visibleCount(crossOriginFrames),
+      visibleCount(sensitive), visibleCount(declaredSensitive),
+      Promise.all(crossOriginFrames.map((locator) => locator.isVisible())).then((visible) => visible.filter(Boolean).length),
     ]);
-    const mask = page.locator(`${sensitiveSelector},[data-sonik-capture-cross-origin]`);
-    const screenshotOptions = { path: outputPath, type: "png", animations: "disabled", caret: "hide", scale: "css", mask: [mask] };
+    const mask = [page.locator(sensitiveSelector), ...crossOriginFrames];
+    const screenshotOptions = { path: outputPath, type: "png", animations: "disabled", caret: "hide", scale: "css", mask };
     if (stableTarget) await capture.screenshot(screenshotOptions);
     else await page.screenshot(screenshotOptions);
 
