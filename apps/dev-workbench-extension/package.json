@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "pnpm build && node --experimental-strip-types tests/capture-visible-tab.test.mjs && node --experimental-strip-types tests/pairing-lifecycle.test.mjs && node --experimental-strip-types tests/protocol.test.mjs && node tests/masking.test.mjs"
+    "test": "pnpm build && node --experimental-strip-types tests/capture-visible-tab.test.mjs && node --experimental-strip-types tests/pairing-lifecycle.test.mjs && node --experimental-strip-types tests/protocol.test.mjs && node tests/masking.test.mjs && node tests/persistent-chromium.test.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

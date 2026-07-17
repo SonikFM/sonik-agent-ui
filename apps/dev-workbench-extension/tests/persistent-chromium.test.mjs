@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 
-const listen = (handler) => new Promise((resolve) => {
+const listen = (handler, port = 0) => new Promise((resolve) => {
   const server = http.createServer(handler);
-  server.listen(0, "127.0.0.1", () => resolve(server));
+  server.listen(port, "127.0.0.1", () => resolve(server));
 });
 const origin = (server) => `http://127.0.0.1:${server.address().port}`;
 const sendHostRequest = (frame, request, hostOrigin) => frame.evaluate(({ request, hostOrigin }) => new Promise((resolve, reject) => {
@@ -29,7 +29,7 @@ let context;
 try {
   await cp(new URL("..", import.meta.url), extension, { recursive: true });
 
-  workbench = await listen((_request, response) => response.end("<!doctype html><title>Workbench fixture</title>"));
+  workbench = await listen((_request, response) => response.end("<!doctype html><title>Workbench fixture</title>"), 5173);
   host = await listen((_request, response) => {
     const hostOrigin = origin(host);
     const workbenchOrigin = origin(workbench);
