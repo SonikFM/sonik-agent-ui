@@ -237,6 +237,7 @@
         class="dev-workbench__button dev-workbench__button--compact"
         type="button"
         disabled={!actions.captureVisualContext.enabled}
+        aria-describedby={!actions.captureVisualContext.enabled ? "workbench-action-readiness" : undefined}
         title={actions.captureVisualContext.disabledReason ?? "Capture visual context"}
         onclick={() => onCaptureVisualContext?.()}
       >Capture</button>
@@ -256,6 +257,7 @@
           <button
             type="button"
             disabled={!actions.setupVisualBrowser.enabled}
+            aria-describedby={!actions.setupVisualBrowser.enabled ? "workbench-action-readiness" : undefined}
             title={actions.setupVisualBrowser.disabledReason ?? "Set up controlled browser capture"}
             onclick={(event) => runMenuAction(event, onSetupVisualBrowser)}
           >

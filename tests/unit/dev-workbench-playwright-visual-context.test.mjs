@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import { readFile } from "node:fs/promises";
+import { chromium } from "playwright";
 import {
   PLAYWRIGHT_VISUAL_CONTEXT_SCRIPT,
   capturePlaywrightPreview,
@@ -8,6 +10,7 @@ import {
 import {
   PLAYWRIGHT_PREVIEW_READINESS_RULE,
   appliedRedactions,
+  crossOriginFrameLocators,
   probeBrowserCapabilities,
   setupBrowser,
 } from "../../apps/dev-workbench/scripts/capture-visual-context.mjs";
@@ -17,7 +20,7 @@ assert.deepEqual(appliedRedactions({ sensitiveCount: 0, declaredSensitiveCount: 
 assert.deepEqual(appliedRedactions({ sensitiveCount: 1, declaredSensitiveCount: 1, crossOriginFrameCount: 1, rawAriaSnapshot: "secret@example.com", ariaSnapshot: "[redacted email]" }), [
   "sensitive form fields", "declared sensitive content", "cross-origin frames", "AI accessibility sensitive content", "AI accessibility text",
 ]);
-assert.match(await readFile("apps/dev-workbench/scripts/capture-visual-context.mjs", "utf8"), /mask: \[mask\]/, "Playwright screenshot masks are always passed as a Locator array");
+assert.match(await readFile("apps/dev-workbench/scripts/capture-visual-context.mjs", "utf8"), /const mask = \[page\.locator\(sensitiveSelector\), \.\.\.crossOriginFrames\]/, "Playwright screenshot masks remain a Locator array");
 
 const request = {
   requestId: "capture-1",
@@ -117,5 +120,33 @@ assert.equal(setupSucceeded.capabilities[0].status, "available");
 const setupFailed = await setupBrowser(setupRequest, { install: async () => 1, probe: async () => missingCapabilities });
 assert.equal(setupFailed.status, "failed");
 assert.equal(setupFailed.capabilities[0].status, "unavailable");
+
+const listen = (handler) => new Promise((resolve) => {
+  const server = http.createServer(handler);
+  server.listen(0, "127.0.0.1", () => resolve(server));
+});
+const foreign = await listen((_request, response) => response.end("payment frame"));
+const foreignOrigin = `http://127.0.0.1:${foreign.address().port}`;
+const preview = await listen((incoming, response) => {
+  if (incoming.url === "/redirect") {
+    response.writeHead(302, { location: `${foreignOrigin}/payment` });
+    response.end();
+    return;
+  }
+  response.end('<iframe title="Payment" src="/redirect"></iframe>');
+});
+const browser = await chromium.launch({ headless: true });
+try {
+  const page = await browser.newPage();
+  await page.goto(`http://127.0.0.1:${preview.address().port}`);
+  await page.waitForLoadState("networkidle");
+  const redirected = await crossOriginFrameLocators(page);
+  assert.equal(redirected.length, 1, "committed cross-origin redirect is included in the mask");
+  assert.match(await redirected[0].getAttribute("data-sonik-capture-cross-origin"), /^frame-/);
+  assert.equal((await page.screenshot({ mask: redirected })).subarray(1, 4).toString("ascii"), "PNG", "committed-frame locators are valid screenshot masks");
+} finally {
+  await browser.close();
+  await Promise.all([new Promise((resolve) => preview.close(resolve)), new Promise((resolve) => foreign.close(resolve))]);
+}
 
 console.log("dev-workbench Playwright visual context provider: ok");

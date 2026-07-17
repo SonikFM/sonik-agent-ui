@@ -36,4 +36,6 @@ test("visual source controls remain native, distinct, and compact", () => {
   assert.match(component, /onSetupVisualBrowser/);
   assert.match(component, /onPairVisualExtension/);
   assert.doesNotMatch(component, /role="radio"/, "the native select owns keyboard behavior without a custom radio implementation");
+  assert.match(component, /disabled=\{!actions\.captureVisualContext\.enabled\}[\s\S]*?aria-describedby=\{!actions\.captureVisualContext\.enabled \? "workbench-action-readiness" : undefined\}/);
+  assert.match(component, /disabled=\{!actions\.setupVisualBrowser\.enabled\}[\s\S]*?aria-describedby=\{!actions\.setupVisualBrowser\.enabled \? "workbench-action-readiness" : undefined\}/);
 });
