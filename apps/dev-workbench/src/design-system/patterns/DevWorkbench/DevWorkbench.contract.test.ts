@@ -20,4 +20,9 @@ test("capability reports actual terminal and preview readiness", () => {
   const ready = createDevWorkbenchCapability(devWorkbenchReadyFixture);
   assert.equal(ready.assertions.terminalReady, true);
   assert.equal(ready.assertions.previewReady, true);
+  assert.equal(ready.assertions.visualSourceDiscovered, true);
+  assert.equal(devWorkbenchReadyFixture.actions.captureSnapshot.enabled, true, "page-context sync remains independent");
+  assert.equal(devWorkbenchReadyFixture.actions.pickVisualTarget.enabled, true);
+  assert.equal(devWorkbenchReadyFixture.actions.captureVisualContext.enabled, true);
+  assert.match(devWorkbenchReadyFixture.actions.pairVisualExtension.disabledReason ?? "", /Host source/);
 });

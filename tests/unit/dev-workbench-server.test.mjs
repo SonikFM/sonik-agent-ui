@@ -10,6 +10,7 @@ import {
   repositoryManifestSchema,
   terminalConnectionDescriptorSchema,
   workspaceContextSyncSchema,
+  workbenchVisualContextStateSchema,
 } from "../../apps/dev-workbench/src/lib/contracts/workbench.ts";
 import {
   createDevWindowRefreshPlan,
@@ -25,6 +26,8 @@ import { authorizeDevWorkbenchRequest } from "../../apps/dev-workbench/src/lib/s
 import { devWorkbenchSessionCookieOptions } from "../../apps/dev-workbench/src/lib/server/session-cookie.ts";
 import {
   createEmbeddedPreviewUrl,
+  defaultVisualSourceId,
+  discoverVisualSources,
   isAgentHostActionRequestMessage,
   isAgentHostActionResultMessage,
   isAgentHostPageContextMessage,
@@ -43,6 +46,32 @@ const repository = repositoryManifestSchema.parse({
   commands: DEFAULT_REPOSITORY_COMMANDS,
 });
 assert.equal(DEV_WORKBENCH_PERSISTENT, true, "developer workspaces retain one provider-managed snapshot for reconnects");
+
+const visualSources = discoverVisualSources({
+  previewUrl: "https://preview.example.test/?private=ignored",
+  previewRoute: "/reservations?token=ignored",
+  hostOrigin: "https://booking.example.test/private?ignored=true",
+  hostRoute: "/booking/42?secret=ignored",
+});
+assert.deepEqual(visualSources, [
+  { id: "preview", label: "Preview", surface: "workbench-preview", route: "/reservations" },
+  { id: "host", label: "Host · booking.example.test", surface: "embedded-host", route: "/booking/42" },
+]);
+assert.equal(defaultVisualSourceId(visualSources), "preview", "Preview is the safe controlled default when both sources exist");
+assert.equal(defaultVisualSourceId(visualSources.slice(1)), "host");
+assert.doesNotThrow(() => workbenchVisualContextStateSchema.parse({
+  sources: visualSources,
+  selectedSourceId: "preview",
+  sourceContextRevision: 2,
+  routeRevision: 3,
+  status: "invalidated",
+  statusMessage: "Route changed.",
+  staleReason: "route-changed",
+}));
+assert.throws(() => workbenchVisualContextStateSchema.parse({
+  sources: visualSources.slice(0, 1), selectedSourceId: "host", sourceContextRevision: 0, routeRevision: 0,
+  status: "idle", statusMessage: null, staleReason: null,
+}), /must be discovered/);
 
 assert.throws(
   () => repositoryManifestSchema.parse({ ...repository, cloneUrl: "https://token@github.com/private/repo.git" }),
