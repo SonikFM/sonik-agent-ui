@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   VISUAL_CONTEXT_PATH,
+  createVisualContextLeaseAcquireScript,
   decodeCanonicalBase64,
   invalidatedVisualContextSnapshot,
   isStaleVisualContextResult,
@@ -12,6 +17,7 @@ import {
   visualContextSnapshotFromResult,
   visualContextSubmissionSchema,
 } from "../../apps/dev-workbench/src/lib/server/visual-context-coordinator.ts";
+import { removeVisualContextTemporaryPath } from "../../apps/dev-workbench/src/lib/server/workspace-service.ts";
 import { createDevWorkbenchBootstrapPlan } from "../../apps/dev-workbench/src/lib/server/bootstrap-plan.ts";
 import {
   DEFAULT_REPOSITORY_COMMANDS,
@@ -97,6 +103,37 @@ const repository = repositoryManifestSchema.parse({
 const plan = createDevWorkbenchBootstrapPlan({ sessionId: "workspace-1", repository });
 assert.equal(plan.windows.every((window) => window.command.includes(`SONIK_VISUAL_CONTEXT_PATH=${VISUAL_CONTEXT_PATH}`)), true);
 
+const leaseRoot = await mkdtemp(join(tmpdir(), "sonik-visual-lease-"));
+try {
+  const leasePath = join(leaseRoot, "lease");
+  const runLease = async (owner) => {
+    const command = ["-lc", createVisualContextLeaseAcquireScript(2, 0.01), "_", leasePath, owner, String(Date.now() + 60_000)];
+    try {
+      await promisify(execFile)("bash", command);
+      return 0;
+    } catch (error) {
+      return error.code;
+    }
+  };
+  const outcomes = await Promise.all([runLease("owner-a"), runLease("owner-b")]);
+  assert.deepEqual(outcomes.toSorted(), [0, 75], "exactly one contender atomically acquires an initialized lease");
+  assert.match(await readFile(leasePath, "utf8"), /^owner-[ab]\n\d+\n$/, "published leases always contain owner and expiry metadata");
+  await writeFile(leasePath, "incomplete\n");
+  await utimes(leasePath, new Date(0), new Date(0));
+  assert.equal(await runLease("owner-recovery"), 0, "bounded stale recovery replaces abandoned invalid metadata");
+} finally {
+  await rm(leaseRoot, { recursive: true, force: true });
+}
+
+const cleanupCommands = [];
+await removeVisualContextTemporaryPath({
+  async runCommand(command) {
+    cleanupCommands.push(command);
+    return { exitCode: 0 };
+  },
+}, result.screenshot.temporaryPath);
+assert.deepEqual(cleanupCommands, [{ cmd: "rm", args: ["-f", result.screenshot.temporaryPath] }], "lease failure cleanup deletes the request-scoped PNG");
+
 const [routeSource, serviceSource, hookSource] = await Promise.all([
   readFile("apps/dev-workbench/src/routes/api/workspaces/visual-context/+server.ts", "utf8"),
   readFile("apps/dev-workbench/src/lib/server/workspace-service.ts", "utf8"),
@@ -107,7 +144,7 @@ assert.match(routeSource, /DEV_WORKBENCH_SESSION_COOKIE/, "the endpoint requires
 assert.match(hookSource, /authorizeDevWorkbenchRequest/, "global Basic Auth covers the endpoint");
 assert.match(serviceSource, /workspaceSessionId !== sessionId/, "the submitted workspace must match the cookie session");
 assert.match(serviceSource, /record\.sessionId === sessionId/, "the cookie session must match the persisted workspace record");
-assert.match(serviceSource, /if mkdir \"\$lease\"/, "lease acquisition uses atomic mkdir rather than an in-memory lock");
+assert.match(serviceSource, /createVisualContextLeaseAcquireScript/, "lease acquisition uses the executable atomic publication helper");
 assert.match(serviceSource, /sed -n '1p'.*\$owner/s, "only the current lease owner can release it");
 assert.match(serviceSource, /mv \"\$manifest\" \"\$stable_manifest\"/, "the manifest is the stable commit marker");
 assert.match(serviceSource, /rm -f \"\$stable_png\"/, "invalidation removes latest.png");

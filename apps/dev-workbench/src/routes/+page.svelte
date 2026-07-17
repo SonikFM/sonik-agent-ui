@@ -6,6 +6,7 @@
     sanitizeAgentHostAuthorityDonation,
     sanitizeAgentHostPageContext,
   } from "@sonik-agent-ui/agent-embed";
+  import type { VisualContextRequest, VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
   import { onMount } from "svelte";
   import TerminalHost from "$lib/client/TerminalHost.svelte";
   import {
@@ -26,6 +27,7 @@
     createAgentPageContextRequest,
     createEmbeddedPreviewUrl,
     createVisualContextSubmission,
+    classifyVisualContextResult,
     defaultVisualSourceId,
     discoverVisualSources,
     isAgentHostActionRequestMessage,
@@ -35,6 +37,7 @@
     isVisualContextResultMessage,
     resolveEmbeddedHostColorScheme,
     resolveEmbeddedHostOrigin,
+    visualPickDisabledReason,
     type AgentHostPageContextMessage,
   } from "$lib/client/host-context-bridge";
 
@@ -59,7 +62,7 @@
   let visualStatusMessage = $state("Start a workspace to discover visual sources.");
   let visualStaleReason = $state<"source-changed" | "route-changed" | "navigation" | "cancelled" | "provider-lost" | null>(null);
   let visualActionFocus: HTMLElement | null = null;
-  let pendingVisualRequest: Record<string, unknown> | null = null;
+  let pendingVisualRequest: VisualContextRequest | null = null;
 
   const terminalOnly = $derived(page.url.searchParams.get("surface") === "terminal");
   const view = $derived<DevWorkbenchViewProps>(createView());
@@ -108,6 +111,7 @@
       ? selectedVisualSourceId
       : defaultVisualSourceId(visualSources);
     const sourceUnavailable = visualSourceId ? null : "No Preview or Host visual source is connected.";
+    const pickDisabledReason = visualPickDisabledReason(visualSourceId);
     const terminalReason = terminalReady
       ? null
       : terminalState === "connecting"
@@ -179,8 +183,8 @@
         captureSnapshot: operation === "idle"
           ? { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
-        pickVisualTarget: sourceUnavailable
-          ? { enabled: false, disabledReason: sourceUnavailable }
+        pickVisualTarget: pickDisabledReason
+          ? { enabled: false, disabledReason: pickDisabledReason }
           : { enabled: true, disabledReason: null },
         captureVisualContext: sourceUnavailable
           ? { enabled: false, disabledReason: sourceUnavailable }
@@ -336,28 +340,26 @@
     if (isAgentHostActionRequestMessage(event.data) && embeddedHostOrigin) {
       window.parent.postMessage(event.data, embeddedHostOrigin);
     }
-    if (isVisualContextResultMessage(event.data)) finishVisualOperation(event.data);
   }
 
-  function finishVisualOperation(value: unknown): void {
-    const record = value as Record<string, unknown>;
-    if (!pendingVisualRequest || record.requestId !== pendingVisualRequest.requestId
-      || record.sourceContextRevision !== sourceContextRevision
-      || record.routeRevision !== routeRevision
-      || (record.source as { id?: unknown } | undefined)?.id !== view.visualContext.selectedSourceId) {
+  function finishVisualOperation(result: VisualContextResult): void {
+    const source = discoveredVisualSources().find((candidate) => candidate.id === view.visualContext.selectedSourceId) ?? null;
+    const classification = classifyVisualContextResult({ pending: pendingVisualRequest, result, sourceContextRevision, routeRevision, source });
+    if (classification === "ignore") return;
+    if (classification === "invalidate") {
       invalidateVisualContext("navigation", "A stale visual result was discarded after the source changed.");
       return;
     }
-    const request = pendingVisualRequest;
+    const request = pendingVisualRequest!;
     pendingVisualRequest = null;
-    const completed = record.status === "completed";
-    visualStatus = completed ? "idle" : record.status === "cancelled" ? "invalidated" : "error";
-    visualStaleReason = record.status === "cancelled" ? "cancelled" : null;
-    visualStatusMessage = completed ? "Visual target selected." : typeof record.disabledReason === "string" ? record.disabledReason : "Visual operation ended.";
+    const completed = result.status === "completed";
+    visualStatus = completed ? "idle" : result.status === "cancelled" ? "invalidated" : "error";
+    visualStaleReason = result.status === "cancelled" ? "cancelled" : null;
+    visualStatusMessage = completed ? "Visual target selected." : result.disabledReason ?? "Visual operation ended.";
     announcement = visualStatusMessage;
     visualActionFocus?.focus();
     visualActionFocus = null;
-    if (workspace) void submitVisualResult(request, record);
+    if (workspace) void submitVisualResult(request, result);
   }
 
   function snapshotPageContext() {
@@ -405,9 +407,9 @@
   function pickVisualTarget(): WorkbenchSemanticActionResult {
     if (!view.actions.pickVisualTarget.enabled) return unavailable("pickVisualTarget");
     const source = discoveredVisualSources().find((candidate) => candidate.id === view.visualContext.selectedSourceId);
-    const target = source?.id === "host" ? window.parent : previewFrame()?.contentWindow;
-    const origin = source?.id === "host" ? embeddedHostOrigin : currentPreviewOrigin();
-    if (!source || !target || !origin) return unavailableAction("The selected visual source cannot receive picker requests.");
+    if (source?.id !== "host" || !embeddedHostOrigin || !workbenchOrigin || window.parent === window) {
+      return unavailableAction(visualPickDisabledReason(source?.id ?? null) ?? "The Host source cannot receive picker requests.");
+    }
     visualActionFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     visualStatus = "picking";
     visualStaleReason = null;
@@ -417,7 +419,7 @@
       requestId: crypto.randomUUID(), operation: "pick", origin: workbenchOrigin,
       sourceContextRevision, routeRevision, source, provider: "host",
     };
-    target.postMessage(pendingVisualRequest, origin);
+    window.parent.postMessage(pendingVisualRequest, embeddedHostOrigin);
     return accepted(visualStatusMessage);
   }
 
@@ -433,7 +435,7 @@
 
   function pairVisualExtension(): WorkbenchSemanticActionResult {
     if (!view.actions.pairVisualExtension.enabled) return unavailable("pairVisualExtension");
-    if (!embeddedHostOrigin || window.parent === window) return unavailableAction("The embedded Host cannot receive extension pairing requests.");
+    if (!embeddedHostOrigin || !workbenchOrigin || window.parent === window) return unavailableAction("The embedded Host cannot receive extension pairing requests.");
     const source = discoveredVisualSources().find((candidate) => candidate.id === "host");
     if (!source) return unavailableAction("Host source is not connected.");
     pendingVisualRequest = {
@@ -445,7 +447,7 @@
     return accepted("Active-tab extension pairing requested.");
   }
 
-  async function submitVisualResult(request: Record<string, unknown>, result: Record<string, unknown>): Promise<void> {
+  async function submitVisualResult(request: VisualContextRequest, result: VisualContextResult): Promise<void> {
     if (!workspace) return;
     try {
       const response = await fetch("/api/workspaces/visual-context", {

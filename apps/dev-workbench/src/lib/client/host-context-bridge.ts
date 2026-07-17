@@ -1,3 +1,11 @@
+import {
+  visualContextRequestSchema,
+  visualContextResultSchema,
+  type VisualContextRequest,
+  type VisualContextResult,
+  type VisualContextSource,
+} from "@sonik-agent-ui/tool-contracts/visual-context";
+
 export const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST = "sonik:agent-ui:request-page-context";
@@ -119,20 +127,48 @@ export function defaultVisualSourceId(sources: readonly DiscoveredVisualSource[]
   return sources.some((source) => source.id === "host") ? "host" : sources[0]?.id ?? null;
 }
 
-export function isVisualContextResultMessage(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return record.messageSource === SONIK_VISUAL_CONTEXT_RESULT_SOURCE
-    && record.type === SONIK_VISUAL_CONTEXT_RESULT
-    && record.version === "sonik.visual-context.v1";
+export function isVisualContextResultMessage(value: unknown): value is VisualContextResult {
+  return visualContextResultSchema.safeParse(value).success;
 }
 
 export function createVisualContextSubmission(
   workspaceSessionId: string,
-  request: Record<string, unknown>,
-  result: Record<string, unknown>,
+  request: VisualContextRequest,
+  result: VisualContextResult,
 ) {
   return { workspaceSessionId, request, result } as const;
+}
+
+export function visualPickDisabledReason(sourceId: "preview" | "host" | null): string | null {
+  if (!sourceId) return "No Preview or Host visual source is connected.";
+  return sourceId === "host" ? null : "Element picking is available only for a connected Host source.";
+}
+
+export function classifyVisualContextResult(input: {
+  pending: VisualContextRequest | null;
+  result: VisualContextResult;
+  sourceContextRevision: number;
+  routeRevision: number;
+  source: VisualContextSource | null;
+}): "accept" | "ignore" | "invalidate" {
+  if (!input.pending || input.result.requestId !== input.pending.requestId) return "ignore";
+  const pending = visualContextRequestSchema.safeParse(input.pending);
+  if (!pending.success
+    || input.result.operation !== pending.data.operation
+    || input.result.origin !== pending.data.origin
+    || input.result.provider !== pending.data.provider
+    || input.result.sourceContextRevision !== pending.data.sourceContextRevision
+    || input.result.routeRevision !== pending.data.routeRevision
+    || !sameVisualSource(input.result.source, pending.data.source)
+    || input.sourceContextRevision !== pending.data.sourceContextRevision
+    || input.routeRevision !== pending.data.routeRevision
+    || !input.source
+    || !sameVisualSource(input.source, pending.data.source)) return "invalidate";
+  return "accept";
+}
+
+function sameVisualSource(left: VisualContextSource, right: VisualContextSource): boolean {
+  return left.id === right.id && left.label === right.label && left.surface === right.surface && left.route === right.route;
 }
 
 export function isOriginAllowed(origin: string, allowlist?: string): boolean {
