@@ -20,7 +20,7 @@
       clearOverlays();
       const redactionsApplied = [];
       for (const element of document.querySelectorAll("[data-sonik-capture-chrome]")) {
-        if (!(element instanceof HTMLElement)) continue;
+        if (!element?.style || typeof element.getAttribute !== "function") continue;
         state.captureChrome.push({ element, style: element.getAttribute("style") });
         element.style.setProperty("visibility", "hidden", "important");
       }
