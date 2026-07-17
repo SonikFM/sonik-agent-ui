@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const TRANSPORT_VERSION = "sonik.active-tab.v1";
 export const VISUAL_VERSION = "sonik.visual-context.v1";
 

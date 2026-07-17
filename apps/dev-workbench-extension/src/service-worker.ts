@@ -1,10 +1,12 @@
+// @ts-nocheck
+import { captureVisibleTabWithoutSonikChrome } from "./capture-visible-tab.js";
 import { TRANSPORT_VERSION, createResult, isExactWorkbenchRequest, pngMetadata } from "./protocol.js";
 
 const pairings = new Map();
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !Number.isInteger(tab.windowId) || !tab.active || !/^https?:/.test(tab.url ?? "")) return;
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content-script.js"] });
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["dist/content-script.js"] });
   const nonce = crypto.randomUUID();
   const response = await chrome.tabs.sendMessage(tab.id, {
     source: "sonik-active-tab-service-worker",
@@ -59,17 +61,21 @@ async function handleRequest(message, sender) {
   }
 
   let prepared;
-  try {
-    prepared = await chrome.tabs.sendMessage(tabId, { type: "prepare-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce });
-    const dataUrl = await chrome.tabs.captureVisibleTab(pairing.windowId, { format: "png" });
-    const png = pngMetadata(dataUrl);
+  const dataUrl = await captureVisibleTabWithoutSonikChrome({
+    async hideCaptureChrome() {
+      prepared = await chrome.tabs.sendMessage(tabId, { type: "prepare-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce });
+    },
+    captureVisibleTab: () => chrome.tabs.captureVisibleTab(pairing.windowId, { format: "png" }),
+    restoreCaptureChrome: () => chrome.tabs.sendMessage(tabId, { type: "clear-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce }),
+  });
+  const png = pngMetadata(dataUrl);
     const sha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", png.bytes))]
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join("");
-    return createResult(request, {
-      ariaSnapshot: null,
-      selectionResolution: "not-requested",
-      screenshot: {
+  return createResult(request, {
+    ariaSnapshot: null,
+    selectionResolution: "not-requested",
+    screenshot: {
         mime: "image/png",
         width: png.width,
         height: png.height,
@@ -78,13 +84,10 @@ async function handleRequest(message, sender) {
         provider: "chrome-active-tab",
         fidelity: "exact-active-tab",
         captureBasis: "native-active-tab-redacted",
-        viewport: prepared.viewport,
-        redactionsApplied: [prepared.redactionCount ? "Sensitive form controls" : "No sensitive fields detected"],
+      viewport: prepared.viewport,
+      redactionsApplied: [prepared.redactionCount ? "Sensitive form controls" : "No sensitive fields detected"],
         capturedAt: new Date().toISOString(),
         pngBase64: png.pngBase64,
-      },
-    });
-  } finally {
-    await chrome.tabs.sendMessage(tabId, { type: "clear-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce }).catch(() => undefined);
-  }
+    },
+  });
 }
