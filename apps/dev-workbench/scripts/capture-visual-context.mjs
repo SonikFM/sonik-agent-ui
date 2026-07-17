@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFile, rm } from "node:fs/promises";
+import { access, readFile, rm } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
@@ -158,40 +158,53 @@ export async function captureVisualContext(request, options = {}) {
   }
 }
 
-async function browserCapabilities(request) {
+export async function probeBrowserCapabilities(options = {}) {
+  const browserApi = options.chromium ?? chromium;
+  const accessFile = options.access ?? access;
+  const setupCapability = { operation: "setup-browser", status: "available", provider: "playwright" };
+  try {
+    await accessFile(browserApi.executablePath());
+  } catch {
+    return [
+      { operation: "capture", status: "unavailable", provider: "playwright", disabledReason: "Chromium is not installed in this workspace." },
+      setupCapability,
+    ];
+  }
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
-    return resultFor(request, {
-      status: "completed",
-      capabilities: [
-        { operation: "capture", status: "available", provider: "playwright" },
-        { operation: "setup-browser", status: "available", provider: "playwright" },
-      ],
-    });
+    browser = await browserApi.launch({ headless: true });
+    return [{ operation: "capture", status: "available", provider: "playwright" }, setupCapability];
   } catch {
-    return resultFor(request, {
-      status: "completed",
-      capabilities: [
-        { operation: "capture", status: "unavailable", provider: "playwright", disabledReason: "Chromium is not installed in this workspace." },
-        { operation: "setup-browser", status: "available", provider: "playwright" },
-      ],
-    });
+    return [
+      { operation: "capture", status: "failed", provider: "playwright", disabledReason: "Chromium is installed but could not launch." },
+      setupCapability,
+    ];
   } finally {
     await browser?.close().catch(() => undefined);
   }
 }
 
-async function setupBrowser(request) {
-  const exitCode = await new Promise((resolveExit) => {
+async function installChromium() {
+  return new Promise((resolveExit) => {
     const child = spawn("pnpm", ["exec", "playwright", "install", "chromium"], { stdio: ["ignore", "ignore", "pipe"] });
     child.stderr.on("data", (chunk) => process.stderr.write(chunk));
     child.on("error", () => resolveExit(1));
     child.on("close", (code) => resolveExit(code ?? 1));
   });
-  return resultFor(request, exitCode === 0
-    ? { status: "completed" }
-    : { status: "failed", disabledReason: "Chromium setup failed in this workspace." });
+}
+
+async function browserCapabilities(request) {
+  return resultFor(request, { status: "completed", capabilities: await probeBrowserCapabilities() });
+}
+
+export async function setupBrowser(request, options = {}) {
+  const exitCode = await (options.install ?? installChromium)();
+  const capabilities = await (options.probe ?? probeBrowserCapabilities)();
+  if (exitCode !== 0) return resultFor(request, { status: "failed", disabledReason: "Chromium setup failed in this workspace.", capabilities });
+  const capture = capabilities.find((capability) => capability.operation === "capture");
+  return resultFor(request, capture?.status === "available"
+    ? { status: "completed", capabilities }
+    : { status: "failed", disabledReason: capture?.disabledReason ?? "Chromium setup could not be verified.", capabilities });
 }
 
 async function main() {
@@ -206,7 +219,12 @@ async function main() {
     process.stdout.write(JSON.stringify(result));
   } catch (error) {
     if (request) {
-      process.stdout.write(JSON.stringify(resultFor(request, { status: "failed", disabledReason: "Controlled Preview capture failed." })));
+      const disabledReason = request.operation === "setup-browser"
+        ? "Chromium setup failed in this workspace."
+        : request.operation === "get-capabilities"
+          ? "Browser capabilities could not be checked."
+          : "Controlled Preview capture failed.";
+      process.stdout.write(JSON.stringify(resultFor(request, { status: "failed", disabledReason })));
       return;
     }
     console.error(error instanceof Error ? error.message : "Invalid visual context request.");

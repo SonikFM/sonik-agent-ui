@@ -4,6 +4,7 @@ import {
   capturePlaywrightVisualContext,
   playwrightVisualContextPaths,
 } from "../../apps/dev-workbench/src/lib/server/playwright-preview-capture.ts";
+import { probeBrowserCapabilities, setupBrowser } from "../../apps/dev-workbench/scripts/capture-visual-context.mjs";
 
 const request = {
   requestId: "capture-1",
@@ -60,11 +61,12 @@ await assert.rejects(() => capturePlaywrightVisualContext({
   },
   request,
   previewUrl: "https://preview.example.com",
-}), /capture failed/);
+}), /operation failed/);
 assert.deepEqual(failingCommands.slice(1).map((command) => command.args), [["-f", paths.screenshot]], "failure removes request-scoped pixels");
 
 for (const operation of ["get-capabilities", "setup-browser"]) {
-  const operationRequest = { ...request, requestId: `${operation}-1`, operation, ...(operation === "get-capabilities" ? { provider: undefined } : {}) };
+  const operationRequest = { ...request, requestId: `${operation}-1`, operation };
+  if (operation === "get-capabilities") delete operationRequest.provider;
   delete operationRequest.targetId;
   delete operationRequest.targetInstanceId;
   delete operationRequest.viewport;
@@ -82,5 +84,25 @@ for (const operation of ["get-capabilities", "setup-browser"]) {
   }), operationResult);
   assert.equal(operationCommands.length, 1, `${operation} does not create or clean screenshot metadata`);
 }
+
+const missingCapabilities = await probeBrowserCapabilities({ chromium: { executablePath: () => "/missing" }, access: async () => { throw new Error("missing"); } });
+assert.equal(missingCapabilities[0].status, "unavailable");
+assert.match(missingCapabilities[0].disabledReason, /not installed/);
+const launchFailedCapabilities = await probeBrowserCapabilities({ chromium: { executablePath: () => "/present", launch: async () => { throw new Error("launch"); } }, access: async () => {} });
+assert.equal(launchFailedCapabilities[0].status, "failed");
+assert.match(launchFailedCapabilities[0].disabledReason, /could not launch/);
+const availableCapabilities = await probeBrowserCapabilities({ chromium: { executablePath: () => "/present", launch: async () => ({ close: async () => {} }) }, access: async () => {} });
+assert.equal(availableCapabilities[0].status, "available");
+
+const setupRequest = { ...request, requestId: "setup-browser-result", operation: "setup-browser" };
+delete setupRequest.targetId;
+delete setupRequest.targetInstanceId;
+delete setupRequest.viewport;
+const setupSucceeded = await setupBrowser(setupRequest, { install: async () => 0, probe: async () => availableCapabilities });
+assert.equal(setupSucceeded.status, "completed");
+assert.equal(setupSucceeded.capabilities[0].status, "available");
+const setupFailed = await setupBrowser(setupRequest, { install: async () => 1, probe: async () => missingCapabilities });
+assert.equal(setupFailed.status, "failed");
+assert.equal(setupFailed.capabilities[0].status, "unavailable");
 
 console.log("dev-workbench Playwright visual context provider: ok");
