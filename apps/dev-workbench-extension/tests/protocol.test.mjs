@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createResult, isExactWorkbenchRequest, pngMetadata } from "../src/protocol.ts";
 
-const manifest = JSON.parse(await readFile("apps/dev-workbench-extension/manifest.json", "utf8"));
+const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
 assert.deepEqual(manifest.permissions, ["activeTab", "scripting"]);
 assert.equal("host_permissions" in manifest, false);
 
@@ -28,5 +28,8 @@ assert.deepEqual(
   { bytes: undefined, width: 2, height: 3, pngBase64: undefined },
 );
 assert.throws(() => pngMetadata("data:image/png;base64,bm90LXBuZw=="), /invalid PNG/);
+const oversized = Buffer.alloc(10 * 1024 * 1024 + 1);
+Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(oversized);
+assert.throws(() => pngMetadata(`data:image/png;base64,${oversized.toString("base64")}`), /10 MiB/);
 
 console.log("active-tab extension protocol: ok");

@@ -17,6 +17,7 @@
     if (!state.nonce || message?.nonce !== state.nonce || message.version !== "sonik.active-tab.v1") return;
     if (message.type === "prepare-capture") {
       clearOverlays();
+      const redactionsApplied = [];
       const selectors = "input[type=password],input[type=email],input[type=tel],[data-sonik-redact]";
       for (const element of document.querySelectorAll(selectors)) {
         const bounds = element.getBoundingClientRect();
@@ -29,8 +30,16 @@
         document.documentElement.append(overlay);
         state.overlays.push(overlay);
       }
+      if (state.overlays.length) redactionsApplied.push("Sensitive form controls");
+      const sensitiveCount = state.overlays.length;
+      for (const frame of document.querySelectorAll("iframe")) {
+        const bounds = frame.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0) continue;
+        addOverlay(bounds);
+      }
+      if (state.overlays.length > sensitiveCount) redactionsApplied.push("Embedded frame pixels");
       sendResponse({
-        redactionCount: state.overlays.length,
+        redactionsApplied,
         viewport: { width: window.innerWidth, height: window.innerHeight, deviceScaleFactor: window.devicePixelRatio },
       });
       return;
@@ -39,10 +48,6 @@
       clearOverlays();
       sendResponse({ ok: true });
       return;
-    }
-    if (message.type === "pick") {
-      void pickElement().then(sendResponse);
-      return true;
     }
   });
 
@@ -71,6 +76,7 @@
         const url = new URL(frame.src, location.href);
         if ((url.protocol === "http:" || url.protocol === "https:")
           && url.searchParams.get("agentUiHostOrigin") === location.origin
+          && frame.dataset.sonikDevWorkbenchOrigin === url.origin
           && frame.contentWindow) frames.set(frame.contentWindow, url.origin);
       } catch {
         // Ignore malformed and non-http iframe sources.
@@ -103,39 +109,13 @@
     state.overlays = [];
   }
 
-  function pickElement() {
-    return new Promise((resolve) => {
-      let highlighted = null;
-      const finish = (result) => {
-        highlighted?.style.removeProperty("outline");
-        removeEventListener("pointermove", move, true);
-        removeEventListener("click", click, true);
-        removeEventListener("keydown", keydown, true);
-        resolve(result);
-      };
-      const move = (event) => {
-        highlighted?.style.removeProperty("outline");
-        highlighted = event.target instanceof HTMLElement ? event.target : null;
-        highlighted?.style.setProperty("outline", "2px solid #7c3aed", "important");
-      };
-      const click = (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const element = event.target instanceof HTMLElement ? event.target : null;
-        const targetId = element?.dataset.sonikTargetId ?? element?.dataset.agentTargetId;
-        if (!element || !targetId) return finish({ disabledReason: "Selected element has no stable Sonik target id." });
-        const bounds = element.getBoundingClientRect();
-        const label = (element.getAttribute("aria-label") ?? element.innerText ?? targetId).trim().slice(0, 160) || targetId;
-        finish({ selection: {
-          targetId, label, role: element.getAttribute("role")?.slice(0, 160) || undefined,
-          accessibleName: label, bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, coordinateSpace: "viewport" },
-          selectedAt: new Date().toISOString(),
-        } });
-      };
-      const keydown = (event) => { if (event.key === "Escape") finish({ disabledReason: "Element picking was cancelled." }); };
-      addEventListener("pointermove", move, true);
-      addEventListener("click", click, true);
-      addEventListener("keydown", keydown, true);
+  function addOverlay(bounds) {
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed", left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, height: `${bounds.height}px`,
+      background: "#111", zIndex: "2147483647", pointerEvents: "none",
     });
+    document.documentElement.append(overlay);
+    state.overlays.push(overlay);
   }
 })();
