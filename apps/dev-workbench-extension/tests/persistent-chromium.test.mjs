@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import http from "node:http";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { chromium } from "playwright";
-
-const execFileAsync = promisify(execFile);
-class InconclusiveError extends Error {}
 
 const listen = (handler) => new Promise((resolve) => {
   const server = http.createServer(handler);
@@ -24,10 +19,6 @@ let context;
 
 try {
   await cp(new URL("..", import.meta.url), extension, { recursive: true });
-  const manifestPath = join(extension, "manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  manifest.commands = { _execute_action: { suggested_key: { default: "Ctrl+Shift+Y", mac: "Command+Shift+Y" } } };
-  await writeFile(manifestPath, JSON.stringify(manifest));
 
   workbench = await listen((_request, response) => response.end("<!doctype html><title>Workbench fixture</title>"));
   host = await listen((_request, response) => {
@@ -49,29 +40,16 @@ try {
   await page.goto(`${origin(host)}/booking`);
   await page.locator("iframe").waitFor();
   await page.bringToFront();
-  const worker = context.serviceWorkers()[0] ?? await context.waitForEvent("serviceworker");
-  const [actionCommand] = await worker.evaluate(() => chrome.commands.getAll());
-  assert.equal(actionCommand.name, "_execute_action");
-  assert.ok(actionCommand.shortcut);
-  const shortcut = actionCommand.shortcut
-    .replace("⇧", "Shift+").replace("⌘", "Meta+").replace("⌃", "Control+").replace("⌥", "Alt+")
-    .replace("Command", "Meta").replace("Ctrl", "Control");
-  if (process.platform === "darwin") {
-    try {
-      await execFileAsync("osascript", [
-        "-e", 'tell application "Google Chrome for Testing" to activate',
-        "-e", "delay 0.2",
-        "-e", 'tell application "System Events" to keystroke "y" using {command down, shift down}',
-      ]);
-    } catch (error) {
-      if (error?.stderr?.includes("not allowed to send keystrokes")) {
-        throw new InconclusiveError("macOS denied the OS-level _execute_action shortcut; no activeTab grant was faked.");
-      }
-      throw error;
-    }
-  } else {
-    await page.keyboard.press(shortcut);
-  }
+  const browser = context.browser();
+  assert.ok(browser, "Persistent Chromium exposes a browser CDP session");
+  const cdp = await browser.newBrowserCDPSession();
+  const { extensions } = await cdp.send("Extensions.getExtensions");
+  const loadedExtension = extensions.find((candidate) => candidate.name === "Sonik Exact Active Tab");
+  assert.ok(loadedExtension?.enabled, "Canonical unpacked extension is enabled");
+  const { targetInfos } = await cdp.send("Target.getTargets");
+  const bookingTarget = targetInfos.find((candidate) => candidate.type === "page" && candidate.url === `${origin(host)}/booking`);
+  assert.ok(bookingTarget, "Booking active-tab target is available");
+  await cdp.send("Extensions.triggerAction", { id: loadedExtension.id, targetId: bookingTarget.targetId });
   await page.waitForTimeout(500);
 
   const frame = page.frames().find((candidate) => candidate.url().startsWith(origin(workbench)));
@@ -114,9 +92,6 @@ try {
   await assert.doesNotReject(page.waitForFunction(() => ![...document.querySelectorAll("div")].some((element) => element.style.zIndex === "2147483647")));
 
   console.log("dev-workbench extension persistent Chromium active-tab capture: ok");
-} catch (error) {
-  if (error instanceof InconclusiveError) console.log(`dev-workbench extension persistent Chromium active-tab capture: INCONCLUSIVE — ${error.message}`);
-  else throw error;
 } finally {
   await context?.close().catch(() => undefined);
   await Promise.all([host, workbench].filter(Boolean).map((server) => new Promise((resolve) => server.close(resolve))));
