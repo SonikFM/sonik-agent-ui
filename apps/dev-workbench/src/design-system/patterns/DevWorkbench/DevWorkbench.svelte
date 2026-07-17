@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import "./DevWorkbench.css";
-  import type { DevWorkbenchCallbacks } from "./actions";
+  import { runEnabledAction, type DevWorkbenchCallbacks } from "./actions";
   import {
     DEFAULT_TERMINAL_LAYOUT,
     DEFAULT_TERMINAL_SIZE,
@@ -236,10 +236,10 @@
       <button
         class="dev-workbench__button dev-workbench__button--compact"
         type="button"
-        disabled={!actions.captureVisualContext.enabled}
+        aria-disabled={!actions.captureVisualContext.enabled}
         aria-describedby={!actions.captureVisualContext.enabled ? "workbench-action-readiness" : undefined}
         title={actions.captureVisualContext.disabledReason ?? "Capture visual context"}
-        onclick={() => onCaptureVisualContext?.()}
+        onclick={() => runEnabledAction(actions.captureVisualContext.enabled, onCaptureVisualContext)}
       >Capture</button>
       <button
         class="dev-workbench__button dev-workbench__button--primary"
@@ -256,10 +256,13 @@
         <div class="dev-workbench__overflow-menu" aria-label="More workspace actions">
           <button
             type="button"
-            disabled={!actions.setupVisualBrowser.enabled}
+            aria-disabled={!actions.setupVisualBrowser.enabled}
             aria-describedby={!actions.setupVisualBrowser.enabled ? "workbench-action-readiness" : undefined}
             title={actions.setupVisualBrowser.disabledReason ?? "Set up controlled browser capture"}
-            onclick={(event) => runMenuAction(event, onSetupVisualBrowser)}
+            onclick={(event) => runEnabledAction(
+              actions.setupVisualBrowser.enabled,
+              () => runMenuAction(event, onSetupVisualBrowser),
+            )}
           >
             Set up browser capture
           </button>
