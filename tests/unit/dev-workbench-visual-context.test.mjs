@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   VISUAL_CONTEXT_PATH,
   decodeCanonicalBase64,
@@ -12,6 +16,10 @@ import {
   visualContextSnapshotFromResult,
   visualContextSubmissionSchema,
 } from "../../apps/dev-workbench/src/lib/server/visual-context-coordinator.ts";
+import {
+  createVisualContextLeaseCommand,
+  removeVisualContextTemporaryPath,
+} from "../../apps/dev-workbench/src/lib/server/workspace-service.ts";
 import { createDevWorkbenchBootstrapPlan } from "../../apps/dev-workbench/src/lib/server/bootstrap-plan.ts";
 import {
   DEFAULT_REPOSITORY_COMMANDS,
@@ -96,6 +104,34 @@ const repository = repositoryManifestSchema.parse({
 });
 const plan = createDevWorkbenchBootstrapPlan({ sessionId: "workspace-1", repository });
 assert.equal(plan.windows.every((window) => window.command.includes(`SONIK_VISUAL_CONTEXT_PATH=${VISUAL_CONTEXT_PATH}`)), true);
+
+const leaseRoot = await mkdtemp(join(tmpdir(), "sonik-visual-lease-"));
+try {
+  const leasePath = join(leaseRoot, "lease");
+  const runLease = async (owner) => {
+    const command = createVisualContextLeaseCommand(leasePath, owner, Date.now() + 60_000, 2);
+    try {
+      await promisify(execFile)(command.cmd, command.args);
+      return 0;
+    } catch (error) {
+      return error.code;
+    }
+  };
+  const outcomes = await Promise.all([runLease("owner-a"), runLease("owner-b")]);
+  assert.deepEqual(outcomes.toSorted(), [0, 75], "exactly one contender atomically acquires an initialized lease");
+  assert.match(await readFile(leasePath, "utf8"), /^owner-[ab]\n\d+\n$/, "published leases always contain owner and expiry metadata");
+} finally {
+  await rm(leaseRoot, { recursive: true, force: true });
+}
+
+const cleanupCommands = [];
+await removeVisualContextTemporaryPath({
+  async runCommand(command) {
+    cleanupCommands.push(command);
+    return { exitCode: 0 };
+  },
+}, result.screenshot.temporaryPath);
+assert.deepEqual(cleanupCommands, [{ cmd: "rm", args: ["-f", result.screenshot.temporaryPath] }], "lease failure cleanup deletes the request-scoped PNG");
 
 const [routeSource, serviceSource, hookSource] = await Promise.all([
   readFile("apps/dev-workbench/src/routes/api/workspaces/visual-context/+server.ts", "utf8"),
