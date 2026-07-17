@@ -4,7 +4,18 @@ import {
   capturePlaywrightVisualContext,
   playwrightVisualContextPaths,
 } from "../../apps/dev-workbench/src/lib/server/playwright-preview-capture.ts";
-import { probeBrowserCapabilities, setupBrowser } from "../../apps/dev-workbench/scripts/capture-visual-context.mjs";
+import {
+  PLAYWRIGHT_PREVIEW_READINESS_RULE,
+  appliedRedactions,
+  probeBrowserCapabilities,
+  setupBrowser,
+} from "../../apps/dev-workbench/scripts/capture-visual-context.mjs";
+
+assert.equal(PLAYWRIGHT_PREVIEW_READINESS_RULE, "domcontentloaded+bounded-networkidle+document-fonts-ready");
+assert.deepEqual(appliedRedactions({ sensitiveCount: 0, declaredSensitiveCount: 0, crossOriginFrameCount: 0, rawAriaSnapshot: "- main", ariaSnapshot: "- main" }), []);
+assert.deepEqual(appliedRedactions({ sensitiveCount: 1, declaredSensitiveCount: 1, crossOriginFrameCount: 1, rawAriaSnapshot: "secret@example.com", ariaSnapshot: "[redacted email]" }), [
+  "sensitive form fields", "declared sensitive content", "cross-origin frames", "AI accessibility sensitive content", "AI accessibility text",
+]);
 
 const request = {
   requestId: "capture-1",
