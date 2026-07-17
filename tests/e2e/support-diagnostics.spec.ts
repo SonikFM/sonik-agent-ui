@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
-import { gotoFreshWorkspace, smokeUrl, submitPrompt } from "./support/dev-smoke";
+import { gotoFreshWorkspace, openChatActions, smokeUrl, submitPrompt } from "./support/dev-smoke";
 import { WORKSPACE_SESSION_ID_MAX_CHARS } from "../../apps/standalone-sveltekit/src/lib/server/workspace-route-limits";
 
 async function expectPanelInsideVisualViewport(page: import("@playwright/test").Page): Promise<void> {
@@ -22,6 +22,7 @@ for (const width of [480, 320]) {
   test(`support diagnostics stays usable inside a ${width}px visual viewport`, async ({ page }) => {
     await page.setViewportSize({ width, height: 260 });
     await gotoFreshWorkspace(page, smokeUrl(null, { embedMode: "chat" }));
+    await openChatActions(page);
 
     const details = page.locator("details.support-menu");
     const summary = details.locator("summary");

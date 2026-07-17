@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { embeddedHostUrl } from "./support/dev-smoke";
+import { embeddedHostUrl, openChatActions } from "./support/dev-smoke";
 import { AMPLIFY_CAMPAIGN_COMMAND_ID, installWorkflowBuilderHostFixture } from "./support/workflow-builder-host-fixture";
 
 const embedUrl = embeddedHostUrl();
@@ -14,6 +14,7 @@ test("embedded chat exposes Workflow Builder and refuses context-less builder cl
   });
 
   await page.goto(embedUrl, { waitUntil: "networkidle" });
+  await openChatActions(page);
   const builderButton = page.getByRole("button", { name: "Open the workflow builder" });
   await expect(builderButton).toBeVisible();
   const requestsBeforeBuilderMount = modelCatalogRequests;
@@ -59,6 +60,7 @@ test("signed Amplify grant drives visible preview, approval, and trusted commit 
     };
   });
 
+  await openChatActions(page);
   await page.getByRole("button", { name: "Open the workflow builder" }).click();
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByText("Draft saved.")).toBeVisible();
@@ -116,6 +118,7 @@ test("Run and Reset expose typed visible reasons while a workflow action is busy
     return target.__sonikAgentUI?.getPageContext?.().organizationId ?? null;
   })).toBe("11111111-1111-4111-8111-111111111111");
 
+  await openChatActions(page);
   await page.getByRole("button", { name: "Open the workflow builder" }).click();
   await page.getByRole("tab", { name: "Canvas" }).click();
   const runPanel = page.locator(`[data-workflow-run-panel="${AMPLIFY_CAMPAIGN_COMMAND_ID}"]`);
@@ -150,6 +153,7 @@ test("missing signed command grant exposes visible described-by reasons on disab
     return target.__sonikAgentUI?.getPageContext?.().organizationId ?? null;
   })).toBe("11111111-1111-4111-8111-111111111111");
 
+  await openChatActions(page);
   await page.getByRole("button", { name: "Open the workflow builder" }).click();
   await page.getByRole("tab", { name: "Canvas" }).click();
   const runPanel = page.locator(`[data-workflow-run-panel="${AMPLIFY_CAMPAIGN_COMMAND_ID}"]`);
