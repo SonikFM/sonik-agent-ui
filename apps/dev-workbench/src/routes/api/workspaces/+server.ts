@@ -5,7 +5,7 @@ import { readDevWorkbenchConfig } from "$lib/server/workbench-config";
 import { provisionWorkspace, reconnectWorkspace, stopWorkspace } from "$lib/server/workspace-service";
 import {
   DEV_WORKBENCH_SESSION_COOKIE,
-  DEV_WORKBENCH_SESSION_COOKIE_MAX_AGE_SECONDS,
+  devWorkbenchSessionCookieOptions,
 } from "$lib/server/session-cookie";
 
 const NO_STORE = { "cache-control": "no-store, max-age=0" };
@@ -18,7 +18,7 @@ export const GET: RequestHandler = async ({ cookies, request }) => {
   const configuration = readDevWorkbenchConfig(env);
   if (!configuration.ok) return json({ error: configuration.reason }, { status: 503, headers: NO_STORE });
 
-  const result = await reconnectWorkspace(sessionId, request.signal);
+  const result = await reconnectWorkspace(sessionId, configuration.value, request.signal);
   if (!result.ok) {
     if (!result.error.retryable) cookies.delete(DEV_WORKBENCH_SESSION_COOKIE, { path: "/" });
     return json({ error: result.error }, { status: result.error.retryable ? 502 : 404, headers: NO_STORE });
@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ cookies, request, url }) => {
 
   const existingSessionId = cookies.get(DEV_WORKBENCH_SESSION_COOKIE);
   if (existingSessionId) {
-    const existing = await reconnectWorkspace(existingSessionId, request.signal);
+    const existing = await reconnectWorkspace(existingSessionId, configuration.value, request.signal);
     if (existing.ok) return json({ workspace: existing.value }, { headers: NO_STORE });
     if (existing.error.retryable) return json({ error: existing.error }, { status: 502, headers: NO_STORE });
     cookies.delete(DEV_WORKBENCH_SESSION_COOKIE, { path: "/" });
@@ -43,13 +43,7 @@ export const POST: RequestHandler = async ({ cookies, request, url }) => {
   const result = await provisionWorkspace(configuration.value, request.signal);
   if (!result.ok) return json({ error: result.error }, { status: 502, headers: NO_STORE });
 
-  cookies.set(DEV_WORKBENCH_SESSION_COOKIE, result.value.sessionId, {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: url.protocol === "https:",
-    path: "/",
-    maxAge: DEV_WORKBENCH_SESSION_COOKIE_MAX_AGE_SECONDS,
-  });
+  cookies.set(DEV_WORKBENCH_SESSION_COOKIE, result.value.sessionId, devWorkbenchSessionCookieOptions(url));
   return json({ workspace: result.value }, { status: 201, headers: NO_STORE });
 };
 

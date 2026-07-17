@@ -11,6 +11,7 @@ import {
   terminalConnectionDescriptorSchema,
 } from "../../apps/dev-workbench/src/lib/contracts/workbench.ts";
 import {
+  createDevWindowRefreshPlan,
   createDevWorkbenchBootstrapPlan,
   createRuntimeRehydrationPlan,
 } from "../../apps/dev-workbench/src/lib/server/bootstrap-plan.ts";
@@ -20,6 +21,16 @@ import {
 } from "../../apps/dev-workbench/src/lib/server/repository-sitemap.ts";
 import { readDevWorkbenchConfig } from "../../apps/dev-workbench/src/lib/server/workbench-config.ts";
 import { authorizeDevWorkbenchRequest } from "../../apps/dev-workbench/src/lib/server/basic-auth.ts";
+import { devWorkbenchSessionCookieOptions } from "../../apps/dev-workbench/src/lib/server/session-cookie.ts";
+import {
+  createEmbeddedPreviewUrl,
+  isAgentHostActionRequestMessage,
+  isAgentHostActionResultMessage,
+  isAgentHostPageContextMessage,
+  resolveEmbeddedHostColorScheme,
+  resolveEmbeddedHostOrigin,
+} from "../../apps/dev-workbench/src/lib/client/host-context-bridge.ts";
+import { resolveAgentUiDevApiProxyTarget } from "../../apps/standalone-sveltekit/src/lib/server/dev-api-proxy.ts";
 
 const repository = repositoryManifestSchema.parse({
   schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
@@ -30,7 +41,7 @@ const repository = repositoryManifestSchema.parse({
   deployment: null,
   commands: DEFAULT_REPOSITORY_COMMANDS,
 });
-assert.equal(DEV_WORKBENCH_PERSISTENT, false, "the first slice must not retain unregistered sandbox snapshots");
+assert.equal(DEV_WORKBENCH_PERSISTENT, true, "developer workspaces retain one provider-managed snapshot for reconnects");
 
 assert.throws(
   () => repositoryManifestSchema.parse({ ...repository, cloneUrl: "https://token@github.com/private/repo.git" }),
@@ -122,10 +133,12 @@ const hostedPlan = createDevWorkbenchBootstrapPlan({
   sessionId: "session_123",
   repository,
   previewHost: "sb-example.vercel.run",
+  agentApiOrigin: "https://agent.example.com",
 });
-assert.deepEqual(hostedPlan.windows[1].command.slice(0, 2), [
+assert.deepEqual(hostedPlan.windows[1].command.slice(0, 3), [
   "env",
   "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=sb-example.vercel.run",
+  "SONIK_AGENT_UI_DEV_API_ORIGIN=https://agent.example.com",
 ]);
 assert.deepEqual(createRuntimeRehydrationPlan({ sessionId: "session_123", repository }).commands.map((command) => command.id), [
   "install-tmux",
@@ -134,6 +147,21 @@ assert.deepEqual(createRuntimeRehydrationPlan({ sessionId: "session_123", reposi
   "start-shell-window",
   "select-codex-window",
 ]);
+const devRefreshPlan = createDevWindowRefreshPlan({
+  sessionId: "session_123",
+  repository,
+  previewHost: "sb-example.vercel.run",
+  agentApiOrigin: "https://agent.example.com",
+});
+assert.deepEqual(devRefreshPlan.commands.map((command) => command.id), [
+  "kill-dev-window",
+  "restart-dev-window",
+]);
+assert.equal(
+  devRefreshPlan.commands[1].args.join(" ").includes("SONIK_AGENT_UI_DEV_API_ORIGIN=https://agent.example.com"),
+  true,
+  "preview-only refreshes must adopt the trusted API proxy without terminating the Codex tmux window",
+);
 
 const terminal = terminalConnectionDescriptorSchema.parse({
   kind: "terminal",
@@ -194,7 +222,49 @@ assert.equal(configured.ok, true);
 if (configured.ok) {
   assert.equal(configured.value.repository.repositoryId, "github.com.sonikfm.sonik-agent-ui");
   assert.deepEqual(configured.value.repository.commands.codex, ["npx", "--yes", "@openai/codex@0.144.5"]);
+  assert.equal(configured.value.agentApiOrigin, "https://sonik-agent-ui.liam-trampota.workers.dev");
 }
+assert.deepEqual(devWorkbenchSessionCookieOptions(new URL("https://workbench.example.com")), {
+  httpOnly: true,
+  sameSite: "none",
+  secure: true,
+  partitioned: true,
+  path: "/",
+  maxAge: 30 * 24 * 60 * 60,
+});
+assert.equal(resolveAgentUiDevApiProxyTarget({}), null);
+assert.equal(resolveAgentUiDevApiProxyTarget({ SONIK_AGENT_UI_DEV_API_ORIGIN: "https://agent.example.com" }), "https://agent.example.com");
+assert.throws(() => resolveAgentUiDevApiProxyTarget({ SONIK_AGENT_UI_DEV_API_ORIGIN: "http://agent.example.com" }), /must use HTTPS/);
+
+const signedDonation = {
+  source: "sonik-agent-ui-host",
+  type: "sonik:agent-ui:page-context",
+  payload: { authenticated: true, organizationId: "org-1", signature: "opaque" },
+  sentAt: "2026-07-16T00:00:00.000Z",
+};
+assert.equal(isAgentHostPageContextMessage(signedDonation), true);
+assert.equal(resolveEmbeddedHostOrigin({
+  search: "?agentUiHostOrigin=https%3A%2F%2Fbooking.sonik.fm",
+  referrer: "https://booking.sonik.fm/settings",
+  allowlist: "https://*.sonik.fm",
+}), "https://booking.sonik.fm");
+assert.equal(resolveEmbeddedHostOrigin({
+  search: "?agentUiHostOrigin=https%3A%2F%2Fevil.example.com",
+  referrer: "https://evil.example.com/",
+  allowlist: "https://*.sonik.fm",
+}), null);
+assert.equal(resolveEmbeddedHostColorScheme("?colorScheme=dark"), "dark");
+assert.equal(resolveEmbeddedHostColorScheme("?colorScheme=light"), "light");
+assert.equal(resolveEmbeddedHostColorScheme("?colorScheme=sepia"), null);
+const embeddedPreview = new URL(createEmbeddedPreviewUrl({
+  previewUrl: "https://sandbox.vercel.run/",
+  workbenchOrigin: "https://workbench.vercel.app",
+  theme: "neumorphic-dark",
+}));
+assert.equal(embeddedPreview.searchParams.get("agentUiHostOrigin"), "https://workbench.vercel.app");
+assert.equal(embeddedPreview.searchParams.get("embedMode"), "workspace");
+assert.equal(isAgentHostActionRequestMessage({ source: "sonik-agent-ui", type: "sonik:agent-ui:action-request" }), true);
+assert.equal(isAgentHostActionResultMessage({ source: "sonik-agent-ui-host", type: "sonik:agent-ui:action-result" }), true);
 
 const authorization = `Basic ${Buffer.from("developer:correct horse battery staple").toString("base64")}`;
 assert.deepEqual(authorizeDevWorkbenchRequest({

@@ -158,7 +158,7 @@ test("approval actions stay bounded in a 480px floated sidecar on a wide viewpor
   await gotoFreshWorkspace(page, smokeUrl(null));
   await installReservationPreview(page);
 
-  const grip = page.locator(".chat-window__grip");
+  const grip = page.locator(".chat-window__drag-region");
   const gripBox = await grip.boundingBox();
   if (!gripBox) throw new Error("chat window grip was not measurable");
   await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2);

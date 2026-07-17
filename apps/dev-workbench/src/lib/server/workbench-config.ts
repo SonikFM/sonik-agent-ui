@@ -10,6 +10,7 @@ export type DevWorkbenchServerConfig = {
   organizationId: string;
   timeoutMs: number;
   repository: RepositoryManifest;
+  agentApiOrigin: string;
 };
 
 export type DevWorkbenchConfigResult =
@@ -18,6 +19,7 @@ export type DevWorkbenchConfigResult =
 
 const DEFAULT_TIMEOUT_MS = 45 * 60 * 1_000;
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
+const DEFAULT_AGENT_API_ORIGIN = "https://sonik-agent-ui.liam-trampota.workers.dev";
 
 export function readDevWorkbenchConfig(env: Record<string, string | undefined>): DevWorkbenchConfigResult {
   if (env.DEV_WORKBENCH_ENABLED !== "true") {
@@ -35,6 +37,10 @@ export function readDevWorkbenchConfig(env: Record<string, string | undefined>):
   if (timeoutMs === null) {
     return { ok: false, reason: "DEV_WORKBENCH_TIMEOUT_MS must be a positive integer no greater than 24 hours." };
   }
+  const agentApiOrigin = parseOrigin(env.DEV_WORKBENCH_AGENT_API_ORIGIN ?? DEFAULT_AGENT_API_ORIGIN);
+  if (!agentApiOrigin) {
+    return { ok: false, reason: "DEV_WORKBENCH_AGENT_API_ORIGIN must be an HTTPS origin without credentials or a path." };
+  }
 
   const repository = repositoryManifestSchema.safeParse({
     schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
@@ -51,8 +57,18 @@ export function readDevWorkbenchConfig(env: Record<string, string | undefined>):
 
   return {
     ok: true,
-    value: { enabled: true, organizationId, timeoutMs, repository: repository.data },
+    value: { enabled: true, organizationId, timeoutMs, repository: repository.data, agentApiOrigin },
   };
+}
+
+function parseOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
 }
 
 function parseTimeout(value: string | undefined): number | null {

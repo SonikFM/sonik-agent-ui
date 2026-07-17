@@ -44,10 +44,12 @@ export function createTmuxSessionName(sessionId: string): string {
   return `sonik-${safe}`.slice(0, 128);
 }
 
-export function createTmuxWindows(manifest: RepositoryManifest, previewHost?: string): TmuxWindow[] {
-  const devCommand = previewHost
-    ? ["env", `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${previewHost}`, ...manifest.commands.dev]
-    : manifest.commands.dev;
+export function createTmuxWindows(manifest: RepositoryManifest, previewHost?: string, agentApiOrigin?: string): TmuxWindow[] {
+  const environment = [
+    ...(previewHost ? [`__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${previewHost}`] : []),
+    ...(agentApiOrigin ? [`SONIK_AGENT_UI_DEV_API_ORIGIN=${agentApiOrigin}`] : []),
+  ];
+  const devCommand = environment.length > 0 ? ["env", ...environment, ...manifest.commands.dev] : manifest.commands.dev;
   return [
     { name: "codex", index: 0, command: manifest.commands.codex, workingDirectory: DEV_WORKBENCH_REPOSITORY_ROOT },
     { name: "dev", index: 1, command: devCommand, workingDirectory: DEV_WORKBENCH_REPOSITORY_ROOT },
@@ -59,10 +61,11 @@ export function createDevWorkbenchBootstrapPlan(input: {
   sessionId: string;
   repository: RepositoryManifest;
   previewHost?: string;
+  agentApiOrigin?: string;
 }): DevWorkbenchBootstrapPlan {
   const repository = repositoryManifestSchema.parse(input.repository);
   const tmuxSession = createTmuxSessionName(input.sessionId);
-  const windows = createTmuxWindows(repository, input.previewHost);
+  const windows = createTmuxWindows(repository, input.previewHost, input.agentApiOrigin);
   const commands: SandboxCommand[] = [
     {
       id: "install-tmux",
@@ -131,6 +134,7 @@ export function createRuntimeRehydrationPlan(input: {
   sessionId: string;
   repository: RepositoryManifest;
   previewHost?: string;
+  agentApiOrigin?: string;
 }): DevWorkbenchBootstrapPlan {
   const fullPlan = createDevWorkbenchBootstrapPlan(input);
   const runtimeCommandIds = new Set([
@@ -143,5 +147,27 @@ export function createRuntimeRehydrationPlan(input: {
   return devWorkbenchBootstrapPlanSchema.parse({
     ...fullPlan,
     commands: fullPlan.commands.filter((command) => runtimeCommandIds.has(command.id)),
+  });
+}
+
+export function createDevWindowRefreshPlan(input: {
+  sessionId: string;
+  repository: RepositoryManifest;
+  previewHost?: string;
+  agentApiOrigin?: string;
+}): DevWorkbenchBootstrapPlan {
+  const fullPlan = createDevWorkbenchBootstrapPlan(input);
+  const startDevWindow = fullPlan.commands.find((command) => command.id === "start-dev-window");
+  if (!startDevWindow) throw new Error("Dev Workbench bootstrap plan is missing the dev window command");
+  return devWorkbenchBootstrapPlanSchema.parse({
+    ...fullPlan,
+    commands: [
+      {
+        id: "kill-dev-window",
+        cmd: "tmux",
+        args: ["kill-window", "-t", `${fullPlan.tmuxSession}:dev`],
+      },
+      { ...startDevWindow, id: "restart-dev-window" },
+    ],
   });
 }

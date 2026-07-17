@@ -46,7 +46,7 @@
     "test:postgres-ordering": "node tests/integration/run-user-message-ordering.postgres.test.mjs",
     "test:postgres-session-deletion": "node tests/integration/session-delete-upload-race.postgres.test.mjs",
     "test:postgres-cloud-runs": "node --experimental-strip-types tests/integration/workspace-cloud-run-scope.postgres.test.mjs",
-    "test:workbench": "node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs tests/unit/dev-workbench-server.test.mjs && node --experimental-strip-types tests/unit/dev-workbench-interactive-protocol.test.mjs && node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs apps/dev-workbench/src/design-system/patterns/DevWorkbench/DevWorkbench.contract.test.ts"
+    "test:workbench": "node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs tests/unit/dev-workbench-server.test.mjs && node --experimental-strip-types tests/unit/dev-workbench-interactive-protocol.test.mjs && node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs apps/dev-workbench/src/design-system/patterns/DevWorkbench/layout-preference.test.ts && node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs apps/dev-workbench/src/design-system/patterns/DevWorkbench/DevWorkbench.contract.test.ts"
   },
   "packageManager": "pnpm@11.1.3",
   "engines": {

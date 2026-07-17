@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { env as publicEnv } from "$env/dynamic/public";
   import { onMount } from "svelte";
   import TerminalHost from "$lib/client/TerminalHost.svelte";
   import {
@@ -15,6 +16,17 @@
     type WorkbenchSemanticActionResult,
   } from "../design-system/patterns/DevWorkbench";
   import { unavailableAction, workbenchActionDescriptors } from "../design-system/patterns/DevWorkbench/actions";
+  import {
+    createAgentPageContextRequest,
+    createEmbeddedPreviewUrl,
+    isAgentHostActionRequestMessage,
+    isAgentHostActionResultMessage,
+    isAgentHostPageContextMessage,
+    isAgentPageContextRequestMessage,
+    resolveEmbeddedHostColorScheme,
+    resolveEmbeddedHostOrigin,
+    type AgentHostPageContextMessage,
+  } from "$lib/client/host-context-bridge";
 
   type Operation = "idle" | "resuming" | "starting" | "stopping";
   type TerminalState = "connecting" | "ready" | "error" | "closed";
@@ -25,6 +37,10 @@
   let activeDetail = $state<WorkbenchDetail>(devWorkbenchStartingFixture.activeDetail);
   let announcement = $state("");
   let visibleError = $state<string | null>(null);
+  let hostContextMessage = $state.raw<AgentHostPageContextMessage | null>(null);
+  let embeddedHostOrigin = $state<string | null>(null);
+  let workbenchOrigin = $state<string | null>(null);
+  let hostColorScheme = $state<"light" | "dark" | null>(null);
 
   const view = $derived<DevWorkbenchViewProps>(createView());
   const capability = $derived(createDevWorkbenchCapability(view));
@@ -90,7 +106,11 @@
       preview: workspace.preview
         ? {
             status: "ready",
-            url: workspace.preview.url,
+            url: createEmbeddedPreviewUrl({
+              previewUrl: workspace.preview.url,
+              workbenchOrigin,
+              theme: hostTheme(),
+            }),
             path: "/",
             viewportLabel: "Responsive preview",
             disabledReason: null,
@@ -136,16 +156,19 @@
   }
 
   function createPageContext() {
+    const donated = hostContextMessage?.payload;
+    const hostAuthenticated = donated?.authenticated === true;
+    const donatedOrganizationId = typeof donated?.organizationId === "string" ? donated.organizationId : null;
     return {
       schemaVersion: "1.0",
       route: "/",
       url: "/",
       title: view.title,
-      theme: "host",
+      theme: hostTheme() ?? "host",
       auth: {
-        signedIn: false,
-        organizationPresent: Boolean(workspace?.organizationId),
-        source: workspace ? "server-session" : "unavailable",
+        signedIn: hostAuthenticated,
+        organizationPresent: Boolean(donatedOrganizationId ?? workspace?.organizationId),
+        source: hostAuthenticated ? "host-donation" : workspace ? "server-session" : "unavailable",
       },
       domain: {
         repository: { ...view.repository },
@@ -161,6 +184,71 @@
       errors: visibleError ? [visibleError] : [],
       browserContextAuthority: "display-only",
     };
+  }
+
+  function hostTheme(): string | null {
+    const value = hostContextMessage?.payload.theme;
+    return typeof value === "string" && value.trim() ? value.trim().slice(0, 64) : null;
+  }
+
+  function previewFrame(): HTMLIFrameElement | null {
+    return document.querySelector<HTMLIFrameElement>("iframe.dev-workbench__preview-frame");
+  }
+
+  function currentPreviewOrigin(): string | null {
+    const url = view.preview.url;
+    if (!url) return null;
+    try {
+      return new URL(url).origin;
+    } catch {
+      return null;
+    }
+  }
+
+  function postHostContextToPreview(): void {
+    if (!hostContextMessage) return;
+    const frame = previewFrame();
+    const targetOrigin = currentPreviewOrigin();
+    if (!frame?.contentWindow || !targetOrigin) return;
+    frame.contentWindow.postMessage(hostContextMessage, targetOrigin);
+  }
+
+  function requestHostContext(reason: string): void {
+    if (!embeddedHostOrigin || window.parent === window) return;
+    window.parent.postMessage(createAgentPageContextRequest(reason), embeddedHostOrigin);
+  }
+
+  function handleBridgeMessage(event: MessageEvent): void {
+    if (event.source === window.parent && event.origin === embeddedHostOrigin) {
+      if (isAgentHostPageContextMessage(event.data)) {
+        hostContextMessage = event.data;
+        const theme = hostTheme();
+        if (theme) document.documentElement.dataset.hostTheme = theme;
+        announcement = "Booking session context connected.";
+        postHostContextToPreview();
+        window.setTimeout(postHostContextToPreview, 250);
+        if (workspace) void synchronizePageContext();
+        return;
+      }
+      if (isAgentHostActionResultMessage(event.data)) {
+        const frame = previewFrame();
+        const targetOrigin = currentPreviewOrigin();
+        if (frame?.contentWindow && targetOrigin) frame.contentWindow.postMessage(event.data, targetOrigin);
+      }
+      return;
+    }
+
+    const frame = previewFrame();
+    const previewOrigin = currentPreviewOrigin();
+    if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== previewOrigin) return;
+    if (isAgentPageContextRequestMessage(event.data)) {
+      if (hostContextMessage) postHostContextToPreview();
+      else requestHostContext("sandbox_preview_requested_context");
+      return;
+    }
+    if (isAgentHostActionRequestMessage(event.data) && embeddedHostOrigin) {
+      window.parent.postMessage(event.data, embeddedHostOrigin);
+    }
   }
 
   function snapshotPageContext() {
@@ -240,6 +328,7 @@
       workspace = next;
       terminalState = "connecting";
       announcement = "Workspace ready.";
+      if (hostContextMessage) void synchronizePageContext();
     }
     operation = "idle";
   }
@@ -247,7 +336,10 @@
   async function reconnectWorkspaceRequest(): Promise<void> {
     visibleError = null;
     const next = await requestWorkspace("GET");
-    if (next) workspace = next;
+    if (next) {
+      workspace = next;
+      if (hostContextMessage) void synchronizePageContext();
+    }
     else terminalState = "error";
   }
 
@@ -329,6 +421,19 @@
   }
 
   onMount(() => {
+    workbenchOrigin = window.location.origin;
+    hostColorScheme = resolveEmbeddedHostColorScheme(window.location.search);
+    if (hostColorScheme) {
+      document.documentElement.style.colorScheme = hostColorScheme;
+      document.documentElement.dataset.hostColorScheme = hostColorScheme;
+    }
+    embeddedHostOrigin = resolveEmbeddedHostOrigin({
+      search: window.location.search,
+      referrer: document.referrer,
+      allowlist: publicEnv.PUBLIC_DEV_WORKBENCH_ALLOWED_HOST_ORIGINS,
+    });
+    window.addEventListener("message", handleBridgeMessage);
+    requestHostContext("dev_workbench_mounted");
     void reconnectWorkspaceRequest().finally(() => { operation = "idle"; });
     const target = window as Window & { __sonikAgentUI?: unknown };
     const control = {
@@ -358,6 +463,7 @@
     };
     target.__sonikAgentUI = control;
     return () => {
+      window.removeEventListener("message", handleBridgeMessage);
       if (target.__sonikAgentUI === control) delete target.__sonikAgentUI;
     };
   });

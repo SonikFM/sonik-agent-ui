@@ -16,7 +16,11 @@ import {
   type SanitizedWorkbenchError,
   type TerminalConnectionDescriptor,
 } from "../contracts/workbench";
-import { createDevWorkbenchBootstrapPlan, createRuntimeRehydrationPlan } from "./bootstrap-plan";
+import {
+  createDevWindowRefreshPlan,
+  createDevWorkbenchBootstrapPlan,
+  createRuntimeRehydrationPlan,
+} from "./bootstrap-plan";
 import { createRepositorySitemapFromTrackedFiles } from "./repository-sitemap";
 import {
   createVercelDevWorkbenchSandbox,
@@ -48,6 +52,7 @@ export async function provisionWorkspace(
       sessionId,
       repository: config.repository,
       previewHost: sandboxPreviewHost(sandbox),
+      agentApiOrigin: config.agentApiOrigin,
     });
     const bootstrapped = await runVercelBootstrapPlan({ sandbox, plan, signal });
     if (!bootstrapped.ok) {
@@ -95,6 +100,7 @@ export async function provisionWorkspace(
 
 export async function reconnectWorkspace(
   sessionId: string,
+  config?: DevWorkbenchServerConfig,
   signal?: AbortSignal,
 ): Promise<WorkspaceServiceResult<DevWorkbenchSessionDescriptor>> {
   const resumed = await resumeVercelDevWorkbenchSandbox({ sessionId, signal });
@@ -104,7 +110,7 @@ export async function reconnectWorkspace(
     if (record.sessionId !== sessionId) {
       return { ok: false, error: workspaceError("sandbox_resume_failed", "session-mismatch", false) };
     }
-    const rehydrated = await rehydrateRuntime(resumed.value, record, signal);
+    const rehydrated = await rehydrateRuntime(resumed.value, record, config, signal);
     if (!rehydrated.ok) return rehydrated;
     const connections = await createVercelWorkbenchConnections({
       sandbox: resumed.value,
@@ -124,6 +130,7 @@ export async function reconnectWorkspace(
 async function rehydrateRuntime(
   sandbox: Sandbox,
   record: DevWorkbenchPersistenceRecord,
+  config?: DevWorkbenchServerConfig,
   signal?: AbortSignal,
 ): Promise<WorkspaceServiceResult<{ running: true }>> {
   const expectedWindows = new Set(["codex", "dev", "shell"]);
@@ -143,6 +150,36 @@ async function rehydrateRuntime(
   }
 
   if (hasExpectedWindows) {
+    const expectedAgentApiMarker = config?.agentApiOrigin
+      ? `SONIK_AGENT_UI_DEV_API_ORIGIN=${config.agentApiOrigin}`
+      : null;
+    let devWindowCurrent = expectedAgentApiMarker === null;
+    if (expectedAgentApiMarker) {
+      try {
+        const devPane = await sandbox.runCommand({
+          cmd: "tmux",
+          args: ["list-panes", "-t", `${record.tmuxSession}:dev`, "-F", "#{pane_start_command}"],
+          ...(signal ? { signal } : {}),
+        });
+        devWindowCurrent = devPane.exitCode === 0
+          && (await devPane.stdout(signal ? { signal } : undefined)).includes(expectedAgentApiMarker);
+      } catch {
+        devWindowCurrent = false;
+      }
+    }
+    if (!devWindowCurrent) {
+      const refreshPlan = createDevWindowRefreshPlan({
+        sessionId: record.sessionId,
+        repository: record.repository,
+        previewHost: sandboxPreviewHost(sandbox),
+        agentApiOrigin: config?.agentApiOrigin,
+      });
+      const refreshed = await runVercelBootstrapPlan({ sandbox, plan: refreshPlan, signal });
+      if (!refreshed.ok) return refreshed;
+      const healthy = await waitForVercelPreview({ sandbox, tmuxSession: record.tmuxSession, signal });
+      if (!healthy.ok) return healthy;
+      return { ok: true, value: { running: true } };
+    }
     const healthy = await waitForVercelPreview({ sandbox, tmuxSession: record.tmuxSession, signal });
     if (healthy.ok) return { ok: true, value: { running: true } };
   }
@@ -156,6 +193,7 @@ async function rehydrateRuntime(
     sessionId: record.sessionId,
     repository: record.repository,
     previewHost: sandboxPreviewHost(sandbox),
+    agentApiOrigin: config?.agentApiOrigin,
   });
   const restarted = await runVercelBootstrapPlan({ sandbox, plan: runtimePlan, signal });
   if (!restarted.ok) return restarted;

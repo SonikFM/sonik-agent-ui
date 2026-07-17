@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createWorkflowSuggestions } from "../../apps/standalone-sveltekit/src/lib/agent-workflows/suggestions.ts";
 
 const agentConversation = await readFile(new URL("../../packages/chat-surface/src/components/AgentConversation.svelte", import.meta.url), "utf8");
+const chatWindow = await readFile(new URL("../../packages/workspace-core/src/components/ChatWindow.svelte", import.meta.url), "utf8");
 const toolCallBlock = await readFile(new URL("../../packages/chat-surface/src/components/ToolCallBlock.svelte", import.meta.url), "utf8");
 const canvasToolbar = await readFile(new URL("../../packages/workspace-core/src/components/CanvasToolbar.svelte", import.meta.url), "utf8");
 const canvasViewport = await readFile(new URL("../../packages/workspace-core/src/components/CanvasViewport.svelte", import.meta.url), "utf8");
@@ -40,6 +41,15 @@ assert.match(agentConversation, /data-approval-action="preview"[\s\S]*data-appro
 assert.match(agentConversation, /data-approval-disabled-reason/);
 assert.match(agentConversation, /role="status"/);
 assert.match(agentConversation, /aria-describedby=\{approvalDisabledState \? APPROVAL_DISABLED_REASON_ID : undefined\}/);
+assert.match(agentConversation, /const componentId = \$props\.id\(\);[\s\S]*const actionsPopoverId = `\$\{componentId\}-actions`/, "chat actions popover IDs must remain unique across component instances and hydration");
+assert.match(agentConversation, /popovertarget=\{actionsPopoverId\}/, "secondary chat actions must use the native popover trigger contract");
+assert.match(agentConversation, /popover="auto"/, "secondary chat actions must render in the browser top layer so narrow and floating chat surfaces cannot clip them");
+assert.match(agentConversation, /data-testid="agent-chat-actions-popover"/, "the secondary action surface needs a stable focused-test seam");
+assert.equal(agentConversation.indexOf("New chat") < agentConversation.indexOf('data-testid="agent-chat-actions-popover"'), true, "New chat must remain a primary visible action before progressive-disclosure controls");
+assert.match(chatWindow, /class:chat-window__grip--floating=\{isFloating\}/, "floating chat chrome must expose its compact utility-strip state");
+assert.doesNotMatch(chatWindow, /chat-window__grip-label/, "ChatWindow must not repeat the inner conversation title");
+assert.match(chatWindow, /aria-label="Move chat window/, "keyboard move access must survive compact floating chrome");
+assert.match(chatWindow, /aria-label="Reset the chat window/, "reset access must survive compact floating chrome");
 assert.doesNotMatch(toolCallBlock, /<button\b|aria-disabled|\bdisabled=/, "ToolCallBlock has no disabled controls and needs no synthetic G011 affordance");
 assert.match(appPage, /createActiveIntakeApprovalAffordance/);
 assert.match(appPage, /handleTrustedIntakeControllerAction\("approveAndRun"/);

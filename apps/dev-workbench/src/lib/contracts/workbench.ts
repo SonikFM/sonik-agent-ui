@@ -224,7 +224,7 @@ export const pageContextMirrorSchema = z.object({
   auth: z.object({
     signedIn: z.boolean(),
     organizationPresent: z.boolean(),
-    source: z.enum(["server-session", "unavailable"]),
+    source: z.enum(["host-donation", "server-session", "unavailable"]),
   }).strict(),
   domain: z.object({
     repository: z.object({
