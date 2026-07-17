@@ -1,0 +1,12 @@
+import { chromium } from "playwright";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const extension = process.cwd() + "/apps/dev-workbench-extension";
+const profile = await mkdtemp(join(tmpdir(), "sonik-targets-"));
+const c = await chromium.launchPersistentContext(profile, { headless: false, executablePath: "/Users/danielletterio/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing", args: ["--disable-extensions-except=" + extension, "--load-extension=" + extension] });
+const p = await c.newPage();
+await p.goto("http://127.0.0.1:8765/");
+const s = await c.browser().newBrowserCDPSession();
+console.log(JSON.stringify(await s.send("Target.getTargets"), null, 2));
+await c.close();
