@@ -51,6 +51,9 @@ import {
   type VisualContextSubmission,
 } from "./visual-context-coordinator";
 import { visualContextSnapshotSchema, type VisualContextSnapshot } from "@sonik-agent-ui/tool-contracts/visual-context";
+import { capturePlaywrightPreview } from "./playwright-preview-capture";
+import { visualBrowserStateFromResult, type VisualBrowserState } from "../contracts/workbench";
+import { visualContextRequestSchema, type VisualContextRequest, type VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
 
 export type WorkspaceServiceResult<T> =
   | { ok: true; value: T }
@@ -315,6 +318,35 @@ export async function writeWorkspacePageContext(
     return { ok: true, value: { written: true, openApiWritten: openApiDocument !== null } };
   } catch {
     return { ok: false, error: workspaceError("unknown", "page-context-write", true) };
+  }
+}
+
+export async function runWorkspacePlaywrightVisualContext(
+  sessionId: string,
+  input: VisualContextRequest,
+  signal?: AbortSignal,
+): Promise<WorkspaceServiceResult<{ browser: VisualBrowserState; result: VisualContextResult; snapshot: VisualContextSnapshot | null }>> {
+  const request = visualContextRequestSchema.safeParse(input);
+  if (!request.success || request.data.provider !== "playwright") {
+    return { ok: false, error: workspaceError("unknown", "visual-context-validate", false) };
+  }
+  const resumed = await resumeVerifiedWorkspace(sessionId, signal);
+  if (!resumed.ok) return resumed;
+  try {
+    const result = await capturePlaywrightPreview({
+      sandbox: resumed.value,
+      request: request.data,
+      previewUrl: resumed.value.domain(DEV_WORKBENCH_PREVIEW_PORT),
+      signal,
+    });
+    if (request.data.operation !== "capture") {
+      return { ok: true, value: { browser: visualBrowserStateFromResult(result), result, snapshot: null } };
+    }
+    const submitted = await submitWorkspaceVisualContext(sessionId, { workspaceSessionId: sessionId, request: request.data, result }, signal);
+    if (!submitted.ok) return submitted;
+    return { ok: true, value: { browser: visualBrowserStateFromResult(result), result, snapshot: submitted.value.snapshot } };
+  } catch {
+    return { ok: false, error: workspaceError("unknown", "playwright-visual-context", true) };
   }
 }
 

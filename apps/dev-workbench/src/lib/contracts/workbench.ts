@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
 
 export const DEV_WORKBENCH_SCHEMA_VERSION = "sonik.dev-workbench.v1" as const;
 export const DEV_WORKBENCH_ROOT = "/vercel/sandbox/workspace" as const;
@@ -310,6 +311,32 @@ export const workbenchVisualContextStateSchema = z.object({
   }
 });
 export type WorkbenchVisualContextState = z.infer<typeof workbenchVisualContextStateSchema>;
+
+export const visualBrowserStateSchema = z.strictObject({
+  capability: z.enum(["installed", "missing", "launch-failed"]),
+  setup: z.enum(["idle", "pending", "succeeded", "failed"]),
+  disabledReason: z.string().min(1).max(160).nullable(),
+}).superRefine((state, ctx) => {
+  if (state.capability === "installed" && state.disabledReason) {
+    ctx.addIssue({ code: "custom", path: ["disabledReason"], message: "Installed browser capability cannot be disabled." });
+  }
+  if (state.capability !== "installed" && !state.disabledReason) {
+    ctx.addIssue({ code: "custom", path: ["disabledReason"], message: "Unavailable browser capability requires a reason." });
+  }
+});
+export type VisualBrowserState = z.infer<typeof visualBrowserStateSchema>;
+
+export function visualBrowserStateFromResult(result: VisualContextResult): VisualBrowserState {
+  const capture = result.capabilities?.find((capability) => capability.operation === "capture");
+  const capability = capture?.status === "available" ? "installed" : capture?.status === "unavailable" ? "missing" : "launch-failed";
+  return visualBrowserStateSchema.parse({
+    capability,
+    setup: result.operation === "setup-browser" ? capability === "installed" ? "succeeded" : "failed" : "idle",
+    disabledReason: capability === "installed" ? null : capability === "missing"
+      ? "Controlled browser capture is not installed."
+      : "Controlled browser capture could not launch.",
+  });
+}
 
 const realtimePayloadSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("status.changed"), status: devWorkbenchLifecycleStatusSchema }).strict(),

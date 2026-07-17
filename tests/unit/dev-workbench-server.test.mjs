@@ -10,6 +10,8 @@ import {
   pageContextMirrorSchema,
   repositoryManifestSchema,
   terminalConnectionDescriptorSchema,
+  visualBrowserStateSchema,
+  visualBrowserStateFromResult,
   workspaceContextSyncSchema,
   workbenchVisualContextStateSchema,
 } from "../../apps/dev-workbench/src/lib/contracts/workbench.ts";
@@ -52,6 +54,9 @@ const repository = repositoryManifestSchema.parse({
 });
 assert.equal(DEV_WORKBENCH_PERSISTENT, true, "developer workspaces retain one provider-managed snapshot for reconnects");
 
+assert.throws(() => visualBrowserStateSchema.parse({ capability: "missing", setup: "idle", disabledReason: null }), /requires a reason/);
+assert.doesNotThrow(() => visualBrowserStateSchema.parse({ capability: "missing", setup: "pending", disabledReason: "Controlled browser capture is not installed." }));
+
 const visualSources = discoverVisualSources({
   previewUrl: "https://preview.example.test/?private=ignored",
   previewRoute: "/reservations?token=ignored",
@@ -82,6 +87,12 @@ const validVisualResult = {
   status: "completed",
   capabilities: [{ operation: "pick", status: "available", provider: "host" }],
 };
+assert.deepEqual(visualBrowserStateFromResult({ ...validVisualResult, operation: "get-capabilities", provider: "playwright", capabilities: [{ operation: "capture", status: "available", provider: "playwright" }] }), {
+  capability: "installed", setup: "idle", disabledReason: null,
+});
+assert.deepEqual(visualBrowserStateFromResult({ ...validVisualResult, operation: "setup-browser", provider: "playwright", capabilities: [{ operation: "capture", status: "unavailable", provider: "playwright", disabledReason: "Browser unavailable" }] }), {
+  capability: "missing", setup: "failed", disabledReason: "Controlled browser capture is not installed.",
+});
 assert.equal(isVisualContextResultMessage(validVisualResult), true, "Workbench accepts strict neutral Agent Embed results");
 assert.equal(isVisualContextResultMessage({
   messageSource: "sonik-agent-ui-host",
@@ -108,6 +119,14 @@ assert.equal(classifyVisualContextResult({
 const workbenchPageSource = readFileSync("apps/dev-workbench/src/routes/+page.svelte", "utf8");
 assert.match(workbenchPageSource, /if \(source\?\.id !== "host"[^]*return unavailableAction/, "Preview is rejected before the Host picker postMessage seam");
 assert.equal(workbenchPageSource.match(/isVisualContextResultMessage\(event\.data\)/g)?.length, 1, "only the exact embedded Host window may return picker results");
+assert.match(workbenchPageSource, /visualBrowser\?\.capability === "installed"[^]*captureVisualContext/, "Preview Capture is enabled only by an installed browser probe");
+assert.match(workbenchPageSource, /aria-live="polite"[^]*announcement/, "browser setup and capture announcements use the existing polite live region");
+const visualBrowserRouteSource = readFileSync("apps/dev-workbench/src/routes/api/workspaces/visual-browser/+server.ts", "utf8");
+assert.match(visualBrowserRouteSource, /visualContextRequestSchema\.safeParse/, "the authenticated browser endpoint accepts only strict visual requests");
+assert.match(visualBrowserRouteSource, /runWorkspacePlaywrightVisualContext/, "the endpoint delegates to the canonical provider/coordinator service seam");
+const workspaceServiceSource = readFileSync("apps/dev-workbench/src/lib/server/workspace-service.ts", "utf8");
+assert.equal(workspaceServiceSource.indexOf("capturePlaywrightPreview") < workspaceServiceSource.indexOf("submitWorkspaceVisualContext(sessionId"), true, "provider temp output reaches the G009 coordinator before any stable artifact promotion");
+assert.match(workspaceServiceSource, /if \(request\.data\.operation !== "capture"\)[^]*snapshot: null[^]*submitWorkspaceVisualContext/, "probe/setup return state without taking the stable artifact coordinator lease");
 assert.deepEqual(
   Object.keys(createVisualContextSubmission("workspace-1", pendingVisualRequest, validVisualResult)),
   ["workspaceSessionId", "request", "result"],

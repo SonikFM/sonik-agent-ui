@@ -11,7 +11,9 @@
   import TerminalHost from "$lib/client/TerminalHost.svelte";
   import {
     devWorkbenchSessionDescriptorSchema,
+    visualBrowserStateSchema,
     type DevWorkbenchSessionDescriptor,
+    type VisualBrowserState,
   } from "$lib/contracts/workbench";
   import {
     DevWorkbench,
@@ -63,6 +65,7 @@
   let visualStaleReason = $state<"source-changed" | "route-changed" | "navigation" | "cancelled" | "provider-lost" | null>(null);
   let visualActionFocus: HTMLElement | null = null;
   let pendingVisualRequest: VisualContextRequest | null = null;
+  let visualBrowser = $state<VisualBrowserState | null>(null);
 
   const terminalOnly = $derived(page.url.searchParams.get("surface") === "terminal");
   const view = $derived<DevWorkbenchViewProps>(createView());
@@ -190,8 +193,14 @@
           ? { enabled: false, disabledReason: sourceUnavailable }
           : visualSourceId === "host"
             ? { enabled: false, disabledReason: "Pair the active-tab extension before capturing the Host source." }
-            : { enabled: false, disabledReason: "Set up the controlled browser before capturing the Preview source." },
-        setupVisualBrowser: { enabled: false, disabledReason: "Controlled browser setup is not connected in this release." },
+            : visualBrowser?.capability === "installed"
+              ? { enabled: operation === "idle", disabledReason: operation === "idle" ? null : "Wait for the current workspace operation to finish." }
+              : { enabled: false, disabledReason: visualBrowser?.disabledReason ?? "Checking controlled browser capture readiness." },
+        setupVisualBrowser: visualBrowser?.setup === "pending"
+          ? { enabled: false, disabledReason: "Controlled browser setup is in progress." }
+          : visualBrowser?.capability === "installed"
+            ? { enabled: false, disabledReason: "Controlled browser capture is ready." }
+            : { enabled: operation === "idle", disabledReason: operation === "idle" ? null : "Wait for the current workspace operation to finish." },
         pairVisualExtension: visualSources.some((source) => source.id === "host")
           ? { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "Connect an embedded Host source before pairing the extension." },
@@ -425,12 +434,19 @@
 
   function captureVisualContext(): WorkbenchSemanticActionResult {
     if (!view.actions.captureVisualContext.enabled) return unavailable("captureVisualContext");
-    return unavailableAction("No capture provider is ready.");
+    visualStatus = "capturing";
+    visualStatusMessage = "Capturing Preview in the controlled browser.";
+    announcement = visualStatusMessage;
+    void requestVisualBrowser("capture");
+    return accepted(visualStatusMessage);
   }
 
   function setupVisualBrowser(): WorkbenchSemanticActionResult {
     if (!view.actions.setupVisualBrowser.enabled) return unavailable("setupVisualBrowser");
-    return unavailableAction("Controlled browser setup is not connected in this release.");
+    visualBrowser = { capability: visualBrowser?.capability ?? "missing", setup: "pending", disabledReason: visualBrowser?.disabledReason ?? "Controlled browser capture is not installed." };
+    announcement = "Controlled browser setup started.";
+    void requestVisualBrowser("setup-browser");
+    return accepted(announcement);
   }
 
   function pairVisualExtension(): WorkbenchSemanticActionResult {
@@ -512,6 +528,7 @@
       workspace = next;
       terminalState = "connecting";
       announcement = "Workspace ready.";
+      void requestVisualBrowser("get-capabilities");
       if (hostContextMessage) void synchronizePageContext();
     }
     operation = "idle";
@@ -522,6 +539,7 @@
     const next = await requestWorkspace("GET");
     if (next) {
       workspace = next;
+      void requestVisualBrowser("get-capabilities");
       if (hostContextMessage) void synchronizePageContext();
     }
     else if (startIfMissing && !visibleError) await startWorkspaceRequest();
@@ -558,6 +576,46 @@
     }
   }
 
+  async function requestVisualBrowser(operation: "get-capabilities" | "setup-browser" | "capture"): Promise<void> {
+    const sessionId = workspace?.sessionId;
+    if (!sessionId) return;
+    try {
+      const source = discoveredVisualSources().find((candidate) => candidate.id === "preview");
+      if (!source) throw new Error("Preview is not connected.");
+      const response = await fetch("/api/workspaces/visual-browser", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
+          requestId: crypto.randomUUID(), operation, origin: window.location.origin,
+          sourceContextRevision, routeRevision, source, provider: "playwright",
+          ...(operation === "capture" ? { viewport: { width: 1440, height: 900, deviceScaleFactor: 1 } } : {}),
+        }),
+      });
+      if (!response.ok) throw new Error(await publicError(response));
+      const payload = await response.json() as { browser?: unknown; result?: { status?: unknown } };
+      const parsed = visualBrowserStateSchema.safeParse(payload.browser);
+      if (!parsed.success) throw new Error("The server returned invalid browser readiness.");
+      if (workspace?.sessionId !== sessionId) return;
+      visualBrowser = parsed.data;
+      if (operation === "capture") {
+        visualStatus = payload.result?.status === "completed" ? "idle" : "error";
+        visualStatusMessage = payload.result?.status === "completed" ? "Preview Capture is current." : "Preview Capture failed.";
+      }
+      announcement = parsed.data.capability === "installed"
+        ? operation === "setup-browser" ? "Controlled browser setup succeeded. Preview Capture is ready." : operation === "capture" ? visualStatusMessage : "Preview Capture is ready."
+        : parsed.data.disabledReason ?? "Controlled browser capture is unavailable.";
+    } catch (error) {
+      if (workspace?.sessionId !== sessionId) return;
+      visualBrowser = { capability: "launch-failed", setup: operation === "setup-browser" ? "failed" : "idle", disabledReason: "Controlled browser capture could not launch." };
+      if (operation === "capture") {
+        visualStatus = "error";
+        visualStatusMessage = "Preview Capture failed.";
+      }
+      announcement = safeMessage(error, visualBrowser.disabledReason ?? "Controlled browser capture is unavailable.");
+    }
+  }
+
   function scheduleHostContextRefresh(): void {
     if (hostContextRefreshTimer !== null) window.clearTimeout(hostContextRefreshTimer);
     const authority = hostContextMessage
@@ -580,6 +638,7 @@
       const response = await fetch("/api/workspaces", { method: "DELETE" });
       if (!response.ok) throw new Error(await publicError(response));
       workspace = null;
+      visualBrowser = null;
       terminalState = "closed";
       announcement = "Workspace stopped.";
     } catch (error) {
