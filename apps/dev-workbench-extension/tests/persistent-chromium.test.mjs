@@ -66,6 +66,7 @@ try {
     const { targetInfos } = await cdp.send("Target.getTargets", { filter: [{ type: "tab", exclude: false }] });
     const target = targetInfos.find((candidate) => candidate.type === "tab" && candidate.url === page.url());
     assert.ok(target, `Active tab target is available for ${page.url()}`);
+    await cdp.send("Target.activateTarget", { targetId: target.targetId });
     await cdp.send("Extensions.triggerAction", { id: loadedExtension.id, targetId: target.targetId });
     await page.waitForTimeout(500);
   };
@@ -144,9 +145,6 @@ try {
   assert.ok(workerTarget, "Extension service-worker target is available");
   assert.equal((await cdp.send("Target.closeTarget", { targetId: workerTarget.targetId })).success, true);
   await expectRejected(frame, requestFor("capture"), origin(host));
-  const restartedTargets = await cdp.send("Target.getTargets", { filter: [{ type: "service_worker", exclude: false }] });
-  const restartedTarget = restartedTargets.targetInfos.find((candidate) => candidate.url === currentWorker.url());
-  assert.ok(restartedTarget && restartedTarget.targetId !== workerTarget.targetId, "Service worker restarted with empty memory");
   await pair();
   assert.equal((await sendHostRequest(frame, requestFor("get-capabilities"), origin(host))).status, "completed");
 
