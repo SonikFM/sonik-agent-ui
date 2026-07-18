@@ -135,9 +135,15 @@ try {
 		drop index sonik_agent_ui.agent_definition_drafts_tenant_agent_key;
 		create unique index agent_definition_drafts_tenant_agent_key
 			on sonik_agent_ui.agent_definition_drafts (organization_id);
+		drop index sonik_agent_ui.agent_definition_published_versions_tenant_package_key;
+		alter table sonik_agent_ui.agent_definition_published_versions
+			add constraint agent_definition_published_versions_tenant_package_key unique (organization_id);
 		alter table sonik_agent_ui.agent_definition_drafts
 			drop constraint agent_definition_drafts_authority_or_quarantine_check,
 			add constraint agent_definition_drafts_authority_or_quarantine_check check (true);
+		alter table sonik_agent_ui.agent_definition_published_versions
+			drop constraint agent_definition_published_authority_or_quarantine_check,
+			add constraint agent_definition_published_authority_or_quarantine_check check (true);
 		drop policy agent_definition_drafts_tenant_scope on sonik_agent_ui.agent_definition_drafts;
 		create policy agent_definition_drafts_tenant_scope on sonik_agent_ui.agent_definition_drafts using (true) with check (true);
 
@@ -157,6 +163,23 @@ try {
 		drop policy agent_workflow_run_events_scope on sonik_agent_ui.agent_workflow_run_events;
 		create policy agent_workflow_run_events_scope on sonik_agent_ui.agent_workflow_run_events using (true) with check (true);
 	`);
+	assert.equal(
+		psql(poisonedBaselineUrl, `
+			select regexp_replace(lower(pg_get_indexdef('sonik_agent_ui.agent_definition_published_versions_tenant_package_key'::regclass)), '[[:space:]()]', '', 'g')
+		`),
+		"createuniqueindexagent_definition_published_versions_tenant_package_keyonsonik_agent_ui.agent_definition_published_versionsusingbtreeorganization_id",
+		"published tenant-package index is poisoned before repair",
+	);
+	assert.equal(
+		psql(poisonedBaselineUrl, `
+			select regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g')
+			from pg_constraint
+			where conrelid = 'sonik_agent_ui.agent_definition_published_versions'::regclass
+				and conname = 'agent_definition_published_authority_or_quarantine_check'
+		`),
+		"check(true)",
+		"published authority constraint is poisoned before repair",
+	);
 
 	const poisonedOutput = runMigrations(poisonedBaselineUrl, { dryRun: true });
 	for (const [version, name] of [
@@ -175,11 +198,32 @@ try {
 		`),
 		"createuniqueindexagent_definition_drafts_tenant_agent_keyonsonik_agent_ui.agent_definition_draftsusingbtreeorganization_id,agent_idwhereorganization_idisnotnull",
 	);
+	assert.equal(
+		psql(poisonedBaselineUrl, `
+			select regexp_replace(lower(pg_get_indexdef('sonik_agent_ui.agent_definition_published_versions_tenant_package_key'::regclass)), '[[:space:]()]', '', 'g')
+		`),
+		"createuniqueindexagent_definition_published_versions_tenant_package_keyonsonik_agent_ui.agent_definition_published_versionsusingbtreeorganization_id,package_version_idwhereorganization_idisnotnull",
+	);
+	assert.equal(
+		psql(poisonedBaselineUrl, `
+			select count(*)
+			from pg_constraint
+			where conrelid = 'sonik_agent_ui.agent_definition_published_versions'::regclass
+				and conname = 'agent_definition_published_versions_tenant_package_key'
+		`),
+		"0",
+		"0015 removes the poison constraint owning the published index",
+	);
 	for (const [table, constraint, definition] of [
 		[
 			"agent_definition_drafts",
 			"agent_definition_drafts_authority_or_quarantine_check",
 			"check((((organization_idisnotnull)and(created_by_user_idisnotnull)and(updated_by_user_idisnotnull)and(legacy_quarantined_atisnull))or((organization_idisnull)and(created_by_user_idisnull)and(updated_by_user_idisnull)and(legacy_quarantined_atisnotnull))))",
+		],
+		[
+			"agent_definition_published_versions",
+			"agent_definition_published_authority_or_quarantine_check",
+			"check((((organization_idisnotnull)and(created_by_user_idisnotnull)and(legacy_quarantined_atisnull))or((organization_idisnull)and(created_by_user_idisnull)and(legacy_quarantined_atisnotnull))))",
 		],
 		["workflow_definition_drafts", "workflow_definition_drafts_pkey", "primarykey(organization_id,user_id,workflow_id)"],
 		["agent_workflow_run_waitpoints", "agent_workflow_run_waitpoints_pkey", "primarykey(organization_id,user_id,run_id,waitpoint_id)"],
@@ -201,6 +245,37 @@ try {
 		`),
 		"true",
 	);
+
+	psql(poisonedBaselineUrl, `
+		delete from sonik_agent_ui.schema_migrations where version = '0015';
+		alter table sonik_agent_ui.agent_definition_published_versions
+			drop constraint agent_definition_published_authority_or_quarantine_check,
+			add constraint agent_definition_published_authority_or_quarantine_check check (true);
+		insert into sonik_agent_ui.agent_definition_published_versions
+			(package_version_id, agent_id, version, organization_id)
+		values ('atomic-poison', 'atomic-poison', '{}'::jsonb, 'tenant-a');
+	`);
+	assert.throws(
+		() => runMigrations(poisonedBaselineUrl),
+		"0015 must fail when existing data violates the canonical published authority constraint",
+	);
+	assert.equal(
+		psql(poisonedBaselineUrl, "select count(*) from sonik_agent_ui.schema_migrations where version = '0015'"),
+		"0",
+		"0015 must not write its ledger row when published constraint repair fails",
+	);
+	assert.equal(
+		psql(poisonedBaselineUrl, `
+			select regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g')
+			from pg_constraint
+			where conrelid = 'sonik_agent_ui.agent_definition_published_versions'::regclass
+				and conname = 'agent_definition_published_authority_or_quarantine_check'
+		`),
+		"check(true)",
+		"failed repair must roll back the published constraint replacement",
+	);
+	psql(poisonedBaselineUrl, "delete from sonik_agent_ui.agent_definition_published_versions where package_version_id = 'atomic-poison'");
+	runMigrations(poisonedBaselineUrl);
 
 	const rerunOutput = runMigrations(poisonedBaselineUrl);
 	for (const [version, name] of [

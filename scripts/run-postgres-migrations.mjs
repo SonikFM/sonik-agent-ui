@@ -221,6 +221,26 @@ const migrations = [
 						where organization_id is not null;
 				end if;
 
+				if to_regclass('sonik_agent_ui.agent_definition_published_versions_tenant_package_key') is not null
+					and regexp_replace(lower(pg_get_indexdef(to_regclass('sonik_agent_ui.agent_definition_published_versions_tenant_package_key'))), '[[:space:]()]', '', 'g')
+						<> 'createuniqueindexagent_definition_published_versions_tenant_package_keyonsonik_agent_ui.agent_definition_published_versionsusingbtreeorganization_id,package_version_idwhereorganization_idisnotnull'
+				then
+					select conname into owning_constraint
+					from pg_constraint
+					where conindid = to_regclass('sonik_agent_ui.agent_definition_published_versions_tenant_package_key');
+
+					if owning_constraint is null then
+						drop index sonik_agent_ui.agent_definition_published_versions_tenant_package_key;
+					else
+						execute format('alter table sonik_agent_ui.agent_definition_published_versions drop constraint %I', owning_constraint);
+					end if;
+				end if;
+				if to_regclass('sonik_agent_ui.agent_definition_published_versions_tenant_package_key') is null then
+					create unique index agent_definition_published_versions_tenant_package_key
+						on sonik_agent_ui.agent_definition_published_versions (organization_id, package_version_id)
+						where organization_id is not null;
+				end if;
+
 				if exists (
 					select 1 from pg_constraint
 					where conrelid = to_regclass('sonik_agent_ui.agent_definition_drafts')
@@ -240,6 +260,28 @@ const migrations = [
 						add constraint agent_definition_drafts_authority_or_quarantine_check check (
 							(organization_id is not null and created_by_user_id is not null and updated_by_user_id is not null and legacy_quarantined_at is null)
 							or (organization_id is null and created_by_user_id is null and updated_by_user_id is null and legacy_quarantined_at is not null)
+						);
+				end if;
+
+				if exists (
+					select 1 from pg_constraint
+					where conrelid = to_regclass('sonik_agent_ui.agent_definition_published_versions')
+						and conname = 'agent_definition_published_authority_or_quarantine_check'
+						and regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g')
+							<> 'check((((organization_idisnotnull)and(created_by_user_idisnotnull)and(legacy_quarantined_atisnull))or((organization_idisnull)and(created_by_user_idisnull)and(legacy_quarantined_atisnotnull))))'
+				) then
+					alter table sonik_agent_ui.agent_definition_published_versions
+						drop constraint agent_definition_published_authority_or_quarantine_check;
+				end if;
+				if not exists (
+					select 1 from pg_constraint
+					where conrelid = 'sonik_agent_ui.agent_definition_published_versions'::regclass
+						and conname = 'agent_definition_published_authority_or_quarantine_check'
+				) then
+					alter table sonik_agent_ui.agent_definition_published_versions
+						add constraint agent_definition_published_authority_or_quarantine_check check (
+							(organization_id is not null and created_by_user_id is not null and legacy_quarantined_at is null)
+							or (organization_id is null and created_by_user_id is null and legacy_quarantined_at is not null)
 						);
 				end if;
 			end
