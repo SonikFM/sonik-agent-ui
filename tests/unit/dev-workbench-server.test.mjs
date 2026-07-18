@@ -34,6 +34,7 @@ import {
   createVisualContextSubmission,
   defaultVisualSourceId,
   discoverVisualSources,
+  hostVisualPersistenceState,
   isAgentHostActionRequestMessage,
   isAgentHostActionResultMessage,
   isAgentHostPageContextMessage,
@@ -120,6 +121,12 @@ assert.equal(classifyVisualContextResult({
   routeRevision: 3,
   source: { ...visualSources[1], route: "/other" },
 }), "invalidate", "the active result must exactly match the current full source");
+assert.deepEqual(hostVisualPersistenceState(false, { operation: "capture", status: "completed" }), {
+  status: "invalidated", staleReason: "navigation", message: "A stale Host result was discarded. Retry the visual action.",
+}, "HTTP 202/accepted=false is stale even when the provider completed");
+assert.deepEqual(hostVisualPersistenceState(true, { operation: "capture", status: "completed" }), {
+  status: "idle", staleReason: null, message: "Host Capture is current.",
+}, "accepted=true alone may report current Host capture");
 const workbenchPageSource = readFileSync("apps/dev-workbench/src/routes/+page.svelte", "utf8");
 assert.match(workbenchPageSource, /if \(source\?\.id !== "host"[^]*return unavailableAction/, "Preview is rejected before the Host picker postMessage seam");
 assert.equal(workbenchPageSource.match(/isVisualContextResultMessage\(event\.data\)/g)?.length, 1, "only the exact embedded Host window may return picker results");
@@ -133,6 +140,8 @@ assert.match(workbenchPageSource, /previousRoute[^]*pairingLost = visualExtensio
 assert.match(workbenchPageSource, /method: "PUT"[^]*body: JSON\.stringify\(request\)[^]*visualContextRequestSchema\.safeParse/, "host operations await a strict server-registered request before postMessage");
 assert.match(workbenchPageSource, /submitVisualResult\(request, result\)/, "pairing results reach the existing server telemetry route");
 assert.match(workbenchPageSource, /payload\.accepted === true[^]*"Preview Capture is current\."/, "Preview success requires server acceptance, not provider completion alone");
+assert.match(workbenchPageSource, /visualContextPersistenceResponseSchema\.safeParse[^]*hostVisualPersistenceState\(persisted\.data\.accepted, result\)/, "Host persistence strictly parses the response before deriving terminal UI");
+assert.match(workbenchPageSource, /persistedHostOperation[^]*submitVisualResult\(request, result\)[^]*return/, "Host pick/capture/clear defer terminal success UI until persistence returns");
 assert.equal(workbenchPageSource.includes("Booking session context connected."), false, "runtime messaging must not hard-code a Booking host");
 assert.match(workbenchPageSource, /hostSourceLabel\(\)[^]*context connected/, "runtime messaging uses the sanitized discovered host label");
 const visualBrowserRouteSource = readFileSync("apps/dev-workbench/src/routes/api/workspaces/visual-browser/+server.ts", "utf8");

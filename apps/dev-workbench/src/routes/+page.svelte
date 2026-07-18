@@ -6,8 +6,14 @@
     sanitizeAgentHostAuthorityDonation,
     sanitizeAgentHostPageContext,
   } from "@sonik-agent-ui/agent-embed";
-  import { visualContextRequestSchema, type VisualContextRequest, type VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
+  import {
+    visualContextRequestSchema,
+    visualContextSnapshotSchema,
+    type VisualContextRequest,
+    type VisualContextResult,
+  } from "@sonik-agent-ui/tool-contracts/visual-context";
   import { onMount } from "svelte";
+  import { z } from "zod";
   import TerminalHost from "$lib/client/TerminalHost.svelte";
   import {
     devWorkbenchSessionDescriptorSchema,
@@ -32,6 +38,7 @@
     classifyVisualContextResult,
     defaultVisualSourceId,
     discoverVisualSources,
+    hostVisualPersistenceState,
     isAgentHostActionRequestMessage,
     isAgentHostActionResultMessage,
     isAgentHostPageContextMessage,
@@ -45,6 +52,10 @@
 
   type Operation = "idle" | "resuming" | "starting" | "stopping";
   type TerminalState = "connecting" | "ready" | "error" | "closed";
+  const visualContextPersistenceResponseSchema = z.strictObject({
+    accepted: z.boolean(),
+    snapshot: visualContextSnapshotSchema.nullable(),
+  });
 
   let workspace = $state<DevWorkbenchSessionDescriptor | null>(null);
   let operation = $state<Operation>("resuming");
@@ -387,7 +398,16 @@
       invalidateVisualContext("provider-lost", "The active-tab provider disconnected. Pair it again before capturing Host context.");
       visualActionFocus?.focus();
       visualActionFocus = null;
-      if (workspace) void submitVisualResult(request, result);
+      if (workspace) void submitVisualResult(request, result, false);
+      return;
+    }
+    const persistedHostOperation = request.operation === "pick" || request.operation === "capture" || request.operation === "clear";
+    if (workspace && persistedHostOperation) {
+      visualStatusMessage = "Saving Host visual context.";
+      announcement = visualStatusMessage;
+      visualActionFocus?.focus();
+      visualActionFocus = null;
+      void submitVisualResult(request, result);
       return;
     }
     visualStatus = completed ? "idle" : result.status === "cancelled" ? "invalidated" : "error";
@@ -531,7 +551,7 @@
     }
   }
 
-  async function submitVisualResult(request: VisualContextRequest, result: VisualContextResult): Promise<void> {
+  async function submitVisualResult(request: VisualContextRequest, result: VisualContextResult, updateUi = true): Promise<void> {
     if (!workspace) return;
     try {
       const response = await fetch("/api/workspaces/visual-context", {
@@ -539,6 +559,15 @@
         body: JSON.stringify(createVisualContextSubmission(workspace.sessionId, request, result)),
       });
       if (!response.ok) throw new Error(await publicError(response));
+      const persisted = visualContextPersistenceResponseSchema.safeParse(await response.json());
+      if (!persisted.success) throw new Error("The server returned an invalid visual persistence result.");
+      const persistedHostOperation = request.operation === "pick" || request.operation === "capture" || request.operation === "clear";
+      if (!persistedHostOperation || !updateUi) return;
+      const state = hostVisualPersistenceState(persisted.data.accepted, result);
+      visualStatus = state.status;
+      visualStaleReason = state.staleReason;
+      visualStatusMessage = state.message;
+      announcement = visualStatusMessage;
     } catch (error) {
       visualStatus = "error";
       visualStatusMessage = safeMessage(error, "The visual result could not be saved.");

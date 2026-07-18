@@ -167,6 +167,23 @@ export function classifyVisualContextResult(input: {
   return "accept";
 }
 
+export function hostVisualPersistenceState(accepted: boolean, result: Pick<VisualContextResult, "operation" | "status">) {
+  if (!accepted || result.status !== "completed") return {
+    status: "invalidated" as const,
+    staleReason: "navigation" as const,
+    message: "A stale Host result was discarded. Retry the visual action.",
+  };
+  return {
+    status: "idle" as const,
+    staleReason: null,
+    message: result.operation === "capture"
+      ? "Host Capture is current."
+      : result.operation === "pick"
+        ? "Visual target selected."
+        : "Host visual context cleared.",
+  };
+}
+
 function sameVisualSource(left: VisualContextSource, right: VisualContextSource): boolean {
   return left.id === right.id && left.label === right.label && left.surface === right.surface && left.route === right.route;
 }
