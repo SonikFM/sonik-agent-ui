@@ -4,7 +4,7 @@
     nonce: string | null;
     tabId: number | null;
     windowId: number | null;
-    frames: Map<MessageEventSource, string>;
+    frames: Map<WindowProxy, string>;
     overlays: HTMLElement[];
     captureChrome: CaptureChrome[];
   };
@@ -70,7 +70,8 @@
   });
 
   window.addEventListener("message", (event) => {
-    const allowedOrigin = event.source ? state.frames.get(event.source) : null;
+    const source = event.source as WindowProxy | null;
+    const allowedOrigin = source ? state.frames.get(source) : null;
     if (!state.nonce || !allowedOrigin || event.origin !== allowedOrigin) return;
     const targetOrigin = allowedOrigin;
     const request = event.data;
@@ -85,24 +86,24 @@
       request,
     }).then((result) => {
       if (result?.type === "sonik:visual-context:result") {
-        event.source?.postMessage(result, { targetOrigin });
+        source?.postMessage(result, targetOrigin);
       } else if (typeof result?.error === "string") {
         postFailure();
       }
     }, postFailure);
 
     function postFailure() {
-      event.source?.postMessage({
+      source?.postMessage({
         messageSource: "sonik-agent-host", type: "sonik:visual-context:result", version: request.version,
         origin: request.origin, requestId: request.requestId, operation: request.operation, source: request.source,
         provider: request.provider, sourceContextRevision: request.sourceContextRevision, routeRevision: request.routeRevision,
         status: "failed", disabledReason: "Active-tab capture failed.",
-      }, { targetOrigin });
+      }, targetOrigin);
     }
   });
 
   function discoverWorkbenchFrames() {
-    const frames = new Map<MessageEventSource, string>();
+    const frames = new Map<WindowProxy, string>();
     for (const frame of document.querySelectorAll<HTMLIFrameElement>("iframe[src]")) {
       try {
         const url = new URL(frame.src, location.href);
