@@ -139,9 +139,8 @@ export function emitVisualBrowserTelemetry(
 }
 
 export function validateVisualContextSubmission(input: VisualContextSubmission): void {
-  if (input.request.provider === "chrome-active-tab" || input.result.provider === "chrome-active-tab") {
-    throw new Error("Exact active-tab capture requires server-verifiable extension attestation.");
-  }
+  validateVisualContextRequestAuthority(input.request);
+  validateVisualContextRequestAuthority(input.result);
   assertVisualContextResultMatchesRequest(input.request, input.result);
   if (JSON.stringify(input.request.source) !== JSON.stringify(input.result.source)) {
     throw new Error("Visual context result source does not match the pending request.");
@@ -151,6 +150,12 @@ export function validateVisualContextSubmission(input: VisualContextSubmission):
   }
   if (input.request.targetInstanceId !== input.result.selection?.targetInstanceId && input.request.targetInstanceId !== undefined) {
     throw new Error("Visual context result target instance does not match the pending request.");
+  }
+}
+
+export function validateVisualContextRequestAuthority(request: Pick<VisualContextRequest, "provider">): void {
+  if (request.provider === "chrome-active-tab") {
+    throw new Error("Exact active-tab capture requires server-verifiable extension attestation.");
   }
 }
 

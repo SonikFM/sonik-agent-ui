@@ -264,7 +264,11 @@ try {
 
   const stableBeforeUnattested = Buffer.from(sandboxFiles.get(VISUAL_CONTEXT_PATH));
   for (const unattested of unattestedSubmissions) {
-    assert.equal((await registerWorkspaceVisualContextRequest("workspace-1", unattested.request)).ok, true);
+    const registryBeforeRegistration = Buffer.from(sandboxFiles.get(VISUAL_CONTEXT_REQUESTS_PATH));
+    assert.equal((await registerWorkspaceVisualContextRequest("workspace-1", unattested.request)).ok, false, `${unattested.request.operation} cannot enter the pending registry`);
+    assert.deepEqual(sandboxFiles.get(VISUAL_CONTEXT_REQUESTS_PATH), registryBeforeRegistration, "rejected registration leaves the registry unchanged");
+    const seeded = issueVisualContextRequest(JSON.parse(registryBeforeRegistration), unattested.request);
+    sandboxFiles.set(VISUAL_CONTEXT_REQUESTS_PATH, Buffer.from(JSON.stringify(seeded.registry)));
     const rejectedUnattested = await submitWorkspaceVisualContext("workspace-1", unattested);
     assert.equal(rejectedUnattested.ok, false, `${unattested.request.operation} cannot be accepted by the real service`);
     assert.deepEqual(sandboxFiles.get(VISUAL_CONTEXT_PATH), stableBeforeUnattested, "unattested results cannot promote state");

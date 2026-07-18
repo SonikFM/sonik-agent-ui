@@ -47,6 +47,7 @@ import {
   issueVisualContextRequest,
   requestTemporaryPath,
   validateVisualContextPng,
+  validateVisualContextRequestAuthority,
   validateVisualContextSnapshotPng,
   validateVisualContextSubmission,
   visualContextInvalidationSchema,
@@ -368,6 +369,11 @@ export async function registerWorkspaceVisualContextRequest(
 ): Promise<WorkspaceServiceResult<{ request: VisualContextRequest }>> {
   const request = visualContextRequestSchema.safeParse(input);
   if (!request.success) return { ok: false, error: workspaceError("unknown", "visual-context-validate", false) };
+  try {
+    validateVisualContextRequestAuthority(request.data);
+  } catch {
+    return { ok: false, error: workspaceError("unknown", "visual-context-validate", false) };
+  }
   const resumed = await resumeVerifiedWorkspace(sessionId, signal);
   if (!resumed.ok) return resumed;
   const leaseOwner = randomUUID();
