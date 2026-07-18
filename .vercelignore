@@ -13,8 +13,8 @@ node_modules
 test-results
 docs
 tests
-scripts
-vendor
+/scripts
+/vendor
 manifests
 
 apps/standalone-sveltekit
