@@ -78,7 +78,7 @@ async function handleRequest(message, sender) {
     });
   }
 
-  let prepared;
+  let prepared: { viewport: { width: number; height: number; deviceScaleFactor: number }; redactionsApplied: string[] } | null = null;
   let dataUrl;
   try {
     dataUrl = await captureVisibleTabWithoutSonikChrome({
@@ -94,6 +94,8 @@ async function handleRequest(message, sender) {
     lifecycle.revoke(tabId);
     throw error;
   }
+  const capturePreparation = prepared as typeof prepared | null;
+  if (!capturePreparation) throw new Error("Capture redaction preparation failed closed.");
   const stillActive = await chrome.tabs.query({ active: true, windowId: pairing.windowId });
   if (stillActive[0]?.id !== tabId || !lifecycle.isCurrent(lease, identity)) {
     pairings.delete(tabId);
@@ -101,7 +103,7 @@ async function handleRequest(message, sender) {
     throw new Error("The paired tab stopped being active during capture.");
   }
   const png = pngMetadata(dataUrl);
-  if (!matchesCaptureViewport(png, prepared.viewport)) {
+  if (!matchesCaptureViewport(png, capturePreparation.viewport)) {
     pairings.delete(tabId);
     lifecycle.revoke(tabId);
     throw new Error("Active-tab capture dimensions do not match the prepared viewport.");
@@ -121,8 +123,8 @@ async function handleRequest(message, sender) {
       provider: "chrome-active-tab",
       fidelity: "exact-active-tab",
       captureBasis: "native-active-tab-redacted",
-      viewport: prepared.viewport,
-      redactionsApplied: prepared.redactionsApplied,
+      viewport: capturePreparation.viewport,
+      redactionsApplied: capturePreparation.redactionsApplied,
       capturedAt: new Date().toISOString(),
       pngBase64: png.pngBase64,
     },

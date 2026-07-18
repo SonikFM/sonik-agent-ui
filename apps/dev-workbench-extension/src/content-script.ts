@@ -1,8 +1,18 @@
 (() => {
-  if (globalThis.__sonikExactActiveTab) return;
+  type CaptureChrome = { element: HTMLElement; style: string | null };
+  type State = {
+    nonce: string | null;
+    tabId: number | null;
+    windowId: number | null;
+    frames: Map<MessageEventSource, string>;
+    overlays: HTMLElement[];
+    captureChrome: CaptureChrome[];
+  };
+  const sonikGlobal = globalThis as typeof globalThis & { __sonikExactActiveTab?: State };
+  if (sonikGlobal.__sonikExactActiveTab) return;
 
-  const state = { nonce: null, tabId: null, windowId: null, frames: new Map(), overlays: [], captureChrome: [] };
-  globalThis.__sonikExactActiveTab = state;
+  const state: State = { nonce: null, tabId: null, windowId: null, frames: new Map(), overlays: [], captureChrome: [] };
+  sonikGlobal.__sonikExactActiveTab = state;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "initialize" && message.version === "sonik.active-tab.v1") {
@@ -17,9 +27,9 @@
     if (message.type === "prepare-capture") {
       clearCaptureChrome();
       clearOverlays();
-      const redactionsApplied = [];
+      const redactionsApplied: string[] = [];
       for (const element of document.querySelectorAll("[data-sonik-capture-chrome]")) {
-        if (!element?.style || typeof element.getAttribute !== "function") continue;
+        if (!(element instanceof HTMLElement)) continue;
         state.captureChrome.push({ element, style: element.getAttribute("style") });
         element.style.setProperty("visibility", "hidden", "important");
       }
@@ -60,8 +70,9 @@
   });
 
   window.addEventListener("message", (event) => {
-    const allowedOrigin = state.frames.get(event.source);
+    const allowedOrigin = event.source ? state.frames.get(event.source) : null;
     if (!state.nonce || !allowedOrigin || event.origin !== allowedOrigin) return;
+    const targetOrigin = allowedOrigin;
     const request = event.data;
     if (!isRequest(request, allowedOrigin)) return;
     void chrome.runtime.sendMessage({
@@ -74,25 +85,25 @@
       request,
     }).then((result) => {
       if (result?.type === "sonik:visual-context:result") {
-        event.source.postMessage(result, allowedOrigin);
+        event.source?.postMessage(result, { targetOrigin });
       } else if (typeof result?.error === "string") {
         postFailure();
       }
     }, postFailure);
 
     function postFailure() {
-      event.source.postMessage({
+      event.source?.postMessage({
         messageSource: "sonik-agent-host", type: "sonik:visual-context:result", version: request.version,
         origin: request.origin, requestId: request.requestId, operation: request.operation, source: request.source,
         provider: request.provider, sourceContextRevision: request.sourceContextRevision, routeRevision: request.routeRevision,
         status: "failed", disabledReason: "Active-tab capture failed.",
-      }, allowedOrigin);
+      }, { targetOrigin });
     }
   });
 
   function discoverWorkbenchFrames() {
-    const frames = new Map();
-    for (const frame of document.querySelectorAll("iframe[src]")) {
+    const frames = new Map<MessageEventSource, string>();
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>("iframe[src]")) {
       try {
         const url = new URL(frame.src, location.href);
         if ((url.protocol === "http:" || url.protocol === "https:")
@@ -138,7 +149,7 @@
     state.captureChrome = [];
   }
 
-  function addOverlay(bounds) {
+  function addOverlay(bounds: DOMRect) {
     const overlay = document.createElement("div");
     Object.assign(overlay.style, {
       position: "fixed", left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, height: `${bounds.height}px`,
