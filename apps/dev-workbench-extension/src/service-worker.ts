@@ -78,7 +78,8 @@ async function handleRequest(message, sender) {
     });
   }
 
-  let prepared: { viewport: { width: number; height: number; deviceScaleFactor: number }; redactionsApplied: string[] } | null = null;
+  type CapturePreparation = { viewport: { width: number; height: number; deviceScaleFactor: number }; redactionsApplied: string[] };
+  let prepared: CapturePreparation | null = null;
   let dataUrl;
   try {
     dataUrl = await captureVisibleTabWithoutSonikChrome({
@@ -94,7 +95,7 @@ async function handleRequest(message, sender) {
     lifecycle.revoke(tabId);
     throw error;
   }
-  const capturePreparation = prepared as typeof prepared | null;
+  const capturePreparation = prepared as CapturePreparation | null;
   if (!capturePreparation) throw new Error("Capture redaction preparation failed closed.");
   const stillActive = await chrome.tabs.query({ active: true, windowId: pairing.windowId });
   if (stillActive[0]?.id !== tabId || !lifecycle.isCurrent(lease, identity)) {

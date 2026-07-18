@@ -10,7 +10,7 @@ assert.deepEqual(manifest.permissions, ["activeTab", "scripting"]);
 assert.equal("host_permissions" in manifest, false);
 assert.match(serviceWorker, /fidelity: "exact-active-tab"/);
 assert.match(serviceWorker, /captureBasis: "native-active-tab-redacted"/);
-assert.match(serviceWorker, /redactionsApplied: prepared\.redactionsApplied/);
+assert.match(serviceWorker, /redactionsApplied: capturePreparation\.redactionsApplied/);
 assert.match(contentScript, /redactionsApplied\.push\("Sensitive form controls"\)/);
 assert.match(contentScript, /redactionsApplied\.push\("Embedded frame pixels"\)/);
 assert.doesNotMatch(contentScript, /No sensitive fields detected/);
