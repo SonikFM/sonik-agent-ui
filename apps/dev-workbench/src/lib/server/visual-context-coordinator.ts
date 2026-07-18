@@ -18,6 +18,7 @@ import { DEV_WORKBENCH_STATE_ROOT } from "../contracts/workbench";
 export const VISUAL_CONTEXT_PATH = `${DEV_WORKBENCH_STATE_ROOT}/visual-context.json` as const;
 export const VISUAL_CONTEXT_LEASE_PATH = `${DEV_WORKBENCH_STATE_ROOT}/locks/visual-context` as const;
 export const VISUAL_CONTEXT_STAGE_ROOT = `${DEV_WORKBENCH_STATE_ROOT}/tmp/visual-context` as const;
+export const VISUAL_CONTEXT_REQUESTS_PATH = `${DEV_WORKBENCH_STATE_ROOT}/visual-context-requests.json` as const;
 
 const workspaceSessionIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 
@@ -37,6 +38,27 @@ export const visualContextInvalidationSchema = z.strictObject({
 
 export type VisualContextSubmission = z.infer<typeof visualContextSubmissionSchema>;
 export type VisualContextInvalidation = z.infer<typeof visualContextInvalidationSchema>;
+
+export const visualContextRequestRegistrySchema = z.strictObject({
+  nextSequence: z.number().int().positive(),
+  pending: z.record(z.string(), z.number().int().nonnegative()),
+});
+export type VisualContextRequestRegistry = z.infer<typeof visualContextRequestRegistrySchema>;
+
+export function issueVisualContextRequest(registry: VisualContextRequestRegistry, requestId: string): { registry: VisualContextRequestRegistry; sequence: number } {
+  if (registry.pending[requestId] !== undefined) throw new Error("Visual context request is already registered.");
+  if (Object.keys(registry.pending).length >= 256) throw new Error("Too many visual context requests are pending.");
+  const sequence = registry.nextSequence;
+  return { sequence, registry: visualContextRequestRegistrySchema.parse({ nextSequence: sequence + 1, pending: { ...registry.pending, [requestId]: sequence } }) };
+}
+
+export function consumeVisualContextRequest(registry: VisualContextRequestRegistry, requestId: string): { registry: VisualContextRequestRegistry; sequence: number } {
+  const sequence = registry.pending[requestId];
+  if (sequence === undefined) throw new Error("Visual context request is unregistered or already consumed.");
+  const pending = { ...registry.pending };
+  delete pending[requestId];
+  return { sequence, registry: visualContextRequestRegistrySchema.parse({ ...registry, pending }) };
+}
 
 export type VisualContextTelemetryEventName =
   | "visual_context.picker.started"
@@ -110,6 +132,9 @@ export function emitVisualBrowserTelemetry(
 
 export function validateVisualContextSubmission(input: VisualContextSubmission): void {
   assertVisualContextResultMatchesRequest(input.request, input.result);
+  if (input.result.screenshot?.fidelity === "exact-active-tab") {
+    throw new Error("Exact active-tab capture requires server-verifiable extension attestation.");
+  }
   if (JSON.stringify(input.request.source) !== JSON.stringify(input.result.source)) {
     throw new Error("Visual context result source does not match the pending request.");
   }
@@ -158,12 +183,13 @@ export function validateVisualContextSnapshotPng(bytes: Buffer, snapshot: Visual
   if (createHash("sha256").update(bytes).digest("hex") !== screenshot.sha256) throw new Error("Visual context PNG hash is invalid.");
 }
 
-export function visualContextSnapshotFromResult(result: VisualContextResult): VisualContextSnapshot {
+export function visualContextSnapshotFromResult(result: VisualContextResult, requestSequence = 0): VisualContextSnapshot {
   return visualContextSnapshotSchema.parse({
     schemaVersion: result.version,
     status: "current",
     generation: randomUUID(),
     requestId: result.requestId,
+    requestSequence,
     sourceContextRevision: result.sourceContextRevision,
     routeRevision: result.routeRevision,
     source: result.source,
@@ -189,12 +215,13 @@ export function visualContextSnapshotFromResult(result: VisualContextResult): Vi
   });
 }
 
-export function invalidatedVisualContextSnapshot(input: VisualContextInvalidation, requestId: string | null = null): VisualContextSnapshot {
+export function invalidatedVisualContextSnapshot(input: VisualContextInvalidation, requestId: string | null = null, requestSequence = 0): VisualContextSnapshot {
   return visualContextSnapshotSchema.parse({
     schemaVersion: "sonik.visual-context.v1",
     status: "invalidated",
     generation: randomUUID(),
     requestId,
+    requestSequence,
     sourceContextRevision: input.sourceContextRevision,
     routeRevision: input.routeRevision,
     source: input.source,
@@ -205,6 +232,10 @@ export function invalidatedVisualContextSnapshot(input: VisualContextInvalidatio
     invalidatedAt: new Date().toISOString(),
     staleReason: input.staleReason,
   });
+}
+
+export function isStaleVisualContextSequence(current: VisualContextSnapshot | null, requestSequence: number): boolean {
+  return current !== null && requestSequence <= current.requestSequence;
 }
 
 export function isStaleVisualContextResult(current: VisualContextSnapshot | null, result: VisualContextResult): boolean {

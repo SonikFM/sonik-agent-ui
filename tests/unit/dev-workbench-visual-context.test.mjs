@@ -9,16 +9,19 @@ import {
   VISUAL_CONTEXT_PATH,
   createVisualContextLeaseAcquireScript,
   decodeCanonicalBase64,
+  consumeVisualContextRequest,
   invalidatedVisualContextSnapshot,
   isStaleVisualContextInvalidation,
   isStaleVisualContextResult,
+  isStaleVisualContextSequence,
+  issueVisualContextRequest,
   requestTemporaryPath,
   validateVisualContextPng,
   validateVisualContextSubmission,
   visualContextSnapshotFromResult,
   visualContextSubmissionSchema,
 } from "../../apps/dev-workbench/src/lib/server/visual-context-coordinator.ts";
-import { removeVisualContextTemporaryPath } from "../../apps/dev-workbench/src/lib/server/workspace-service.ts";
+import { createVisualContextPromotionScript, removeVisualContextTemporaryPath } from "../../apps/dev-workbench/src/lib/server/workspace-service.ts";
 import { createDevWorkbenchBootstrapPlan } from "../../apps/dev-workbench/src/lib/server/bootstrap-plan.ts";
 import {
   DEFAULT_REPOSITORY_COMMANDS,
@@ -82,6 +85,22 @@ assert.equal(JSON.stringify(snapshot).includes("pngBase64"), false, "stable mani
 assert.equal(JSON.stringify(snapshot).includes("temporaryPath"), false, "stable manifests never disclose request paths");
 assert.equal(isStaleVisualContextResult(snapshot, { ...result, requestId: "capture-older", sourceContextRevision: 3 }), true);
 assert.equal(isStaleVisualContextResult(snapshot, { ...result, requestId: "capture-repeat" }), false, "a later same-revision capture may refresh the snapshot");
+assert.throws(() => validateVisualContextSubmission({
+  workspaceSessionId: "workspace-1",
+  request: { ...request, provider: "chrome-active-tab" },
+  result: {
+    ...result,
+    provider: "chrome-active-tab",
+    screenshot: { ...result.screenshot, provider: "chrome-active-tab", fidelity: "exact-active-tab", captureBasis: "native-active-tab-redacted", temporaryPath: undefined, pngBase64: png.toString("base64") },
+  },
+}), /attestation/, "host assertions cannot establish exact-active-tab fidelity");
+const issuedFirst = issueVisualContextRequest({ nextSequence: 1, pending: {} }, "older");
+const issuedSecond = issueVisualContextRequest(issuedFirst.registry, "newer");
+const consumedSecond = consumeVisualContextRequest(issuedSecond.registry, "newer");
+assert.equal(consumedSecond.sequence, 2);
+assert.throws(() => consumeVisualContextRequest(consumedSecond.registry, "newer"), /consumed/, "request issuance is one-time");
+const orderedSnapshot = visualContextSnapshotFromResult({ ...result, requestId: "newer" }, consumedSecond.sequence);
+assert.equal(isStaleVisualContextSequence(orderedSnapshot, consumeVisualContextRequest(consumedSecond.registry, "older").sequence), true, "an older equal-revision result cannot supersede newer state");
 assert.equal(isStaleVisualContextInvalidation(snapshot, { sourceContextRevision: 3, routeRevision: 9 }), true, "an older invalidation cannot replace a newer capture");
 assert.equal(isStaleVisualContextInvalidation(snapshot, { sourceContextRevision: 5, routeRevision: 9 }), false);
 const invalidated = invalidatedVisualContextSnapshot({
@@ -139,6 +158,25 @@ try {
   await rm(leaseRoot, { recursive: true, force: true });
 }
 
+for (const failpoint of ["before-invalidation", "after-invalidation", "after-png-rename", "before-manifest-rename"]) {
+  const root = await mkdtemp(join(tmpdir(), "sonik-visual-promote-"));
+  try {
+    const paths = Object.fromEntries(["manifest", "png", "invalidation", "stableManifest", "stablePng"].map((name) => [name, join(root, name)]));
+    await Promise.all([
+      writeFile(paths.manifest, JSON.stringify({ status: "current" })),
+      writeFile(paths.png, "new-png"),
+      writeFile(paths.invalidation, JSON.stringify({ status: "invalidated" })),
+      writeFile(paths.stableManifest, JSON.stringify({ status: "current", prior: true })),
+      writeFile(paths.stablePng, "prior-png"),
+    ]);
+    await assert.rejects(promisify(execFile)("bash", ["-lc", createVisualContextPromotionScript(), "_", paths.manifest, paths.png, paths.invalidation, paths.stableManifest, paths.stablePng, "1", failpoint]));
+    const durable = JSON.parse(await readFile(paths.stableManifest, "utf8"));
+    assert.equal(durable.status, failpoint === "before-invalidation" ? "current" : "invalidated", `${failpoint} leaves only prior-valid or invalidated state`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 const cleanupCommands = [];
 await removeVisualContextTemporaryPath({
   async runCommand(command) {
@@ -164,5 +202,6 @@ assert.match(serviceSource, /mv \"\$manifest\" \"\$stable_manifest\"/, "the mani
 assert.match(serviceSource, /rm -f \"\$stable_png\"/, "invalidation removes latest.png");
 assert.match(serviceSource, /result\.status === "cancelled"[\s\S]*invalidatedVisualContextSnapshot[\s\S]*promoteVisualContextManifest\([^)]*null/, "cancelled pick/capture atomically invalidates the manifest and removes latest.png");
 assert.match(serviceSource, /result\.operation === "clear"[\s\S]*isStaleVisualContextResult\(current, result\)[\s\S]*invalidatedVisualContextSnapshot/, "clear promotion applies the same revision guard as capture");
+assert.match(serviceSource, /accepted: submitted\.value\.accepted/, "controlled-preview capture exposes coordinator acceptance truth");
 
 console.log("dev-workbench visual context coordinator: ok");

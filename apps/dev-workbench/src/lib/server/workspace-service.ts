@@ -35,12 +35,16 @@ import type { DevWorkbenchServerConfig } from "./workbench-config";
 import {
   VISUAL_CONTEXT_LEASE_PATH,
   VISUAL_CONTEXT_PATH,
+  VISUAL_CONTEXT_REQUESTS_PATH,
   VISUAL_CONTEXT_STAGE_ROOT,
   createVisualContextLeaseAcquireScript,
+  consumeVisualContextRequest,
   decodeCanonicalBase64,
   invalidatedVisualContextSnapshot,
   isStaleVisualContextInvalidation,
   isStaleVisualContextResult,
+  isStaleVisualContextSequence,
+  issueVisualContextRequest,
   requestTemporaryPath,
   validateVisualContextPng,
   validateVisualContextSnapshotPng,
@@ -48,8 +52,10 @@ import {
   visualContextInvalidationSchema,
   visualContextSnapshotFromResult,
   visualContextSubmissionSchema,
+  visualContextRequestRegistrySchema,
   type VisualContextInvalidation,
   type VisualContextSubmission,
+  type VisualContextRequestRegistry,
 } from "./visual-context-coordinator";
 import { visualContextSnapshotSchema, type VisualContextSnapshot } from "@sonik-agent-ui/tool-contracts/visual-context";
 import { capturePlaywrightPreview } from "./playwright-preview-capture";
@@ -326,7 +332,7 @@ export async function runWorkspacePlaywrightVisualContext(
   sessionId: string,
   input: VisualContextRequest,
   signal?: AbortSignal,
-): Promise<WorkspaceServiceResult<{ browser: VisualBrowserState; result: VisualContextResult; snapshot: VisualContextSnapshot | null }>> {
+): Promise<WorkspaceServiceResult<{ browser: VisualBrowserState; result: VisualContextResult; snapshot: VisualContextSnapshot | null; accepted: boolean }>> {
   const request = visualContextRequestSchema.safeParse(input);
   if (!request.success || request.data.provider !== "playwright") {
     return { ok: false, error: workspaceError("unknown", "visual-context-validate", false) };
@@ -334,6 +340,10 @@ export async function runWorkspacePlaywrightVisualContext(
   const resumed = await resumeVerifiedWorkspace(sessionId, signal);
   if (!resumed.ok) return resumed;
   try {
+    if (visualContextOperationPromotesStableArtifact(request.data.operation)) {
+      const registered = await registerWorkspaceVisualContextRequest(sessionId, request.data, signal);
+      if (!registered.ok) return registered;
+    }
     const result = await capturePlaywrightPreview({
       sandbox: resumed.value,
       request: request.data,
@@ -341,13 +351,35 @@ export async function runWorkspacePlaywrightVisualContext(
       signal,
     });
     if (!visualContextOperationPromotesStableArtifact(request.data.operation)) {
-      return { ok: true, value: { browser: visualBrowserStateFromResult(result), result, snapshot: null } };
+      return { ok: true, value: { browser: visualBrowserStateFromResult(result), result, snapshot: null, accepted: true } };
     }
     const submitted = await submitWorkspaceVisualContext(sessionId, { workspaceSessionId: sessionId, request: request.data, result }, signal);
     if (!submitted.ok) return submitted;
-    return { ok: true, value: { browser: visualBrowserStateFromResult(result), result, snapshot: submitted.value.snapshot } };
+    return { ok: true, value: { browser: visualBrowserStateFromResult(result), result, snapshot: submitted.value.snapshot, accepted: submitted.value.accepted } };
   } catch {
     return { ok: false, error: workspaceError("unknown", "playwright-visual-context", true) };
+  }
+}
+
+export async function registerWorkspaceVisualContextRequest(
+  sessionId: string,
+  input: VisualContextRequest,
+  signal?: AbortSignal,
+): Promise<WorkspaceServiceResult<{ request: VisualContextRequest }>> {
+  const request = visualContextRequestSchema.safeParse(input);
+  if (!request.success) return { ok: false, error: workspaceError("unknown", "visual-context-validate", false) };
+  const resumed = await resumeVerifiedWorkspace(sessionId, signal);
+  if (!resumed.ok) return resumed;
+  const leaseOwner = randomUUID();
+  if (!await acquireVisualContextLease(resumed.value, leaseOwner, signal)) return { ok: false, error: workspaceError("unknown", "visual-context-lease", true) };
+  try {
+    const issued = issueVisualContextRequest(await readVisualContextRequestRegistry(resumed.value, signal), request.data.requestId);
+    await writeVisualContextRequestRegistry(resumed.value, issued.registry, signal);
+    return { ok: true, value: { request: request.data } };
+  } catch {
+    return { ok: false, error: workspaceError("unknown", "visual-context-register", false) };
+  } finally {
+    await releaseVisualContextLease(resumed.value, leaseOwner, signal).catch(() => undefined);
   }
 }
 
@@ -377,10 +409,13 @@ export async function submitWorkspaceVisualContext(
   }
   try {
     const result = parsed.data.result;
+    const consumed = consumeVisualContextRequest(await readVisualContextRequestRegistry(resumed.value, signal), result.requestId);
+    await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
+    const requestSequence = consumed.sequence;
     if (result.status !== "completed") {
       if (result.status === "cancelled" && (result.operation === "pick" || result.operation === "capture")) {
         const current = await readVisualContextSnapshot(resumed.value, signal);
-        if (isStaleVisualContextResult(current, result)) {
+        if (isStaleVisualContextResult(current, result) || isStaleVisualContextSequence(current, requestSequence)) {
           if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
           return { ok: true, value: { accepted: false, snapshot: null } };
         }
@@ -391,7 +426,7 @@ export async function submitWorkspaceVisualContext(
           source: result.source,
           staleReason: "cancelled",
         });
-        const snapshot = invalidatedVisualContextSnapshot(invalidation, result.requestId);
+        const snapshot = invalidatedVisualContextSnapshot(invalidation, result.requestId, requestSequence);
         await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
         if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
         return { ok: true, value: { accepted: false, snapshot } };
@@ -404,7 +439,7 @@ export async function submitWorkspaceVisualContext(
     }
     const current = await readVisualContextSnapshot(resumed.value, signal);
     if (result.operation === "clear") {
-      if (isStaleVisualContextResult(current, result)) {
+      if (isStaleVisualContextResult(current, result) || isStaleVisualContextSequence(current, requestSequence)) {
         return { ok: true, value: { accepted: false, snapshot: null } };
       }
       const invalidation = visualContextInvalidationSchema.parse({
@@ -414,11 +449,11 @@ export async function submitWorkspaceVisualContext(
         source: result.source,
         staleReason: "cancelled",
       });
-      const snapshot = invalidatedVisualContextSnapshot(invalidation, result.requestId);
+      const snapshot = invalidatedVisualContextSnapshot(invalidation, result.requestId, requestSequence);
       await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
       return { ok: true, value: { accepted: true, snapshot } };
     }
-    if (isStaleVisualContextResult(current, result)) {
+    if (isStaleVisualContextResult(current, result) || isStaleVisualContextSequence(current, requestSequence)) {
       if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
       return { ok: true, value: { accepted: false, snapshot: null } };
     }
@@ -433,7 +468,7 @@ export async function submitWorkspaceVisualContext(
       if (!png) throw new Error("Visual context capture did not produce PNG bytes.");
       validateVisualContextPng(png, result);
     }
-    const snapshot = visualContextSnapshotFromResult(result);
+    const snapshot = visualContextSnapshotFromResult(result, requestSequence);
     await promoteVisualContextManifest(resumed.value, snapshot, png, signal);
     if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
     return { ok: true, value: { accepted: true, snapshot } };
@@ -462,10 +497,13 @@ export async function invalidateWorkspaceVisualContext(
   }
   try {
     const current = await readVisualContextSnapshot(resumed.value, signal);
+    const registry = await readVisualContextRequestRegistry(resumed.value, signal);
+    const requestSequence = registry.nextSequence;
+    await writeVisualContextRequestRegistry(resumed.value, { ...registry, nextSequence: requestSequence + 1 }, signal);
     if (isStaleVisualContextInvalidation(current, parsed.data)) {
       return { ok: true, value: { snapshot: current! } };
     }
-    const snapshot = invalidatedVisualContextSnapshot(parsed.data);
+    const snapshot = invalidatedVisualContextSnapshot(parsed.data, null, requestSequence);
     await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
     return { ok: true, value: { snapshot } };
   } catch {
@@ -535,6 +573,18 @@ async function readVisualContextSnapshot(sandbox: Sandbox, signal?: AbortSignal)
   return visualContextSnapshotSchema.parse(JSON.parse(buffer.toString("utf8")));
 }
 
+async function readVisualContextRequestRegistry(sandbox: Sandbox, signal?: AbortSignal): Promise<VisualContextRequestRegistry> {
+  const buffer = await sandbox.readFileToBuffer({ path: VISUAL_CONTEXT_REQUESTS_PATH }, signal ? { signal } : undefined);
+  return buffer ? visualContextRequestRegistrySchema.parse(JSON.parse(buffer.toString("utf8"))) : { nextSequence: 1, pending: {} };
+}
+
+async function writeVisualContextRequestRegistry(sandbox: Sandbox, registry: VisualContextRequestRegistry, signal?: AbortSignal): Promise<void> {
+  const staged = `${VISUAL_CONTEXT_REQUESTS_PATH}.${randomUUID()}.tmp`;
+  await sandbox.writeFiles([{ path: staged, content: JSON.stringify(registry) }], signal ? { signal } : undefined);
+  const result = await sandbox.runCommand({ cmd: "mv", args: [staged, VISUAL_CONTEXT_REQUESTS_PATH], ...(signal ? { signal } : {}) });
+  if (result.exitCode !== 0) throw new Error("Visual context request registry publication failed.");
+}
+
 async function promoteVisualContextManifest(
   sandbox: Sandbox,
   snapshot: VisualContextSnapshot,
@@ -543,31 +593,45 @@ async function promoteVisualContextManifest(
 ): Promise<void> {
   const stageManifest = `${VISUAL_CONTEXT_STAGE_ROOT}/${snapshot.generation}.json`;
   const stagePng = `${VISUAL_CONTEXT_STAGE_ROOT}/${snapshot.generation}.png`;
+  const stageInvalidation = `${VISUAL_CONTEXT_STAGE_ROOT}/${snapshot.generation}.invalidated.json`;
+  const invalidation = snapshot.status === "invalidated" ? snapshot : visualContextSnapshotSchema.parse({
+    ...snapshot,
+    status: "invalidated",
+    selection: null,
+    ariaSnapshot: null,
+    selectionResolution: "not-requested",
+    screenshot: null,
+    invalidatedAt: new Date().toISOString(),
+    staleReason: "provider-lost",
+  });
   await sandbox.writeFiles([
     { path: stageManifest, content: JSON.stringify(snapshot, null, 2) },
+    { path: stageInvalidation, content: JSON.stringify(invalidation, null, 2) },
     ...(png ? [{ path: stagePng, content: png }] : []),
   ], signal ? { signal } : undefined);
-  const script = `set -eu
-manifest="$1"; png="$2"; stable_manifest="$3"; stable_png="$4"; has_png="$5"
-manifest_backup="$manifest.backup"; png_backup="$png.backup"
-[ ! -e "$stable_manifest" ] || cp -p "$stable_manifest" "$manifest_backup"
-[ ! -e "$stable_png" ] || cp -p "$stable_png" "$png_backup"
-rollback() {
-  if [ -e "$manifest_backup" ]; then mv "$manifest_backup" "$stable_manifest"; else rm -f "$stable_manifest"; fi
-  if [ -e "$png_backup" ]; then mv "$png_backup" "$stable_png"; else rm -f "$stable_png"; fi
-}
-trap rollback ERR
-if [ "$has_png" = 1 ]; then mv "$png" "$stable_png"; fi
-mv "$manifest" "$stable_manifest"
-if [ "$has_png" = 0 ]; then rm -f "$stable_png"; fi
-trap - ERR
-rm -f "$manifest_backup" "$png_backup"`;
+  const script = createVisualContextPromotionScript();
   const result = await sandbox.runCommand({
     cmd: "bash",
-    args: ["-lc", script, "_", stageManifest, stagePng, VISUAL_CONTEXT_PATH, DEV_WORKBENCH_MIRROR_PATHS.latestScreenshot, png ? "1" : "0"],
+    args: ["-lc", script, "_", stageManifest, stagePng, stageInvalidation, VISUAL_CONTEXT_PATH, DEV_WORKBENCH_MIRROR_PATHS.latestScreenshot, png ? "1" : "0", "none"],
     ...(signal ? { signal } : {}),
   });
   if (result.exitCode !== 0) throw new Error("Visual context promotion failed.");
+}
+
+export function createVisualContextPromotionScript(): string {
+  return `set -eu
+manifest="$1"; png="$2"; invalidation="$3"; stable_manifest="$4"; stable_png="$5"; has_png="$6"; failpoint="$7"
+[ "$failpoint" != before-invalidation ] || exit 86
+if [ "$has_png" = 1 ]; then
+  mv "$invalidation" "$stable_manifest"
+  rm -f "$stable_png"
+  [ "$failpoint" != after-invalidation ] || exit 86
+  mv "$png" "$stable_png"
+  [ "$failpoint" != after-png-rename ] || exit 86
+  [ "$failpoint" != before-manifest-rename ] || exit 86
+fi
+mv "$manifest" "$stable_manifest"
+if [ "$has_png" = 0 ]; then rm -f "$stable_png"; fi`;
 }
 
 async function removeSandboxPath(sandbox: Sandbox, path: string, signal?: AbortSignal): Promise<void> {

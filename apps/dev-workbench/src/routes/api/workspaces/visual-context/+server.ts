@@ -13,8 +13,10 @@ import { readDevWorkbenchConfig } from "$lib/server/workbench-config";
 import {
   invalidateWorkspaceVisualContext,
   readWorkspaceVisualContext,
+  registerWorkspaceVisualContextRequest,
   submitWorkspaceVisualContext,
 } from "$lib/server/workspace-service";
+import { visualContextRequestSchema } from "@sonik-agent-ui/tool-contracts/visual-context";
 
 const NO_STORE = { "cache-control": "no-store, max-age=0" };
 const MAX_BODY_BYTES = 14 * 1_024 * 1_024;
@@ -56,6 +58,21 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
   }
   emitLifecycleEvent(sessionId, parsed.data, terminalEvent(parsed.data.result.operation, parsed.data.result.status, result.value.accepted), result.value.accepted);
   return json(result.value, { status: result.value.accepted ? 200 : 202, headers: NO_STORE });
+};
+
+export const PUT: RequestHandler = async ({ cookies, request }) => {
+  const configuration = readDevWorkbenchConfig(env);
+  if (!configuration.ok) return json({ error: configuration.reason }, { status: 503, headers: NO_STORE });
+  const sessionId = cookies.get(DEV_WORKBENCH_SESSION_COOKIE);
+  if (!sessionId) return json({ error: "No Dev Workbench session is attached." }, { status: 404, headers: NO_STORE });
+  const input = await parseBoundedJson(request);
+  if (!input.ok) return json({ error: input.error }, { status: input.status, headers: NO_STORE });
+  const parsed = visualContextRequestSchema.safeParse(input.value);
+  if (!parsed.success) return json({ error: "Visual context request is invalid." }, { status: 400, headers: NO_STORE });
+  const result = await registerWorkspaceVisualContextRequest(sessionId, parsed.data, request.signal);
+  return result.ok
+    ? json(result.value, { headers: NO_STORE })
+    : json({ error: result.error }, { status: result.error.retryable ? 409 : 400, headers: NO_STORE });
 };
 
 export const DELETE: RequestHandler = async ({ cookies, request }) => {

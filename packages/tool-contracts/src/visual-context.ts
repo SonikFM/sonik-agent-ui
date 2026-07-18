@@ -183,6 +183,7 @@ export const visualContextSnapshotSchema = z.strictObject({
   status: z.enum(["current", "invalidated"]),
   generation: boundedIdSchema,
   requestId: boundedIdSchema.nullable(),
+  requestSequence: z.number().int().nonnegative().default(0),
   sourceContextRevision: z.number().int().nonnegative(),
   routeRevision: z.number().int().nonnegative(),
   source: visualContextSourceSchema,
