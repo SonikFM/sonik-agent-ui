@@ -119,6 +119,12 @@ assert.equal((await call({ action: "resolve", pin: { kind: "published", workflow
 assert.equal((await call({ action: "create", definition }, otherUser)).ok, true);
 const otherUserDraft = (await call({ action: "get", workflowId: definition.workflowId }, otherUser)).draft;
 assert.equal((await call({ action: "publish", workflowId: definition.workflowId, expectedRevision: 0, workflowVersionId, dependencyPins: { ...pins, definitionDigest: otherUserDraft.definitionDigest } }, otherUser)).reason, "revision_conflict_or_version_exists", "published IDs are unique across an organization, not per publisher");
+assert.equal((await call({ action: "create", definition }, otherOrganization)).ok, true);
+const otherOrganizationDraft = (await call({ action: "get", workflowId: definition.workflowId }, otherOrganization)).draft;
+const otherOrganizationPins = { ...pins, organizationId: otherOrganization.organizationId, definitionDigest: otherOrganizationDraft.definitionDigest };
+const otherOrganizationPublished = await call({ action: "publish", workflowId: definition.workflowId, expectedRevision: 0, workflowVersionId, dependencyPins: otherOrganizationPins }, otherOrganization);
+assert.equal(otherOrganizationPublished.ok, true, "published IDs may be reused by another organization with its own valid draft and dependency pins");
+assert.deepEqual(otherOrganizationPublished.version.dependencyPins, otherOrganizationPins);
 assert.equal((await call({ action: "resolve", pin: { kind: "published", workflowVersionId, definitionDigest: digest("f") } })).definition, null, "digest is part of the exact published pin");
 
 const unsupportedVersion = structuredClone(train0WorkflowFixtures.linear);
@@ -170,8 +176,12 @@ for (const table of ["workflow_definition_drafts", "workflow_definition_publishe
 }
 assert.match(migration, /before update or delete[\s\S]*reject_published_workflow_mutation/i, "database rejects published mutation");
 assert.match(migration, /jsonb_typeof\(dependency_pins\) = 'object'/i);
-assert.match(organizationScopeMigration, /create unique index concurrently[\s\S]*\(organization_id, workflow_version_id\)[\s\S]*primary key using index/i, "published identity is organization scoped without a blocking index build");
-assert.match(organizationScopeMigration, /using \(organization_id = sonik_agent_ui\.current_organization_id\(\)\)[\s\S]*with check \(organization_id = sonik_agent_ui\.current_organization_id\(\) and user_id = sonik_agent_ui\.current_user_id\(\)\)/i, "same-org reads retain publisher-scoped inserts");
+const organizationVersionIndex = organizationScopeMigration.match(/create unique index concurrently\s+([a-z0-9_]+)\s+on\s+sonik_agent_ui\.workflow_definition_published_versions\s*\(organization_id,\s*workflow_version_id\)\s*;/i);
+assert.ok(organizationVersionIndex, "published identity is organization scoped without a blocking index build");
+assert.match(organizationScopeMigration, new RegExp(`alter table\\s+sonik_agent_ui\\.workflow_definition_published_versions[^;]*primary key using index\\s+${organizationVersionIndex[1]}\\s*;`, "i"), "the published primary key reuses the concurrent organization/version index in one statement");
+const organizationPolicy = organizationScopeMigration.match(/create policy\s+workflow_definition_versions_scope\s+on\s+sonik_agent_ui\.workflow_definition_published_versions[^;]*;/i);
+assert.ok(organizationPolicy, "the exact published-version organization policy exists on the exact published-version table");
+assert.match(organizationPolicy[0], /using \(organization_id = sonik_agent_ui\.current_organization_id\(\)\)\s+with check \(organization_id = sonik_agent_ui\.current_organization_id\(\) and user_id = sonik_agent_ui\.current_user_id\(\)\)/i, "same-org reads retain publisher-scoped inserts within the same policy statement");
 assert.match(repositorySource, /draft_revision = draft_revision \+ 1[\s\S]*draft_revision = \$4[\s\S]*returning/i, "cloud draft writes use one CAS statement");
 assert.match(repositorySource, /insert into sonik_agent_ui\.workflow_definition_published_versions[\s\S]*select[\s\S]*draft_revision = \$4[\s\S]*definition_digest = \$6/i, "cloud publish atomically snapshots the expected draft");
 assert.match(route, /createAgentHostSessionEnvelope\(event\)/);
