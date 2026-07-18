@@ -212,6 +212,7 @@ const sandboxFiles = new Map([
     createdAt: "2026-07-17T12:00:00.000Z",
   }))],
 ]);
+let failNextPromotion = false;
 const fakeSandbox = {
   update: async () => undefined,
   readFileToBuffer: async ({ path }) => sandboxFiles.get(path) ?? null,
@@ -225,6 +226,10 @@ const fakeSandbox = {
     } else if (cmd === "rm") {
       sandboxFiles.delete(args.at(-1));
     } else if (cmd === "bash" && args.length >= 10) {
+      if (failNextPromotion) {
+        failNextPromotion = false;
+        return { exitCode: 86, stdout: async () => "" };
+      }
       const [, , , stageManifest, stagePng, , stableManifest, stablePng, hasPng] = args;
       sandboxFiles.set(stableManifest, sandboxFiles.get(stageManifest));
       sandboxFiles.delete(stageManifest);
@@ -256,6 +261,12 @@ try {
   assert.ok(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_REQUESTS_PATH)).pending[request.requestId], "the exact issuance remains pending");
 
   sandboxFiles.set(result.screenshot.temporaryPath, png);
+  failNextPromotion = true;
+  const promotionFailed = await submitWorkspaceVisualContext("workspace-1", submission);
+  assert.equal(promotionFailed.ok, false, "a failed promotion remains retryable");
+  assert.ok(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_REQUESTS_PATH)).pending[request.requestId], "failed promotion preserves the pending request");
+  assert.equal(sandboxFiles.has(result.screenshot.temporaryPath), true, "failed promotion preserves the request-scoped PNG");
+
   const accepted = await submitWorkspaceVisualContext("workspace-1", submission);
   assert.equal(accepted.ok && accepted.value.accepted, true, "the exact retried POST consumes and promotes once");
   assert.equal(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_PATH)).status, "current");

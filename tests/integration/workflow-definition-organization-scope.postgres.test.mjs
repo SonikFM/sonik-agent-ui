@@ -117,18 +117,21 @@ try {
     delete from sonik_agent_ui.schema_migrations where version = '0019';
     insert into sonik_agent_ui.workflow_definition_published_versions
       (organization_id, user_id, workflow_id, workflow_version_id, source_draft_revision, definition_digest, definition, dependency_pins, published_by)
-    values ('org-a', 'publisher-c', 'shared', 'shared@1', 0, '${digest}', '{}'::jsonb, '{}'::jsonb, 'publisher-c');
+    values ('org-a', 'publisher-c', 'shared', 'shared@1', 0, '${digest}', '{}'::jsonb, '{"workflowVersionId":"shared@1"}'::jsonb, 'publisher-c');
+    insert into sonik_agent_ui.agent_workflow_runs
+      (run_id, organization_id, user_id, workflow_id, workflow_version_id, definition, state)
+    values
+      ('publisher-a-run', 'org-a', 'publisher-a', 'shared', 'shared@1', '{}'::jsonb, '{}'::jsonb),
+      ('publisher-c-run', 'org-a', 'publisher-c', 'shared', 'shared@1', '{}'::jsonb, '{}'::jsonb),
+      ('legacy-run', null, null, 'shared', 'shared@1', '{}'::jsonb, '{}'::jsonb);
   `);
 
-  assert.throws(
-    () => runMigrations(),
-    "the 0019 upgrade fails atomically instead of discarding duplicate organization-local version identities",
-  );
-  assert.equal(psql(testUrl, "select count(*) from sonik_agent_ui.schema_migrations where version = '0019'"), "0");
+  runMigrations();
+  assert.equal(psql(testUrl, "select count(*) from sonik_agent_ui.schema_migrations where version = '0019'"), "1");
   assert.equal(
-    psql(testUrl, "select count(*) from sonik_agent_ui.workflow_definition_published_versions where organization_id = 'org-a' and workflow_version_id = 'shared@1'"),
+    psql(testUrl, "select count(*) from sonik_agent_ui.workflow_definition_published_versions where organization_id = 'org-a' and workflow_version_id like 'shared@1%'"),
     "2",
-    "a failed upgrade preserves both conflicting rows for explicit operator repair",
+    "the upgrade preserves both immutable published versions",
   );
   assert.equal(
     psql(testUrl, `
@@ -139,26 +142,23 @@ try {
       where constraint_definition.conrelid = 'sonik_agent_ui.workflow_definition_published_versions'::regclass
         and constraint_definition.contype = 'p'
     `),
-    "organization_id,user_id,workflow_version_id",
-    "the failed 0019 transaction leaves the pre-upgrade primary key intact",
+    "organization_id,workflow_version_id",
+    "the upgrade installs the organization-scoped primary key",
   );
-
-  psql(testUrl, `
-    alter table sonik_agent_ui.workflow_definition_published_versions disable trigger workflow_definition_versions_immutable;
-    delete from sonik_agent_ui.workflow_definition_published_versions
-      where organization_id = 'org-a' and user_id = 'publisher-c' and workflow_version_id = 'shared@1';
-    alter table sonik_agent_ui.workflow_definition_published_versions enable trigger workflow_definition_versions_immutable;
-  `);
-  runMigrations();
-  assert.equal(
-    psql(testUrl, "select applied_via from sonik_agent_ui.schema_migrations where version = '0019'"),
-    "runner",
-    "the repaired pre-0019 schema upgrades through the migration runner",
+  assert.deepEqual(
+    psql(testUrl, "select user_id || ':' || workflow_version_id || ':' || published_by from sonik_agent_ui.workflow_definition_published_versions where organization_id = 'org-a' and workflow_version_id like 'shared@1%' order by user_id").split("\n"),
+    ["publisher-a:shared@1:publisher-a", "publisher-c:shared@1~legacy-1:publisher-c"],
+    "the deterministic reconciliation retains publisher provenance without deleting history",
   );
   assert.equal(
-    psql(testUrl, "select user_id || ':' || published_by from sonik_agent_ui.workflow_definition_published_versions where organization_id = 'org-a' and workflow_version_id = 'shared@1'"),
-    "publisher-a:publisher-a",
-    "the successful upgrade retains publisher provenance",
+    psql(testUrl, "select dependency_pins->>'workflowVersionId' from sonik_agent_ui.workflow_definition_published_versions where organization_id = 'org-a' and user_id = 'publisher-c'"),
+    "shared@1~legacy-1",
+    "the reconciled published row retains an exact self-pin",
+  );
+  assert.deepEqual(
+    psql(testUrl, "select coalesce(user_id, 'legacy') || ':' || workflow_version_id from sonik_agent_ui.agent_workflow_runs where workflow_id = 'shared' order by run_id").split("\n"),
+    ["legacy:shared@1", "publisher-a:shared@1", "publisher-c:shared@1~legacy-1"],
+    "only matching owned run history follows the reconciled immutable version",
   );
 
   psql(testUrl, `
@@ -176,7 +176,7 @@ try {
       select organization_id from sonik_agent_ui.workflow_definition_published_versions order by organization_id;
       rollback;
     `).split("\n").filter((line) => line.startsWith("org-")),
-    ["org-a", "org-b"],
+    ["org-a", "org-a", "org-b"],
     "the deliberately permissive policy demonstrates the cross-organization leak the baseline must reject",
   );
   const permissivePolicyPlan = runMigrations({ dryRun: true });

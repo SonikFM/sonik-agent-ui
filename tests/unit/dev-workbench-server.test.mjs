@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { Sandbox } from "../../apps/dev-workbench/node_modules/@vercel/sandbox/dist/index.js";
 import {
   DEFAULT_REPOSITORY_COMMANDS,
   DEV_WORKBENCH_MIRROR_PATHS,
@@ -46,6 +47,7 @@ import {
   visualPickDisabledReason,
 } from "../../apps/dev-workbench/src/lib/client/host-context-bridge.ts";
 import { resolveAgentUiDevApiProxyTarget } from "../../apps/standalone-sveltekit/src/lib/server/dev-api-proxy.ts";
+import { writeWorkspacePageContext } from "../../apps/dev-workbench/src/lib/server/workspace-service.ts";
 
 const repository = repositoryManifestSchema.parse({
   schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
@@ -197,6 +199,31 @@ const workspaceServiceSource = readFileSync("apps/dev-workbench/src/lib/server/w
 assert.match(workspaceServiceSource, /host-context\.json.*host origin plus redacted page context/i);
 assert.match(workspaceServiceSource, /openapi\.json.*host OpenAPI document fetched with that authority/i);
 assert.doesNotMatch(workspaceServiceSource, /booking-host origin|booking host OpenAPI/i);
+
+const contextSandboxFiles = new Map([
+  [DEV_WORKBENCH_MIRROR_PATHS.workspace, Buffer.from(JSON.stringify({
+    schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
+    sessionId: "workspace-1",
+    organizationId: "organization-1",
+    sandboxName: "sandbox-1",
+    repository,
+    tmuxSession: "sonik-dev",
+    createdAt: "2026-07-17T12:00:00.000Z",
+  }))],
+  [DEV_WORKBENCH_MIRROR_PATHS.openApi, Buffer.from(JSON.stringify({ stale: true }))],
+]);
+const originalSandboxGet = Sandbox.get;
+Sandbox.get = async () => ({
+  update: async () => undefined,
+  readFileToBuffer: async ({ path }) => contextSandboxFiles.get(path) ?? null,
+  writeFiles: async (files) => {
+    for (const file of files) contextSandboxFiles.set(file.path, Buffer.from(file.content));
+  },
+  runCommand: async ({ cmd, args }) => {
+    if (cmd === "rm") contextSandboxFiles.delete(args.at(-1));
+    return { exitCode: 0, stdout: async () => "" };
+  },
+});
 assert.equal(workspaceServiceSource.indexOf("capturePlaywrightPreview") < workspaceServiceSource.indexOf("submitWorkspaceVisualContext(sessionId"), true, "provider temp output reaches the G009 coordinator before any stable artifact promotion");
 assert.match(workspaceServiceSource, /if \(!visualContextOperationPromotesStableArtifact\(request\.data\.operation\)\)[^]*snapshot: null[^]*submitWorkspaceVisualContext/, "probe/setup return state without taking the stable artifact coordinator lease");
 assert.match(workspaceServiceSource, /consumeVisualContextRequest\([^]*parsed\.data\.request\)[^]*if \(!consumed\)[^]*removeSandboxPath\([^]*accepted: false[^]*writeVisualContextRequestRegistry/, "a mutated same-id POST cleans staged pixels and is discarded before the exact issuance is consumed");
@@ -510,6 +537,13 @@ const syncedContext = workspaceContextSyncSchema.parse({
     },
   },
 });
+try {
+  const written = await writeWorkspacePageContext("workspace-1", { ...syncedContext, host: null }, null);
+  assert.equal(written.ok, true);
+  assert.equal(contextSandboxFiles.has(DEV_WORKBENCH_MIRROR_PATHS.openApi), false, "absent OpenAPI refresh removes a stale snapshot");
+} finally {
+  Sandbox.get = originalSandboxGet;
+}
 assert.equal(syncedContext.host?.authority?.header, "opaque_signed_host_authority");
 assert.throws(
   () => workspaceContextSyncSchema.parse({ ...syncedContext, host: { ...syncedContext.host, origin: "http://localhost:3000" } }),

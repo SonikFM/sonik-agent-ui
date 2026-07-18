@@ -572,7 +572,7 @@ try {
     assert.equal((await handlePublicWorkflowDriverAction({ action: "preview", runId }, governedDeps)).result.run.status, "waiting");
     let releasedAfterFailure = false;
     const releaseLease = governedDeps.journal.releaseLease.bind(governedDeps.journal);
-    const rejected = await handlePublicWorkflowDriverAction({ action: "approve", runId }, {
+    const rejected = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit" }, {
       ...governedDeps,
       journal: {
         ...governedDeps.journal,
@@ -582,12 +582,14 @@ try {
     });
     assert.deepEqual(rejected.result, { ok: false, reason: "workflow_run_driver_failed" });
     assert.equal(releasedAfterFailure, true, "structured approval failures still release the server lease");
-    const recognized = await handlePublicWorkflowDriverAction({ action: "approve", runId }, {
+    const recognized = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit" }, {
       ...governedDeps,
       journal: { ...governedDeps.journal, appendEventAndProject: async () => { throw new Error("run_revision_or_lease_conflict"); } },
     });
     assert.deepEqual(recognized.result, { ok: false, reason: "run_revision_or_lease_conflict" });
-    const approved = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "client-hint-ignored" }, governedDeps);
+    const staleApproval = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "client-hint-ignored" }, governedDeps);
+    assert.deepEqual(staleApproval.result, { ok: false, reason: "approval_node_mismatch" }, "approval must bind to the current waiting node");
+    const approved = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit" }, governedDeps);
     assert.equal(approved.result.run.status, "running", JSON.stringify(approved.result));
     assert.equal(providerCalls, 0, "approval CAS persists authority without pumping the write");
     assert.ok(approved.result.run.outputs["__approval_decision__:approval"], "exact signed decision survives driver recreation");
@@ -611,7 +613,7 @@ try {
       } : {},
     };
     assert.equal((await handlePublicWorkflowDriverAction({ action: "preview", runId }, governedDeps)).result.run.status, "waiting");
-    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId }, governedDeps)).result.run.status, "running");
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit" }, governedDeps)).result.run.status, "running");
     const failed = await handlePublicWorkflowDriverAction({ action: "commit", runId }, governedDeps);
     assert.equal(failed.result.run.status, "failed");
     assert.equal(failed.result.run.compatibilityPhase, "unsafe_write_retry_refused");
@@ -657,9 +659,9 @@ try {
       } : {},
     };
     assert.equal((await handlePublicWorkflowDriverAction({ action: "preview", runId }, governedDeps)).result.run.status, "waiting");
-    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId }, governedDeps)).result.run.status, "running");
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit-a" }, governedDeps)).result.run.status, "running");
     assert.equal((await handlePublicWorkflowDriverAction({ action: "commit", runId }, governedDeps)).result.run.status, "waiting");
-    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId }, governedDeps)).result.run.status, "running");
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit-b" }, governedDeps)).result.run.status, "running");
     assert.equal((await handlePublicWorkflowDriverAction({ action: "commit", runId }, governedDeps)).result.run.status, "succeeded");
     assert.equal(providerCalls, 2, "distinct approvals produce two distinct governed effects");
   }

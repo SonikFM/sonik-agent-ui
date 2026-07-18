@@ -737,7 +737,7 @@ function createPickerHarness({ timeoutMs = 25, helperVersion = 1 } = {}) {
       }],
     }),
   }) : null;
-  return { controller, document, window, source, timers, documentListeners, windowListeners, helper };
+  return { controller, document, window, source, timers, documentListeners, windowListeners, appended, helper };
 }
 
 function pickerRequest(requestId, overrides = {}) {
@@ -778,6 +778,22 @@ assert.throws(
   harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("wrong-request-origin", { origin: "https://other-agent.example" })));
   assert.equal(harness.controller.isActive(), false, "foreign window/origin and mismatched request-origin messages must be ignored");
   assert.equal(harness.source.messages.length, 0, "rejected visual requests must not receive an oracle response");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("keyboard-pick")));
+  const announcement = harness.appended.find((element) => element.getAttribute?.("role") === "status");
+  assert.equal(announcement?.getAttribute("aria-live"), "polite", "picker instructions must be announced to screen-reader users");
+  assert.match(announcement?.textContent ?? "", /press enter or space to select/i);
+  const target = new PickerElement("BUTTON", { "data-sonik-target": "booking.card" });
+  harness.document.dispatch("keydown", target, { key: "Enter" });
+  assert.equal(harness.source.messages.at(-1).message.status, "completed", "Enter must select the focused page element");
+  assert.equal(harness.source.messages.at(-1).message.selection.targetId, "booking.card");
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("keyboard-cancel")));
+  harness.document.dispatch("keydown", target, { key: "Escape" });
+  assert.equal(harness.source.messages.at(-1).message.status, "cancelled", "Escape must continue to cancel keyboard selection");
   harness.controller.destroy();
 }
 

@@ -92,13 +92,16 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   let pending: PendingPick | undefined;
   let destroyed = false;
   let overlay: HTMLDivElement | undefined;
+  let instructions: HTMLDivElement | undefined;
   let style: HTMLStyleElement | undefined;
   let priorCursor = "";
 
   const removeChrome = () => {
     overlay?.remove();
+    instructions?.remove();
     style?.remove();
     overlay = undefined;
+    instructions = undefined;
     style = undefined;
     ownerDocument.documentElement.style.cursor = priorCursor;
   };
@@ -136,12 +139,19 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
     privateTargets.clear();
     priorCursor = ownerDocument.documentElement.style.cursor;
     style = ownerDocument.createElement("style");
-    style.textContent = `html { cursor: crosshair !important; } #${PICKER_PREFIX}-overlay { position: fixed; pointer-events: none; z-index: 2147483647; outline: 3px solid #f59e0b; outline-offset: 2px; } @media (prefers-reduced-motion: reduce) { #${PICKER_PREFIX}-overlay { transition: none; } }`;
+    style.textContent = `html { cursor: crosshair !important; } #${PICKER_PREFIX}-overlay { position: fixed; pointer-events: none; z-index: 2147483647; outline: 3px solid #f59e0b; outline-offset: 2px; } #${PICKER_PREFIX}-instructions { position: fixed; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; } @media (prefers-reduced-motion: reduce) { #${PICKER_PREFIX}-overlay { transition: none; } }`;
     helper.uiAppendStyle(style);
     overlay = ownerDocument.createElement("div");
     overlay.id = `${PICKER_PREFIX}-overlay`;
     overlay.setAttribute("aria-hidden", "true");
     helper.uiAppend(overlay);
+    instructions = ownerDocument.createElement("div");
+    instructions.id = `${PICKER_PREFIX}-instructions`;
+    instructions.setAttribute("role", "status");
+    instructions.setAttribute("aria-live", "polite");
+    instructions.setAttribute("aria-atomic", "true");
+    instructions.textContent = "Element picker active. Focus a page element and press Enter or Space to select. Press Escape to cancel.";
+    helper.uiAppend(instructions);
 
     const settle: PendingPick["settle"] = (status, selection, disabledReason) => {
       if (!pending || pending.request.requestId !== request.requestId) return;
@@ -219,9 +229,14 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
 
   function onClick(event: Event): void {
     if (!pending) return;
-    const element = pickableElement(event.target);
     const textSelection = ownerWindow.getSelection?.();
-    if (!element || (textSelection && !textSelection.isCollapsed)) return;
+    if (textSelection && !textSelection.isCollapsed) return;
+    selectElement(event);
+  }
+
+  function selectElement(event: Event): void {
+    const element = pickableElement(event.target);
+    if (!pending || !element) return;
     event.preventDefault();
     event.stopPropagation();
     try {
@@ -234,10 +249,14 @@ export function mountVisualContextPicker(options: VisualContextPickerOptions): V
   }
 
   function onKeyDown(event: Event): void {
-    if ((event as KeyboardEvent).key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    cancelPending("Element picker cancelled.");
+    const key = (event as KeyboardEvent).key;
+    if (key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelPending("Element picker cancelled.");
+    } else if (key === "Enter" || key === " ") {
+      selectElement(event);
+    }
   }
 
   function pickableElement(target: EventTarget | null): Element | undefined {

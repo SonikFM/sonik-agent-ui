@@ -318,6 +318,14 @@ export async function writeWorkspacePageContext(
         ? []
         : [{ path: DEV_WORKBENCH_MIRROR_PATHS.openApi, content: JSON.stringify(openApiDocument, null, 2) }]),
     ], signal ? { signal } : undefined);
+    if (openApiDocument === null) {
+      const removed = await resumed.value.runCommand({
+        cmd: "rm",
+        args: ["-f", DEV_WORKBENCH_MIRROR_PATHS.openApi],
+        ...(signal ? { signal } : {}),
+      });
+      if (removed.exitCode !== 0) throw new Error("Stale OpenAPI removal failed.");
+    }
     await resumed.value.runCommand({
       cmd: "chmod",
       args: ["600", DEV_WORKBENCH_MIRROR_PATHS.hostAuthority],
@@ -410,7 +418,6 @@ export async function submitWorkspaceVisualContext(
   const leaseOwner = randomUUID();
   const lease = await acquireVisualContextLease(resumed.value, leaseOwner, signal);
   if (!lease) {
-    if (temporaryPath) await removeVisualContextTemporaryPath(resumed.value, temporaryPath, signal);
     return { ok: false, error: workspaceError("unknown", "visual-context-lease", true) };
   }
   try {
@@ -420,12 +427,12 @@ export async function submitWorkspaceVisualContext(
       if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
       return { ok: true, value: { accepted: false, snapshot: null } };
     }
-    await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
     const requestSequence = consumed.sequence;
     if (result.status !== "completed") {
       if (result.status === "cancelled" && (result.operation === "pick" || result.operation === "capture")) {
         const current = await readVisualContextSnapshot(resumed.value, signal);
         if (isStaleVisualContextResult(current, result) || isStaleVisualContextSequence(current, requestSequence)) {
+          await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
           if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
           return { ok: true, value: { accepted: false, snapshot: null } };
         }
@@ -438,18 +445,22 @@ export async function submitWorkspaceVisualContext(
         });
         const snapshot = invalidatedVisualContextSnapshot(invalidation, result.requestId, requestSequence);
         await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
+        await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
         if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
         return { ok: true, value: { accepted: false, snapshot } };
       }
+      await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
       if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
       return { ok: true, value: { accepted: false, snapshot: null } };
     }
     if (result.operation === "get-capabilities" || result.operation === "setup-browser" || result.operation === "pair-extension" || result.operation === "unpair-extension") {
+      await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
       return { ok: true, value: { accepted: true, snapshot: null } };
     }
     const current = await readVisualContextSnapshot(resumed.value, signal);
     if (result.operation === "clear") {
       if (isStaleVisualContextResult(current, result) || isStaleVisualContextSequence(current, requestSequence)) {
+        await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
         return { ok: true, value: { accepted: false, snapshot: null } };
       }
       const invalidation = visualContextInvalidationSchema.parse({
@@ -461,9 +472,11 @@ export async function submitWorkspaceVisualContext(
       });
       const snapshot = invalidatedVisualContextSnapshot(invalidation, result.requestId, requestSequence);
       await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
+      await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
       return { ok: true, value: { accepted: true, snapshot } };
     }
     if (isStaleVisualContextResult(current, result) || isStaleVisualContextSequence(current, requestSequence)) {
+      await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
       if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
       return { ok: true, value: { accepted: false, snapshot: null } };
     }
@@ -480,10 +493,10 @@ export async function submitWorkspaceVisualContext(
     }
     const snapshot = visualContextSnapshotFromResult(result, requestSequence);
     await promoteVisualContextManifest(resumed.value, snapshot, png, signal);
+    await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
     if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
     return { ok: true, value: { accepted: true, snapshot } };
   } catch {
-    if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal).catch(() => undefined);
     return { ok: false, error: workspaceError("unknown", "visual-context-promote", true) };
   } finally {
     await releaseVisualContextLease(resumed.value, leaseOwner, signal).catch(() => undefined);

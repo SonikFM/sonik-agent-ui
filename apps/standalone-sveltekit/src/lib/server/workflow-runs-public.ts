@@ -11,7 +11,8 @@ import { handleWorkflowRunsAction, workflowRunOwnerFromHostSession, type Workflo
 
 export type PublicWorkflowDriverAction =
   | Extract<WorkflowRunsAction, { action: "start" }>
-  | { action: "preview" | "approve" | "commit"; runId: string; nodeId?: string }
+  | { action: "approve"; runId: string; nodeId: string }
+  | { action: "preview" | "commit"; runId: string; nodeId?: string }
   | { action: "run_until_blocked"; request: unknown }
   | { action: "resume_run"; request: unknown }
   | { action: "cancel_run"; runId: string; lease?: unknown };
@@ -56,7 +57,13 @@ export async function handlePublicWorkflowDriverAction(action: PublicWorkflowDri
   if (!published || published.workflowId !== row.workflowId) return failure(404, "published_workflow_not_found");
   const snapshot = await deps.journal.getSnapshot(owner, runId);
   const approvalWait = snapshot?.waits[0];
-  if (action.action === "approve" && (!approvalWait || approvalWait.kind !== "approval")) return failure(409, "approval_wait_not_available");
+  if (action.action === "approve") {
+    if (!approvalWait || approvalWait.kind !== "approval") return failure(409, "approval_wait_not_available");
+    const requestedEffect = published.definition.nodes.find((node) => node.nodeId === action.nodeId && node.nodeType === "tool_commit")?.effectBinding;
+    if (requestedEffect?.approvalNodeId !== approvalWait.nodeId || requestedEffect.logicalEffectId !== approvalWait.logicalEffectId) {
+      return failure(409, "approval_node_mismatch");
+    }
+  }
   const approvalLogicalEffectId = approvalWait?.kind === "approval" ? approvalWait.logicalEffectId : undefined;
   const parsedResumeEvent = action.action === "resume_run"
     ? publicResumeEventSchema.safeParse(publicRequest.resumeEvent)
