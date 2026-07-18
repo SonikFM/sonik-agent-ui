@@ -196,6 +196,55 @@ const migrations = [
 		version: "0015",
 		name: "agent_definition_tenant_authority",
 		file: "packages/workspace-session/migrations/postgres/0015_agent_definition_tenant_authority.sql",
+		postApply: `
+			do $$
+			declare
+				owning_constraint text;
+			begin
+				if to_regclass('sonik_agent_ui.agent_definition_drafts_tenant_agent_key') is not null
+					and regexp_replace(lower(pg_get_indexdef(to_regclass('sonik_agent_ui.agent_definition_drafts_tenant_agent_key'))), '[[:space:]()]', '', 'g')
+						<> 'createuniqueindexagent_definition_drafts_tenant_agent_keyonsonik_agent_ui.agent_definition_draftsusingbtreeorganization_id,agent_idwhereorganization_idisnotnull'
+				then
+					select conname into owning_constraint
+					from pg_constraint
+					where conindid = to_regclass('sonik_agent_ui.agent_definition_drafts_tenant_agent_key');
+
+					if owning_constraint is null then
+						drop index sonik_agent_ui.agent_definition_drafts_tenant_agent_key;
+					else
+						execute format('alter table sonik_agent_ui.agent_definition_drafts drop constraint %I', owning_constraint);
+					end if;
+				end if;
+				if to_regclass('sonik_agent_ui.agent_definition_drafts_tenant_agent_key') is null then
+					create unique index agent_definition_drafts_tenant_agent_key
+						on sonik_agent_ui.agent_definition_drafts (organization_id, agent_id)
+						where organization_id is not null;
+				end if;
+
+				if exists (
+					select 1 from pg_constraint
+					where conrelid = to_regclass('sonik_agent_ui.agent_definition_drafts')
+						and conname = 'agent_definition_drafts_authority_or_quarantine_check'
+						and regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g')
+							<> 'check((((organization_idisnotnull)and(created_by_user_idisnotnull)and(updated_by_user_idisnotnull)and(legacy_quarantined_atisnull))or((organization_idisnull)and(created_by_user_idisnull)and(updated_by_user_idisnull)and(legacy_quarantined_atisnotnull))))'
+				) then
+					alter table sonik_agent_ui.agent_definition_drafts
+						drop constraint agent_definition_drafts_authority_or_quarantine_check;
+				end if;
+				if not exists (
+					select 1 from pg_constraint
+					where conrelid = 'sonik_agent_ui.agent_definition_drafts'::regclass
+						and conname = 'agent_definition_drafts_authority_or_quarantine_check'
+				) then
+					alter table sonik_agent_ui.agent_definition_drafts
+						add constraint agent_definition_drafts_authority_or_quarantine_check check (
+							(organization_id is not null and created_by_user_id is not null and updated_by_user_id is not null and legacy_quarantined_at is null)
+							or (organization_id is null and created_by_user_id is null and updated_by_user_id is null and legacy_quarantined_at is not null)
+						);
+				end if;
+			end
+			$$;
+		`,
 		baselineCheck: `
 			select (
 				not exists (
@@ -295,6 +344,30 @@ const migrations = [
 		version: "0016",
 		name: "workflow_definitions",
 		file: "packages/workspace-session/migrations/postgres/0016_workflow_definitions.sql",
+		postApply: `
+			do $$
+			begin
+				if exists (
+					select 1 from pg_constraint
+					where conrelid = to_regclass('sonik_agent_ui.workflow_definition_drafts')
+						and conname = 'workflow_definition_drafts_pkey'
+						and regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g')
+							<> 'primarykey(organization_id,user_id,workflow_id)'
+				) then
+					alter table sonik_agent_ui.workflow_definition_drafts
+						drop constraint workflow_definition_drafts_pkey;
+				end if;
+				if not exists (
+					select 1 from pg_constraint
+					where conrelid = 'sonik_agent_ui.workflow_definition_drafts'::regclass
+						and conname = 'workflow_definition_drafts_pkey'
+				) then
+					alter table sonik_agent_ui.workflow_definition_drafts
+						add constraint workflow_definition_drafts_pkey primary key (organization_id, user_id, workflow_id);
+				end if;
+			end
+			$$;
+		`,
 		baselineCheck: `
 			select (
 				not exists (
@@ -448,6 +521,30 @@ const migrations = [
 		version: "0017",
 		name: "workflow_run_journal",
 		file: "packages/workspace-session/migrations/postgres/0017_workflow_run_journal.sql",
+		postApply: `
+			do $$
+			begin
+				if exists (
+					select 1 from pg_constraint
+					where conrelid = to_regclass('sonik_agent_ui.agent_workflow_run_waitpoints')
+						and conname = 'agent_workflow_run_waitpoints_pkey'
+						and regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g')
+							<> 'primarykey(organization_id,user_id,run_id,waitpoint_id)'
+				) then
+					alter table sonik_agent_ui.agent_workflow_run_waitpoints
+						drop constraint agent_workflow_run_waitpoints_pkey;
+				end if;
+				if not exists (
+					select 1 from pg_constraint
+					where conrelid = 'sonik_agent_ui.agent_workflow_run_waitpoints'::regclass
+						and conname = 'agent_workflow_run_waitpoints_pkey'
+				) then
+					alter table sonik_agent_ui.agent_workflow_run_waitpoints
+						add constraint agent_workflow_run_waitpoints_pkey primary key (organization_id, user_id, run_id, waitpoint_id);
+				end if;
+			end
+			$$;
+		`,
 		baselineCheck: `
 			select (
 				not exists (
@@ -787,7 +884,7 @@ function applyMigration(migration, sum) {
 		values (${sqlLiteral(migration.version)}, ${sqlLiteral(migration.name)}, ${sqlLiteral(sum)}, 'runner')
 		on conflict (version) do nothing;
 	`;
-	psql(["-1", "-f", filePath, "-c", recordSql], { stdio: "inherit" });
+	psql(["-1", "-f", filePath, ...(migration.postApply ? ["-c", migration.postApply] : []), "-c", recordSql], { stdio: "inherit" });
 }
 
 if (!dryRun) ensureMigrationLedger();

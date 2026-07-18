@@ -168,6 +168,49 @@ try {
 		assert.doesNotMatch(poisonedOutput, new RegExp(`${version} ${name}: existing schema detected; recording baseline`));
 	}
 
+	runMigrations(poisonedBaselineUrl);
+	assert.equal(
+		psql(poisonedBaselineUrl, `
+			select regexp_replace(lower(pg_get_indexdef('sonik_agent_ui.agent_definition_drafts_tenant_agent_key'::regclass)), '[[:space:]()]', '', 'g')
+		`),
+		"createuniqueindexagent_definition_drafts_tenant_agent_keyonsonik_agent_ui.agent_definition_draftsusingbtreeorganization_id,agent_idwhereorganization_idisnotnull",
+	);
+	for (const [table, constraint, definition] of [
+		[
+			"agent_definition_drafts",
+			"agent_definition_drafts_authority_or_quarantine_check",
+			"check((((organization_idisnotnull)and(created_by_user_idisnotnull)and(updated_by_user_idisnotnull)and(legacy_quarantined_atisnull))or((organization_idisnull)and(created_by_user_idisnull)and(updated_by_user_idisnull)and(legacy_quarantined_atisnotnull))))",
+		],
+		["workflow_definition_drafts", "workflow_definition_drafts_pkey", "primarykey(organization_id,user_id,workflow_id)"],
+		["agent_workflow_run_waitpoints", "agent_workflow_run_waitpoints_pkey", "primarykey(organization_id,user_id,run_id,waitpoint_id)"],
+	]) {
+		assert.equal(
+			psql(poisonedBaselineUrl, `
+				select regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g')
+				from pg_constraint
+				where conrelid = 'sonik_agent_ui.${table}'::regclass and conname = '${constraint}'
+			`),
+			definition,
+		);
+	}
+	assert.equal(
+		psql(poisonedBaselineUrl, `
+			select (count(*) = 3 and bool_and(applied_via = 'runner'))::text
+			from sonik_agent_ui.schema_migrations
+			where version in ('0015', '0016', '0017')
+		`),
+		"true",
+	);
+
+	const rerunOutput = runMigrations(poisonedBaselineUrl);
+	for (const [version, name] of [
+		["0015", "agent_definition_tenant_authority"],
+		["0016", "workflow_definitions"],
+		["0017", "workflow_run_journal"],
+	]) {
+		assert.match(rerunOutput, new RegExp(`${version} ${name}: already recorded \\(runner\\)`));
+	}
+
 	console.log("postgres-migration-partial-baseline.postgres.test.mjs: poisoned same-name assertions passed");
 } finally {
 	psql(adminUrl, `drop database if exists ${poisonedBaselineDatabase} with (force)`);
