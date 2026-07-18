@@ -35,6 +35,7 @@ import {
   defaultVisualSourceId,
   discoverVisualSources,
   hostVisualPersistenceState,
+  pendingHostVisualRequestDisabledReason,
   isAgentHostActionRequestMessage,
   isAgentHostActionResultMessage,
   isAgentHostPageContextMessage,
@@ -114,6 +115,37 @@ assert.equal(classifyVisualContextResult({
   routeRevision: 3,
   source: visualSources[1],
 }), "ignore", "a late result cannot clear the newer active request");
+assert.equal(pendingHostVisualRequestDisabledReason(null), null);
+assert.match(pendingHostVisualRequestDisabledReason(pendingVisualRequest) ?? "", /current Host visual request/i);
+let rapidPending = null;
+let rapidIssueCount = 0;
+const issueHostRequest = (request) => {
+  if (pendingHostVisualRequestDisabledReason(rapidPending)) return false;
+  rapidPending = request;
+  rapidIssueCount += 1;
+  return true;
+};
+assert.equal(issueHostRequest(pendingVisualRequest), true);
+assert.equal(issueHostRequest({ ...pendingVisualRequest, requestId: "request-2" }), false);
+assert.equal(rapidIssueCount, 1, "rapid Host re-entry issues only one request");
+assert.equal(rapidPending, pendingVisualRequest, "rapid Host re-entry cannot replace the sole pending request");
+let behaviorallyPending = pendingVisualRequest;
+if (classifyVisualContextResult({
+  pending: behaviorallyPending,
+  result: { ...validVisualResult, requestId: "old-request" },
+  sourceContextRevision: 2,
+  routeRevision: 3,
+  source: visualSources[1],
+}) === "accept") behaviorallyPending = null;
+assert.equal(behaviorallyPending, pendingVisualRequest, "a nonmatching completion leaves the sole pending request intact");
+if (classifyVisualContextResult({
+  pending: behaviorallyPending,
+  result: validVisualResult,
+  sourceContextRevision: 2,
+  routeRevision: 3,
+  source: visualSources[1],
+}) === "accept") behaviorallyPending = null;
+assert.equal(behaviorallyPending, null, "only the exact matching completion clears the pending request");
 assert.equal(classifyVisualContextResult({
   pending: pendingVisualRequest,
   result: validVisualResult,
@@ -128,6 +160,10 @@ assert.deepEqual(hostVisualPersistenceState(true, { operation: "capture", status
   status: "idle", staleReason: null, message: "Host Capture is current.",
 }, "accepted=true alone may report current Host capture");
 const workbenchPageSource = readFileSync("apps/dev-workbench/src/routes/+page.svelte", "utf8");
+assert.match(workbenchPageSource, /let pendingVisualRequest = \$state\.raw<VisualContextRequest \| null>\(null\)/, "pending Host request readiness is reactive without changing request identity");
+assert.ok((workbenchPageSource.match(/pendingHostVisualRequestDisabledReason\(pendingVisualRequest\)/g) ?? []).length >= 4, "UI readiness and every Host action function share the pending-request guard");
+assert.match(workbenchPageSource, /classification === "ignore"[^]*classification === "invalidate"[^]*pendingVisualRequest = null/, "nonmatching results return before exact completion clears pending state");
+assert.ok((workbenchPageSource.match(/pendingVisualRequest !== request/g) ?? []).length >= 2, "only the exact registration request callback may post or clear pending state");
 assert.match(workbenchPageSource, /if \(source\?\.id !== "host"[^]*return unavailableAction/, "Preview is rejected before the Host picker postMessage seam");
 assert.equal(workbenchPageSource.match(/isVisualContextResultMessage\(event\.data\)/g)?.length, 1, "only the exact embedded Host window may return picker results");
 assert.match(workbenchPageSource, /visualBrowser\?\.capability === "installed"[^]*captureVisualContext/, "Preview Capture is enabled only by an installed browser probe");

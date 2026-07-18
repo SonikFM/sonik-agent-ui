@@ -44,6 +44,7 @@
     isAgentHostPageContextMessage,
     isAgentPageContextRequestMessage,
     isVisualContextResultMessage,
+    pendingHostVisualRequestDisabledReason,
     resolveEmbeddedHostColorScheme,
     resolveEmbeddedHostOrigin,
     visualPickDisabledReason,
@@ -75,7 +76,7 @@
   let visualStatusMessage = $state("Start a workspace to discover visual sources.");
   let visualStaleReason = $state<"source-changed" | "route-changed" | "navigation" | "cancelled" | "provider-lost" | null>(null);
   let visualActionFocus: HTMLElement | null = null;
-  let pendingVisualRequest: VisualContextRequest | null = null;
+  let pendingVisualRequest = $state.raw<VisualContextRequest | null>(null);
   let visualBrowser = $state<VisualBrowserState | null>(null);
   let visualExtensionPaired = $state(false);
 
@@ -127,6 +128,7 @@
       : defaultVisualSourceId(visualSources);
     const sourceUnavailable = visualSourceId ? null : "No Preview or Host visual source is connected.";
     const pickDisabledReason = visualPickDisabledReason(visualSourceId);
+    const pendingHostReason = pendingHostVisualRequestDisabledReason(pendingVisualRequest);
     const terminalReason = terminalReady
       ? null
       : terminalState === "connecting"
@@ -198,10 +200,14 @@
         captureSnapshot: operation === "idle"
           ? { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
-        pickVisualTarget: pickDisabledReason
+        pickVisualTarget: pendingHostReason
+          ? { enabled: false, disabledReason: pendingHostReason }
+          : pickDisabledReason
           ? { enabled: false, disabledReason: pickDisabledReason }
           : { enabled: true, disabledReason: null },
-        captureVisualContext: sourceUnavailable
+        captureVisualContext: pendingHostReason
+          ? { enabled: false, disabledReason: pendingHostReason }
+          : sourceUnavailable
           ? { enabled: false, disabledReason: sourceUnavailable }
           : visualSourceId === "host"
             ? visualExtensionPaired
@@ -215,7 +221,9 @@
           : visualBrowser?.capability === "installed"
             ? { enabled: false, disabledReason: "Controlled browser capture is ready." }
             : { enabled: operation === "idle", disabledReason: operation === "idle" ? null : "Wait for the current workspace operation to finish." },
-        pairVisualExtension: visualSources.some((source) => source.id === "host")
+        pairVisualExtension: pendingHostReason
+          ? { enabled: false, disabledReason: pendingHostReason }
+          : visualSources.some((source) => source.id === "host")
           ? visualExtensionPaired
             ? { enabled: false, disabledReason: "The exact active tab is paired." }
             : { enabled: true, disabledReason: null }
@@ -384,7 +392,8 @@
     const classification = classifyVisualContextResult({ pending: pendingVisualRequest, result, sourceContextRevision, routeRevision, source });
     if (classification === "ignore") return;
     if (classification === "invalidate") {
-      invalidateVisualContext("navigation", "A stale visual result was discarded after the source changed.");
+      visualStatusMessage = "A stale visual result was discarded after the source changed.";
+      announcement = visualStatusMessage;
       return;
     }
     const request = pendingVisualRequest!;
@@ -468,6 +477,11 @@
   }
 
   function pickVisualTarget(): WorkbenchSemanticActionResult {
+    const pendingReason = pendingHostVisualRequestDisabledReason(pendingVisualRequest);
+    if (pendingReason) {
+      announcement = pendingReason;
+      return unavailableAction(pendingReason);
+    }
     if (!view.actions.pickVisualTarget.enabled) return unavailable("pickVisualTarget");
     const source = discoveredVisualSources().find((candidate) => candidate.id === view.visualContext.selectedSourceId);
     if (source?.id !== "host" || !embeddedHostOrigin || !workbenchOrigin || window.parent === window) {
@@ -487,6 +501,11 @@
   }
 
   function captureVisualContext(): WorkbenchSemanticActionResult {
+    const pendingReason = pendingHostVisualRequestDisabledReason(pendingVisualRequest);
+    if (pendingReason) {
+      announcement = pendingReason;
+      return unavailableAction(pendingReason);
+    }
     if (!view.actions.captureVisualContext.enabled) return unavailable("captureVisualContext");
     const source = discoveredVisualSources().find((candidate) => candidate.id === view.visualContext.selectedSourceId);
     if (source?.id === "host" && embeddedHostOrigin && workbenchOrigin && window.parent !== window) {
@@ -516,6 +535,11 @@
   }
 
   function pairVisualExtension(): WorkbenchSemanticActionResult {
+    const pendingReason = pendingHostVisualRequestDisabledReason(pendingVisualRequest);
+    if (pendingReason) {
+      announcement = pendingReason;
+      return unavailableAction(pendingReason);
+    }
     if (!view.actions.pairVisualExtension.enabled) return unavailable("pairVisualExtension");
     if (!embeddedHostOrigin || !workbenchOrigin || window.parent === window) return unavailableAction("The embedded Host cannot receive extension pairing requests.");
     const source = discoveredVisualSources().find((candidate) => candidate.id === "host");
@@ -540,10 +564,10 @@
       const payload = await response.json() as { request?: unknown };
       const registered = visualContextRequestSchema.safeParse(payload.request);
       if (!registered.success || registered.data.requestId !== request.requestId) throw new Error("The visual request could not be registered.");
-      if (pendingVisualRequest?.requestId !== request.requestId) return;
+      if (pendingVisualRequest !== request) return;
       window.parent.postMessage(registered.data, embeddedHostOrigin);
     } catch (error) {
-      if (pendingVisualRequest?.requestId !== request.requestId) return;
+      if (pendingVisualRequest !== request) return;
       pendingVisualRequest = null;
       visualStatus = "error";
       visualStatusMessage = safeMessage(error, "The visual request could not be registered.");

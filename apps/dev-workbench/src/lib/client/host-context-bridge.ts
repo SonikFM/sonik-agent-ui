@@ -144,6 +144,10 @@ export function visualPickDisabledReason(sourceId: "preview" | "host" | null): s
   return sourceId === "host" ? null : "Element picking is available only for a connected Host source.";
 }
 
+export function pendingHostVisualRequestDisabledReason(pending: VisualContextRequest | null): string | null {
+  return pending ? "Wait for the current Host visual request to finish." : null;
+}
+
 export function classifyVisualContextResult(input: {
   pending: VisualContextRequest | null;
   result: VisualContextResult;
