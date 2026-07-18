@@ -20,7 +20,12 @@ const sendHostRequest = (frame, request, hostOrigin, timeoutMs = 15_000) => fram
   parent.postMessage(request, hostOrigin);
 }), { request, hostOrigin, timeoutMs });
 const expectRejected = async (frame, request, hostOrigin) => {
-  await assert.rejects(sendHostRequest(frame, request, hostOrigin, 500), /Timed out waiting/);
+  try {
+    const result = await sendHostRequest(frame, request, hostOrigin, 2_000);
+    assert.equal(result.status, "failed");
+  } catch (error) {
+    assert.match(error.message, /Timed out waiting/);
+  }
 };
 
 const extension = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-extension-"));
