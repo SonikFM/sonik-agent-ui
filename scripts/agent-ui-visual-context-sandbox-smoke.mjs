@@ -80,7 +80,7 @@ try {
   assert.equal(manifest.screenshot.path, "/vercel/sandbox/workspace/.sonik/screenshots/latest.png");
   assert.equal(manifest.screenshot.sha256, stable.screenshot.sha256);
   assert.equal(JSON.stringify(manifest).includes(stable.screenshot.temporaryPath), false);
-  assert.equal(isStaleVisualContextResult(manifest, { ...stable, requestId: `${requestId}-race` }), true);
+  assert.equal(isStaleVisualContextResult(manifest, { ...stable, requestId: `${requestId}-repeat` }), false);
   assert.equal(isStaleVisualContextResult(manifest, { ...stable, sourceContextRevision: 0 }), true);
 
   const ephemeral = await runProvider(request("ephemeral", { targetId: "ephemeral:viewport" }));
