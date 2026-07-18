@@ -46,7 +46,7 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
   if (!parsed.success) return json({ error: "Visual context submission is invalid." }, { status: 400, headers: NO_STORE });
   emitLifecycleEvent(sessionId, parsed.data, parsed.data.request.operation === "pick"
     ? "visual_context.picker.started"
-    : parsed.data.request.operation === "capture" ? "visual_context.capture.started" : null);
+    : parsed.data.request.operation === "capture" ? "visual_context.capture.started" : null, undefined, "started");
   const result = await submitWorkspaceVisualContext(sessionId, parsed.data, request.signal);
   if (!result.ok) {
     emitLifecycleEvent(sessionId, parsed.data, parsed.data.request.operation === "capture"
@@ -100,6 +100,7 @@ function emitLifecycleEvent(
   input: VisualContextSubmission,
   event: VisualContextTelemetryEventName | null,
   accepted?: boolean,
+  status = input.result.status,
 ): void {
   if (!event) return;
   emitVisualContextTelemetry({
@@ -108,7 +109,7 @@ function emitLifecycleEvent(
     requestId: input.request.requestId,
     operation: input.request.operation,
     provider: input.request.provider,
-    status: input.result.status,
+    status,
     accepted,
     sourceContextRevision: input.request.sourceContextRevision,
     routeRevision: input.request.routeRevision,
