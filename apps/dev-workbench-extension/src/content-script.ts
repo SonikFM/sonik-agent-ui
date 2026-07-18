@@ -77,18 +77,22 @@
       if (result?.type === "sonik:visual-context:result") {
         event.source.postMessage(result, allowedOrigin);
       } else if (typeof result?.error === "string") {
-        postFailure();
+        event.source.postMessage({
+          messageSource: "sonik-agent-host",
+          type: "sonik:visual-context:result",
+          version: request.version,
+          origin: request.origin,
+          requestId: request.requestId,
+          operation: request.operation,
+          source: request.source,
+          provider: request.provider,
+          sourceContextRevision: request.sourceContextRevision,
+          routeRevision: request.routeRevision,
+          status: "failed",
+          disabledReason: result.error.slice(0, 512),
+        }, allowedOrigin);
       }
-    }, postFailure);
-
-    function postFailure() {
-      event.source.postMessage({
-        messageSource: "sonik-agent-host", type: "sonik:visual-context:result", version: request.version,
-        origin: request.origin, requestId: request.requestId, operation: request.operation, source: request.source,
-        provider: request.provider, sourceContextRevision: request.sourceContextRevision, routeRevision: request.routeRevision,
-        status: "failed", disabledReason: "Active-tab capture failed.",
-      }, allowedOrigin);
-    }
+    });
   });
 
   function discoverWorkbenchFrames() {
