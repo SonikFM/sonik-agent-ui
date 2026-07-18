@@ -29,12 +29,29 @@ const expectRejected = async (frame, request, hostOrigin) => {
     assert.match(error.message, /Timed out waiting/);
   }
 };
+const expectFailed = async (frame, request, hostOrigin) => {
+  assert.equal((await sendHostRequest(frame, request, hostOrigin)).status, "failed");
+};
+const closeServer = async (server) => {
+  if (!server) return;
+  server.closeIdleConnections?.();
+  server.closeAllConnections?.();
+  await Promise.race([
+    new Promise((resolve) => server.close(resolve)),
+    new Promise((resolve) => { const timer = setTimeout(resolve, 1_000); timer.unref(); }),
+  ]);
+};
 
 const extension = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-extension-"));
 const profile = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-profile-"));
 let host;
 let workbench;
 let context;
+const deadline = setTimeout(() => {
+  void context?.close().catch(() => undefined);
+  host?.closeAllConnections?.();
+  workbench?.closeAllConnections?.();
+}, 40_000);
 
 try {
   workbench = await listen((_request, response) => response.end("<!doctype html><title>Workbench fixture</title>"));
@@ -132,19 +149,19 @@ try {
   assert.equal(await captureChrome.getAttribute("style"), captureChromeStyle);
   await assert.doesNotReject(page.waitForFunction(() => ![...document.querySelectorAll("div")].some((element) => element.style.zIndex === "2147483647")));
 
-  await expectRejected(frame, captureRequest, origin(host));
+  await expectFailed(frame, captureRequest, origin(host));
   await expectRejected(frame, { ...requestFor("capture"), origin: "https://foreign.invalid" }, origin(host));
 
   const otherPage = await context.newPage();
   await otherPage.goto(`${origin(host)}/background`);
   await otherPage.bringToFront();
-  await expectRejected(frame, requestFor("capture"), origin(host));
+  await expectFailed(frame, requestFor("capture"), origin(host));
   await otherPage.close();
   await page.bringToFront();
   await pair();
 
   assert.equal((await sendHostRequest(frame, requestFor("unpair-extension"), origin(host))).status, "completed");
-  await expectRejected(frame, requestFor("capture"), origin(host));
+  await expectFailed(frame, requestFor("capture"), origin(host));
   await pair();
 
   await page.goto(`${origin(host)}/booking-next`);
@@ -159,13 +176,14 @@ try {
   const workerTarget = workerTargets.targetInfos.find((candidate) => candidate.url === currentWorker.url());
   assert.ok(workerTarget, "Extension service-worker target is available");
   assert.equal((await cdp.send("Target.closeTarget", { targetId: workerTarget.targetId })).success, true);
-  await expectRejected(frame, requestFor("capture"), origin(host));
+  await expectFailed(frame, requestFor("capture"), origin(host));
   assert.equal(await captureChrome.getAttribute("style"), captureChromeStyle, "Rejected capture restores exact Sonik chrome style");
   await pair();
   assert.equal((await sendHostRequest(frame, requestFor("get-capabilities"), origin(host))).status, "completed");
 
   console.log("dev-workbench extension persistent Chromium security lifecycle: ok");
 } finally {
+  clearTimeout(deadline);
   await context?.close().catch(() => undefined);
   await Promise.all([host, workbench].filter(Boolean).map((server) => new Promise((resolve) => {
     server.closeAllConnections?.();
