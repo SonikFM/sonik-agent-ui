@@ -11,12 +11,14 @@ const listen = (handler, port = 0) => new Promise((resolve) => {
 });
 const origin = (server) => `http://127.0.0.1:${server.address().port}`;
 const sendHostRequest = (frame, request, hostOrigin, timeoutMs = 15_000) => frame.evaluate(({ request, hostOrigin, timeoutMs }) => new Promise((resolve, reject) => {
-  const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${request.operation}.`)), timeoutMs);
-  addEventListener("message", (event) => {
+  const onMessage = (event) => {
     if (event.origin !== hostOrigin || event.data?.requestId !== request.requestId) return;
-    clearTimeout(timeout);
+    cleanup();
     resolve(event.data);
-  }, { once: true });
+  };
+  const cleanup = () => { clearTimeout(timeout); removeEventListener("message", onMessage); };
+  const timeout = setTimeout(() => { cleanup(); reject(new Error(`Timed out waiting for ${request.operation}.`)); }, timeoutMs);
+  addEventListener("message", onMessage);
   parent.postMessage(request, hostOrigin);
 }), { request, hostOrigin, timeoutMs });
 const expectRejected = async (frame, request, hostOrigin) => {
@@ -156,6 +158,10 @@ try {
   console.log("dev-workbench extension persistent Chromium security lifecycle: ok");
 } finally {
   await context?.close().catch(() => undefined);
-  await Promise.all([host, workbench].filter(Boolean).map((server) => new Promise((resolve) => server.close(resolve))));
+  await Promise.all([host, workbench].filter(Boolean).map((server) => new Promise((resolve) => {
+    server.closeAllConnections?.();
+    const timeout = setTimeout(resolve, 2_000);
+    server.close(() => { clearTimeout(timeout); resolve(); });
+  })));
   await Promise.all([rm(extension, { recursive: true, force: true }), rm(profile, { recursive: true, force: true })]);
 }
