@@ -6,7 +6,7 @@
     sanitizeAgentHostAuthorityDonation,
     sanitizeAgentHostPageContext,
   } from "@sonik-agent-ui/agent-embed";
-  import type { VisualContextRequest, VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
+  import { visualContextRequestSchema, type VisualContextRequest, type VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
   import { onMount } from "svelte";
   import TerminalHost from "$lib/client/TerminalHost.svelte";
   import {
@@ -236,6 +236,7 @@
     const source = discoveredVisualSources().find((candidate) => candidate.id === sourceId);
     if (!source) return unavailableAction("That visual source is no longer connected.");
     if (selectedVisualSourceId !== sourceId) {
+      visualExtensionPaired = false;
       selectedVisualSourceId = sourceId;
       sourceContextRevision += 1;
       invalidateVisualContext("source-changed", `${source.label} selected. Previous visual context was cleared.`);
@@ -243,7 +244,14 @@
     return accepted(`${source.label} selected.`);
   }
 
+  function cancelHostPicker(): void {
+    const request = pendingVisualRequest;
+    if (request?.operation !== "pick" || request.provider !== "host" || !embeddedHostOrigin || window.parent === window) return;
+    window.parent.postMessage({ ...request, requestId: crypto.randomUUID(), operation: "clear" }, embeddedHostOrigin);
+  }
+
   function invalidateVisualContext(reason: NonNullable<typeof visualStaleReason>, message: string): void {
+    cancelHostPicker();
     pendingVisualRequest = null;
     visualStatus = "invalidated";
     visualStaleReason = reason;
@@ -323,11 +331,15 @@
         const nextRoute = discoveredVisualSources().find((source) => source.id === "host")?.route;
         if (previousRoute && nextRoute && previousRoute !== nextRoute) {
           routeRevision += 1;
-          invalidateVisualContext("route-changed", "Host navigation cleared the previous visual context.");
+          const pairingLost = visualExtensionPaired;
+          visualExtensionPaired = false;
+          invalidateVisualContext(pairingLost ? "provider-lost" : "route-changed", pairingLost
+            ? "Host navigation ended the active-tab pairing. Pair it again before capturing Host context."
+            : "Host navigation cleared the previous visual context.");
         }
         const theme = hostTheme();
         if (theme) document.documentElement.dataset.hostTheme = theme;
-        announcement = "Booking session context connected.";
+        announcement = `${hostSourceLabel()} context connected.`;
         postHostContextToPreview();
         window.setTimeout(postHostContextToPreview, 250);
         if (workspace) void synchronizePageContext();
@@ -367,7 +379,17 @@
     const request = pendingVisualRequest!;
     pendingVisualRequest = null;
     const completed = result.status === "completed";
+    const providerLost = request.provider === "chrome-active-tab"
+      && (result.operation === "unpair-extension" || result.status === "failed" || result.status === "unavailable");
     if (completed && result.operation === "pair-extension") visualExtensionPaired = true;
+    if (providerLost) {
+      visualExtensionPaired = false;
+      invalidateVisualContext("provider-lost", "The active-tab provider disconnected. Pair it again before capturing Host context.");
+      visualActionFocus?.focus();
+      visualActionFocus = null;
+      if (workspace) void submitVisualResult(request, result);
+      return;
+    }
     visualStatus = completed ? "idle" : result.status === "cancelled" ? "invalidated" : "error";
     visualStaleReason = result.status === "cancelled" ? "cancelled" : null;
     visualStatusMessage = completed
@@ -380,9 +402,7 @@
     announcement = visualStatusMessage;
     visualActionFocus?.focus();
     visualActionFocus = null;
-    if (workspace && (request.operation === "pick" || request.operation === "capture" || request.operation === "clear")) {
-      void submitVisualResult(request, result);
-    }
+    if (workspace) void submitVisualResult(request, result);
   }
 
   function snapshotPageContext() {
@@ -442,7 +462,7 @@
       requestId: crypto.randomUUID(), operation: "pick", origin: workbenchOrigin,
       sourceContextRevision, routeRevision, source, provider: "host",
     };
-    window.parent.postMessage(pendingVisualRequest, embeddedHostOrigin);
+    void postRegisteredHostRequest(pendingVisualRequest);
     return accepted(visualStatusMessage);
   }
 
@@ -457,7 +477,7 @@
         requestId: crypto.randomUUID(), operation: "capture", origin: workbenchOrigin,
         sourceContextRevision, routeRevision, source, provider: "chrome-active-tab",
       };
-      window.parent.postMessage(pendingVisualRequest, embeddedHostOrigin);
+      void postRegisteredHostRequest(pendingVisualRequest);
       return accepted(visualStatusMessage);
     }
     visualStatus = "capturing";
@@ -485,8 +505,30 @@
       requestId: crypto.randomUUID(), operation: "pair-extension", origin: workbenchOrigin,
       sourceContextRevision, routeRevision, source, provider: "chrome-active-tab",
     };
-    window.parent.postMessage(pendingVisualRequest, embeddedHostOrigin);
+    void postRegisteredHostRequest(pendingVisualRequest);
     return accepted("Active-tab extension pairing requested.");
+  }
+
+  async function postRegisteredHostRequest(request: VisualContextRequest): Promise<void> {
+    if (!workspace || !embeddedHostOrigin || window.parent === window) return;
+    try {
+      const response = await fetch("/api/workspaces/visual-context", {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) throw new Error(await publicError(response));
+      const payload = await response.json() as { request?: unknown };
+      const registered = visualContextRequestSchema.safeParse(payload.request);
+      if (!registered.success || registered.data.requestId !== request.requestId) throw new Error("The visual request could not be registered.");
+      if (pendingVisualRequest?.requestId !== request.requestId) return;
+      window.parent.postMessage(registered.data, embeddedHostOrigin);
+    } catch (error) {
+      if (pendingVisualRequest?.requestId !== request.requestId) return;
+      pendingVisualRequest = null;
+      visualStatus = "error";
+      visualStatusMessage = safeMessage(error, "The visual request could not be registered.");
+      announcement = visualStatusMessage;
+    }
   }
 
   async function submitVisualResult(request: VisualContextRequest, result: VisualContextResult): Promise<void> {
@@ -619,14 +661,18 @@
         }),
       });
       if (!response.ok) throw new Error(await publicError(response));
-      const payload = await response.json() as { browser?: unknown; result?: { status?: unknown } };
+      const payload = await response.json() as { accepted?: unknown; browser?: unknown; result?: { status?: unknown } };
       const parsed = visualBrowserStateSchema.safeParse(payload.browser);
       if (!parsed.success) throw new Error("The server returned invalid browser readiness.");
       if (workspace?.sessionId !== sessionId) return;
       visualBrowser = parsed.data;
       if (operation === "capture") {
-        visualStatus = payload.result?.status === "completed" ? "idle" : "error";
-        visualStatusMessage = payload.result?.status === "completed" ? "Preview Capture is current." : "Preview Capture failed.";
+        const accepted = payload.accepted === true && payload.result?.status === "completed";
+        visualStatus = accepted ? "idle" : payload.accepted === false ? "invalidated" : "error";
+        visualStaleReason = payload.accepted === false ? "navigation" : null;
+        visualStatusMessage = accepted ? "Preview Capture is current." : payload.accepted === false
+          ? "A stale Preview result was discarded. Capture again."
+          : "Preview Capture failed.";
       }
       announcement = parsed.data.capability === "installed"
         ? operation === "setup-browser" ? "Controlled browser setup succeeded. Preview Capture is ready." : operation === "capture" ? visualStatusMessage : "Preview Capture is ready."
@@ -655,6 +701,10 @@
     hostContextRefreshTimer = window.setTimeout(() => {
       requestHostContext("dev_workbench_authority_refresh");
     }, untilRefresh);
+  }
+
+  function hostSourceLabel(): string {
+    return discoveredVisualSources().find((source) => source.id === "host")?.label ?? "Host";
   }
 
   async function stopWorkspaceRequest(): Promise<void> {
@@ -767,6 +817,7 @@
     };
     target.__sonikAgentUI = control;
     return () => {
+      cancelHostPicker();
       window.removeEventListener("message", handleBridgeMessage);
       if (hostContextRefreshTimer !== null) window.clearTimeout(hostContextRefreshTimer);
       if (target.__sonikAgentUI === control) delete target.__sonikAgentUI;

@@ -833,6 +833,20 @@ assert.throws(
 
 {
   const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("pick-before-clear")));
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("clear-picker", { operation: "clear" })));
+  assert.deepEqual(harness.source.messages.map(({ message }) => [message.requestId, message.status]), [
+    ["pick-before-clear", "cancelled"],
+    ["clear-picker", "completed"],
+  ], "a host clear request must settle the active pick before acknowledging the clear");
+  assert.equal(harness.controller.isActive(), false);
+  assert.equal(harness.documentListeners.size, 0, "host clear must restore normal page interaction");
+  assert.equal(harness.document.documentElement.style.cursor, "default", "host clear must restore the prior cursor");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
   harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("exception")));
   const target = new PickerElement("DIV");
   target.getBoundingClientRect = () => { throw new Error("private DOM failure"); };

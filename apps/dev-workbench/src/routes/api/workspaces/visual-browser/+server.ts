@@ -29,7 +29,7 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
     emitVisualBrowserTelemetry({ workspaceSessionId: sessionId, request: parsed.data, phase: "failed", status: result.error.code, accepted: false });
     return json({ error: result.error }, { status: result.error.retryable ? 502 : 400, headers: NO_STORE });
   }
-  const accepted = result.value.result.status === "completed";
+  const accepted = result.value.accepted && result.value.result.status === "completed";
   emitVisualBrowserTelemetry({
     workspaceSessionId: sessionId,
     request: parsed.data,
@@ -37,5 +37,5 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
     status: result.value.result.status,
     accepted,
   });
-  return json(result.value, { headers: NO_STORE });
+  return json({ ...result.value, accepted }, { status: accepted ? 200 : 202, headers: NO_STORE });
 };
