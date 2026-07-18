@@ -152,6 +152,7 @@ assert.match(visualBrowserRouteSource, /result\.value\.accepted[^]*status: accep
 const workspaceServiceSource = readFileSync("apps/dev-workbench/src/lib/server/workspace-service.ts", "utf8");
 assert.equal(workspaceServiceSource.indexOf("capturePlaywrightPreview") < workspaceServiceSource.indexOf("submitWorkspaceVisualContext(sessionId"), true, "provider temp output reaches the G009 coordinator before any stable artifact promotion");
 assert.match(workspaceServiceSource, /if \(!visualContextOperationPromotesStableArtifact\(request\.data\.operation\)\)[^]*snapshot: null[^]*submitWorkspaceVisualContext/, "probe/setup return state without taking the stable artifact coordinator lease");
+assert.match(workspaceServiceSource, /consumeVisualContextRequest\([^]*parsed\.data\.request\)[^]*if \(!consumed\)[^]*accepted: false[^]*writeVisualContextRequestRegistry/, "a mutated same-id POST is discarded before the exact issuance is consumed");
 assert.deepEqual(
   Object.keys(createVisualContextSubmission("workspace-1", pendingVisualRequest, validVisualResult)),
   ["workspaceSessionId", "request", "result"],

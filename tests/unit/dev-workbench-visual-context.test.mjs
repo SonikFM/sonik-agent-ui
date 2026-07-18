@@ -94,13 +94,22 @@ assert.throws(() => validateVisualContextSubmission({
     screenshot: { ...result.screenshot, provider: "chrome-active-tab", fidelity: "exact-active-tab", captureBasis: "native-active-tab-redacted", temporaryPath: undefined, pngBase64: png.toString("base64") },
   },
 }), /attestation/, "host assertions cannot establish exact-active-tab fidelity");
-const issuedFirst = issueVisualContextRequest({ nextSequence: 1, pending: {} }, "older");
-const issuedSecond = issueVisualContextRequest(issuedFirst.registry, "newer");
-const consumedSecond = consumeVisualContextRequest(issuedSecond.registry, "newer");
+const olderRequest = { ...request, requestId: "older" };
+const newerRequest = { ...request, requestId: "newer" };
+const issuedFirst = issueVisualContextRequest({ nextSequence: 1, pending: {} }, olderRequest);
+const issuedSecond = issueVisualContextRequest(issuedFirst.registry, newerRequest);
+const persistedRegistry = JSON.parse(JSON.stringify(issuedSecond.registry));
+assert.equal(
+  consumeVisualContextRequest(persistedRegistry, { ...newerRequest, routeRevision: 9 }),
+  null,
+  "a schema-valid same-id mutation is rejected without consuming the exact issuance",
+);
+assert.deepEqual(persistedRegistry, issuedSecond.registry, "a rejected mutation preserves the sandbox registry for an exact retry");
+const consumedSecond = consumeVisualContextRequest(persistedRegistry, newerRequest);
 assert.equal(consumedSecond.sequence, 2);
-assert.throws(() => consumeVisualContextRequest(consumedSecond.registry, "newer"), /consumed/, "request issuance is one-time");
+assert.throws(() => consumeVisualContextRequest(consumedSecond.registry, newerRequest), /consumed/, "request issuance is one-time");
 const orderedSnapshot = visualContextSnapshotFromResult({ ...result, requestId: "newer" }, consumedSecond.sequence);
-assert.equal(isStaleVisualContextSequence(orderedSnapshot, consumeVisualContextRequest(consumedSecond.registry, "older").sequence), true, "an older equal-revision result cannot supersede newer state");
+assert.equal(isStaleVisualContextSequence(orderedSnapshot, consumeVisualContextRequest(consumedSecond.registry, olderRequest).sequence), true, "an older equal-revision result cannot supersede newer state");
 assert.equal(isStaleVisualContextInvalidation(snapshot, { sourceContextRevision: 3, routeRevision: 9 }), true, "an older invalidation cannot replace a newer capture");
 assert.equal(isStaleVisualContextInvalidation(snapshot, { sourceContextRevision: 5, routeRevision: 9 }), false);
 const invalidated = invalidatedVisualContextSnapshot({

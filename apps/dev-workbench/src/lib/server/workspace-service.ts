@@ -373,7 +373,7 @@ export async function registerWorkspaceVisualContextRequest(
   const leaseOwner = randomUUID();
   if (!await acquireVisualContextLease(resumed.value, leaseOwner, signal)) return { ok: false, error: workspaceError("unknown", "visual-context-lease", true) };
   try {
-    const issued = issueVisualContextRequest(await readVisualContextRequestRegistry(resumed.value, signal), request.data.requestId);
+    const issued = issueVisualContextRequest(await readVisualContextRequestRegistry(resumed.value, signal), request.data);
     await writeVisualContextRequestRegistry(resumed.value, issued.registry, signal);
     return { ok: true, value: { request: request.data } };
   } catch {
@@ -409,7 +409,8 @@ export async function submitWorkspaceVisualContext(
   }
   try {
     const result = parsed.data.result;
-    const consumed = consumeVisualContextRequest(await readVisualContextRequestRegistry(resumed.value, signal), result.requestId);
+    const consumed = consumeVisualContextRequest(await readVisualContextRequestRegistry(resumed.value, signal), parsed.data.request);
+    if (!consumed) return { ok: true, value: { accepted: false, snapshot: null } };
     await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
     const requestSequence = consumed.sequence;
     if (result.status !== "completed") {

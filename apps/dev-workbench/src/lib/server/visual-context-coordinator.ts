@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { createTelemetryEvent, type AgentTelemetryEvent } from "@sonik-agent-ui/agent-observability";
 import {
@@ -41,23 +42,30 @@ export type VisualContextInvalidation = z.infer<typeof visualContextInvalidation
 
 export const visualContextRequestRegistrySchema = z.strictObject({
   nextSequence: z.number().int().positive(),
-  pending: z.record(z.string(), z.number().int().nonnegative()),
+  pending: z.record(z.string(), z.union([
+    z.number().int().nonnegative(),
+    z.strictObject({
+      sequence: z.number().int().nonnegative(),
+      request: visualContextRequestSchema,
+    }),
+  ])),
 });
 export type VisualContextRequestRegistry = z.infer<typeof visualContextRequestRegistrySchema>;
 
-export function issueVisualContextRequest(registry: VisualContextRequestRegistry, requestId: string): { registry: VisualContextRequestRegistry; sequence: number } {
-  if (registry.pending[requestId] !== undefined) throw new Error("Visual context request is already registered.");
+export function issueVisualContextRequest(registry: VisualContextRequestRegistry, request: VisualContextRequest): { registry: VisualContextRequestRegistry; sequence: number } {
+  if (registry.pending[request.requestId] !== undefined) throw new Error("Visual context request is already registered.");
   if (Object.keys(registry.pending).length >= 256) throw new Error("Too many visual context requests are pending.");
   const sequence = registry.nextSequence;
-  return { sequence, registry: visualContextRequestRegistrySchema.parse({ nextSequence: sequence + 1, pending: { ...registry.pending, [requestId]: sequence } }) };
+  return { sequence, registry: visualContextRequestRegistrySchema.parse({ nextSequence: sequence + 1, pending: { ...registry.pending, [request.requestId]: { sequence, request } } }) };
 }
 
-export function consumeVisualContextRequest(registry: VisualContextRequestRegistry, requestId: string): { registry: VisualContextRequestRegistry; sequence: number } {
-  const sequence = registry.pending[requestId];
-  if (sequence === undefined) throw new Error("Visual context request is unregistered or already consumed.");
+export function consumeVisualContextRequest(registry: VisualContextRequestRegistry, request: VisualContextRequest): { registry: VisualContextRequestRegistry; sequence: number } | null {
+  const issued = registry.pending[request.requestId];
+  if (issued === undefined) throw new Error("Visual context request is unregistered or already consumed.");
+  if (typeof issued === "number" || !isDeepStrictEqual(issued.request, request)) return null;
   const pending = { ...registry.pending };
-  delete pending[requestId];
-  return { sequence, registry: visualContextRequestRegistrySchema.parse({ ...registry, pending }) };
+  delete pending[request.requestId];
+  return { sequence: issued.sequence, registry: visualContextRequestRegistrySchema.parse({ ...registry, pending }) };
 }
 
 export type VisualContextTelemetryEventName =
