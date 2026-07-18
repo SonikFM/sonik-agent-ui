@@ -62,10 +62,11 @@ product-neutral contracts.
   `visual_context.target.selected`, `visual_context.capture.started`,
   `visual_context.capture.completed`, `visual_context.capture.failed`,
   `visual_context.extension_pairing.changed`.
-- host test / ultratest / manual prompt: `tests/unit/agent-embed.test.mjs`,
-  `tests/unit/dev-workbench-interactive-protocol.test.mjs`, and the planned
-  `pnpm smoke:agent-ui:booking-visual-context` exercise click, Escape, source/route
-  invalidation, and capture-chrome exclusion.
+- host test / ultratest / manual prompt:
+  `pnpm smoke:agent-ui:booking-visual-context` composes the existing non-browser
+  Agent Embed, Workbench host/invalidation, copied-picker, masking, and
+  capture-chrome tests. It exercises click, Escape, source/route invalidation,
+  and capture-chrome exclusion without requiring a Booking deployment.
 - deployed host URL or local route: local Dev Workbench route `/`; exact active-tab
   proof requires the separately gated extension and its recorded paired Booking URL.
 - known gaps or deferred scope: OpenDesign's runtime, selectors, editing, annotation,
