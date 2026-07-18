@@ -53,6 +53,78 @@ function sanitizeAria(value) {
     .slice(0, maxVisualContextAriaLength);
 }
 
+export async function ariaSnapshotWithSensitiveContentRedacted(page, ariaRoot) {
+  const sensitive = page.locator(sensitiveSelector);
+  await sensitive.evaluateAll((elements) => {
+    if (globalThis.__sonikVisualContextFormState) throw new Error("Sensitive form redaction is already active.");
+    const state = elements.map((element) => ({
+      element,
+      attributes: ["aria-label", "alt", "title", "value"].map((name) => [name, element.getAttribute(name)]),
+      textContent: element.hasAttribute("contenteditable") || element.hasAttribute("data-sonik-sensitive") ? element.textContent : undefined,
+      value: element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element.value : undefined,
+      selection: element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+        ? [element.selectionStart, element.selectionEnd, element.selectionDirection]
+        : undefined,
+      selectedIndex: element instanceof HTMLSelectElement ? element.selectedIndex : undefined,
+      options: element instanceof HTMLSelectElement
+        ? [...element.options].map((option) => ({ option, textContent: option.textContent, selected: option.selected }))
+        : undefined,
+    }));
+    const restore = () => {
+      for (const saved of state) {
+        for (const [name, value] of saved.attributes) {
+          if (value === null) saved.element.removeAttribute(name);
+          else saved.element.setAttribute(name, value);
+        }
+        if (saved.textContent !== undefined) saved.element.textContent = saved.textContent;
+        if (saved.options) for (const option of saved.options) option.option.textContent = option.textContent;
+        if (saved.value !== undefined) saved.element.value = saved.value;
+        if (saved.selectedIndex !== undefined) {
+          for (const option of saved.options) option.option.selected = option.selected;
+          saved.element.selectedIndex = saved.selectedIndex;
+        }
+        if (saved.selection && saved.selection[0] !== null && saved.selection[1] !== null) saved.element.setSelectionRange(...saved.selection);
+      }
+    };
+    globalThis.__sonikVisualContextFormState = state;
+    try {
+      for (const saved of state) {
+        for (const [name, value] of saved.attributes) if (value !== null) saved.element.setAttribute(name, "[redacted]");
+        if (saved.value !== undefined) saved.element.value = "[redacted]";
+        if (saved.options) for (const option of saved.options) option.option.textContent = "[redacted]";
+        if (saved.textContent !== undefined) saved.element.textContent = "[redacted]";
+      }
+    } catch (error) {
+      restore();
+      delete globalThis.__sonikVisualContextFormState;
+      throw error;
+    }
+  });
+  try {
+    return await ariaRoot.ariaSnapshot({ timeout: 5_000 });
+  } finally {
+    await sensitive.evaluateAll((elements) => {
+      const state = globalThis.__sonikVisualContextFormState;
+      if (!state || state.length !== elements.length) throw new Error("Sensitive form restoration state was lost.");
+      for (const saved of state) {
+        for (const [name, value] of saved.attributes) {
+          if (value === null) saved.element.removeAttribute(name);
+          else saved.element.setAttribute(name, value);
+        }
+        if (saved.textContent !== undefined) saved.element.textContent = saved.textContent;
+        if (saved.options) for (const option of saved.options) option.option.textContent = option.textContent;
+        if (saved.value !== undefined) saved.element.value = saved.value;
+        if (saved.selectedIndex !== undefined) {
+          for (const option of saved.options) option.option.selected = option.selected;
+          saved.element.selectedIndex = saved.selectedIndex;
+        }
+        if (saved.selection && saved.selection[0] !== null && saved.selection[1] !== null) saved.element.setSelectionRange(...saved.selection);
+      }
+      delete globalThis.__sonikVisualContextFormState;
+    });
+  }
+}
+
 async function readRequest() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
@@ -131,18 +203,12 @@ export async function captureVisualContext(request, options = {}) {
     if (stableTarget) await capture.screenshot(screenshotOptions);
     else await page.screenshot(screenshotOptions);
 
-    await page.locator(sensitiveSelector).evaluateAll((elements) => {
-      for (const element of elements) {
-        for (const attribute of ["aria-label", "alt", "title", "value"]) if (element.hasAttribute(attribute)) element.setAttribute(attribute, "[redacted]");
-        if (element.hasAttribute("contenteditable") || element.hasAttribute("data-sonik-sensitive")) element.textContent = "[redacted]";
-      }
-    });
     const bytes = await readFile(outputPath);
     const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
     if (bytes.length < 24 || bytes.length > maxVisualContextImageBytes || !bytes.subarray(0, 8).equals(pngSignature) || bytes.toString("ascii", 12, 16) !== "IHDR") {
       throw new Error("Playwright produced an invalid PNG.");
     }
-    const rawAriaSnapshot = await ariaRoot.ariaSnapshot({ timeout: 5_000 });
+    const rawAriaSnapshot = await ariaSnapshotWithSensitiveContentRedacted(page, ariaRoot);
     const ariaSnapshot = sanitizeAria(rawAriaSnapshot);
     const redactionsApplied = appliedRedactions({ sensitiveCount, declaredSensitiveCount, crossOriginFrameCount, ariaSnapshot, rawAriaSnapshot });
     completed = true;

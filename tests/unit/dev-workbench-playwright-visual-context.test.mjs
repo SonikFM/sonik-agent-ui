@@ -134,13 +134,18 @@ const preview = await listen((incoming, response) => {
     response.end();
     return;
   }
-  response.end('<input id="name"><textarea id="notes"></textarea><select id="account"><option>Public</option><option>Private account 73</option></select><iframe title="Payment" src="/redirect"></iframe>');
+  response.end('<iframe title="Payment" src="/redirect"></iframe>');
 });
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${preview.address().port}`);
   await page.waitForLoadState("networkidle");
+  const redirected = await crossOriginFrameLocators(page);
+  assert.equal(redirected.length, 1, "committed cross-origin redirect is included in the mask");
+  assert.match(await redirected[0].getAttribute("data-sonik-capture-cross-origin"), /^frame-/);
+  assert.equal((await page.screenshot({ mask: redirected })).subarray(1, 4).toString("ascii"), "PNG", "committed-frame locators are valid screenshot masks");
+  await page.setContent('<input id="name"><textarea id="notes"></textarea><select id="account"><option>Public</option><option>Private account 73</option></select>');
   await page.evaluate(() => {
     document.querySelector("#name").value = "Ada Arbitrary";
     document.querySelector("#notes").value = "unstructured private note";
@@ -154,10 +159,6 @@ try {
     document.querySelector("#account").selectedIndex,
     document.querySelector("#account").selectedOptions[0].textContent,
   ]), ["Ada Arbitrary", "unstructured private note", 1, "Private account 73"], "live values and selection are restored after ARIA capture");
-  const redirected = await crossOriginFrameLocators(page);
-  assert.equal(redirected.length, 1, "committed cross-origin redirect is included in the mask");
-  assert.match(await redirected[0].getAttribute("data-sonik-capture-cross-origin"), /^frame-/);
-  assert.equal((await page.screenshot({ mask: redirected })).subarray(1, 4).toString("ascii"), "PNG", "committed-frame locators are valid screenshot masks");
 } finally {
   await browser.close();
   await Promise.all([new Promise((resolve) => preview.close(resolve)), new Promise((resolve) => foreign.close(resolve))]);
