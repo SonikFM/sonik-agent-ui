@@ -1,8 +1,13 @@
+drop index concurrently if exists sonik_agent_ui.workflow_definition_published_versions_organization_version_key;
+create unique index concurrently workflow_definition_published_versions_organization_version_key
+  on sonik_agent_ui.workflow_definition_published_versions (organization_id, workflow_version_id);
+
 alter table sonik_agent_ui.workflow_definition_published_versions
   drop constraint workflow_definition_published_versions_pkey,
-  add primary key (organization_id, workflow_version_id);
+  add constraint workflow_definition_published_versions_pkey
+    primary key using index workflow_definition_published_versions_organization_version_key;
 
-drop index if exists sonik_agent_ui.workflow_definition_versions_owner_workflow_idx;
+drop index concurrently if exists sonik_agent_ui.workflow_definition_versions_owner_workflow_idx;
 do $$
 declare
   constraint_name name;
@@ -21,8 +26,8 @@ begin
   end if;
 end
 $$;
-drop index if exists sonik_agent_ui.workflow_definition_versions_organization_workflow_idx;
-create index workflow_definition_versions_organization_workflow_idx
+drop index concurrently if exists sonik_agent_ui.workflow_definition_versions_organization_workflow_idx;
+create index concurrently workflow_definition_versions_organization_workflow_idx
   on sonik_agent_ui.workflow_definition_published_versions (organization_id, workflow_id, published_at desc);
 
 create or replace function sonik_agent_ui.reject_published_workflow_mutation()

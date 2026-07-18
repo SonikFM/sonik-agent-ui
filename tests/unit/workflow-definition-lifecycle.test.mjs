@@ -170,7 +170,7 @@ for (const table of ["workflow_definition_drafts", "workflow_definition_publishe
 }
 assert.match(migration, /before update or delete[\s\S]*reject_published_workflow_mutation/i, "database rejects published mutation");
 assert.match(migration, /jsonb_typeof\(dependency_pins\) = 'object'/i);
-assert.match(organizationScopeMigration, /add primary key \(organization_id, workflow_version_id\)/i, "published identity is organization scoped");
+assert.match(organizationScopeMigration, /create unique index concurrently[\s\S]*\(organization_id, workflow_version_id\)[\s\S]*primary key using index/i, "published identity is organization scoped without a blocking index build");
 assert.match(organizationScopeMigration, /using \(organization_id = sonik_agent_ui\.current_organization_id\(\)\)[\s\S]*with check \(organization_id = sonik_agent_ui\.current_organization_id\(\) and user_id = sonik_agent_ui\.current_user_id\(\)\)/i, "same-org reads retain publisher-scoped inserts");
 assert.match(repositorySource, /draft_revision = draft_revision \+ 1[\s\S]*draft_revision = \$4[\s\S]*returning/i, "cloud draft writes use one CAS statement");
 assert.match(repositorySource, /insert into sonik_agent_ui\.workflow_definition_published_versions[\s\S]*select[\s\S]*draft_revision = \$4[\s\S]*definition_digest = \$6/i, "cloud publish atomically snapshots the expected draft");

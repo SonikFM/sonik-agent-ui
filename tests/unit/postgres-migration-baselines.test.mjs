@@ -44,6 +44,14 @@ for (const [version, artifacts] of Object.entries(requiredArtifacts)) {
   for (const artifact of artifacts) assert.ok(sql.includes(artifact), `${version} baseline requires ${artifact}`);
 }
 
+for (const version of ["0015", "0016", "0017"]) {
+  const sql = baseline(version);
+  assert.match(sql, /pg_get_indexdef|pg_get_constraintdef/i, `${version} compares canonical artifact definitions`);
+  assert.match(sql, /polpermissive[\s\S]*polcmd[\s\S]*polroles/i, `${version} compares canonical policy metadata`);
+  assert.match(sql, /pg_get_expr[\s\S]*polqual[\s\S]*pg_get_expr[\s\S]*polwithcheck/i, `${version} compares canonical policy expressions`);
+  assert.match(sql, /count\(\*\)[\s\S]*pg_policy/i, `${version} rejects extra same-table policies`);
+}
+
 const organizationScopedVersions = baseline("0019");
 assert.match(organizationScopedVersions, /organization_id,workflow_version_id/, "0019 requires organization-scoped version identity");
 assert.match(organizationScopedVersions, /pg_get_indexdef/i, "0019 compares the canonical lookup-index definition");
@@ -63,9 +71,14 @@ assert.match(organizationScopedVersions, /prosrc[\s\S]*publishedworkflowversions
 assert.match(organizationScopedVersions, /polpermissive/i, "0019 requires a permissive tenant policy");
 assert.match(organizationScopedVersions, /polcmd\s*=\s*'\*'/i, "0019 requires an ALL-command tenant policy");
 assert.match(organizationScopedVersions, /polroles\s*=\s*array\[0::oid\]/i, "0019 requires a PUBLIC tenant policy");
+assert.match(source, /version: "0019"[\s\S]*?transactional: false/, "0019 uses the non-transactional migration lane");
+assert.match(organizationScopeMigration, /create unique index concurrently workflow_definition_published_versions_organization_version_key/i, "0019 builds the replacement primary-key index without blocking writers");
+assert.match(organizationScopeMigration, /primary key using index workflow_definition_published_versions_organization_version_key/i, "0019 attaches the prebuilt primary-key index");
+assert.match(organizationScopeMigration, /drop index concurrently if exists sonik_agent_ui\.workflow_definition_versions_owner_workflow_idx/i, "0019 removes the legacy lookup index concurrently");
+assert.match(organizationScopeMigration, /create index concurrently workflow_definition_versions_organization_workflow_idx/i, "0019 rebuilds the canonical lookup index concurrently");
 assert.match(organizationScopeMigration, /alter table sonik_agent_ui\.workflow_definition_published_versions\s+enable row level security/i, "0019 repairs disabled RLS");
 assert.match(organizationScopeMigration, /alter table sonik_agent_ui\.workflow_definition_published_versions\s+force row level security/i, "0019 repairs unforced RLS");
-assert.match(organizationScopeMigration, /drop index if exists sonik_agent_ui\.workflow_definition_versions_organization_workflow_idx/i, "0019 removes a poisoned same-name lookup index");
+assert.match(organizationScopeMigration, /drop index concurrently if exists sonik_agent_ui\.workflow_definition_versions_organization_workflow_idx/i, "0019 removes a poisoned same-name lookup index without blocking writers");
 assert.match(organizationScopeMigration, /pg_constraint[\s\S]*conindid[\s\S]*to_regclass\('sonik_agent_ui\.workflow_definition_versions_organization_workflow_idx'\)[\s\S]*workflow_definition_published_versions/i, "0019 removes a constraint-owned poisoned same-name lookup index only from the expected table");
 assert.doesNotMatch(organizationScopeMigration, /create index if not exists workflow_definition_versions_organization_workflow_idx/i, "0019 recreates the canonical lookup index unconditionally");
 

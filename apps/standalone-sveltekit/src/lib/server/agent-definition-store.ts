@@ -377,29 +377,69 @@ export function createNeonAgentDefinitionStoreFromSql(sql: NeonQueryFunction<fal
     if (!draft) throw new Error(`No draft agent definition found for ${input.agentId}`);
     const draftDefinition = parseStoredAgentDefinition(draft.definition);
     const packageVersionId = `${draft.agent_id}@${input.packageSemver}`;
-    const existing = await scopedRows(authority, "publish", sql`
-      select 1 from sonik_agent_ui.agent_definition_published_versions
-      where organization_id = ${authority.organizationId} and package_version_id = ${packageVersionId}
-    `);
-    if (existing.length > 0) {
+    const version = buildAgentDefinitionPackageVersion(draftDefinition, input, packageVersionId);
+    const results = await sql.transaction([
+      sql`select sonik_agent_ui.set_request_context(${authority.organizationId}, ${authority.userId})`,
+      sql`
+        with locked_draft as materialized (
+          select agent_id, definition
+          from sonik_agent_ui.agent_definition_drafts
+          where organization_id = ${authority.organizationId} and agent_id = ${input.agentId}
+          for update
+        ), latest as (
+          select version ->> 'packageSemver' as package_semver
+          from sonik_agent_ui.agent_definition_published_versions
+          where organization_id = ${authority.organizationId} and agent_id = ${input.agentId}
+          order by seq desc
+          limit 1
+        ), checked as (
+          select locked_draft.agent_id,
+                 locked_draft.definition,
+                 exists (
+                   select 1 from sonik_agent_ui.agent_definition_published_versions
+                   where organization_id = ${authority.organizationId} and package_version_id = ${packageVersionId}
+                 ) as duplicate,
+                 latest.package_semver
+          from locked_draft
+          left join latest on true
+        ), inserted as (
+          insert into sonik_agent_ui.agent_definition_published_versions (
+            organization_id, package_version_id, agent_id, version, created_by_user_id
+          )
+          select ${authority.organizationId}, ${packageVersionId}, checked.agent_id, ${JSON.stringify(version)}::jsonb, ${authority.userId}
+          from checked
+          where not checked.duplicate
+            and checked.definition = ${JSON.stringify(draftDefinition)}::jsonb
+            and (
+              checked.package_semver is null
+              or string_to_array(substring(${input.packageSemver} from '^[0-9]+\\.[0-9]+\\.[0-9]+'), '.')::int[]
+                 > string_to_array(substring(checked.package_semver from '^[0-9]+\\.[0-9]+\\.[0-9]+'), '.')::int[]
+            )
+          returning package_version_id
+        )
+        select checked.agent_id,
+               checked.definition,
+               checked.duplicate,
+               checked.package_semver,
+               checked.definition <> ${JSON.stringify(draftDefinition)}::jsonb as draft_changed,
+               inserted.package_version_id
+        from checked
+        left join inserted on true
+      `,
+    ], { isolationLevel: "Serializable" });
+    const outcome = (results[1] as unknown[])[0] as {
+      duplicate: boolean;
+      package_semver: string | null;
+      draft_changed: boolean;
+      package_version_id: string | null;
+    } | undefined;
+    if (!outcome) throw new Error(`No draft agent definition found for ${input.agentId}`);
+    if (outcome.duplicate) {
       throw new Error(`Package version ${packageVersionId} is already published (packageVersionId is immutable, D002) -- bump packageSemver`);
     }
-    const latestRows = await scopedRows(authority, "publish", sql`
-      select version ->> 'packageSemver' as package_semver from sonik_agent_ui.agent_definition_published_versions
-      where organization_id = ${authority.organizationId} and agent_id = ${input.agentId}
-      order by seq desc
-      limit 1
-    `);
-    assertSemverAdvancesPast(draft.agent_id, input.packageSemver, (latestRows[0] as { package_semver: string } | undefined)?.package_semver);
-    const version = buildAgentDefinitionPackageVersion(draftDefinition, input, packageVersionId);
-    await scopedRows(authority, "publish", sql`
-      insert into sonik_agent_ui.agent_definition_published_versions (
-        organization_id, package_version_id, agent_id, version, created_by_user_id
-      ) values (
-        ${authority.organizationId}, ${packageVersionId}, ${draft.agent_id}, ${JSON.stringify(version)}::jsonb, ${authority.userId}
-      )
-      returning package_version_id
-    `);
+    assertSemverAdvancesPast(draft.agent_id, input.packageSemver, outcome.package_semver ?? undefined);
+    if (outcome.draft_changed) throw new Error(`Draft agent definition changed while publishing ${input.agentId}; retry publish`);
+    if (!outcome.package_version_id) throw new Error(`Agent definition publish failed for ${input.agentId}`);
     return version;
   }
 

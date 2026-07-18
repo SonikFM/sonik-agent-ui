@@ -30,6 +30,10 @@ async function assertAgentDefinitionStoreContract(store, label) {
   assert.equal(await store.getDraft(authority, draftDefinition.agentId), null, `${label}: no draft exists before saveDraft`);
   await store.saveDraft(authority, draftDefinition);
   assert.deepEqual((await store.getDraft(authority, draftDefinition.agentId))?.definition, draftDefinition, `${label}: getDraft round-trips the saved definition`);
+  assert.equal(await store.deleteDraft(authority, draftDefinition.agentId), true, `${label}: deleteDraft reports a persisted deletion`);
+  assert.equal(await store.getDraft(authority, draftDefinition.agentId), null, `${label}: deleteDraft removes the stored draft`);
+  assert.equal(await store.deleteDraft(authority, draftDefinition.agentId), false, `${label}: deleting a missing draft reports false`);
+  await store.saveDraft(authority, draftDefinition);
 
   const versionOne = await store.publish(authority, { agentId: draftDefinition.agentId, packageSemver: "0.1.0" });
   assert.equal(versionOne.packageVersionId, `${draftDefinition.agentId}@0.1.0`, `${label}: publish mints packageId@semver`);
@@ -90,13 +94,50 @@ function createDeterministicNeonSqlClient() {
     return { strings: [...strings], params };
   }
 
-  sql.transaction = async (queries) => {
+  sql.transactionTexts = [];
+
+  sql.transaction = async (queries, options) => {
+    sql.transactionTexts.push(queries.map(queryText));
     assert.equal(queries.length, 2, "Neon store operations establish context and execute one statement atomically");
     const [contextQuery, operation] = queries;
     assert.match(queryText(contextQuery), /set_request_context/);
     const [organizationId, userId] = contextQuery.params;
     const text = queryText(operation);
     const params = operation.params;
+
+    if (text.startsWith("with locked_draft")) {
+      assert.equal(options?.isolationLevel, "Serializable");
+      assert.match(text, /for update/);
+      const draft = drafts.get(key(params[0], params[1]));
+      if (!draft) return [[], []];
+      const duplicate = published.some((version) => version.organization_id === params[4] && version.package_version_id === params[5]);
+      const latest = published.filter((version) => version.organization_id === params[2] && version.agent_id === params[3]).at(-1);
+      const latestSemver = latest?.version.packageSemver ?? null;
+      const nextParts = params[11].split(".").slice(0, 3).map(Number);
+      const latestParts = latestSemver?.split(".").slice(0, 3).map(Number);
+      const differingIndex = latestParts?.findIndex((part, index) => part !== nextParts[index]) ?? -1;
+      const advances = latestParts == null || (differingIndex >= 0 && nextParts[differingIndex] > latestParts[differingIndex]);
+      const draftChanged = JSON.stringify(draft.definition) !== JSON.stringify(JSON.parse(params[10]));
+      const inserted = !duplicate && advances && !draftChanged;
+      if (inserted) {
+        published.push({
+          organization_id: params[6],
+          package_version_id: params[7],
+          agent_id: draft.agent_id,
+          version: JSON.parse(params[8]),
+          created_by_user_id: params[9],
+          seq: published.length + 1,
+        });
+      }
+      return [[], [{
+        agent_id: draft.agent_id,
+        definition: structuredClone(draft.definition),
+        duplicate,
+        package_semver: latestSemver,
+        draft_changed: draftChanged,
+        package_version_id: inserted ? params[7] : null,
+      }]];
+    }
 
     if (text.includes("insert into sonik_agent_ui.agent_definition_drafts")) {
       const draftKey = key(params[0], params[1]);
@@ -111,6 +152,13 @@ function createDeterministicNeonSqlClient() {
       };
       drafts.set(draftKey, record);
       return [[], [structuredClone(record)]];
+    }
+
+    if (text.startsWith("delete from sonik_agent_ui.agent_definition_drafts")) {
+      const draftKey = key(params[0], params[1]);
+      const deleted = drafts.get(draftKey);
+      drafts.delete(draftKey);
+      return [[], deleted ? [{ agent_id: deleted.agent_id }] : []];
     }
 
     if (text.includes("from sonik_agent_ui.agent_definition_drafts")) {
@@ -169,7 +217,17 @@ function createDeterministicNeonSqlClient() {
 }
 
 await assertAgentDefinitionStoreContract(wrapAgentDefinitionStoreAsync(createInMemoryAgentDefinitionStore()), "in-memory");
-await assertAgentDefinitionStoreContract(createNeonAgentDefinitionStoreFromSql(createDeterministicNeonSqlClient()), "neon-sql-client");
+const contractSql = createDeterministicNeonSqlClient();
+await assertAgentDefinitionStoreContract(createNeonAgentDefinitionStoreFromSql(contractSql), "neon-sql-client");
+assert.ok(
+  contractSql.transactionTexts.some(
+    (queries) => queries.length === 2
+      && queries[1].includes("for update")
+      && queries[1].includes("agent_definition_published_versions")
+      && queries[1].includes("insert into"),
+  ),
+  "Neon publish locks the draft and checks/inserts the published version in one transaction",
+);
 
 const corruptSql = createDeterministicNeonSqlClient();
 const corruptStore = createNeonAgentDefinitionStoreFromSql(corruptSql);

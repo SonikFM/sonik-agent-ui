@@ -113,6 +113,66 @@ try {
 	psql(adminUrl, `drop database if exists ${database} with (force)`);
 }
 
+const poisonedBaselineDatabase = `sonik_agent_ui_poisoned_baselines_${process.pid}_${Date.now()}`;
+const poisonedBaselineUrl = new URL(sourceUrl);
+poisonedBaselineUrl.pathname = `/${poisonedBaselineDatabase}`;
+
+psql(adminUrl, `create database ${poisonedBaselineDatabase}`);
+try {
+	runMigrations(poisonedBaselineUrl);
+	psql(poisonedBaselineUrl, "delete from sonik_agent_ui.schema_migrations where version in ('0015', '0016', '0017')");
+
+	const canonicalOutput = runMigrations(poisonedBaselineUrl, { dryRun: true });
+	for (const [version, name] of [
+		["0015", "agent_definition_tenant_authority"],
+		["0016", "workflow_definitions"],
+		["0017", "workflow_run_journal"],
+	]) {
+		assert.match(canonicalOutput, new RegExp(`${version} ${name}: existing schema detected; recording baseline`));
+	}
+
+	psql(poisonedBaselineUrl, `
+		drop index sonik_agent_ui.agent_definition_drafts_tenant_agent_key;
+		create unique index agent_definition_drafts_tenant_agent_key
+			on sonik_agent_ui.agent_definition_drafts (organization_id);
+		alter table sonik_agent_ui.agent_definition_drafts
+			drop constraint agent_definition_drafts_authority_or_quarantine_check,
+			add constraint agent_definition_drafts_authority_or_quarantine_check check (true);
+		drop policy agent_definition_drafts_tenant_scope on sonik_agent_ui.agent_definition_drafts;
+		create policy agent_definition_drafts_tenant_scope on sonik_agent_ui.agent_definition_drafts using (true) with check (true);
+
+		alter table sonik_agent_ui.workflow_definition_drafts
+			drop constraint workflow_definition_drafts_pkey,
+			add constraint workflow_definition_drafts_pkey primary key (workflow_id);
+		drop trigger workflow_definition_versions_immutable on sonik_agent_ui.workflow_definition_published_versions;
+		create trigger workflow_definition_versions_immutable before update or delete
+			on sonik_agent_ui.workflow_definition_published_versions for each row when (false)
+			execute function sonik_agent_ui.reject_published_workflow_mutation();
+		drop policy workflow_definition_drafts_scope on sonik_agent_ui.workflow_definition_drafts;
+		create policy workflow_definition_drafts_scope on sonik_agent_ui.workflow_definition_drafts using (true) with check (true);
+
+		alter table sonik_agent_ui.agent_workflow_run_waitpoints
+			drop constraint agent_workflow_run_waitpoints_pkey,
+			add constraint agent_workflow_run_waitpoints_pkey primary key (waitpoint_id);
+		drop policy agent_workflow_run_events_scope on sonik_agent_ui.agent_workflow_run_events;
+		create policy agent_workflow_run_events_scope on sonik_agent_ui.agent_workflow_run_events using (true) with check (true);
+	`);
+
+	const poisonedOutput = runMigrations(poisonedBaselineUrl, { dryRun: true });
+	for (const [version, name] of [
+		["0015", "agent_definition_tenant_authority"],
+		["0016", "workflow_definitions"],
+		["0017", "workflow_run_journal"],
+	]) {
+		assert.match(poisonedOutput, new RegExp(`${version} ${name}: applying `), `${version} rejects poisoned same-name artifacts`);
+		assert.doesNotMatch(poisonedOutput, new RegExp(`${version} ${name}: existing schema detected; recording baseline`));
+	}
+
+	console.log("postgres-migration-partial-baseline.postgres.test.mjs: poisoned same-name assertions passed");
+} finally {
+	psql(adminUrl, `drop database if exists ${poisonedBaselineDatabase} with (force)`);
+}
+
 const canonicalityDatabase = `sonik_agent_ui_0019_canonicality_${process.pid}_${Date.now()}`;
 const canonicalityUrl = new URL(sourceUrl);
 canonicalityUrl.pathname = `/${canonicalityDatabase}`;

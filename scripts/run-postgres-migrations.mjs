@@ -242,6 +242,52 @@ const migrations = [
 							and polname = required.policy_name
 					)
 				)
+				and not exists (
+					select 1
+					from (values
+						('agent_definition_drafts_tenant_agent_key', 'createuniqueindexagent_definition_drafts_tenant_agent_keyonsonik_agent_ui.agent_definition_draftsusingbtreeorganization_id,agent_idwhereorganization_idisnotnull'),
+						('agent_definition_published_versions_tenant_package_key', 'createuniqueindexagent_definition_published_versions_tenant_package_keyonsonik_agent_ui.agent_definition_published_versionsusingbtreeorganization_id,package_version_idwhereorganization_idisnotnull'),
+						('agent_definition_published_versions_tenant_agent_seq_idx', 'createindexagent_definition_published_versions_tenant_agent_seq_idxonsonik_agent_ui.agent_definition_published_versionsusingbtreeorganization_id,agent_id,seq')
+					) as required(index_name, index_definition)
+					where not exists (
+						select 1 from pg_index
+						where indexrelid = to_regclass('sonik_agent_ui.' || required.index_name)
+							and indisvalid
+							and indisready
+							and regexp_replace(lower(pg_get_indexdef(indexrelid)), '[[:space:]()]', '', 'g') = required.index_definition
+					)
+				)
+				and not exists (
+					select 1
+					from (values
+						('agent_definition_drafts', 'agent_definition_drafts_authority_or_quarantine_check', 'check((((organization_idisnotnull)and(created_by_user_idisnotnull)and(updated_by_user_idisnotnull)and(legacy_quarantined_atisnull))or((organization_idisnull)and(created_by_user_idisnull)and(updated_by_user_idisnull)and(legacy_quarantined_atisnotnull))))'),
+						('agent_definition_published_versions', 'agent_definition_published_authority_or_quarantine_check', 'check((((organization_idisnotnull)and(created_by_user_idisnotnull)and(legacy_quarantined_atisnull))or((organization_idisnull)and(created_by_user_idisnull)and(legacy_quarantined_atisnotnull))))')
+					) as required(table_name, constraint_name, constraint_definition)
+					where not exists (
+						select 1 from pg_constraint
+						where conrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and conname = required.constraint_name
+							and regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g') = required.constraint_definition
+					)
+				)
+				and not exists (
+					select 1
+					from (values
+						('agent_definition_drafts', 'agent_definition_drafts_tenant_scope', '(organization_id=sonik_agent_ui.current_organization_id())', '((organization_id=sonik_agent_ui.current_organization_id())and(created_by_user_idisnotnull)and(updated_by_user_id=sonik_agent_ui.current_user_id())and(legacy_quarantined_atisnull))'),
+						('agent_definition_published_versions', 'agent_definition_published_versions_tenant_scope', '(organization_id=sonik_agent_ui.current_organization_id())', '((organization_id=sonik_agent_ui.current_organization_id())and(created_by_user_id=sonik_agent_ui.current_user_id())and(legacy_quarantined_atisnull))')
+					) as required(table_name, policy_name, using_expression, check_expression)
+					where (select count(*) from pg_policy where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)) <> 1
+						or not exists (
+							select 1 from pg_policy
+							where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+								and polname = required.policy_name
+								and polpermissive
+								and polcmd = '*'
+								and polroles = array[0::oid]
+								and regexp_replace(lower(pg_get_expr(polqual, polrelid)), '[[:space:]]', '', 'g') = required.using_expression
+								and regexp_replace(lower(pg_get_expr(polwithcheck, polrelid)), '[[:space:]]', '', 'g') = required.check_expression
+						)
+				)
 			)::text
 		`,
 	},
@@ -284,7 +330,6 @@ const migrations = [
 					)
 				)
 				and to_regclass('sonik_agent_ui.workflow_definition_drafts_owner_updated_idx') is not null
-				and to_regclass('sonik_agent_ui.workflow_definition_versions_owner_workflow_idx') is not null
 				and to_regprocedure('sonik_agent_ui.reject_published_workflow_mutation()') is not null
 				and exists (
 					select 1 from pg_trigger
@@ -314,6 +359,87 @@ const migrations = [
 						where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)
 							and polname = required.policy_name
 					)
+				)
+				and exists (
+					select 1 from pg_index
+					where indexrelid = to_regclass('sonik_agent_ui.workflow_definition_drafts_owner_updated_idx')
+						and indisvalid
+						and indisready
+						and regexp_replace(lower(pg_get_indexdef(indexrelid)), '[[:space:]()]', '', 'g')
+							= 'createindexworkflow_definition_drafts_owner_updated_idxonsonik_agent_ui.workflow_definition_draftsusingbtreeorganization_id,user_id,updated_atdesc'
+				)
+				and exists (
+					select 1 from pg_index
+					where indexrelid in (
+						to_regclass('sonik_agent_ui.workflow_definition_versions_owner_workflow_idx'),
+						to_regclass('sonik_agent_ui.workflow_definition_versions_organization_workflow_idx')
+					)
+						and indisvalid
+						and indisready
+						and regexp_replace(lower(pg_get_indexdef(indexrelid)), '[[:space:]()]', '', 'g') in (
+							'createindexworkflow_definition_versions_owner_workflow_idxonsonik_agent_ui.workflow_definition_published_versionsusingbtreeorganization_id,user_id,workflow_id,published_atdesc',
+							'createindexworkflow_definition_versions_organization_workflow_idxonsonik_agent_ui.workflow_definition_published_versionsusingbtreeorganization_id,workflow_id,published_atdesc'
+						)
+				)
+				and exists (
+					select 1 from pg_constraint
+					where conrelid = to_regclass('sonik_agent_ui.workflow_definition_drafts')
+						and conname = 'workflow_definition_drafts_pkey'
+						and regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g')
+							= 'primarykey(organization_id,user_id,workflow_id)'
+				)
+				and exists (
+					select 1 from pg_constraint
+					where conrelid = to_regclass('sonik_agent_ui.workflow_definition_published_versions')
+						and conname = 'workflow_definition_published_versions_pkey'
+						and regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g') in (
+							'primarykey(organization_id,user_id,workflow_version_id)',
+							'primarykey(organization_id,workflow_version_id)'
+						)
+				)
+				and exists (
+					select 1
+					from pg_trigger as immutable_trigger
+					join pg_proc as trigger_function on trigger_function.oid = immutable_trigger.tgfoid
+					join pg_namespace as function_schema on function_schema.oid = trigger_function.pronamespace
+					join pg_language as function_language on function_language.oid = trigger_function.prolang
+					where immutable_trigger.tgrelid = to_regclass('sonik_agent_ui.workflow_definition_published_versions')
+						and immutable_trigger.tgname = 'workflow_definition_versions_immutable'
+						and not immutable_trigger.tgisinternal
+						and immutable_trigger.tgenabled = 'O'
+						and immutable_trigger.tgtype = 27
+						and immutable_trigger.tgqual is null
+						and immutable_trigger.tgattr = ''::int2vector
+						and function_schema.nspname = 'sonik_agent_ui'
+						and trigger_function.proname = 'reject_published_workflow_mutation'
+						and function_language.lanname = 'plpgsql'
+						and trigger_function.prorettype = 'trigger'::regtype
+						and trigger_function.pronargs = 0
+						and not trigger_function.prosecdef
+						and trigger_function.proconfig @> array['search_path=pg_catalog']
+						and regexp_replace(lower(trigger_function.prosrc), '[[:space:]]', '', 'g')
+							= 'beginraiseexception''publishedworkflowversionsareimmutable''usingerrcode=''55000'';end'
+				)
+				and not exists (
+					select 1
+					from (values
+						('workflow_definition_drafts', 'workflow_definition_drafts_scope', '((organization_id=sonik_agent_ui.current_organization_id())and(user_id=sonik_agent_ui.current_user_id()))', '((organization_id=sonik_agent_ui.current_organization_id())and(user_id=sonik_agent_ui.current_user_id()))'),
+						('workflow_definition_published_versions', 'workflow_definition_versions_scope', '(organization_id=sonik_agent_ui.current_organization_id())', '((organization_id=sonik_agent_ui.current_organization_id())and(user_id=sonik_agent_ui.current_user_id()))')
+					) as required(table_name, policy_name, using_expression, check_expression)
+					where (select count(*) from pg_policy where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)) <> 1
+						or not exists (
+							select 1 from pg_policy
+							where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+								and polname = required.policy_name
+								and polpermissive
+								and polcmd = '*'
+								and polroles = array[0::oid]
+								and regexp_replace(lower(pg_get_expr(polqual, polrelid)), '[[:space:]]', '', 'g') in (
+									required.using_expression,
+									'((organization_id=sonik_agent_ui.current_organization_id())and(user_id=sonik_agent_ui.current_user_id()))'
+								)
+								and regexp_replace(lower(pg_get_expr(polwithcheck, polrelid)), '[[:space:]]', '', 'g') = required.check_expression
+						)
 				)
 			)::text
 		`,
@@ -407,6 +533,65 @@ const migrations = [
 							and polname = required.policy_name
 					)
 				)
+				and exists (
+					select 1 from pg_index
+					where indexrelid = to_regclass('sonik_agent_ui.agent_workflow_run_leases_expiry_idx')
+						and indisvalid
+						and indisready
+						and regexp_replace(lower(pg_get_indexdef(indexrelid)), '[[:space:]()]', '', 'g')
+							= 'createindexagent_workflow_run_leases_expiry_idxonsonik_agent_ui.agent_workflow_run_leasesusingbtreelease_expires_at'
+				)
+				and not exists (
+					select 1
+					from (values
+						('agent_workflow_runs', 'check((journal_revision=journal_sequence))'),
+						('agent_workflow_run_events', 'primarykey(organization_id,user_id,run_id,sequence)'),
+						('agent_workflow_run_events', 'unique(organization_id,user_id,run_id,event_id)'),
+						('agent_workflow_run_events', 'foreignkey(organization_id,user_id,run_id)referencessonik_agent_ui.agent_workflow_runs(organization_id,user_id,run_id)ondeletecascade'),
+						('agent_workflow_run_leases', 'primarykey(organization_id,user_id,run_id)'),
+						('agent_workflow_run_leases', 'foreignkey(organization_id,user_id,run_id)referencessonik_agent_ui.agent_workflow_runs(organization_id,user_id,run_id)ondeletecascade'),
+						('agent_workflow_run_waitpoints', 'primarykey(organization_id,user_id,run_id,waitpoint_id)'),
+						('agent_workflow_run_waitpoints', 'foreignkey(organization_id,user_id,run_id)referencessonik_agent_ui.agent_workflow_runs(organization_id,user_id,run_id)ondeletecascade'),
+						('agent_workflow_effect_claims', 'primarykey(organization_id,user_id,run_id,logical_effect_id)'),
+						('agent_workflow_effect_claims', 'unique(organization_id,user_id,run_id,idempotency_key)'),
+						('agent_workflow_effect_claims', 'unique(organization_id,user_id,run_id,claim_id)'),
+						('agent_workflow_effect_claims', 'foreignkey(organization_id,user_id,run_id)referencessonik_agent_ui.agent_workflow_runs(organization_id,user_id,run_id)ondeletecascade')
+					) as required(table_name, constraint_definition)
+					where not exists (
+						select 1 from pg_constraint
+						where conrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and regexp_replace(lower(pg_get_constraintdef(oid)), '[[:space:]]', '', 'g') = required.constraint_definition
+					)
+				)
+				and not exists (
+					select 1
+					from (values
+						('agent_workflow_run_events', 'agent_workflow_run_events_scope'),
+						('agent_workflow_run_leases', 'agent_workflow_run_leases_scope'),
+						('agent_workflow_run_waitpoints', 'agent_workflow_run_waitpoints_scope'),
+						('agent_workflow_effect_claims', 'agent_workflow_effect_claims_scope')
+					) as required(table_name, policy_name)
+					where (select count(*) from pg_policy where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)) <> 1
+						or not exists (
+							select 1 from pg_policy
+							where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+								and polname = required.policy_name
+								and polpermissive
+								and polcmd = '*'
+								and polroles = array[0::oid]
+								and (
+									regexp_replace(lower(pg_get_expr(polqual, polrelid)), '[[:space:]]', '', 'g')
+										= '((organization_id=sonik_agent_ui.current_organization_id())and(user_id=sonik_agent_ui.current_user_id()))'
+									or (
+										required.table_name = 'agent_workflow_effect_claims'
+										and regexp_replace(lower(pg_get_expr(polqual, polrelid)), '[[:space:]]', '', 'g')
+											= '(organization_id=sonik_agent_ui.current_organization_id())'
+									)
+								)
+								and regexp_replace(lower(pg_get_expr(polwithcheck, polrelid)), '[[:space:]]', '', 'g')
+									= regexp_replace(lower(pg_get_expr(polqual, polrelid)), '[[:space:]]', '', 'g')
+						)
+				)
 			)::text
 		`,
 	},
@@ -438,6 +623,7 @@ const migrations = [
 		version: "0019",
 		name: "organization_scoped_workflow_versions",
 		file: "packages/workspace-session/migrations/postgres/0019_organization_scoped_workflow_versions.sql",
+		transactional: false,
 		baselineCheck: `
 			select (
 				(
@@ -457,7 +643,7 @@ const migrations = [
 						and canonical_index.indisvalid
 						and canonical_index.indisready
 						and regexp_replace(lower(pg_get_indexdef(canonical_index.indexrelid)), '[[:space:]]', '', 'g')
-							= 'createindexworkflow_definition_versions_organization_workflow_idxonsonik_agent_ui.workflow_definition_published_versionsusingbtree(organization_id,workflow_id,published_atdesc)'
+							= 'createindexworkflow_definition_versions_organization_workflow_idxonsonik_agent_ui.workflow_definition_published_versionsusingbtreeorganization_id,workflow_id,published_atdesc'
 				)
 				and (
 					select relrowsecurity and relforcerowsecurity
@@ -591,6 +777,11 @@ function baselineExists(migration) {
 
 function applyMigration(migration, sum) {
 	const filePath = path.resolve(repoRoot, migration.file);
+	if (migration.transactional === false) {
+		psql(["-f", filePath], { stdio: "inherit" });
+		recordMigration(migration, sum, "runner");
+		return;
+	}
 	const recordSql = `
 		insert into sonik_agent_ui.schema_migrations (version, name, checksum, applied_via)
 		values (${sqlLiteral(migration.version)}, ${sqlLiteral(migration.name)}, ${sqlLiteral(sum)}, 'runner')
