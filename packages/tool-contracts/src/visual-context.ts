@@ -82,7 +82,7 @@ export const visualContextScreenshotSchema = z.strictObject({
   redactionsApplied: z.array(boundedPublicTextSchema).max(64),
   capturedAt: z.string().datetime(),
   temporaryPath: z.string().regex(/^\/vercel\/sandbox\/workspace\/\.sonik\/(?:tmp\/visual-context|screenshots\/requests)\/[a-zA-Z0-9._-]+\.png$/).optional(),
-  pngBase64: z.string().max(Math.ceil(maxVisualContextImageBytes / 3) * 4).optional(),
+  pngBase64: z.base64().max(Math.ceil(maxVisualContextImageBytes / 3) * 4).optional(),
 }).superRefine((screenshot, ctx) => {
   const expectedFidelity = screenshot.provider === "playwright" ? "controlled-preview" : "exact-active-tab";
   const expectedBasis = screenshot.provider === "playwright" ? "fresh-playwright-navigation" : "native-active-tab-redacted";
@@ -221,7 +221,13 @@ export function assertVisualContextResultMatchesRequest(request: VisualContextRe
   for (const field of fields) {
     if (request[field] !== result[field]) throw new Error(`Visual context result ${field} does not match the pending request.`);
   }
-  if (request.origin !== result.origin || request.source.id !== result.source.id || request.source.route !== result.source.route) {
+  if (
+    request.origin !== result.origin
+    || request.source.id !== result.source.id
+    || request.source.route !== result.source.route
+    || request.source.label !== result.source.label
+    || request.source.surface !== result.source.surface
+  ) {
     throw new Error("Visual context result origin/source does not match the pending request.");
   }
   if (request.provider && request.provider !== result.provider) {
