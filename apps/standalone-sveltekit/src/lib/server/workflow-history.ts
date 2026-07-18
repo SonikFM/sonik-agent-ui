@@ -51,18 +51,25 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
     correlatedWorkflowId ? deps.journal.listEvents(deps.owner, correlatedWorkflowId) : Promise.resolve([]),
     sessionId ? deps.workspace.listToolCalls(sessionId) : Promise.resolve([]),
   ]);
-  const hasCausalMatch = (!query.conversationRunId || Boolean(exactConversation && (!query.sessionId || exactConversation.session_id === query.sessionId)))
+  const hasStructuralMatch = (!query.conversationRunId || Boolean(exactConversation && (!query.sessionId || exactConversation.session_id === query.sessionId)))
     && (!query.workflowRunId || workflowRows.length === 1)
     && (!(query.nodeId || query.approvalId || query.receiptId) || workflowRows.length > 0)
     && (!query.artifactId || Boolean(artifact && (!query.sessionId || artifact.session_id === query.sessionId)))
     && (!query.attemptId || workflowEvents.some((event) => event.attemptId === query.attemptId));
+  const correlationIds = new Set(workflowEvents.flatMap((event) => event.correlationIds));
+  const conversations = hasStructuralMatch ? conversationCandidates.filter((run) => matchesConversation(run, query, correlationIds)) : [];
+  const conversationRequestIds = new Set(conversations.flatMap((run) => run.request_id ? [run.request_id] : []));
+  const filteredToolCalls = hasStructuralMatch ? toolCalls.filter((call) => matchesToolCall(call, query, correlationIds, conversationRequestIds)) : [];
+  const hasCausalMatch = hasStructuralMatch
+    && (!query.conversationRunId || conversations.some((run) => run.id === query.conversationRunId))
+    && (!query.toolCallId || filteredToolCalls.some((call) => call.id === query.toolCallId))
+    && (!query.requestId || correlationIds.has(query.requestId) || conversations.some((run) => run.request_id === query.requestId) || filteredToolCalls.some((call) => call.request_id === query.requestId))
+    && (!query.traceId || correlationIds.has(query.traceId) || conversations.some((run) => run.trace_id === query.traceId));
   const causalWorkflowRows = hasCausalMatch ? workflowRows : [];
   const causalWorkflowEvents = hasCausalMatch ? workflowEvents : [];
-  const correlationIds = new Set(causalWorkflowEvents.flatMap((event) => event.correlationIds));
-  const conversations = hasCausalMatch ? conversationCandidates.filter((run) => matchesConversation(run, query, correlationIds)) : [];
-  const conversationRequestIds = new Set(conversations.flatMap((run) => run.request_id ? [run.request_id] : []));
-  const filteredToolCalls = hasCausalMatch ? toolCalls.filter((call) => matchesToolCall(call, query, correlationIds, conversationRequestIds)) : [];
-  const correlatedConversationId = conversations.length === 1 ? conversations[0]?.id : undefined;
+  const causalConversations = hasCausalMatch ? conversations : [];
+  const causalToolCalls = hasCausalMatch ? filteredToolCalls : [];
+  const correlatedConversationId = causalConversations.length === 1 ? causalConversations[0]?.id : undefined;
   const conversationEvents = correlatedConversationId
     ? await deps.workspace.listRunEvents(correlatedConversationId)
     : [];
@@ -77,10 +84,10 @@ export async function getWorkflowHistory(queryInput: WorkflowHistoryQuery, deps:
     ok: true as const,
     history: {
       query,
-      conversations: conversations.map(projectConversation),
+      conversations: causalConversations.map(projectConversation),
       workflows: causalWorkflowRows.map(projectWorkflow),
       nodes: causalWorkflowRows.flatMap(projectNodes).filter((node) => (!query.nodeId || node.nodeId === query.nodeId) && (!query.attemptId || attemptNodeIds.has(node.nodeId))),
-      toolCalls: filteredToolCalls.map(projectToolCall),
+      toolCalls: causalToolCalls.map(projectToolCall),
       approvals: dedupeApprovals([...causalWorkflowRows.flatMap(projectApprovals), ...causalWorkflowEvents.flatMap(projectEventApproval)])
         .filter((approval) => !query.approvalId || approval.approvalId === query.approvalId),
       artifacts: projectArtifacts(causalWorkflowRows, causalWorkflowEvents, hasCausalMatch ? artifact : null).filter((entry) => !query.artifactId || entry.artifactId === query.artifactId),

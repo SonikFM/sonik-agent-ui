@@ -56,6 +56,7 @@ async function installModelCatalogFixture(page: Page): Promise<void> {
     task: index === 34 ? "Agent" : "Text",
     inputModalities: index === 34 ? ["audio"] : ["text"],
     outputModalities: ["text"],
+    disabledReason: index === 33 ? "Provider maintenance window." : undefined,
   }));
   await page.route("**/api/agent-models", (route) => route.fulfill({
     status: 200,
@@ -382,6 +383,11 @@ test("model catalog proves 35-row search, ten-row viewport, pointer and keyboard
   expect(dimensions.clientHeight).toBe(800);
   expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
 
+  await page.getByLabel("Search models").fill("Fixture Model 34");
+  const disabledModel = page.getByRole("option", { name: /Fixture Model 34/ });
+  await expect(disabledModel).toBeDisabled();
+  await expect(disabledModel).toContainText("Provider maintenance window.");
+
   await page.getByLabel("Search models").fill("Fixture Model 35");
   const finalModel = page.getByRole("option", { name: /Fixture Model 35/ });
   await expect(finalModel).toContainText("Video");
@@ -402,6 +408,24 @@ test("model catalog proves 35-row search, ten-row viewport, pointer and keyboard
   await expect(firstModel).toHaveAttribute("aria-selected", "true");
   await page.getByRole("button", { name: "Expand catalog" }).click();
   await expect(page.getByRole("button", { name: "Collapse catalog" })).toHaveAttribute("aria-expanded", "true");
+});
+
+test("owned builder and model surfaces fit 390, 768, and 1280 pixel viewports", async ({ page }) => {
+  await installModelCatalogFixture(page);
+  await page.setViewportSize({ width: 390, height: 900 });
+  await gotoFreshWorkspace(page, smokeUrl(null));
+  await openWorkflowBuilder(page);
+
+  for (const width of [390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    const root = page.locator('[data-agent-mode="workflow-builder"]');
+    const listbox = page.getByRole("listbox", { name: "Model" });
+    await expect(root).toBeVisible();
+    await expect(listbox).toBeVisible();
+    const rootMetrics = await root.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+    expect(rootMetrics.scrollWidth, `${width}px root overflow: ${JSON.stringify(rootMetrics)}`).toBeLessThanOrEqual(rootMetrics.clientWidth);
+    expect(await listbox.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  }
 });
 
 test("capability readiness renders callable and actionable non-callable states", async ({ page }) => {
@@ -493,7 +517,9 @@ test("builder exposes isolated preview, full keyboard canvas semantics, and grap
 
   await page.getByRole("tab", { name: "Debug & Preview" }).click();
   await expect(page.locator("[data-debug-preview-context]")).toContainText("Isolated preview context");
-  await expect(page.locator("[data-debug-preview-context]")).toContainText("read/preview only");
+  await expect(page.locator("[data-debug-preview-context]")).toContainText("isolated test");
+  await expect(page.locator("[data-debug-preview-context]")).toContainText("Missing: main chat history and session history");
+  await expect(page.locator("[data-debug-preview-context]")).toContainText("Missing: attachments");
 
   await page.getByRole("button", { name: "Organizer", exact: true }).click();
   await expect(page.locator("[data-organizer-panel]")).toBeVisible();
@@ -542,7 +568,7 @@ test("operator history visibly correlates the governed causal path", async ({ pa
         approvals: [{ approvalId: query.approvalId, workflowRunId: query.workflowRunId, nodeId: "approval", status: "approved" }],
         artifacts: [{ artifactId: query.artifactId, workflowRunId: query.workflowRunId, nodeId: "evidence", status: "ready" }],
         receipts: [{ receiptId: query.receiptId, workflowRunId: query.workflowRunId, nodeId: query.nodeId, semanticStatus: "success" }],
-        events: [{ eventId: "event-e2e", source: "workflow", timestamp: "2026-07-15T21:01:00.000Z", status: "completed", workflowRunId: query.workflowRunId, nodeId: query.nodeId, approvalId: query.approvalId, artifactId: query.artifactId }],
+        events: [{ eventId: "event-e2e", source: "workflow", type: "node_completed", timestamp: "2026-07-15T21:01:00.000Z", status: "completed", workflowRunId: query.workflowRunId, nodeId: query.nodeId, approvalId: query.approvalId, artifactId: query.artifactId, attemptId: `${query.workflowRunId}:${query.nodeId}:1`, correlationIds: [query.requestId, query.traceId] }],
       },
     }),
   }));
@@ -554,6 +580,11 @@ test("operator history visibly correlates the governed causal path", async ({ pa
     await expect(page.getByText(`${key}: ${value}`, { exact: true })).toBeVisible();
   }
   await expect(page.getByText("Events (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Conversation runs (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Workflow runs (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Tool calls (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText(`attempt: ${query.workflowRunId}:${query.nodeId}:1`, { exact: true })).toBeVisible();
   await expect(page.getByText("Approvals (1)", { exact: true })).toBeVisible();
   await expect(page.getByText("Artifacts (1)", { exact: true })).toBeVisible();
   await expect(page.getByText("Receipts (1)", { exact: true })).toBeVisible();
@@ -681,6 +712,9 @@ test("E2E-03 Organizer edits allowlisted fields and preserves the P3 published s
   await page.getByRole("button", { name: "Organizer", exact: true }).click();
   await expect(page.locator('[data-agent-panel="workflow-builder-canvas"]')).toHaveCount(0);
   await page.getByLabel("Start from a campaign request title").fill("Start from the governed campaign brief");
+  await page.getByLabel("Start from a campaign request instructions").fill("Use the approved campaign brief and preserve its constraints.");
+  await page.getByLabel("Start from a campaign request knowledge").fill("campaign-playbook, brand-policy");
+  await page.getByLabel("Start from a campaign request curated capabilities").fill("amplify.campaign.create, amplify.campaign.read");
   await page.getByRole("button", { name: "Save configuration" }).click();
   await expect(page.getByText(/Organizer configuration saved at revision/)).toBeVisible();
   await page.getByRole("button", { name: "Test", exact: true }).click();
@@ -707,12 +741,20 @@ test("E2E-03 Organizer edits allowlisted fields and preserves the P3 published s
   const organizerPatch = fixture.workflowDefinitionBodies.find(({ action }) => action === "organizer_patch") as { patch?: { expectedDraftRevision?: number; edits?: Array<{ path: string }> } };
   const publish = fixture.workflowDefinitionBodies.find(({ action }) => action === "publish") as { dependencyPins?: Record<string, unknown> };
   expect(organizerPatch.patch?.expectedDraftRevision).toBeGreaterThan(0);
-  expect(organizerPatch.patch?.edits?.map(({ path }) => path)).toEqual(["nodes.trigger.config.title"]);
+  expect(organizerPatch.patch?.edits?.map(({ path }) => path)).toEqual([
+    "nodes.trigger.config.title",
+    "nodes.trigger.config.instructions",
+    "nodes.trigger.config.knowledge",
+    "nodes.trigger.config.capabilities",
+  ]);
   expect(Object.keys(p3Definition).sort()).toEqual(["definitionVersion", "edges", "entryNodeId", "facadeToolIds", "nodes", "schemaVersion", "title", "workflowId"].sort());
-  expect(publish.dependencyPins).toMatchObject({
-    organizationId: "11111111-1111-4111-8111-111111111111",
-    workflowVersionId: "amplify.campaign.create@0.1.0",
-    definitionDigest: `sha256:${"a".repeat(64)}`,
+  expect(publish.dependencyPins).toEqual({
+    agentPublishedVersionId: "agent@0.1.0",
+    nodeDescriptorsDigest: `sha256:${"b".repeat(64)}`,
+    capabilityVersionsDigest: `sha256:${"c".repeat(64)}`,
+    toolPackVersionsDigest: `sha256:${"d".repeat(64)}`,
+    skillVersionsDigest: `sha256:${"e".repeat(64)}`,
+    runtimePolicyDigest: `sha256:${"f".repeat(64)}`,
   });
   expect(fixture.workflowRunActions).toEqual(["start", "preview", "approve", "commit"]);
 });

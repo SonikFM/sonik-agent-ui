@@ -3,15 +3,16 @@ import type { WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketpl
 
 export const COLLAPSED_MODEL_ROW_LIMIT = 10;
 
-export type OrganizerParameterType = "text" | "textarea" | "number" | "boolean";
+export type OrganizerParameterType = "text" | "textarea" | "number" | "boolean" | "string_list";
 export type OrganizerEditKind = "parameter_edit" | "safe_patch";
+export type OrganizerParameterValue = string | number | boolean | string[];
 
 export interface OrganizerParameter {
   path: string;
   kind: OrganizerEditKind;
   label: string;
   type: OrganizerParameterType;
-  value: string | number | boolean;
+  value: OrganizerParameterValue;
   description?: string;
 }
 
@@ -20,7 +21,7 @@ export interface OrganizerPatchRequest {
   workflowId: string;
   patch: {
     expectedDraftRevision: number;
-    edits: Array<{ kind: OrganizerEditKind; path: string; value: string | number | boolean }>;
+    edits: Array<{ kind: OrganizerEditKind; path: string; value: OrganizerParameterValue }>;
   };
 }
 
@@ -80,7 +81,7 @@ export function createOrganizerPatchRequest(
   expectedRevision: number,
   parameters: readonly OrganizerParameter[],
   safePatchPaths: readonly string[],
-  values: Readonly<Record<string, string | number | boolean>>,
+  values: Readonly<Record<string, OrganizerParameterValue>>,
 ): OrganizerPatchRequest {
   const declared = new Map(parameters.map((parameter) => [parameter.path, parameter]));
   const allowed = new Set(safePatchPaths);
@@ -89,7 +90,9 @@ export function createOrganizerPatchRequest(
     if (!parameter || !allowed.has(path)) return [];
     if (parameter.kind === "parameter_edit" && !/^parameters\.[^.]+\..+/.test(path)) return [];
     if (parameter.kind === "safe_patch" && !/^nodes\.[^.]+\.config\..+/.test(path)) return [];
-    const valid = parameter.type === "boolean"
+    const valid = parameter.type === "string_list"
+      ? Array.isArray(value) && value.every((entry) => typeof entry === "string")
+      : parameter.type === "boolean"
       ? typeof value === "boolean"
       : parameter.type === "number"
         ? typeof value === "number" && Number.isFinite(value)

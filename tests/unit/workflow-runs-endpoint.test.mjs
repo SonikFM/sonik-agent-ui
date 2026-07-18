@@ -152,21 +152,15 @@ try {
   };
   const publishedDraft = await publishedRepository.createDraft(owner, publishedDefinition, owner.userId);
   assert.ok(publishedDraft);
-  const publishedWorkflowVersionId = "amplify.campaign.create@0.1.0";
-  const publishedPins = {
-    ...structuredClone(train0SelectedPathRunState.dependencyPins),
-    organizationId: owner.organizationId,
-    workflowVersionId: publishedWorkflowVersionId,
-    definitionDigest: publishedDraft.definitionDigest,
-  };
-  assert.ok(await publishedRepository.publish(owner, {
+  const { organizationId: _publishedOrganizationId, workflowVersionId: _publishedWorkflowVersionId, definitionDigest: _publishedDefinitionDigest, ...publishedPins } = structuredClone(train0SelectedPathRunState.dependencyPins);
+  const published = await publishedRepository.publish(owner, {
     workflowId: publishedDefinition.workflowId,
     expectedRevision: publishedDraft.draftRevision,
-    workflowVersionId: publishedWorkflowVersionId,
-    definitionDigest: publishedDraft.definitionDigest,
     dependencyPins: publishedPins,
     actorId: owner.userId,
-  }));
+  });
+  assert.ok(published);
+  const publishedWorkflowVersionId = published.workflowVersionId;
   const publishedStart = await handleWorkflowRunsAction({
     action: "start",
     workflowId: publishedDefinition.workflowId,
@@ -458,24 +452,23 @@ try {
     const repository = createInMemoryWorkflowDefinitionRepository();
     const draft = await repository.createDraft(owner, definition, owner.userId);
     assert.ok(draft);
-    const workflowVersionId = requestedVersionId ?? `${definition.workflowId}@1`;
-    const dependencyPins = {
-      ...structuredClone(train0SelectedPathRunState.dependencyPins),
-      organizationId: owner.organizationId,
-      workflowVersionId,
-      definitionDigest: draft.definitionDigest,
-    };
+    const { organizationId: _organizationId, workflowVersionId: _workflowVersionId, definitionDigest: _definitionDigest, ...dependencyPins } = structuredClone(train0SelectedPathRunState.dependencyPins);
     const published = await repository.publish(owner, {
       workflowId: definition.workflowId,
       expectedRevision: draft.draftRevision,
-      workflowVersionId,
-      definitionDigest: draft.definitionDigest,
       dependencyPins,
       actorId: owner.userId,
     });
     assert.ok(published);
+    const workflowVersionId = requestedVersionId ?? published.workflowVersionId;
+    const resolvedPublished = requestedVersionId
+      ? { ...published, workflowVersionId, dependencyPins: { ...published.dependencyPins, workflowVersionId } }
+      : published;
+    const runtimeRepository = requestedVersionId
+      ? { ...repository, getPublished: async (scope, versionId) => versionId === workflowVersionId ? resolvedPublished : repository.getPublished(scope, versionId) }
+      : repository;
     baseStore.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, sourceKind: "published", definition: {}, input, state: { runId } });
-    return { deps: { hostSession: authenticatedHostSession, store, journal, repository }, journal, published };
+    return { deps: { hostSession: authenticatedHostSession, store, journal, repository: runtimeRepository }, journal, published: resolvedPublished };
   }
 
   {

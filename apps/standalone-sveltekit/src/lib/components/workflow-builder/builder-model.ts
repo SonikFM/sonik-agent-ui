@@ -219,25 +219,44 @@ export function hasUnsavedWorkflowChanges(input: { dirty: boolean; saving: boole
   return input.dirty || input.saving;
 }
 
-/** Minimal explicit bridge while the canvas still edits the deprecated marketplace shape. */
-export function workflowDefinitionToVNext(workflow: WorkflowDefinition): WorkflowVNextDefinition {
+/** Minimal explicit bridge while the canvas still edits the deprecated marketplace shape.
+ * Existing canonical fields must survive the legacy canvas unchanged. */
+export function workflowDefinitionToVNext(workflow: WorkflowDefinition, base?: WorkflowVNextDefinition): WorkflowVNextDefinition {
+  const baseNodes = new Map(base?.nodes.map((node) => [node.nodeId, node]));
+  const baseEdges = new Map(base?.edges.map((edge) => [edge.edgeId, edge]));
   return workflowVNextDefinitionSchema.parse({
     schemaVersion: WORKFLOW_VNEXT_SCHEMA_VERSION,
     workflowId: workflow.workflowId,
-    definitionVersion: 1,
+    definitionVersion: base?.definitionVersion ?? 1,
     title: workflow.title,
-    entryNodeId: workflow.nodes[0]?.nodeId,
-    nodes: workflow.nodes.map((node) => ({
-      nodeId: node.nodeId,
-      nodeType: node.type,
-      typeVersion: 1,
-      config: { title: node.title, effect: node.effect, approvalPolicy: node.approvalPolicy },
-      bindings: {},
-      requiredHostContext: node.requiredHostContext ?? [],
-      capabilityPins: node.commandId ? [node.commandId] : [],
-      output: { inlineByteLimit: 64 * 1024 },
-    })),
-    edges: workflow.edges.map((edge) => ({ edgeId: edge.edgeId, from: edge.from, to: edge.to, default: !edge.condition })),
+    entryNodeId: base && workflow.nodes.some(({ nodeId }) => nodeId === base.entryNodeId) ? base.entryNodeId : workflow.nodes[0]?.nodeId,
+    nodes: workflow.nodes.map((node) => {
+      const existing = baseNodes.get(node.nodeId);
+      const existingConfig = existing?.config && typeof existing.config === "object" && !Array.isArray(existing.config) ? existing.config : null;
+      const config = existingConfig ? { ...existingConfig } : { title: node.title, effect: node.effect, approvalPolicy: node.approvalPolicy };
+      if (existingConfig) {
+        if (node.title !== (typeof existingConfig.title === "string" ? existingConfig.title : node.nodeId)) config.title = node.title;
+        if (node.effect !== (typeof existingConfig.effect === "string" ? existingConfig.effect : "none")) config.effect = node.effect;
+        if (node.approvalPolicy !== (typeof existingConfig.approvalPolicy === "string" ? existingConfig.approvalPolicy : "none")) config.approvalPolicy = node.approvalPolicy;
+      }
+      return {
+        ...existing,
+        nodeId: node.nodeId,
+        nodeType: node.type,
+        typeVersion: existing?.typeVersion ?? 1,
+        config,
+        bindings: existing?.bindings ?? {},
+        requiredHostContext: node.requiredHostContext ?? [],
+        capabilityPins: node.commandId ? [node.commandId] : [],
+        output: existing?.output ?? { inlineByteLimit: 64 * 1024 },
+      };
+    }),
+    edges: workflow.edges.map((edge) => {
+      const existing = baseEdges.get(edge.edgeId);
+      return existing && existing.from === edge.from && existing.to === edge.to
+        ? existing
+        : { edgeId: edge.edgeId, from: edge.from, to: edge.to, default: !edge.condition };
+    }),
     facadeToolIds: workflow.facadeToolIds ?? [],
   });
 }

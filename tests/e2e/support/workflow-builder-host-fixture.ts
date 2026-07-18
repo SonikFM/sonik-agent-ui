@@ -134,24 +134,45 @@ export async function installWorkflowBuilderHostFixture(
     observation.workflowDefinitionActions.push(body.action ?? "unknown");
     observation.workflowDefinitionBodies.push(body);
     if (body.action === "list") return fulfillJson(route, { ok: true, drafts: definition ? [{ organizationId: "11111111-1111-4111-8111-111111111111", workflowId: definition.workflowId, draftRevision, definitionDigest, definition }] : [] });
-    if (body.action === "versions") return fulfillJson(route, { ok: true, versions: published ? [{ workflowVersionId: "amplify.campaign.create@0.1.0", sourceDraftRevision: draftRevision, publishedAt: now }] : [] });
+    if (body.action === "versions") return fulfillJson(route, { ok: true, versions: published ? [{ organizationId: workflowPublishPins.organizationId, workflowVersionId: "amplify.campaign.create@0.1.0", sourceDraftRevision: draftRevision, definitionDigest, publishedAt: now }] : [] });
     if (body.action === "get") return fulfillJson(route, { ok: true, draft: { organizationId: "11111111-1111-4111-8111-111111111111", workflowId: definition?.workflowId, draftRevision, definitionDigest, definition } });
+    if (body.action === "organizer_fields") {
+      const node = Array.isArray(definition?.nodes) ? definition.nodes[0] as Record<string, unknown> | undefined : undefined;
+      const config = node?.config as Record<string, unknown> | undefined;
+      const label = typeof config?.title === "string" ? config.title : String(node?.nodeId ?? "workflow");
+      const parameters = [
+        ["title", "text", `${label} title`],
+        ["instructions", "textarea", `${label} instructions`],
+        ["knowledge", "string_list", `${label} knowledge`],
+        ["capabilities", "string_list", `${label} curated capabilities`],
+      ].map(([key, type, fieldLabel]) => ({ path: `nodes.${node?.nodeId}.config.${key}`, kind: "safe_patch", label: fieldLabel, type, value: config?.[key] }));
+      return fulfillJson(route, { ok: true, parameters, safePatchPaths: parameters.map(({ path }) => path) });
+    }
     if (body.action === "publish") {
       published = true;
-      return fulfillJson(route, { ok: true, version: { workflowVersionId: "amplify.campaign.create@0.1.0", sourceDraftRevision: draftRevision, definitionDigest, definition } });
+      return fulfillJson(route, { ok: true, version: { organizationId: workflowPublishPins.organizationId, workflowVersionId: "amplify.campaign.create@0.1.0", sourceDraftRevision: draftRevision, definitionDigest, definition } });
     }
-    if (body.definition) definition = body.definition;
+    if (body.definition) {
+      definition = structuredClone(body.definition);
+      const nodes = Array.isArray(definition.nodes) ? definition.nodes as Array<Record<string, unknown>> : [];
+      if (nodes[0]) nodes[0].config = {
+        ...((nodes[0].config as Record<string, unknown> | undefined) ?? {}),
+        instructions: "Draft the governed campaign from the approved brief.",
+        knowledge: ["campaign-playbook"],
+        capabilities: [AMPLIFY_CAMPAIGN_COMMAND_ID],
+      };
+    }
     if (body.action === "create" || body.action === "update" || body.action === "organizer_patch") draftRevision += 1;
     if (body.action === "organizer_patch" && definition) {
       const edits = ((body.patch as { edits?: Array<{ path: string; value: unknown }> } | undefined)?.edits ?? []);
       const nodes = Array.isArray(definition.nodes) ? definition.nodes as Array<Record<string, unknown>> : [];
-      definition = {
-        ...definition,
-        nodes: nodes.map((node) => {
-          const edit = edits.find(({ path }) => path === `nodes.${node.nodeId}.config.title`);
-          return edit ? { ...node, config: { ...((node.config as Record<string, unknown> | undefined) ?? {}), title: edit.value } } : node;
-        }),
-      };
+      definition = { ...definition, nodes: nodes.map((node) => ({
+        ...node,
+        config: edits.reduce((config, edit) => {
+          const match = edit.path.match(new RegExp(`^nodes\\.${node.nodeId}\\.config\\.([^.]+)$`));
+          return match?.[1] ? { ...config, [match[1]]: edit.value } : config;
+        }, { ...((node.config as Record<string, unknown> | undefined) ?? {}) }),
+      })) };
     }
     return fulfillJson(route, {
       ok: true,

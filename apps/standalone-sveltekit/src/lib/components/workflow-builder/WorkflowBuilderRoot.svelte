@@ -99,9 +99,10 @@
   let draftLockState = $state<WorkflowLockState>("draft");
   let activeRunSelection = $state<ActiveWorkflowRunSelection | null>(null);
   type DraftRecord = { organizationId: string; workflowId: string; draftRevision: number; definitionDigest: string; definition: WorkflowVNextDefinition };
-  type VersionRecord = { workflowVersionId: string; sourceDraftRevision: number; publishedAt: string };
+  type VersionRecord = { organizationId: string; workflowVersionId: string; sourceDraftRevision: number; definitionDigest: string; publishedAt: string };
   let persistedDrafts = $state<DraftRecord[]>([]);
   let workflowDraft = $state<DraftRecord | null>(null);
+  let canonicalWorkflow = $state<WorkflowVNextDefinition | null>(null);
   let workflowVersions = $state<VersionRecord[]>([]);
   let workflowDirty = $state(false);
   let workflowSaving = $state(false);
@@ -126,23 +127,17 @@
     draftRevision: workflowDraft?.draftRevision ?? null,
     publishedRevision,
   }));
-  const publishedSource = $derived(workflowLifecycle === "published" && workflowPublishPins
+  const currentPublishedVersion = $derived(workflowVersions.find((version) => version.sourceDraftRevision === workflowDraft?.draftRevision) ?? null);
+  const publishedSource = $derived(workflowLifecycle === "published" && currentPublishedVersion
     ? {
         kind: "published" as const,
-        organizationId: workflowPublishPins.organizationId,
-        workflowVersionId: workflowPublishPins.workflowVersionId,
-        definitionDigest: workflowPublishPins.definitionDigest,
+        organizationId: currentPublishedVersion.organizationId,
+        workflowVersionId: currentPublishedVersion.workflowVersionId,
+        definitionDigest: currentPublishedVersion.definitionDigest,
       }
     : undefined);
-  const organizerParameters = $derived<OrganizerParameter[]>(draftWorkflow.nodes.map((node) => ({
-    path: `nodes.${node.nodeId}.config.title`,
-    kind: "safe_patch",
-    label: `${node.title} title`,
-    type: "text",
-    value: node.title,
-    description: "Organizer-safe label; graph structure remains hidden.",
-  })));
-  const organizerSafePatchPaths = $derived(organizerParameters.map((parameter) => parameter.path));
+  let organizerParameters = $state<OrganizerParameter[]>([]);
+  let organizerSafePatchPaths = $state<string[]>([]);
   const activeReceiptIds = $derived(activeRunSelection?.run.receipts
     .map((receipt) => receipt.receiptRef)
     .filter((receiptId): receiptId is string => Boolean(receiptId)) ?? []);
@@ -261,11 +256,12 @@
     workflowConflicted = false;
     workflowFailed = false;
     try {
-      const next = workflowDefinitionToVNext(workflowValidation.workflow!);
+      const next = workflowDefinitionToVNext(workflowValidation.workflow!, canonicalWorkflow ?? undefined);
       const result = await workflowDefinitions(workflowDraft
         ? { action: "update", workflowId: next.workflowId, expectedRevision: workflowDraft.draftRevision, definition: next }
         : { action: "create", definition: next });
       workflowDraft = result.draft as DraftRecord;
+      canonicalWorkflow = workflowDraft.definition;
       workflowDirty = false;
       workflowFailed = false;
       await refreshWorkflowVersions();
@@ -291,6 +287,7 @@
     const result = await workflowDefinitions({ action: "get", workflowId });
     if (!result.draft) return;
     workflowDraft = result.draft as DraftRecord;
+    canonicalWorkflow = workflowDraft.definition;
     draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
     workflowDirty = false;
     workflowConflicted = false;
@@ -302,7 +299,9 @@
     if (!workflowDraft) { workflowVersions = []; publishedRevision = null; return; }
     const result = await workflowDefinitions({ action: "versions", workflowId: workflowDraft.workflowId });
     workflowVersions = result.versions ?? [];
-    publishedRevision = workflowVersions.at(-1)?.sourceDraftRevision ?? null;
+    publishedRevision = workflowVersions.find((version) => version.sourceDraftRevision === workflowDraft?.draftRevision)?.sourceDraftRevision
+      ?? workflowVersions[0]?.sourceDraftRevision
+      ?? null;
   }
 
   async function publishWorkflow(): Promise<{ ok: boolean; message: string }> {
@@ -310,7 +309,8 @@
     workflowPublishing = true;
     workflowFailed = false;
     try {
-      await workflowDefinitions({ action: "publish", workflowId: workflowDraft.workflowId, expectedRevision: workflowDraft.draftRevision, workflowVersionId: workflowPublishPins.workflowVersionId, dependencyPins: workflowPublishPins });
+      const { organizationId: _organizationId, workflowVersionId: _workflowVersionId, definitionDigest: _definitionDigest, ...dependencyPins } = workflowPublishPins;
+      await workflowDefinitions({ action: "publish", workflowId: workflowDraft.workflowId, expectedRevision: workflowDraft.draftRevision, dependencyPins });
       publishedRevision = workflowDraft.draftRevision;
       await refreshWorkflowVersions();
       saveMessage = "Workflow published.";
@@ -328,6 +328,7 @@
     const targetWorkflowId = `${workflowDraft.workflowId}.copy.${Date.now().toString(36)}`;
     const result = await workflowDefinitions({ action: "clone", source: { kind: "draft", workflowId: workflowDraft.workflowId, draftRevision: workflowDraft.draftRevision, definitionDigest: workflowDraft.definitionDigest }, targetWorkflowId });
     workflowDraft = result.draft as DraftRecord;
+    canonicalWorkflow = workflowDraft.definition;
     draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
     workflowDirty = false;
     workflowFailed = false;
@@ -340,6 +341,7 @@
     try {
       const result = await workflowDefinitions(request as unknown as Record<string, unknown>);
       workflowDraft = result.draft as DraftRecord;
+      canonicalWorkflow = workflowDraft.definition;
       draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
       workflowDirty = false;
       workflowConflicted = false;
@@ -347,6 +349,7 @@
       saveStatus = "saved";
       saveMessage = `Organizer configuration saved at revision ${workflowDraft.draftRevision}.`;
       await refreshWorkflowVersions();
+      await refreshOrganizerFields();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Organizer configuration failed.";
       workflowConflicted = message.includes("conflict");
@@ -354,6 +357,18 @@
       saveStatus = "error";
       saveMessage = message;
     } finally { organizerBusy = false; }
+  }
+
+  async function refreshOrganizerFields(): Promise<void> {
+    if (!workflowDraft) { organizerParameters = []; organizerSafePatchPaths = []; return; }
+    try {
+      const result = await workflowDefinitions({ action: "organizer_fields", workflowId: workflowDraft.workflowId });
+      organizerParameters = result.parameters ?? [];
+      organizerSafePatchPaths = result.safePatchPaths ?? [];
+    } catch {
+      organizerParameters = [];
+      organizerSafePatchPaths = [];
+    }
   }
 
   async function handleOrganizerAction(action: OrganizerAction): Promise<void> {
@@ -396,6 +411,7 @@
     tab = "config";
     activeRunSelection = null;
     workflowDraft = null;
+    canonicalWorkflow = null;
     workflowVersions = [];
     workflowDirty = false;
     workflowSaving = false;
@@ -519,8 +535,8 @@
 </script>
 
 <div class="flex h-full flex-col gap-4 p-4" data-agent-mode="workflow-builder">
-  <div class="flex items-center justify-between gap-3">
-    <div class="flex items-center gap-2">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center gap-2">
       <h1 class="text-lg font-semibold">Workflow Builder</h1>
       <Badge variant="outline">{agentId}</Badge>
       <Badge variant={workflowLifecycle === "invalid" || workflowLifecycle === "conflicted" || workflowLifecycle === "failed" ? "destructive" : "secondary"} data-workflow-lifecycle={workflowLifecycle} aria-live="polite">{workflowLifecycle}</Badge>
@@ -528,7 +544,7 @@
         <Badge variant="destructive">invalid definition</Badge>
       {/if}
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       {#if onExit}
         <Button variant="ghost" onclick={exitBuilder} aria-label="Return to the chat workspace">Back to chat</Button>
       {/if}
@@ -562,7 +578,7 @@
 
   <nav class="flex gap-2" aria-label="Workflow audience">
     <Button variant={audience === "builder" ? "default" : "outline"} onclick={() => { audience = "builder"; }}>Builder</Button>
-    <Button variant={audience === "organizer" ? "default" : "outline"} onclick={() => { audience = "organizer"; }}>Organizer</Button>
+    <Button variant={audience === "organizer" ? "default" : "outline"} onclick={() => { audience = "organizer"; void refreshOrganizerFields(); }}>Organizer</Button>
     <Button variant={audience === "history" ? "default" : "outline"} onclick={() => { audience = "history"; void refreshWorkflowHistory(); }}>History</Button>
   </nav>
 
@@ -643,6 +659,7 @@
           // loads into the editable draft and jumps to the canvas so it's ready
           // to inspect and Run.
           draftWorkflow = drafted;
+          canonicalWorkflow = null;
           draftLockState = "draft";
           workflowDirty = true;
           setTab("canvas");

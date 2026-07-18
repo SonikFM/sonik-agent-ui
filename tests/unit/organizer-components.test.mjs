@@ -14,14 +14,15 @@ const workflow = createEmptyWorkflowDefinition("organizer.test");
 const parameters = [
   { path: "nodes.identity.config.title", kind: "safe_patch", label: "Title", type: "text", value: "Original" },
   { path: "parameters.intake.capacity", kind: "parameter_edit", label: "Capacity", type: "number", value: 10 },
+  { path: "nodes.identity.config.knowledge", kind: "safe_patch", label: "Knowledge", type: "string_list", value: ["hours"] },
   { path: "nodes.graph.topology", kind: "safe_patch", label: "Graph", type: "text", value: "hidden" },
 ];
 const request = createOrganizerPatchRequest(
   workflow,
   7,
   parameters,
-  ["nodes.identity.config.title", "parameters.intake.capacity", "nodes.graph.topology"],
-  { "nodes.identity.config.title": "Updated", "parameters.intake.capacity": 20, "nodes.graph.topology": "rewrite", undeclared: "drop" },
+  ["nodes.identity.config.title", "parameters.intake.capacity", "nodes.identity.config.knowledge", "nodes.graph.topology"],
+  { "nodes.identity.config.title": "Updated", "parameters.intake.capacity": 20, "nodes.identity.config.knowledge": ["hours", "policies"], "nodes.graph.topology": "rewrite", undeclared: "drop" },
 );
 assert.deepEqual(request, {
   action: "organizer_patch",
@@ -31,6 +32,7 @@ assert.deepEqual(request, {
     edits: [
       { kind: "safe_patch", path: "nodes.identity.config.title", value: "Updated" },
       { kind: "parameter_edit", path: "parameters.intake.capacity", value: 20 },
+      { kind: "safe_patch", path: "nodes.identity.config.knowledge", value: ["hours", "policies"] },
     ],
   },
 }, "P2 emits only declared, allowlisted patches and carries the expected revision");
@@ -97,6 +99,11 @@ for (const surface of ["Identity", "Instructions", "Knowledge", "Curated capabil
 for (const field of ["history.query", "events", "approvals", "artifacts", "receipts"]) {
   assert.match(historySource, new RegExp(field), `operator history renders typed ${field}`);
 }
+for (const field of ["conversations", "workflows", "nodes", "toolCalls"]) {
+  assert.match(historySource, new RegExp(`history\\.${field}`), `operator history renders correlated ${field}`);
+}
+assert.match(historySource, /event\.attemptId/, "operator history exposes exact node-attempt identity");
+assert.match(historySource, /event\.correlationIds/, "operator history exposes redacted retry and wait join keys");
 assert.match(historySource, /workflowHistoryItemKey\(approval\.workflowRunId, approval\.approvalId\)/, "approval rows use collision-safe causal identity");
 assert.match(historySource, /workflowHistoryItemKey\(receipt\.workflowRunId, receipt\.receiptId\)/, "receipt rows use collision-safe causal identity");
 assert.match(historySource, /receipt\.semanticStatus/, "receipt rows render the server projection field");

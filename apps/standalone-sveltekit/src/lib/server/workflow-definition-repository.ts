@@ -8,6 +8,8 @@ export interface WorkflowDefinitionOwner {
   userId: string;
 }
 
+export type WorkflowPublishDependencyPins = Omit<WorkflowDependencyPins, "organizationId" | "workflowVersionId" | "definitionDigest">;
+
 export interface WorkflowDraftRecord extends WorkflowDefinitionOwner {
   workflowId: string;
   draftRevision: number;
@@ -41,7 +43,7 @@ export interface WorkflowDefinitionRepository {
   getDraft(owner: WorkflowDefinitionOwner, workflowId: string): Promise<WorkflowDraftRecord | null>;
   listDrafts(owner: WorkflowDefinitionOwner, includeArchived?: boolean): Promise<WorkflowDraftRecord[]>;
   archiveDraft(owner: WorkflowDefinitionOwner, workflowId: string, expectedRevision: number, actorId: string): Promise<WorkflowDraftRecord | null>;
-  publish(owner: WorkflowDefinitionOwner, input: { workflowId: string; expectedRevision: number; workflowVersionId: string; definitionDigest: string; dependencyPins: WorkflowDependencyPins; actorId: string }): Promise<PublishedWorkflowRecord | null>;
+  publish(owner: WorkflowDefinitionOwner, input: { workflowId: string; expectedRevision: number; dependencyPins: WorkflowPublishDependencyPins; actorId: string }): Promise<PublishedWorkflowRecord | null>;
   getPublished(owner: WorkflowDefinitionOwner, workflowVersionId: string): Promise<PublishedWorkflowRecord | null>;
   listPublished(owner: WorkflowDefinitionOwner, workflowId: string): Promise<PublishedWorkflowRecord[]>;
   resolvePin(owner: WorkflowDefinitionOwner, pin: WorkflowDefinitionPin): Promise<WorkflowDraftRecord | PublishedWorkflowRecord | null>;
@@ -95,9 +97,22 @@ export function createInMemoryWorkflowDefinitionRepository(): WorkflowDefinition
     async publish(ownerInput, input) {
       const owner = normalizeOwner(ownerInput);
       const draft = drafts.get(draftKey(owner, input.workflowId));
-      if (!draft || draft.archivedAt || draft.draftRevision !== input.expectedRevision || draft.definitionDigest !== input.definitionDigest || versions.has(versionKey(owner, input.workflowVersionId))) return null;
-      const row: PublishedWorkflowRecord = { ...owner, workflowId: draft.workflowId, workflowVersionId: input.workflowVersionId, sourceDraftRevision: draft.draftRevision, definitionDigest: draft.definitionDigest, definition: clone(draft.definition), dependencyPins: clone(input.dependencyPins), publishedBy: input.actorId, publishedAt: new Date().toISOString() };
-      versions.set(versionKey(owner, input.workflowVersionId), row);
+      if (!draft || draft.archivedAt || draft.draftRevision !== input.expectedRevision) return null;
+      const workflowVersionId = `${draft.workflowId}@0.0.${draft.draftRevision + 1}`;
+      if (versions.has(versionKey(owner, workflowVersionId))) return null;
+      const dependencyPins: WorkflowDependencyPins = {
+        organizationId: owner.organizationId,
+        workflowVersionId,
+        definitionDigest: draft.definitionDigest,
+        agentPublishedVersionId: input.dependencyPins.agentPublishedVersionId,
+        nodeDescriptorsDigest: input.dependencyPins.nodeDescriptorsDigest,
+        capabilityVersionsDigest: input.dependencyPins.capabilityVersionsDigest,
+        toolPackVersionsDigest: input.dependencyPins.toolPackVersionsDigest,
+        skillVersionsDigest: input.dependencyPins.skillVersionsDigest,
+        runtimePolicyDigest: input.dependencyPins.runtimePolicyDigest,
+      };
+      const row: PublishedWorkflowRecord = { ...owner, workflowId: draft.workflowId, workflowVersionId, sourceDraftRevision: draft.draftRevision, definitionDigest: draft.definitionDigest, definition: clone(draft.definition), dependencyPins, publishedBy: input.actorId, publishedAt: new Date().toISOString() };
+      versions.set(versionKey(owner, workflowVersionId), row);
       return clone(row);
     },
     async getPublished(ownerInput, workflowVersionId) {
@@ -131,7 +146,7 @@ export function createCloudWorkflowDefinitionRepository(executor: WorkspaceSqlEx
     getDraft: (owner, workflowId) => withOwner(executor, owner, async (tx, scope) => rowOrNull(await tx.query<DraftColumns>(`select ${DRAFT_COLUMNS} from sonik_agent_ui.workflow_definition_drafts where organization_id = $1 and user_id = $2 and workflow_id = $3`, [scope.organizationId, scope.userId, workflowId]), draftFromColumns)),
     listDrafts: (owner, includeArchived = false) => withOwner(executor, owner, async (tx, scope) => (await tx.query<DraftColumns>(`select ${DRAFT_COLUMNS} from sonik_agent_ui.workflow_definition_drafts where organization_id = $1 and user_id = $2 and ($3::boolean or archived_at is null) order by updated_at desc`, [scope.organizationId, scope.userId, includeArchived])).rows.map(draftFromColumns)),
     archiveDraft: (owner, workflowId, expectedRevision, actorId) => withOwner(executor, owner, async (tx, scope) => rowOrNull(await tx.query<DraftColumns>(`update sonik_agent_ui.workflow_definition_drafts set draft_revision = draft_revision + 1, archived_at = now(), updated_by = $5, updated_at = now() where organization_id = $1 and user_id = $2 and workflow_id = $3 and draft_revision = $4 and archived_at is null returning ${DRAFT_COLUMNS}`, [scope.organizationId, scope.userId, workflowId, expectedRevision, actorId]), draftFromColumns)),
-    publish: (owner, input) => withOwner(executor, owner, async (tx, scope) => rowOrNull(await tx.query<PublishedColumns>(`insert into sonik_agent_ui.workflow_definition_published_versions (organization_id, user_id, workflow_id, workflow_version_id, source_draft_revision, definition_digest, definition, dependency_pins, published_by) select organization_id, user_id, workflow_id, $5, draft_revision, definition_digest, definition, $7::jsonb, $8 from sonik_agent_ui.workflow_definition_drafts where organization_id = $1 and user_id = $2 and workflow_id = $3 and draft_revision = $4 and definition_digest = $6 and archived_at is null on conflict do nothing returning ${PUBLISHED_COLUMNS}`, [scope.organizationId, scope.userId, input.workflowId, input.expectedRevision, input.workflowVersionId, input.definitionDigest, JSON.stringify(input.dependencyPins), input.actorId]), publishedFromColumns)),
+    publish: (owner, input) => withOwner(executor, owner, async (tx, scope) => rowOrNull(await tx.query<PublishedColumns>(`insert into sonik_agent_ui.workflow_definition_published_versions (organization_id, user_id, workflow_id, workflow_version_id, source_draft_revision, definition_digest, definition, dependency_pins, published_by) select organization_id, user_id, workflow_id, workflow_id || '@0.0.' || (draft_revision + 1)::text, draft_revision, definition_digest, definition, $5::jsonb || jsonb_build_object('organizationId', organization_id, 'workflowVersionId', workflow_id || '@0.0.' || (draft_revision + 1)::text, 'definitionDigest', definition_digest), $6 from sonik_agent_ui.workflow_definition_drafts where organization_id = $1 and user_id = $2 and workflow_id = $3 and draft_revision = $4 and archived_at is null on conflict do nothing returning ${PUBLISHED_COLUMNS}`, [scope.organizationId, scope.userId, input.workflowId, input.expectedRevision, JSON.stringify(input.dependencyPins), input.actorId]), publishedFromColumns)),
     getPublished: (owner, workflowVersionId) => withOwner(executor, owner, async (tx, scope) => rowOrNull(await tx.query<PublishedColumns>(`select ${PUBLISHED_COLUMNS} from sonik_agent_ui.workflow_definition_published_versions where organization_id = $1 and workflow_version_id = $2`, [scope.organizationId, workflowVersionId]), publishedFromColumns)),
     listPublished: (owner, workflowId) => withOwner(executor, owner, async (tx, scope) => (await tx.query<PublishedColumns>(`select ${PUBLISHED_COLUMNS} from sonik_agent_ui.workflow_definition_published_versions where organization_id = $1 and workflow_id = $2 order by published_at desc`, [scope.organizationId, workflowId])).rows.map(publishedFromColumns)),
     resolvePin: (owner, pin) => withOwner(executor, owner, async (tx, scope) => pin.kind === "published"

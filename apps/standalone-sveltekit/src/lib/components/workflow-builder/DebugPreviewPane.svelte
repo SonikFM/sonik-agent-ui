@@ -75,6 +75,10 @@
 
   const isStreaming = $derived(preview.status === "streaming" || preview.status === "submitted");
   const callableCapabilityCount = $derived((capabilityReadiness ?? []).filter((entry) => entry.callable).length);
+  const previewStatus = $derived(preview.status === "error" ? "error" : isStreaming ? "streaming" : "idle");
+  const callabilityLabel = $derived(capabilityReadiness === null
+    ? "Callability unavailable"
+    : `${callableCapabilityCount} of ${capabilityReadiness.length} declared capabilities callable`);
 
   async function submit(): Promise<void> {
     const trimmed = input.trim();
@@ -106,20 +110,20 @@
   <div class="flex items-center justify-between">
     <span class="text-sm font-medium">Debug &amp; Preview</span>
     <span class="flex items-center gap-2">
-      <Badge variant="outline">{callableCapabilityCount} callable</Badge>
-      <Badge variant={isStreaming ? "default" : "secondary"}>{isStreaming ? "streaming" : "idle"}</Badge>
+      <Badge variant="outline">{callabilityLabel}</Badge>
+      <Badge variant={previewStatus === "error" ? "destructive" : isStreaming ? "default" : "secondary"}>{previewStatus}</Badge>
     </span>
   </div>
   <div class="rounded-md border border-border bg-muted/30 p-3" data-debug-preview-context>
     <div class="flex items-center justify-between gap-2">
       <p class="text-sm font-medium">Isolated preview context</p>
-      <Badge variant="secondary">read/preview only</Badge>
+      <Badge variant="secondary">isolated test</Badge>
     </div>
     <ul class="mt-2 grid gap-1 text-xs text-muted-foreground">
-      <li>✓ Separate conversation; main chat history is not included.</li>
-      <li>✓ Current saved draft agent: <span class="font-mono">{draftAgentId}</span>.</li>
-      <li>✓ Model, prompt modules, knowledge references, and tool scope come from that draft.</li>
-      <li>✓ Write/destructive effects require the normal trusted approval path; preview does not grant authority.</li>
+      <li>Included: the current draft is saved before each send, then agent <span class="font-mono">{draftAgentId}</span> supplies its model, prompt modules, knowledge references, and tool policy.</li>
+      <li>Included: authenticated host authority and runtime access controls still apply; preview does not grant write authority.</li>
+      <li>Missing: main chat history and session history; this conversation is not loaded from or persisted to the active workspace session.</li>
+      <li>Missing: attachments, selected files/documents, and active page context.</li>
     </ul>
   </div>
   <div class="flex-1 overflow-y-auto rounded-md border border-border p-3">
@@ -132,6 +136,9 @@
         <p class="whitespace-pre-wrap text-sm">{getText(message.parts as DataPart[])}</p>
       </div>
     {/each}
+    {#if preview.error}
+      <p class="text-sm text-destructive" role="alert">{preview.error.message}</p>
+    {/if}
   </div>
   <div class="flex gap-2">
     <textarea

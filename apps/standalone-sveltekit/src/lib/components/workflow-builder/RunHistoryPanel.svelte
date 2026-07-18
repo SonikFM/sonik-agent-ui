@@ -8,6 +8,11 @@
     | WorkflowHistoryProjection["approvals"][number]
     | WorkflowHistoryProjection["artifacts"][number]
     | WorkflowHistoryProjection["receipts"][number];
+  type CorrelatedEvent = WorkflowHistoryProjection["events"][number] & {
+    attemptId?: string | null;
+    correlationIds?: string[];
+    type?: string;
+  };
 
   interface Props {
     history?: WorkflowHistoryProjection | null;
@@ -15,6 +20,7 @@
   }
 
   let { history = null, onInspect }: Props = $props();
+  let events = $derived((history?.events ?? []) as CorrelatedEvent[]);
 </script>
 
 <section class="flex flex-col gap-4" aria-labelledby="operator-history-title" data-run-history-panel>
@@ -34,11 +40,55 @@
 
     <div class="grid gap-4 md:grid-cols-2">
       <Card.Root>
-        <Card.Header><Card.Title>Events ({history.events.length})</Card.Title></Card.Header>
+        <Card.Header><Card.Title>Conversation runs ({history.conversations.length})</Card.Title></Card.Header>
         <Card.Content>
           <ul class="flex flex-col gap-2">
-            {#each history.events as event (event.eventId)}
-              <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("event", event)}><strong>{event.source}</strong> · {event.eventId}<br /><span class="text-muted-foreground">{event.timestamp}{event.status ? ` · ${event.status}` : ""}</span></button></li>
+            {#each history.conversations as conversation (conversation.conversationRunId)}
+              <li class="rounded-md border p-2 text-sm"><strong>{conversation.conversationRunId}</strong> · {conversation.status ?? "unknown"}<br /><code class="text-xs">{conversation.sessionId}{conversation.requestId ? ` / ${conversation.requestId}` : ""}{conversation.traceId ? ` / ${conversation.traceId}` : ""}</code></li>
+            {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
+          </ul>
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root>
+        <Card.Header><Card.Title>Workflow runs ({history.workflows.length})</Card.Title></Card.Header>
+        <Card.Content>
+          <ul class="flex flex-col gap-2">
+            {#each history.workflows as workflow (workflow.workflowRunId)}
+              <li class="rounded-md border p-2 text-sm"><strong>{workflow.workflowRunId}</strong> · {workflow.status ?? "unknown"}<br /><code class="text-xs">{workflow.workflowVersionId} / {workflow.sessionId}</code></li>
+            {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
+          </ul>
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root>
+        <Card.Header><Card.Title>Nodes ({history.nodes.length})</Card.Title></Card.Header>
+        <Card.Content>
+          <ul class="flex flex-col gap-2">
+            {#each history.nodes as node (workflowHistoryItemKey(node.workflowRunId, node.nodeId))}
+              <li class="rounded-md border p-2 text-sm"><strong>{node.nodeId}</strong> · {node.status ?? "unknown"}<br /><code class="text-xs">{node.workflowRunId}</code></li>
+            {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
+          </ul>
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root>
+        <Card.Header><Card.Title>Tool calls ({history.toolCalls.length})</Card.Title></Card.Header>
+        <Card.Content>
+          <ul class="flex flex-col gap-2">
+            {#each history.toolCalls as toolCall (toolCall.toolCallId)}
+              <li class="rounded-md border p-2 text-sm"><strong>{toolCall.toolCallId}</strong> · {toolCall.status ?? "unknown"}<br /><code class="text-xs">{toolCall.sessionId}{toolCall.requestId ? ` / ${toolCall.requestId}` : ""}</code></li>
+            {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
+          </ul>
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root>
+        <Card.Header><Card.Title>Events ({events.length})</Card.Title></Card.Header>
+        <Card.Content>
+          <ul class="flex flex-col gap-2">
+            {#each events as event (event.eventId)}
+              <li><button type="button" class="w-full rounded-md border p-2 text-left text-sm" onclick={() => onInspect?.("event", event)}><strong>{event.source}</strong> · {event.type ?? event.eventId}<br /><span class="text-muted-foreground">{event.timestamp}{event.status ? ` · ${event.status}` : ""}</span>{#if event.attemptId}<br /><code class="text-xs">attempt: {event.attemptId}</code>{/if}{#if event.correlationIds?.length}<br /><code class="text-xs">joins: {event.correlationIds.join(", ")}</code>{/if}</button></li>
             {:else}<li class="text-sm text-muted-foreground">None</li>{/each}
           </ul>
         </Card.Content>

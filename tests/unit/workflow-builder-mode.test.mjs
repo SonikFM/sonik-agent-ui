@@ -22,6 +22,7 @@ import {
   workflowVNextToDefinition,
 } from "../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts";
 import { sonikBookingCapabilityFamilyIds } from "../../packages/tool-contracts/src/capability-family.ts";
+import { train0WorkflowFixtures } from "../../packages/tool-contracts/dist/workflow-vnext-fixtures.js";
 
 // Phase 5 (agent-creation-tool-plan-2026-07-13.md, Decision 3): the missing
 // workflow-builder verification wave -- builder-model.ts pure logic + source
@@ -140,6 +141,13 @@ const vNextWorkflow = workflowDefinitionToVNext(emptyWorkflow);
 assert.equal(vNextWorkflow.schemaVersion, "sonik.workflow.vnext.v1");
 assert.equal(vNextWorkflow.entryNodeId, "trigger");
 assert.equal(workflowVNextToDefinition(vNextWorkflow).workflowId, emptyWorkflow.workflowId, "the explicit legacy/VNext bridge preserves workflow identity");
+
+const conditionalWorkflow = structuredClone(train0WorkflowFixtures.conditional);
+assert.deepEqual(
+  workflowDefinitionToVNext(workflowVNextToDefinition(conditionalWorkflow), conditionalWorkflow),
+  conditionalWorkflow,
+  "persisted canonical bindings, predicates, descriptor versions, and execution metadata survive a legacy canvas round trip",
+);
 
 // A tool_commit node without preview_then_trusted_approval must fail the
 // schema's write/commit refinement (marketplace.ts:219-220) -- the canvas
@@ -497,6 +505,11 @@ assert.equal(
   true,
   "Debug & Preview must run through the real generate route so preview behavior matches production",
 );
+assert.match(debugPreviewSource, /callability unavailable/i, "missing readiness must not be presented as zero callable capabilities");
+for (const missingContext of ["main chat history", "attachments", "page context", "session history"]) {
+  assert.match(debugPreviewSource, new RegExp(missingContext, "i"), `isolated preview discloses missing ${missingContext}`);
+}
+assert.doesNotMatch(debugPreviewSource, /Current saved draft agent:/, "the preview must not claim the mutable draft is already saved before preparation");
 
 // -- WorkflowCanvas.svelte: locked/draft discipline + live-type surfacing ---
 
@@ -525,7 +538,9 @@ assert.match(builderRootSource, /data-builder-action="publish"/);
 assert.match(builderRootSource, /data-builder-action="validate"/);
 assert.match(builderRootSource, /aria-keyshortcuts="Alt\+Shift\+V"/);
 assert.match(builderRootSource, /const publishedSource = \$derived/);
-assert.match(builderRootSource, /workflowLifecycle === "published" && workflowPublishPins/);
+assert.doesNotMatch(builderRootSource.match(/async function publishWorkflow[\s\S]*?\n  }/)?.[0] ?? "", /workflowPublishPins\.workflowVersionId/, "publish never trusts the host's fixed workflow version identity");
+assert.match(builderRootSource, /organizationId: _organizationId, workflowVersionId: _workflowVersionId, definitionDigest: _definitionDigest/, "the client sends only unrelated trusted dependency pins");
+assert.match(builderRootSource, /workflowLifecycle === "published" && currentPublishedVersion/, "runtime source comes from the server-returned version for the current draft revision");
 assert.equal((builderRootSource.match(/\{publishedSource\}/g) ?? []).length, 2, "only editable draft and Organizer run panels receive the current published source");
 assert.match(builderRootSource, /function activateBuilderAction/);
 assert.match(builderRootSource, /trace\.open = true/);
