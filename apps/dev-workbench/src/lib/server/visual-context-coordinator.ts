@@ -189,12 +189,12 @@ export function visualContextSnapshotFromResult(result: VisualContextResult): Vi
   });
 }
 
-export function invalidatedVisualContextSnapshot(input: VisualContextInvalidation): VisualContextSnapshot {
+export function invalidatedVisualContextSnapshot(input: VisualContextInvalidation, requestId: string | null = null): VisualContextSnapshot {
   return visualContextSnapshotSchema.parse({
     schemaVersion: "sonik.visual-context.v1",
     status: "invalidated",
     generation: randomUUID(),
-    requestId: null,
+    requestId,
     sourceContextRevision: input.sourceContextRevision,
     routeRevision: input.routeRevision,
     source: input.source,
@@ -209,7 +209,9 @@ export function invalidatedVisualContextSnapshot(input: VisualContextInvalidatio
 
 export function isStaleVisualContextResult(current: VisualContextSnapshot | null, result: VisualContextResult): boolean {
   if (!current) return false;
-  return result.sourceContextRevision < current.sourceContextRevision || result.routeRevision < current.routeRevision;
+  return result.sourceContextRevision < current.sourceContextRevision
+    || result.routeRevision < current.routeRevision
+    || (current.status === "invalidated" && current.requestId === result.requestId);
 }
 
 export function isStaleVisualContextInvalidation(

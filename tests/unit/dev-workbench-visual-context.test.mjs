@@ -90,12 +90,19 @@ const invalidated = invalidatedVisualContextSnapshot({
   routeRevision: 9,
   source: request.source,
   staleReason: "navigation",
-}, result.requestId);
+});
 assert.equal(invalidated.status, "invalidated");
-assert.equal(invalidated.requestId, result.requestId, "cancellation binds invalidation to the request it fences");
 assert.equal(invalidated.screenshot, null);
-assert.equal(isStaleVisualContextResult(invalidated, result), true, "a delayed completion cannot revive its cancelled request");
-assert.equal(isStaleVisualContextResult(invalidated, { ...result, requestId: "capture-after-cancel" }), false, "a new same-revision request may capture after cancellation");
+const cancelled = invalidatedVisualContextSnapshot({
+  workspaceSessionId: "workspace-1",
+  sourceContextRevision: result.sourceContextRevision,
+  routeRevision: result.routeRevision,
+  source: result.source,
+  staleReason: "cancelled",
+}, result.requestId);
+assert.equal(cancelled.requestId, result.requestId, "cancellation binds invalidation to the request it fences");
+assert.equal(isStaleVisualContextResult(cancelled, result), true, "a delayed completion cannot revive its cancelled request");
+assert.equal(isStaleVisualContextResult(cancelled, { ...result, requestId: "capture-after-cancel" }), false, "a new same-revision request may capture after cancellation");
 assert.equal(isStaleVisualContextResult(snapshot, { ...result, operation: "clear", sourceContextRevision: 3 }), true, "older clear results are stale");
 
 const repository = repositoryManifestSchema.parse({

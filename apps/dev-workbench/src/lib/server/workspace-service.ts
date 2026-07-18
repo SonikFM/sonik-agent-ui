@@ -378,13 +378,35 @@ export async function submitWorkspaceVisualContext(
   try {
     const result = parsed.data.result;
     if (result.status !== "completed") {
+      if (result.status === "cancelled" && (result.operation === "pick" || result.operation === "capture")) {
+        const current = await readVisualContextSnapshot(resumed.value, signal);
+        if (isStaleVisualContextResult(current, result)) {
+          if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
+          return { ok: true, value: { accepted: false, snapshot: null } };
+        }
+        const invalidation = visualContextInvalidationSchema.parse({
+          workspaceSessionId: sessionId,
+          sourceContextRevision: result.sourceContextRevision,
+          routeRevision: result.routeRevision,
+          source: result.source,
+          staleReason: "cancelled",
+        });
+        const snapshot = invalidatedVisualContextSnapshot(invalidation, result.requestId);
+        await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
+        if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
+        return { ok: true, value: { accepted: false, snapshot } };
+      }
       if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
       return { ok: true, value: { accepted: false, snapshot: null } };
     }
     if (result.operation === "get-capabilities" || result.operation === "setup-browser" || result.operation === "pair-extension" || result.operation === "unpair-extension") {
       return { ok: true, value: { accepted: true, snapshot: null } };
     }
+    const current = await readVisualContextSnapshot(resumed.value, signal);
     if (result.operation === "clear") {
+      if (isStaleVisualContextResult(current, result)) {
+        return { ok: true, value: { accepted: false, snapshot: null } };
+      }
       const invalidation = visualContextInvalidationSchema.parse({
         workspaceSessionId: sessionId,
         sourceContextRevision: result.sourceContextRevision,
@@ -392,11 +414,10 @@ export async function submitWorkspaceVisualContext(
         source: result.source,
         staleReason: "cancelled",
       });
-      const snapshot = invalidatedVisualContextSnapshot(invalidation);
+      const snapshot = invalidatedVisualContextSnapshot(invalidation, result.requestId);
       await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
       return { ok: true, value: { accepted: true, snapshot } };
     }
-    const current = await readVisualContextSnapshot(resumed.value, signal);
     if (isStaleVisualContextResult(current, result)) {
       if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
       return { ok: true, value: { accepted: false, snapshot: null } };
