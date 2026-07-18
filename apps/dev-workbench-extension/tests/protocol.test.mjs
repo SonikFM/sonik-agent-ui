@@ -37,6 +37,9 @@ assert.equal(isSafeCapturePreparation(preparation), true);
 assert.equal(isSafeCapturePreparation({ ...preparation, redactionsApplied: ["Sonik capture chrome"] }), true);
 assert.equal(isSafeCapturePreparation({ ...preparation, redactionsApplied: ["No sensitive fields detected"] }), false);
 assert.equal(isSafeCapturePreparation({ ...preparation, viewport: { ...preparation.viewport, width: 0 } }), false);
+assert.equal(isSafeCapturePreparation({ ...preparation, viewport: { ...preparation.viewport, width: 8_193 } }), false);
+assert.equal(isSafeCapturePreparation({ ...preparation, viewport: { ...preparation.viewport, height: 8_193 } }), false);
+assert.equal(isSafeCapturePreparation({ ...preparation, viewport: { ...preparation.viewport, deviceScaleFactor: 4.01 } }), false);
 
 const png = Buffer.alloc(24);
 Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
@@ -58,5 +61,9 @@ globalThis.atob = () => { decoded = true; throw new Error("decoded"); };
 assert.throws(() => pngMetadata(`data:image/png;base64,${"A".repeat(Math.ceil(10 * 1024 * 1024 / 3) * 4 + 1)}`), /10 MiB/);
 assert.equal(decoded, false, "oversized base64 is rejected before decode/allocation");
 globalThis.atob = originalAtob;
+
+for (const file of ["protocol.ts", "content-script.ts", "service-worker.ts"]) {
+  assert.doesNotMatch(await readFile(new URL(`../src/${file}`, import.meta.url), "utf8"), /@ts-nocheck/, `${file} must remain under extension typecheck`);
+}
 
 console.log("active-tab extension protocol: ok");

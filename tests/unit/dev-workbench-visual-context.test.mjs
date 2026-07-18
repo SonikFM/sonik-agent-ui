@@ -10,6 +10,7 @@ import {
   createVisualContextLeaseAcquireScript,
   decodeCanonicalBase64,
   invalidatedVisualContextSnapshot,
+  isStaleVisualContextInvalidation,
   isStaleVisualContextResult,
   requestTemporaryPath,
   validateVisualContextPng,
@@ -80,7 +81,9 @@ assert.equal(snapshot.screenshot?.path, "/vercel/sandbox/workspace/.sonik/screen
 assert.equal(JSON.stringify(snapshot).includes("pngBase64"), false, "stable manifests never persist inline pixels");
 assert.equal(JSON.stringify(snapshot).includes("temporaryPath"), false, "stable manifests never disclose request paths");
 assert.equal(isStaleVisualContextResult(snapshot, { ...result, requestId: "capture-older", sourceContextRevision: 3 }), true);
-assert.equal(isStaleVisualContextResult(snapshot, { ...result, requestId: "capture-race" }), true, "one same-revision request wins the workspace lease");
+assert.equal(isStaleVisualContextResult(snapshot, { ...result, requestId: "capture-repeat" }), false, "a later same-revision capture may refresh the snapshot");
+assert.equal(isStaleVisualContextInvalidation(snapshot, { sourceContextRevision: 3, routeRevision: 9 }), true, "an older invalidation cannot replace a newer capture");
+assert.equal(isStaleVisualContextInvalidation(snapshot, { sourceContextRevision: 5, routeRevision: 9 }), false);
 const invalidated = invalidatedVisualContextSnapshot({
   workspaceSessionId: "workspace-1",
   sourceContextRevision: 5,
