@@ -1,4 +1,3 @@
-// @ts-nocheck
 export const TRANSPORT_VERSION = "sonik.active-tab.v1";
 export const VISUAL_VERSION = "sonik.visual-context.v1";
 
@@ -11,9 +10,9 @@ export function isSafeCapturePreparation(value) {
   const viewport = value?.viewport;
   return Array.isArray(value?.redactionsApplied)
     && value.redactionsApplied.every((item) => redactionKinds.has(item))
-    && Number.isInteger(viewport?.width) && viewport.width > 0 && viewport.width <= 16_384
-    && Number.isInteger(viewport?.height) && viewport.height > 0 && viewport.height <= 16_384
-    && Number.isFinite(viewport?.deviceScaleFactor) && viewport.deviceScaleFactor > 0 && viewport.deviceScaleFactor <= 8;
+    && Number.isInteger(viewport?.width) && viewport.width > 0 && viewport.width <= 8_192
+    && Number.isInteger(viewport?.height) && viewport.height > 0 && viewport.height <= 8_192
+    && Number.isFinite(viewport?.deviceScaleFactor) && viewport.deviceScaleFactor > 0 && viewport.deviceScaleFactor <= 4;
 }
 
 export function isExactWorkbenchRequest(request, allowedOrigins, route) {
@@ -56,7 +55,7 @@ export function pngMetadata(dataUrl) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const width = view.getUint32(16);
   const height = view.getUint32(20);
-  if (width === 0 || height === 0 || width > 16_384 || height > 16_384) throw new TypeError("Active-tab capture returned invalid PNG dimensions.");
+  if (width === 0 || height === 0 || width > 8_192 || height > 8_192) throw new TypeError("Active-tab capture returned invalid PNG dimensions.");
   return { bytes, width, height, pngBase64 };
 }
 

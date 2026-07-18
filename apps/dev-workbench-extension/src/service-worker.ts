@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { captureVisibleTabWithoutSonikChrome } from "./capture-visible-tab.js";
 import { createPairingLifecycle } from "./pairing-lifecycle.js";
 import { allowedWorkbenchOrigins } from "./config.js";

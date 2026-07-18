@@ -39,6 +39,7 @@ import {
   createVisualContextLeaseAcquireScript,
   decodeCanonicalBase64,
   invalidatedVisualContextSnapshot,
+  isStaleVisualContextInvalidation,
   isStaleVisualContextResult,
   requestTemporaryPath,
   validateVisualContextPng,
@@ -439,6 +440,10 @@ export async function invalidateWorkspaceVisualContext(
     return { ok: false, error: workspaceError("unknown", "visual-context-lease", true) };
   }
   try {
+    const current = await readVisualContextSnapshot(resumed.value, signal);
+    if (isStaleVisualContextInvalidation(current, parsed.data)) {
+      return { ok: true, value: { snapshot: current! } };
+    }
     const snapshot = invalidatedVisualContextSnapshot(parsed.data);
     await promoteVisualContextManifest(resumed.value, snapshot, null, signal);
     return { ok: true, value: { snapshot } };

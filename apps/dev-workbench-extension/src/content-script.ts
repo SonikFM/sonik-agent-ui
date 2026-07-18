@@ -1,4 +1,3 @@
-// @ts-nocheck
 (() => {
   if (globalThis.__sonikExactActiveTab) return;
 

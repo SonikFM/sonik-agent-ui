@@ -137,11 +137,15 @@ export function invalidatedVisualContextSnapshot(input: VisualContextInvalidatio
 
 export function isStaleVisualContextResult(current: VisualContextSnapshot | null, result: VisualContextResult): boolean {
   if (!current) return false;
-  if (result.sourceContextRevision < current.sourceContextRevision || result.routeRevision < current.routeRevision) return true;
-  return result.sourceContextRevision === current.sourceContextRevision
-    && result.routeRevision === current.routeRevision
-    && current.requestId !== null
-    && current.requestId !== result.requestId;
+  return result.sourceContextRevision < current.sourceContextRevision || result.routeRevision < current.routeRevision;
+}
+
+export function isStaleVisualContextInvalidation(
+  current: VisualContextSnapshot | null,
+  invalidation: Pick<VisualContextInvalidation, "sourceContextRevision" | "routeRevision">,
+): boolean {
+  if (!current) return false;
+  return invalidation.sourceContextRevision < current.sourceContextRevision || invalidation.routeRevision < current.routeRevision;
 }
 
 export function decodeCanonicalBase64(value: string): Buffer {
