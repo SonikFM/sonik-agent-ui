@@ -2,8 +2,10 @@ import { env } from "$env/dynamic/private";
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import {
+  emitVisualContextTelemetry,
   visualContextInvalidationSchema,
   visualContextSubmissionSchema,
+  type VisualContextTelemetryEventName,
 } from "$lib/server/visual-context-coordinator";
 import { DEV_WORKBENCH_SESSION_COOKIE } from "$lib/server/session-cookie";
 import { readDevWorkbenchConfig } from "$lib/server/workbench-config";
@@ -41,8 +43,17 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
   if (!input.ok) return json({ error: input.error }, { status: input.status, headers: NO_STORE });
   const parsed = visualContextSubmissionSchema.safeParse(input.value);
   if (!parsed.success) return json({ error: "Visual context submission is invalid." }, { status: 400, headers: NO_STORE });
+  emitLifecycleEvent(sessionId, parsed.data, parsed.data.request.operation === "pick"
+    ? "visual_context.picker.started"
+    : parsed.data.request.operation === "capture" ? "visual_context.capture.started" : null);
   const result = await submitWorkspaceVisualContext(sessionId, parsed.data, request.signal);
-  if (!result.ok) return json({ error: result.error }, { status: result.error.retryable ? 409 : 400, headers: NO_STORE });
+  if (!result.ok) {
+    emitLifecycleEvent(sessionId, parsed.data, parsed.data.request.operation === "capture"
+      ? "visual_context.capture.failed"
+      : "visual_context.result.discarded", false);
+    return json({ error: result.error }, { status: result.error.retryable ? 409 : 400, headers: NO_STORE });
+  }
+  emitLifecycleEvent(sessionId, parsed.data, terminalEvent(parsed.data.result.operation, parsed.data.result.status, result.value.accepted), result.value.accepted);
   return json(result.value, { status: result.value.accepted ? 200 : 202, headers: NO_STORE });
 };
 
@@ -70,4 +81,35 @@ async function parseBoundedJson(request: Request): Promise<{ ok: true; value: un
   } catch {
     return { ok: false, error: "Visual context payload must be valid JSON.", status: 400 };
   }
+}
+
+function terminalEvent(operation: string, status: string, accepted: boolean): VisualContextTelemetryEventName | null {
+  if (!accepted) return status === "cancelled" && operation === "pick"
+    ? "visual_context.picker.cancelled"
+    : operation === "capture" && status === "failed" ? "visual_context.capture.failed" : "visual_context.result.discarded";
+  if (operation === "pick") return "visual_context.target.selected";
+  if (operation === "capture") return "visual_context.capture.completed";
+  if (operation === "setup-browser") return "visual_context.browser_setup.changed";
+  if (operation === "pair-extension" || operation === "unpair-extension") return "visual_context.extension_pairing.changed";
+  return null;
+}
+
+function emitLifecycleEvent(
+  workspaceSessionId: string,
+  input: z.infer<typeof visualContextSubmissionSchema>,
+  event: VisualContextTelemetryEventName | null,
+  accepted?: boolean,
+): void {
+  if (!event) return;
+  emitVisualContextTelemetry({
+    event,
+    workspaceSessionId,
+    requestId: input.request.requestId,
+    operation: input.request.operation,
+    provider: input.request.provider,
+    status: input.result.status,
+    accepted,
+    sourceContextRevision: input.request.sourceContextRevision,
+    routeRevision: input.request.routeRevision,
+  });
 }
