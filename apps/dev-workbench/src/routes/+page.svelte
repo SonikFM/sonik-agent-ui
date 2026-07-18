@@ -32,6 +32,7 @@
   } from "../design-system/patterns/DevWorkbench";
   import { unavailableAction, workbenchActionDescriptors } from "../design-system/patterns/DevWorkbench/actions";
   import {
+    EXACT_ACTIVE_TAB_UNAVAILABLE_REASON,
     createAgentPageContextRequest,
     createEmbeddedPreviewUrl,
     createVisualContextSubmission,
@@ -210,9 +211,7 @@
           : sourceUnavailable
           ? { enabled: false, disabledReason: sourceUnavailable }
           : visualSourceId === "host"
-            ? visualExtensionPaired
-              ? { enabled: true, disabledReason: null }
-              : { enabled: false, disabledReason: "Pair the active-tab extension before capturing the Host source." }
+            ? { enabled: false, disabledReason: EXACT_ACTIVE_TAB_UNAVAILABLE_REASON }
             : visualBrowser?.capability === "installed"
               ? { enabled: operation === "idle", disabledReason: operation === "idle" ? null : "Wait for the current workspace operation to finish." }
               : { enabled: false, disabledReason: visualBrowser?.disabledReason ?? "Checking controlled browser capture readiness." },
@@ -224,9 +223,7 @@
         pairVisualExtension: pendingHostReason
           ? { enabled: false, disabledReason: pendingHostReason }
           : visualSources.some((source) => source.id === "host")
-          ? visualExtensionPaired
-            ? { enabled: false, disabledReason: "The exact active tab is paired." }
-            : { enabled: true, disabledReason: null }
+          ? { enabled: false, disabledReason: EXACT_ACTIVE_TAB_UNAVAILABLE_REASON }
           : { enabled: false, disabledReason: "Connect an embedded Host source before pairing the extension." },
         openPreview: workspace.preview
           ? { enabled: true, disabledReason: null }
@@ -506,19 +503,12 @@
       announcement = pendingReason;
       return unavailableAction(pendingReason);
     }
-    if (!view.actions.captureVisualContext.enabled) return unavailable("captureVisualContext");
     const source = discoveredVisualSources().find((candidate) => candidate.id === view.visualContext.selectedSourceId);
-    if (source?.id === "host" && embeddedHostOrigin && workbenchOrigin && window.parent !== window) {
-      visualStatus = "capturing";
-      visualStatusMessage = "Capturing the exact active Host tab.";
-      pendingVisualRequest = {
-        messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
-        requestId: crypto.randomUUID(), operation: "capture", origin: workbenchOrigin,
-        sourceContextRevision, routeRevision, source, provider: "chrome-active-tab",
-      };
-      void postRegisteredHostRequest(pendingVisualRequest);
-      return accepted(visualStatusMessage);
+    if (source?.id === "host") {
+      announcement = EXACT_ACTIVE_TAB_UNAVAILABLE_REASON;
+      return unavailableAction(EXACT_ACTIVE_TAB_UNAVAILABLE_REASON);
     }
+    if (!view.actions.captureVisualContext.enabled) return unavailable("captureVisualContext");
     visualStatus = "capturing";
     visualStatusMessage = "Capturing Preview in the controlled browser.";
     announcement = visualStatusMessage;
@@ -540,17 +530,8 @@
       announcement = pendingReason;
       return unavailableAction(pendingReason);
     }
-    if (!view.actions.pairVisualExtension.enabled) return unavailable("pairVisualExtension");
-    if (!embeddedHostOrigin || !workbenchOrigin || window.parent === window) return unavailableAction("The embedded Host cannot receive extension pairing requests.");
-    const source = discoveredVisualSources().find((candidate) => candidate.id === "host");
-    if (!source) return unavailableAction("Host source is not connected.");
-    pendingVisualRequest = {
-      messageSource: "sonik-agent-ui", type: "sonik:visual-context:request", version: "sonik.visual-context.v1",
-      requestId: crypto.randomUUID(), operation: "pair-extension", origin: workbenchOrigin,
-      sourceContextRevision, routeRevision, source, provider: "chrome-active-tab",
-    };
-    void postRegisteredHostRequest(pendingVisualRequest);
-    return accepted("Active-tab extension pairing requested.");
+    announcement = EXACT_ACTIVE_TAB_UNAVAILABLE_REASON;
+    return unavailableAction(EXACT_ACTIVE_TAB_UNAVAILABLE_REASON);
   }
 
   async function postRegisteredHostRequest(request: VisualContextRequest): Promise<void> {

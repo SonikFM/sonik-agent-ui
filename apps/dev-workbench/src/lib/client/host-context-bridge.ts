@@ -14,6 +14,7 @@ export const SONIK_AGENT_UI_HOST_ACTION_RESULT = "sonik:agent-ui:action-result";
 export const SONIK_VISUAL_CONTEXT_REQUEST = "sonik:visual-context:request";
 export const SONIK_VISUAL_CONTEXT_RESULT = "sonik:visual-context:result";
 export const SONIK_VISUAL_CONTEXT_RESULT_SOURCE = "sonik-agent-host";
+export const EXACT_ACTIVE_TAB_UNAVAILABLE_REASON = "Exact active-tab capture is unavailable because this build has no server-verifiable extension attestation.";
 
 export type DiscoveredVisualSource = {
   id: "preview" | "host";

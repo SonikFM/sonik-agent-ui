@@ -29,6 +29,7 @@ import { readDevWorkbenchConfig } from "../../apps/dev-workbench/src/lib/server/
 import { authorizeDevWorkbenchRequest } from "../../apps/dev-workbench/src/lib/server/basic-auth.ts";
 import { devWorkbenchSessionCookieOptions } from "../../apps/dev-workbench/src/lib/server/session-cookie.ts";
 import {
+  EXACT_ACTIVE_TAB_UNAVAILABLE_REASON,
   classifyVisualContextResult,
   createEmbeddedPreviewUrl,
   createVisualContextSubmission,
@@ -108,6 +109,7 @@ assert.equal(isVisualContextResultMessage({
 assert.equal(isVisualContextResultMessage({ ...validVisualResult, secret: "Bearer abcdefghijklmnop" }), false, "extra or secret-bearing generic payloads fail closed");
 assert.equal(visualPickDisabledReason("host"), null);
 assert.match(visualPickDisabledReason("preview") ?? "", /only.*Host/i, "Preview cannot post Host-only picker requests");
+assert.match(EXACT_ACTIVE_TAB_UNAVAILABLE_REASON, /server-verifiable extension attestation/i);
 assert.equal(classifyVisualContextResult({
   pending: pendingVisualRequest,
   result: { ...validVisualResult, requestId: "old-request" },
@@ -164,6 +166,10 @@ assert.match(workbenchPageSource, /let pendingVisualRequest = \$state\.raw<Visua
 assert.ok((workbenchPageSource.match(/pendingHostVisualRequestDisabledReason\(pendingVisualRequest\)/g) ?? []).length >= 4, "UI readiness and every Host action function share the pending-request guard");
 assert.match(workbenchPageSource, /classification === "ignore"[^]*classification === "invalidate"[^]*pendingVisualRequest = null/, "nonmatching results return before exact completion clears pending state");
 assert.ok((workbenchPageSource.match(/pendingVisualRequest !== request/g) ?? []).length >= 2, "only the exact registration request callback may post or clear pending state");
+assert.match(workbenchPageSource, /visualSourceId === "host"[^]*enabled: false, disabledReason: EXACT_ACTIVE_TAB_UNAVAILABLE_REASON[^]*visualBrowser\?\.capability === "installed"/, "Host Capture fails closed while Preview keeps controlled-browser readiness");
+assert.match(workbenchPageSource, /function captureVisualContext[^]*source\?\.id === "host"[^]*return unavailableAction\(EXACT_ACTIVE_TAB_UNAVAILABLE_REASON\)/, "direct Host Capture calls fail before request issuance");
+assert.match(workbenchPageSource, /function pairVisualExtension\(\)[^]*return unavailableAction\(EXACT_ACTIVE_TAB_UNAVAILABLE_REASON\);\n  }/, "direct extension pairing calls fail closed");
+assert.equal(workbenchPageSource.match(/postRegisteredHostRequest\(pendingVisualRequest\)/g)?.length, 1, "only Host element picking may register a Host request without extension attestation");
 assert.match(workbenchPageSource, /if \(source\?\.id !== "host"[^]*return unavailableAction/, "Preview is rejected before the Host picker postMessage seam");
 assert.equal(workbenchPageSource.match(/isVisualContextResultMessage\(event\.data\)/g)?.length, 1, "only the exact embedded Host window may return picker results");
 assert.match(workbenchPageSource, /visualBrowser\?\.capability === "installed"[^]*captureVisualContext/, "Preview Capture is enabled only by an installed browser probe");
