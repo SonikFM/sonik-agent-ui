@@ -55,12 +55,12 @@ assert.equal((await resumable.driver.resume(resumable.request)).status, "succeed
 
 const artifact = { storage: "artifact", artifact: { artifactId: "artifact-reasoning", organizationId: owner.organizationId, contentType: "application/json", byteLength: 1000, digest: `sha256:${"b".repeat(64)}`, createdByNodeId: "work" } };
 const artifactRun = await governedRun({ usage: { steps: 1, tokens: 1 }, output: artifact, inlineOutputByteLimit: 1 });
-assert.equal(artifactRun.state.status, "succeeded", "large safe output uses ArtifactRef instead of leaking inline data");
-assert.deepEqual(artifactRun.state.outputRefs.work, artifact, "the persisted output reference is the bounded ArtifactRef");
+assert.equal(artifactRun.state.status, "failed", "artifact-backed structured output fails closed until its contents can be validated");
+assert.equal(artifactRun.state.outputRefs.work, undefined, "unverified artifact output is not accepted into persisted run state");
 const artifactYield = await governedRun({ usage: { steps: 2, tokens: 1 }, output: artifact, inlineOutputByteLimit: 1 });
 assert.equal(artifactYield.state.status, "waiting");
-assert.deepEqual(artifactYield.state.outputRefs.work, artifact, "budget yield preserves an exact ArtifactRef");
-assert.deepEqual((await artifactYield.journal.replayEvents(owner, artifactYield.initialState)).outputRefs.work, artifact, "event replay reconstructs the yielded ArtifactRef");
+assert.equal(artifactYield.state.outputRefs.work, undefined, "budget yield does not preserve an unverified artifact output");
+assert.equal((await artifactYield.journal.replayEvents(owner, artifactYield.initialState)).outputRefs.work, undefined, "event replay cannot reconstruct rejected artifact output");
 
 let clock = 0;
 const wallTimeRun = await governedRun({ usage: { steps: 1, tokens: 1 }, output: { storage: "inline", value: { secret: "must-not-persist" }, byteLength: 29 }, driverNow: () => (clock += 101) });

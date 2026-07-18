@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [source, organizationScopeMigration] = await Promise.all([
+const [source, organizationScopeMigration, workflowRunSourceMigration] = await Promise.all([
   readFile("scripts/run-postgres-migrations.mjs", "utf8"),
   readFile("packages/workspace-session/migrations/postgres/0019_organization_scoped_workflow_versions.sql", "utf8"),
+  readFile("packages/workspace-session/migrations/postgres/0020_workflow_run_source_kind.sql", "utf8"),
 ]);
 
 function baseline(version) {
@@ -81,5 +82,9 @@ assert.match(organizationScopeMigration, /alter table sonik_agent_ui\.workflow_d
 assert.match(organizationScopeMigration, /drop index concurrently if exists sonik_agent_ui\.workflow_definition_versions_organization_workflow_idx/i, "0019 removes a poisoned same-name lookup index without blocking writers");
 assert.match(organizationScopeMigration, /pg_constraint[\s\S]*conindid[\s\S]*to_regclass\('sonik_agent_ui\.workflow_definition_versions_organization_workflow_idx'\)[\s\S]*workflow_definition_published_versions/i, "0019 removes a constraint-owned poisoned same-name lookup index only from the expected table");
 assert.doesNotMatch(organizationScopeMigration, /create index if not exists workflow_definition_versions_organization_workflow_idx/i, "0019 recreates the canonical lookup index unconditionally");
+assert.match(source, /version: "0020"[\s\S]*workflow_run_source_kind/);
+assert.match(source, /version: "0020"[\s\S]*pg_get_constraintdef[\s\S]*internal[\s\S]*draft[\s\S]*published/, "0020 baselines only the canonical source-kind constraint");
+assert.match(source, /version: "0020"[\s\S]*convalidated/, "0020 rejects an unvalidated source-kind constraint");
+assert.match(workflowRunSourceMigration, /source_kind[\s\S]*internal[\s\S]*draft[\s\S]*published/i);
 
 console.log("postgres-migration-baselines.test.mjs OK");

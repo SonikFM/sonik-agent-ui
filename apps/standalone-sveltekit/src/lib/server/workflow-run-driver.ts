@@ -37,6 +37,7 @@ import {
 import type { WorkflowRunJournalStore, WorkflowRunOwner, WorkflowRunSnapshot } from "./workflow-run-store.ts";
 
 type PumpRequest = ReturnType<typeof runDriverPumpRequestSchema.parse>;
+const MAX_NODE_ATTEMPTS = 100;
 
 export interface WorkflowRunDriverDeps {
   journal: WorkflowRunJournalStore;
@@ -115,7 +116,11 @@ export class WorkflowRunDriver {
       }
 
       const logicalEffectId = node.nodeType === "tool_commit" ? node.effectBinding?.logicalEffectId : undefined;
-      const executionContext = { ...this.deps.executionContext?.(node), ...(node.nodeType === "approval" ? { logicalEffectId: node.approvalEffect?.logicalEffectId } : {}) };
+      const executionContext = {
+        ...this.deps.executionContext?.(node),
+        ...(node.nodeType === "approval" ? { logicalEffectId: node.approvalEffect?.logicalEffectId } : {}),
+        ...(this.deps.runtimeRegistry ? { runtimeRegistry: this.deps.runtimeRegistry } : {}),
+      };
       const externalEffectIdentity = this.externalEffectIdentity(node, state, executionContext);
       const engineRequest: EngineRequest = {
         workflowRunId: state.workflowRunId,
@@ -174,7 +179,10 @@ export class WorkflowRunDriver {
       const configuredRetries = retryConfig && typeof retryConfig === "object" && !Array.isArray(retryConfig)
         ? Number(retryConfig.maxAttempts ?? 1)
         : 1;
-      const maxAttempts = node.nodeType === "tool_preview" ? 3 : node.nodeType === "reasoning" ? node.reasoning?.budgets.maxSteps ?? 1 : configuredRetries;
+      const requestedAttempts = node.nodeType === "tool_preview" ? 3 : node.nodeType === "reasoning" ? node.reasoning?.budgets.maxSteps ?? 1 : configuredRetries;
+      const maxAttempts = Number.isFinite(requestedAttempts) && requestedAttempts > 0
+        ? Math.min(Math.floor(requestedAttempts), MAX_NODE_ATTEMPTS)
+        : 1;
       const reasoningStartedAt = this.now();
       let completedAttemptId = attemptId;
       for (let retry = 0; ; retry += 1) {
@@ -332,12 +340,20 @@ export class WorkflowRunDriver {
   }
   private async predicate(predicate: WorkflowVNextDefinition["edges"][number]["predicate"], state: WorkflowRunSnapshot): Promise<boolean> {
     if (!predicate) return false;
+    if (predicate.operator === "exists") return this.bindingExists(predicate.left, state);
     const left = await this.binding(predicate.left, state); const right = predicate.right && "value" in predicate.right ? predicate.right.value : predicate.right ? await this.binding(predicate.right, state) : undefined;
-    if (predicate.operator === "exists") return left !== undefined && left !== null;
     if (predicate.operator === "eq") return JSON.stringify(left) === JSON.stringify(right);
     if (predicate.operator === "not_eq") return JSON.stringify(left) !== JSON.stringify(right);
     if (predicate.operator === "in") return Array.isArray(right) && right.some((value) => JSON.stringify(value) === JSON.stringify(left));
     return typeof left === "number" && typeof right === "number" && ({ gt: left > right, gte: left >= right, lt: left < right, lte: left <= right } as const)[predicate.operator];
+  }
+  private async bindingExists(binding: WorkflowVNextNode["bindings"][string], state: WorkflowRunSnapshot): Promise<boolean> {
+    if (binding.source === "node_output" && !(binding.nodeId in state.outputs)) return false;
+    try { return await this.binding(binding, state) !== null; }
+    catch (error) {
+      if (error instanceof Error && ["binding_path_missing", "host_context_missing"].includes(error.message)) return false;
+      throw error;
+    }
   }
   private async resolveInput(node: WorkflowVNextNode, state: WorkflowRunSnapshot): Promise<JsonValue> {
     return Object.fromEntries(await Promise.all(Object.entries(node.bindings).map(async ([key, binding]) => [key, await this.binding(binding, state)]))) as JsonValue;

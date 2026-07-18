@@ -241,6 +241,8 @@ export async function dispatchWorkflowNode(
         : (runtimeRegistry.schemas as Readonly<Record<string, z.ZodType>>)[key];
       if (!schema) response = terminal("reasoning_output_schema_missing", `Reasoning output schema is not registered: ${key}`);
       else if (!schema.safeParse(response.output.value).success) response = terminal("reasoning_output_schema_invalid", "Reasoning output does not match its declared structured schema");
+    } else {
+      response = terminal("reasoning_output_schema_unverified", "Artifact-backed reasoning output must be loaded and schema-validated");
     }
     if (executor && !context.reasoningUsage) response = terminal("reasoning_usage_required", "Reasoning adapters must report step and token usage");
     const usage = context.reasoningUsage ?? { steps: 1, tokens: 0 };

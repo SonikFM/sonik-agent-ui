@@ -185,7 +185,8 @@ const referenced = await dispatchWorkflowNode(request("reasoning"), {
   inlineOutputByteLimit: 1,
   executors: { reasoning: () => ({ status: "succeeded", output: { storage: "artifact", artifact: { artifactId: "artifact-1", organizationId: "org-1", contentType: "application/json", byteLength: 100, digest: `sha256:${"b".repeat(64)}`, createdByNodeId: "reasoning" } } }) },
 });
-assert.equal(referenced.status, "succeeded", "artifact references remain valid when inline output would exceed budget");
+assert.equal(referenced.status, "terminal_error", "artifact-backed structured output fails closed until its contents can be validated");
+assert.equal(referenced.error.code, "reasoning_output_schema_unverified");
 
 const logicalEffectId = "effect:generic";
 const committed = await dispatchWorkflowNode(request("tool_commit", {

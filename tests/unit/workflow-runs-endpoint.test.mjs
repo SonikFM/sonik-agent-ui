@@ -84,7 +84,7 @@ function createFakeWorkflowRunExecutor() {
           assert.ok(context, "every cloud workflow-run query must establish request context first");
 
           if (/^insert into sonik_agent_ui\.agent_workflow_runs/i.test(normalized)) {
-            const [organizationId, userId, hostSessionId, runId, workflowId, workflowVersionId, definition, input, state, now] = params;
+            const [organizationId, userId, hostSessionId, runId, workflowId, workflowVersionId, sourceKind, definition, input, state, now] = params;
             const rowKey = key(organizationId, userId, runId);
             if (rows.has(rowKey)) throw Object.assign(new Error("duplicate key"), { code: "23505" });
             const row = {
@@ -94,6 +94,7 @@ function createFakeWorkflowRunExecutor() {
               run_id: runId,
               workflow_id: workflowId,
               workflow_version_id: workflowVersionId,
+              source_kind: sourceKind,
               definition: JSON.parse(definition),
               input: JSON.parse(input),
               state: JSON.parse(state),
@@ -179,6 +180,7 @@ try {
   assert.equal(publishedStart.ok, true, "an exact published pin starts successfully");
   const publishedRow = await store.getRun(owner, publishedStart.run.runId);
   assert.equal(publishedRow.workflowVersionId, publishedWorkflowVersionId);
+  assert.equal(publishedRow.sourceKind, "published");
   assert.deepEqual(
     publishedRow.definition,
     workflowVNextToDefinition(publishedDefinition),
@@ -203,6 +205,7 @@ try {
   const persistedAfterStart = await store.getRun(owner, runId);
   assert.ok(persistedAfterStart, "start persists a run row");
   assert.equal(persistedAfterStart.workflowVersionId, "sonik.amplify.campaign.workflow@0.1.0");
+  assert.equal(persistedAfterStart.sourceKind, "internal");
 
   // 2. preview: drives the tool_preview node through the shared controller.
   const previewed = await handleWorkflowRunsAction({ action: "preview", runId, nodeId: "preview" }, deps(authenticatedHostSessionRotated));
@@ -371,6 +374,7 @@ try {
   const cloudInput = {
     workflowId: persistedAfterStart.workflowId,
     workflowVersionId: persistedAfterStart.workflowVersionId,
+    sourceKind: "internal",
     definition: persistedAfterStart.definition,
     input: persistedAfterStart.input,
     state: { ...persistedAfterStart.state, runId: "cloud-shared-run-id" },
@@ -380,6 +384,15 @@ try {
   assert.equal((await cloudStore.getRun(rotatedOwner, "cloud-shared-run-id"))?.runId, "cloud-shared-run-id");
   assert.deepEqual((await cloudStore.listRuns(rotatedOwner)).map((row) => row.runId), ["cloud-shared-run-id"]);
   assert.equal((await cloudStore.updateRunState(rotatedOwner, "cloud-shared-run-id", cloudInput.state))?.hostSessionId, owner.hostSessionId, "cloud updates preserve insert-time provenance");
+  const legacyRunId = "legacy-null-source-kind";
+  fakeExecutor.rows.set(JSON.stringify([owner.organizationId, owner.userId, legacyRunId]), {
+    ...fakeExecutor.rows.get(JSON.stringify([owner.organizationId, owner.userId, "cloud-shared-run-id"])),
+    run_id: legacyRunId,
+    workflow_id: "legacy.unregistered",
+    source_kind: null,
+  });
+  assert.equal((await cloudStore.getRun(owner, legacyRunId))?.sourceKind, null, "legacy rows preserve their missing provenance instead of inventing authority");
+  assert.deepEqual(await handleWorkflowRunsAction({ action: "preview", runId: legacyRunId, nodeId: "preview" }, { hostSession: authenticatedHostSession, store: cloudStore }), { ok: false, reason: "legacy_workflow_path_not_available_for_vnext" }, "legacy rows without explicit provenance remain quarantined");
   for (const foreignOwner of [otherUserOwner, otherOrgOwner]) {
     assert.equal(await cloudStore.getRun(foreignOwner, "cloud-shared-run-id"), null);
     assert.deepEqual(await cloudStore.listRuns(foreignOwner), []);
@@ -438,14 +451,14 @@ try {
   assert.match(migrationSource, /Rows created before this migration[\s\S]*intentionally invisible/i, "legacy unowned rows must fail closed");
   assert.match(runnerSource, /0013_workflow_run_owner_scope\.sql/);
 
-  async function publicDriverHarness(definition, runId, input) {
+  async function publicDriverHarness(definition, runId, input, requestedVersionId) {
     const baseStore = createInMemoryWorkflowRunStore();
     const store = wrapWorkflowRunStoreAsync(baseStore);
     const journal = createInMemoryWorkflowRunJournalStore(baseStore);
     const repository = createInMemoryWorkflowDefinitionRepository();
     const draft = await repository.createDraft(owner, definition, owner.userId);
     assert.ok(draft);
-    const workflowVersionId = `${definition.workflowId}@1`;
+    const workflowVersionId = requestedVersionId ?? `${definition.workflowId}@1`;
     const dependencyPins = {
       ...structuredClone(train0SelectedPathRunState.dependencyPins),
       organizationId: owner.organizationId,
@@ -461,8 +474,18 @@ try {
       actorId: owner.userId,
     });
     assert.ok(published);
-    baseStore.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, definition: {}, input, state: { runId } });
+    baseStore.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, sourceKind: "published", definition: {}, input, state: { runId } });
     return { deps: { hostSession: authenticatedHostSession, store, journal, repository }, journal, published };
+  }
+
+  {
+    const runId = "published-version-ending-draft";
+    const versionId = `${train0WorkflowFixtures.linear.workflowId}@1-draft`;
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.linear, runId, null, versionId);
+    const completed = await handlePublicWorkflowDriverAction({ action: "preview", runId }, publicDeps);
+    assert.equal(completed.result.ok, true, "an explicitly published run remains public even when its version ID ends in -draft");
+    const quarantined = await handleWorkflowRunsAction({ action: "preview", runId, nodeId: "start" }, { hostSession: authenticatedHostSession, store: publicDeps.store });
+    assert.deepEqual(quarantined, { ok: false, reason: "legacy_workflow_path_not_available_for_vnext" }, "a published -draft suffix cannot bypass the legacy controller quarantine");
   }
 
   {
@@ -472,6 +495,16 @@ try {
     assert.equal(previewed.result.ok, true);
     assert.equal(previewed.result.run.status, "succeeded");
     assert.deepEqual(previewed.result.run.selectedPath, ["start", "work"], "preview pumps scheduler-owned canonical traversal");
+  }
+
+  {
+    const runId = "public-driver-error-redaction";
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.linear, runId, null);
+    const rejected = await handlePublicWorkflowDriverAction({ action: "run_until_blocked", request: { workflowRunId: runId } }, {
+      ...publicDeps,
+      journal: { ...publicDeps.journal, appendEventAndProject: async () => { throw new Error("provider_database_secret"); } },
+    });
+    assert.deepEqual(rejected.result, { ok: false, reason: "workflow_run_driver_failed" }, "public driver actions redact unexpected inner driver errors");
   }
 
   {
@@ -554,8 +587,13 @@ try {
         releaseLease: async (...args) => { releasedAfterFailure = true; return releaseLease(...args); },
       },
     });
-    assert.deepEqual(rejected.result, { ok: false, reason: "approval_projection_failed" });
+    assert.deepEqual(rejected.result, { ok: false, reason: "workflow_run_driver_failed" });
     assert.equal(releasedAfterFailure, true, "structured approval failures still release the server lease");
+    const recognized = await handlePublicWorkflowDriverAction({ action: "approve", runId }, {
+      ...governedDeps,
+      journal: { ...governedDeps.journal, appendEventAndProject: async () => { throw new Error("run_revision_or_lease_conflict"); } },
+    });
+    assert.deepEqual(recognized.result, { ok: false, reason: "run_revision_or_lease_conflict" });
     const approved = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "client-hint-ignored" }, governedDeps);
     assert.equal(approved.result.run.status, "running", JSON.stringify(approved.result));
     assert.equal(providerCalls, 0, "approval CAS persists authority without pumping the write");

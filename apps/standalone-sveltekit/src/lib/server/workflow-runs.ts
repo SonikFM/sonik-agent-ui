@@ -39,7 +39,7 @@ import {
 } from "./workflow-node-executors.ts";
 import type { WorkflowRunDriver } from "./workflow-run-driver.ts";
 import type { WorkflowDefinitionPin, WorkflowDefinitionRepository } from "./workflow-definition-repository.ts";
-import { workflowRunStore, wrapWorkflowRunStoreAsync, type AsyncWorkflowRunStore, type WorkflowRunOwner, type WorkflowRunRow } from "./workflow-run-store.ts";
+import { workflowRunStore, wrapWorkflowRunStoreAsync, type AsyncWorkflowRunStore, type WorkflowRunOwner, type WorkflowRunRow, type WorkflowRunSourceKind } from "./workflow-run-store.ts";
 
 const AMPLIFY_CAMPAIGN_KNOWLEDGE_STORE_ID = "sonik.knowledge.campaign-artifacts";
 
@@ -159,6 +159,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     const registered = registeredInternalWorkflows[action.workflowId];
     let definition: WorkflowDefinition;
     let workflowVersionId: string;
+    let sourceKind: WorkflowRunSourceKind;
     let runInput: unknown = null;
 
     if (action.source?.kind === "published") {
@@ -173,10 +174,12 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
       }
       definition = workflowVNextToDefinition(published.definition);
       workflowVersionId = published.workflowVersionId;
+      sourceKind = "published";
       runInput = action.workflowInput ?? action.brief ?? null;
     } else if (registered) {
       definition = registered.definition;
       workflowVersionId = registered.workflowVersionId;
+      sourceKind = "internal";
       if (action.workflowId === "amplify.campaign.create") {
         if (!isAmplifyCampaignBrief(action.brief)) {
           return { ok: false, reason: "amplify_campaign_brief_required" };
@@ -193,6 +196,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
       // matching how a never-published draft has no packageVersionId to pin to (D002 only applies
       // once something is actually published).
       workflowVersionId = `${definition.workflowId}@0.0.0-draft`;
+      sourceKind = "draft";
     } else {
       return { ok: false, reason: "unknown_workflowId_or_workflow_required" };
     }
@@ -204,7 +208,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
     }
     const state = startControllerRun(definition, { runId, workflowVersionId, artifactId: action.artifactId ?? null });
     try {
-      await store.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, definition, input: runInput, state });
+      await store.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, sourceKind, definition, input: runInput, state });
     } catch (error) {
       // Race past the getRun check above straight into the store's run_id primary key --
       // surface that as a clean conflict result too, not an unhandled 500.
@@ -216,7 +220,7 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
 
   const row = await store.getRun(owner, action.runId);
   if (!row) return { ok: false, reason: "run_not_found" };
-  if (!registeredInternalWorkflows[row.workflowId] && !row.workflowVersionId.endsWith("-draft")) {
+  if (!registeredInternalWorkflows[row.workflowId] && row.sourceKind !== "draft") {
     return { ok: false, reason: "legacy_workflow_path_not_available_for_vnext" };
   }
 

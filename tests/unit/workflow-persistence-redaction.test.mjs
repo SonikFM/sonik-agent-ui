@@ -15,7 +15,7 @@ const serializedSafe = (value, boundary) => assert.equal(JSON.stringify(value).i
 
 const owner = { organizationId: "org-redaction", userId: "user-redaction" };
 const runId = "run-redaction";
-const safeRunInput = { workflowId: "workflow-safe", workflowVersionId: "workflow-safe@1", definition: {}, input: { campaign: "safe" }, state: { runId } };
+const safeRunInput = { workflowId: "workflow-safe", workflowVersionId: "workflow-safe@1", sourceKind: "published", definition: {}, input: { campaign: "safe" }, state: { runId } };
 const unsafeRunInput = { ...safeRunInput, input: { apiKey: sentinel } };
 const runStore = createInMemoryWorkflowRunStore();
 assert.throws(

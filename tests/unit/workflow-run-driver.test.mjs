@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createInMemoryWorkflowRunJournalStore } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
 import { WorkflowRunDriver } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-driver.ts";
-import { hashWorkflowInput } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
+import { hashWorkflowInput, workflowNodeExecutorRuntimeRegistry } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
 import { handleWorkflowRunsAction } from "../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts";
-import { externalEffectIdempotencyKey } from "../../packages/tool-contracts/src/workflow-vnext.ts";
+import { externalEffectIdempotencyKey, workflowSchemaRefKey } from "../../packages/tool-contracts/src/workflow-vnext.ts";
 import { train0SelectedPathRunState, train0WorkflowFixtures } from "../../packages/tool-contracts/src/workflow-vnext-fixtures.ts";
 
 const owner = { organizationId: "org-1", userId: "user-1" };
@@ -50,6 +50,35 @@ function harness(definition, suffix, options = {}) {
   assert.equal(completed.status, "succeeded");
   assert.deepEqual(completed.selectedPath, ["start", "choose", "no"], "one deterministic branch is selected");
   assert.equal(completed.selectedPath.includes("yes"), false, "unselected branches never dispatch");
+}
+
+{
+  const definition = structuredClone(train0WorkflowFixtures.conditional);
+  const branch = definition.nodes.find((node) => node.nodeType === "branch");
+  branch.bindings = {};
+  branch.requiredHostContext = ["optional"];
+  definition.edges.find((edge) => edge.predicate).predicate = { operator: "exists", left: { source: "host_context", key: "optional" } };
+  const { runId, driver } = harness(definition, "exists-missing");
+  const completed = await driver.start(request(runId, "exists-missing-a"));
+  assert.deepEqual(completed.selectedPath, ["start", "choose", "no"], "exists treats an authorized missing binding as false");
+
+  branch.requiredHostContext = [];
+  const unauthorized = harness(definition, "exists-unauthorized");
+  await assert.rejects(() => unauthorized.driver.start(request(unauthorized.runId, "exists-unauthorized-a")), /unauthorized_host_context/, "exists does not hide binding authorization errors");
+}
+
+{
+  const trigger = workflowNodeExecutorRuntimeRegistry.descriptors.find((descriptor) => descriptor.nodeType === "trigger");
+  const runtimeRegistry = {
+    descriptors: workflowNodeExecutorRuntimeRegistry.descriptors,
+    schemas: new Map(workflowNodeExecutorRuntimeRegistry.schemas),
+  };
+  runtimeRegistry.schemas.set(workflowSchemaRefKey(trigger.inputSchema), { parse(value) { if (value?.required !== true) throw new Error("required"); return value; } });
+  const { runId, driver } = harness(train0WorkflowFixtures.linear, "authoritative-registry", {
+    runtimeRegistry,
+    executionContext: () => ({ runtimeRegistry: workflowNodeExecutorRuntimeRegistry }),
+  });
+  await assert.rejects(() => driver.start(request(runId, "authoritative-registry-a")), /required/, "driver registry remains authoritative at dispatch");
 }
 
 {
@@ -352,6 +381,29 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
 
 {
   const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].config = { retry: { maxAttempts: 1_000_000 } };
+  let attempts = 0;
+  const { runId, driver } = harness(definition, "retry-cap", { executionContext: (node) => node.nodeType === "skill" ? { executors: { skill: () => { attempts += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {} });
+  await driver.start(request(runId, "retry-cap-a"));
+  assert.equal(attempts, 100, "configured retries are capped at a practical finite bound");
+}
+
+for (const [name, maxAttempts] of [["negative", -1], ["zero", 0]]) {
+  const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].config = { retry: { maxAttempts } };
+  let attempts = 0;
+  const { runId, driver } = harness(definition, `retry-${name}`, { executionContext: (node) => node.nodeType === "skill" ? { executors: { skill: () => { attempts += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {} });
+  await driver.start(request(runId, `retry-${name}-a`));
+  assert.equal(attempts, 1, `${name} retry limits normalize to one finite attempt`);
+}
+for (const [name, maxAttempts] of [["nan", Number.NaN], ["infinity", Number.POSITIVE_INFINITY]]) {
+  const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].config = { retry: { maxAttempts } };
+  assert.throws(() => harness(definition, `retry-${name}`), /Invalid input/, `${name} retry limits are rejected at the definition boundary`);
+}
+
+{
+  const definition = structuredClone(train0WorkflowFixtures.linear);
   definition.nodes[1].nodeType = "tool_preview";
   let attempts = 0;
   const attemptedIds = [];
@@ -375,13 +427,13 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
 {
   const definition = structuredClone(train0WorkflowFixtures.linear);
   definition.nodes[1].nodeType = "reasoning";
-  definition.nodes[1].reasoning = { structuredOutputSchema: { schemaId: "reasoning.output", version: 1, digest: `sha256:${"a".repeat(64)}` }, budgets: { maxSteps: 2, maxTokens: 10, maxWallTimeMs: 100 }, nestedCapabilityEffects: [] };
+  definition.nodes[1].reasoning = { structuredOutputSchema: { schemaId: "reasoning.output", version: 1, digest: `sha256:${"a".repeat(64)}` }, budgets: { maxSteps: 1_000_000, maxTokens: 10, maxWallTimeMs: 10_000 }, nestedCapabilityEffects: [] };
   let attempts = 0;
   const { runId, driver } = harness(definition, "reasoning-budget", { executionContext: (node) => node.nodeType === "reasoning" ? { reasoning: node.reasoning, executors: { reasoning: () => { attempts += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {} });
   const failed = await driver.start(request(runId, "reasoning-budget-a"));
   assert.equal(failed.status, "failed");
   assert.equal(failed.compatibilityPhase, "reasoning_budget_exhausted");
-  assert.equal(attempts, 2, "reasoning maxSteps is an execution bound, not advisory metadata");
+  assert.equal(attempts, 100, "reasoning retries are capped at a practical finite bound");
 }
 
 {

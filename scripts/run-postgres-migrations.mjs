@@ -832,6 +832,32 @@ const migrations = [
 			)::text
 		`,
 	},
+	{
+		version: "0020",
+		name: "workflow_run_source_kind",
+		file: "packages/workspace-session/migrations/postgres/0020_workflow_run_source_kind.sql",
+		baselineCheck: `
+			select (
+				exists (
+					select 1 from information_schema.columns
+					where table_schema = 'sonik_agent_ui'
+						and table_name = 'agent_workflow_runs'
+						and column_name = 'source_kind'
+						and data_type = 'text'
+						and is_nullable = 'YES'
+				)
+				and exists (
+					select 1 from pg_constraint as source_kind_constraint
+					where conrelid = to_regclass('sonik_agent_ui.agent_workflow_runs')
+						and conname = 'agent_workflow_runs_source_kind_check'
+						and contype = 'c'
+						and convalidated
+						and regexp_replace(lower(pg_get_constraintdef(source_kind_constraint.oid)), '[[:space:]]', '', 'g')
+							= 'check(((source_kindisnull)or(source_kind=any(array[''internal''::text,''draft''::text,''published''::text]))))'
+				)
+			)::text
+		`,
+	},
 ];
 
 if (!databaseUrl) {

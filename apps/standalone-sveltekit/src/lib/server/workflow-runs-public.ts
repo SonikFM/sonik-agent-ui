@@ -51,6 +51,7 @@ export async function handlePublicWorkflowDriverAction(action: PublicWorkflowDri
   if (!runId) return failure(400, "workflowRunId_required");
   const row = await deps.store.getRun(owner, runId);
   if (!row) return failure(404, "run_not_found");
+  if (row.sourceKind !== "published") return failure(404, "published_workflow_not_found");
   const published = await deps.repository.getPublished(owner, row.workflowVersionId);
   if (!published || published.workflowId !== row.workflowId) return failure(404, "published_workflow_not_found");
   const snapshot = await deps.journal.getSnapshot(owner, runId);
@@ -111,12 +112,27 @@ export async function handlePublicWorkflowDriverAction(action: PublicWorkflowDri
   });
   try {
     if (action.action === "approve") return { status: 200, result: { ok: true, run: await driver.approve(serverRequest) } as unknown as WorkflowRunsResult };
-    return { status: 200, result: await handleWorkflowRunsAction(internalAction, { hostSession: deps.hostSession, store: deps.store, driver }) };
+    const result = await handleWorkflowRunsAction(internalAction, { hostSession: deps.hostSession, store: deps.store, driver });
+    return result.ok || PUBLIC_WORKFLOW_DRIVER_ERRORS.has(result.reason)
+      ? { status: 200, result }
+      : failure(200, "workflow_run_driver_failed");
   } catch (error) {
-    return failure(200, error instanceof Error ? error.message : "workflow_run_driver_failed");
+    return failure(200, isPublicWorkflowDriverError(error) ? error.message : "workflow_run_driver_failed");
   } finally {
     await deps.journal.releaseLease(owner, runId, lease.leaseId);
   }
+}
+
+const PUBLIC_WORKFLOW_DRIVER_ERRORS = new Set([
+  "resume_event_does_not_match_waitpoint",
+  "resume_not_allowed_for_terminal_run",
+  "run_revision_or_lease_conflict",
+  "waitpoint_expired",
+  "workflow_run_mismatch",
+]);
+
+function isPublicWorkflowDriverError(error: unknown): error is Error {
+  return error instanceof Error && PUBLIC_WORKFLOW_DRIVER_ERRORS.has(error.message);
 }
 
 function failure(status: number, reason: string): PublicWorkflowDriverResponse {
