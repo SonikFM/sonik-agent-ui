@@ -718,7 +718,7 @@ function sandboxEnvironment(config: DevWorkbenchServerConfig): Record<string, st
   };
 }
 
-export function createSandboxContextGuide(pipeBWorker: string, pipeBEnabled: boolean): string {
+function createSandboxContextGuide(pipeBWorker: string, pipeBEnabled: boolean): string {
   return `# Sonik Agent UI Dev Context
 
 This directory is host-written runtime context for the isolated Agent UI checkout.
