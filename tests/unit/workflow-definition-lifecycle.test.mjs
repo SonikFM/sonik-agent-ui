@@ -8,12 +8,46 @@ const host = { source: "amplify-embedded", sessionId: "session-a", userId: "user
 const otherUser = { ...host, sessionId: "session-b", userId: "user-b", principalId: "user-b" };
 const otherOrganization = { ...host, sessionId: "session-c", organizationId: "org-b" };
 const repository = createInMemoryWorkflowDefinitionRepository();
-const call = (action, hostSession = host) => handleWorkflowDefinitionsAction(action, { hostSession, repository });
+const call = (action, hostSession = host) => handleWorkflowDefinitionsAction(action, { hostSession, repository, capabilityReadiness: readinessFor(definition) });
 const digest = (character) => `sha256:${character.repeat(64)}`;
+
+function readinessFor(workflow) {
+  return [...new Set([...workflow.facadeToolIds, ...workflow.nodes.flatMap((node) => node.capabilityPins)])].map((capabilityId) => ({
+    capabilityId, effectMode: "read", registered: true, implemented: true, authorable: true, definitionCompatible: true,
+    mounted: true, contextReady: true, grantReady: true, previewable: true, committable: true, killSwitched: false,
+    versionPinned: true, callable: true, reasonCodes: [], nextAction: null,
+  }));
+}
+
+{
+  const failClosedRepository = createInMemoryWorkflowDefinitionRepository();
+  const failClosedDefinition = structuredClone(train0WorkflowFixtures.linear);
+  assert.equal((await handleWorkflowDefinitionsAction({ action: "create", definition: failClosedDefinition }, { hostSession: host, repository: failClosedRepository })).ok, true);
+  const failClosedDraft = await failClosedRepository.getDraft({ organizationId: host.organizationId, userId: host.userId }, failClosedDefinition.workflowId);
+  const failClosedVersionId = `${failClosedDefinition.workflowId}@missing-readiness`;
+  const missingReadiness = await handleWorkflowDefinitionsAction({
+    action: "publish",
+    workflowId: failClosedDefinition.workflowId,
+    expectedRevision: 0,
+    workflowVersionId: failClosedVersionId,
+    dependencyPins: {
+      organizationId: host.organizationId,
+      workflowVersionId: failClosedVersionId,
+      definitionDigest: failClosedDraft.definitionDigest,
+      agentPublishedVersionId: "agent@1",
+      nodeDescriptorsDigest: digest("a"),
+      capabilityVersionsDigest: digest("b"),
+      toolPackVersionsDigest: digest("c"),
+      skillVersionsDigest: digest("d"),
+      runtimePolicyDigest: digest("e"),
+    },
+  }, { hostSession: host, repository: failClosedRepository });
+  assert.equal(missingReadiness.reason, "capability_readiness_required", "publish defaults deny when current readiness authority is absent");
+}
 
 async function assertPublishRejected(definition, expectedIssue) {
   const rejectedRepository = createInMemoryWorkflowDefinitionRepository();
-  const rejectedCall = (action) => handleWorkflowDefinitionsAction(action, { hostSession: host, repository: rejectedRepository });
+  const rejectedCall = (action) => handleWorkflowDefinitionsAction(action, { hostSession: host, repository: rejectedRepository, capabilityReadiness: readinessFor(definition) });
   assert.equal((await rejectedCall({ action: "create", definition })).ok, true);
   const draft = (await rejectedCall({ action: "get", workflowId: definition.workflowId })).draft;
   const workflowVersionId = `${definition.workflowId}@1`;

@@ -10,6 +10,7 @@ import {
 } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import { type WorkflowDefinitionOwner, type WorkflowDefinitionPin, type WorkflowDefinitionRepository } from "./workflow-definition-repository.ts";
 import { workflowNodeExecutorRuntimeRegistry } from "./workflow-node-executors.ts";
+import { requireCallableCapabilities } from "./capability-readiness.ts";
 
 export type WorkflowDefinitionsAction =
   | { action: "create"; definition: unknown }
@@ -69,7 +70,8 @@ export async function handleWorkflowDefinitionsAction(action: WorkflowDefinition
         if (!draft || draft.archivedAt || draft.draftRevision !== revision(action.expectedRevision)) return { ok: false as const, reason: "revision_conflict_or_archived" };
         const dependencyPins = workflowDependencyPinsSchema.parse(action.dependencyPins);
         if (dependencyPins.organizationId !== owner.organizationId || dependencyPins.workflowVersionId !== workflowVersionId || dependencyPins.definitionDigest !== draft.definitionDigest) throw new Error("dependency_pins_mismatch");
-        if (deps.capabilityReadiness) assertPublishableCapabilities(draft.definition, deps.capabilityReadiness);
+        if (!deps.capabilityReadiness) throw new Error("capability_readiness_required");
+        requireCallableCapabilities(deps.capabilityReadiness, [...draft.definition.facadeToolIds, ...draft.definition.nodes.flatMap((node) => node.capabilityPins)]);
         const validation = validateWorkflowForPublish(draft.definition, workflowNodeExecutorRuntimeRegistry);
         if (!validation.ok) return { ok: false as const, reason: validation.issues[0]?.code ?? "workflow_not_publishable", issues: validation.issues };
         const version = await deps.repository.publish(owner, { workflowId, expectedRevision: action.expectedRevision, workflowVersionId, definitionDigest: draft.definitionDigest, dependencyPins, actorId });
@@ -137,12 +139,3 @@ function parseDefinition(input: unknown, expectedWorkflowId?: string): WorkflowV
 }
 function required(value: string, name: string): string { const normalized = typeof value === "string" ? value.trim() : ""; if (!normalized) throw new Error(`${name}_required`); return normalized; }
 function revision(value: number): number { if (!Number.isSafeInteger(value) || value < 0) throw new Error("expected_revision_invalid"); return value; }
-function assertPublishableCapabilities(definition: WorkflowVNextDefinition, readiness: readonly CapabilityReadiness[]): void {
-  const byId = new Map(readiness.map((entry) => [entry.capabilityId, entry]));
-  for (const capabilityId of new Set([...definition.facadeToolIds, ...definition.nodes.flatMap((node) => node.capabilityPins)])) {
-    const state = byId.get(capabilityId);
-    if (!state?.registered || !state.implemented || !state.authorable || !state.definitionCompatible) {
-      throw new Error(`capability_not_publishable:${capabilityId}:${state?.nextAction ?? "not_registered"}`);
-    }
-  }
-}

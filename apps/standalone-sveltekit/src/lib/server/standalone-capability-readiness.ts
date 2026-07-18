@@ -15,6 +15,8 @@ export function resolveStandaloneCapabilityReadiness(input: StandaloneHostRuntim
 } = {}): CapabilityReadiness[] {
   const bundle = createStandaloneHostCommandRuntimeBundle(input);
   const registry = sonikBookingCapabilityRegistry;
+  const capabilityVersionPins = input.capabilityVersionPins
+    ?? Object.fromEntries(registry.capabilities.map(({ capabilityId, version }) => [capabilityId, version]));
   const familyIds = Object.fromEntries(bundle.catalog.commands.map((command) => [command.id, command.familyId]));
   const toolPermissionModes = resolveCapabilityToolPermissionModes({
     registry,
@@ -31,8 +33,8 @@ export function resolveStandaloneCapabilityReadiness(input: StandaloneHostRuntim
     registry,
     grants: synthesizeCapabilityGrantsFromRuntimeState({ registry }),
     revokedCapabilityIds: input.revokedCapabilityIds,
-    capabilityVersionPins: input.capabilityVersionPins,
-    requireVersionPins: input.requireVersionPins,
+    capabilityVersionPins,
+    requireVersionPins: input.requireVersionPins ?? true,
     approvedCommandIds: input.approvedCommandIds,
     toolPermissionModes,
   });

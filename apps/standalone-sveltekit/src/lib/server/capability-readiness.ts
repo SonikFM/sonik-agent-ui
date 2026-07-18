@@ -77,8 +77,25 @@ export function resolveCapabilityReadiness(input: CapabilityReadinessResolverInp
 export function requireCallableCapability(readiness: readonly CapabilityReadiness[], capabilityId: string): CapabilityReadiness {
   const result = readiness.find((entry) => entry.capabilityId === capabilityId)
     ?? computeCapabilityReadiness({ capabilityId, implementedCapabilityIds: [], authorable: false, definitionCompatible: false, mounted: false, contextReady: false, grantReady: false, previewable: false, committable: false, killSwitched: false, versionPinned: false });
-  if (!result.callable) throw new Error(`Capability ${capabilityId} is unavailable: ${result.reasonCodes.join(",")}`);
+  const reasonCodes = [
+    !result.registered && "not_registered",
+    !result.implemented && "not_implemented",
+    !result.authorable && "not_authorable",
+    !result.definitionCompatible && "definition_incompatible",
+    !result.mounted && "not_mounted",
+    !result.contextReady && "missing_context",
+    !result.grantReady && "missing_host_grant",
+    result.killSwitched && "kill_switched",
+    !result.versionPinned && "version_not_pinned",
+    !result.previewable && "preview_required",
+    result.effectMode === "write" && result.previewable && !result.committable && "approval_required",
+  ].filter(Boolean);
+  if (!result.callable || reasonCodes.length) throw new Error(`Capability ${capabilityId} is unavailable: ${reasonCodes.join(",") || result.reasonCodes.join(",")}`);
   return result;
+}
+
+export function requireCallableCapabilities(readiness: readonly CapabilityReadiness[], capabilityIds: Iterable<string>): CapabilityReadiness[] {
+  return [...new Set(capabilityIds)].sort().map((capabilityId) => requireCallableCapability(readiness, capabilityId));
 }
 
 function hasRequiredContext(auth: CommandCatalog["commands"][number]["auth"], context: CommandExecutionContext): boolean {
