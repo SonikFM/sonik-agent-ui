@@ -7,6 +7,7 @@ const rect = (x, y, width, height) => ({ x, y, left: x, top: y, width, height })
 const element = (bounds) => ({ getBoundingClientRect: () => bounds });
 
 globalThis.window = { addEventListener() {}, innerWidth: 1280, innerHeight: 720, devicePixelRatio: 2 };
+globalThis.requestAnimationFrame = (callback) => callback();
 globalThis.location = { origin: "https://host.example", pathname: "/bookings" };
 globalThis.document = {
   querySelectorAll(selector) {
@@ -25,7 +26,7 @@ globalThis.chrome = { runtime: { onMessage: { addListener(listener) { messageLis
 await import(`../dist/content-script.js?masking=${crypto.randomUUID()}`);
 messageListener({ type: "initialize", version: "sonik.active-tab.v1", nonce: "nonce", tabId: 7, windowId: 3 }, null, () => {});
 let preparation;
-messageListener({ type: "prepare-capture", version: "sonik.active-tab.v1", nonce: "nonce" }, null, (value) => { preparation = value; });
+await new Promise((resolve) => messageListener({ type: "prepare-capture", version: "sonik.active-tab.v1", nonce: "nonce" }, null, (value) => { preparation = value; resolve(); }));
 
 for (const required of ["type=password", "autocomplete*=cc-", "autocomplete*=token", "autocomplete=one-time-code", "name*=secret", "name*=token", "data-sonik-redact"]) {
   assert.ok(sensitiveSelector.includes(required), `missing sensitive selector ${required}`);
