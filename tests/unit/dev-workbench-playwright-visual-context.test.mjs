@@ -10,6 +10,7 @@ import {
 import {
   PLAYWRIGHT_PREVIEW_READINESS_RULE,
   appliedRedactions,
+  ariaSnapshotWithSensitiveContentRedacted,
   crossOriginFrameLocators,
   probeBrowserCapabilities,
   setupBrowser,
@@ -133,13 +134,26 @@ const preview = await listen((incoming, response) => {
     response.end();
     return;
   }
-  response.end('<iframe title="Payment" src="/redirect"></iframe>');
+  response.end('<input id="name"><textarea id="notes"></textarea><select id="account"><option>Public</option><option>Private account 73</option></select><iframe title="Payment" src="/redirect"></iframe>');
 });
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${preview.address().port}`);
   await page.waitForLoadState("networkidle");
+  await page.evaluate(() => {
+    document.querySelector("#name").value = "Ada Arbitrary";
+    document.querySelector("#notes").value = "unstructured private note";
+    document.querySelector("#account").selectedIndex = 1;
+  });
+  const ariaSnapshot = await ariaSnapshotWithSensitiveContentRedacted(page, page.locator("body"));
+  assert.doesNotMatch(ariaSnapshot, /Ada Arbitrary|unstructured private note|Private account 73/);
+  assert.deepEqual(await page.evaluate(() => [
+    document.querySelector("#name").value,
+    document.querySelector("#notes").value,
+    document.querySelector("#account").selectedIndex,
+    document.querySelector("#account").selectedOptions[0].textContent,
+  ]), ["Ada Arbitrary", "unstructured private note", 1, "Private account 73"], "live values and selection are restored after ARIA capture");
   const redirected = await crossOriginFrameLocators(page);
   assert.equal(redirected.length, 1, "committed cross-origin redirect is included in the mask");
   assert.match(await redirected[0].getAttribute("data-sonik-capture-cross-origin"), /^frame-/);
