@@ -45,11 +45,12 @@
         addOverlay(bounds);
       }
       if (state.overlays.length > sensitiveCount) redactionsApplied.push("Embedded frame pixels");
-      sendResponse({
+      const response = {
         redactionsApplied,
         viewport: { width: window.innerWidth, height: window.innerHeight, deviceScaleFactor: window.devicePixelRatio },
-      });
-      return;
+      };
+      requestAnimationFrame(() => requestAnimationFrame(() => sendResponse(response)));
+      return true;
     }
     if (message.type === "clear-capture") {
       clearCaptureChrome();
@@ -73,8 +74,21 @@
       route: sanitizedRoute(),
       request,
     }).then((result) => {
-      if (result?.type === "sonik:visual-context:result") event.source.postMessage(result, allowedOrigin);
-    });
+      if (result?.type === "sonik:visual-context:result") {
+        event.source.postMessage(result, allowedOrigin);
+      } else if (typeof result?.error === "string") {
+        postFailure();
+      }
+    }, postFailure);
+
+    function postFailure() {
+      event.source.postMessage({
+        messageSource: "sonik-agent-host", type: "sonik:visual-context:result", version: request.version,
+        origin: request.origin, requestId: request.requestId, operation: request.operation, source: request.source,
+        provider: request.provider, sourceContextRevision: request.sourceContextRevision, routeRevision: request.routeRevision,
+        status: "failed", disabledReason: "Active-tab capture failed.",
+      }, allowedOrigin);
+    }
   });
 
   function discoverWorkbenchFrames() {
