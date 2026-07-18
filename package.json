@@ -22,6 +22,7 @@
     "smoke:agent-ui:run-reattach": "node scripts/agent-ui-run-reattach-smoke.mjs",
     "gate:agent-ui": "node scripts/agent-ui-release-gate.mjs",
     "smoke:agent-ui:embed": "node scripts/agent-ui-embed-smoke.mjs",
+    "smoke:agent-ui:booking-visual-context": "pnpm --filter @sonik-agent-ui/dev-workbench-extension build && node --experimental-strip-types tests/unit/agent-embed.test.mjs && node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs tests/unit/dev-workbench-server.test.mjs && node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs tests/unit/dev-workbench-visual-context.test.mjs && (cd packages/agent-embed/src/vendor/impeccable/visual-context-picker && node --test tests/live-browser-dom.test.mjs) && node --experimental-strip-types apps/dev-workbench-extension/tests/capture-chrome.test.mjs && node apps/dev-workbench-extension/tests/masking.test.mjs",
     "smoke:agent-ui:visual-context:sandbox": "node scripts/agent-ui-visual-context-sandbox-runner.mjs",
     "smoke:agent-ui:visual-context:sandbox:internal": "pnpm --filter @sonik-agent-ui/agent-observability build && pnpm --filter @sonik-agent-ui/tool-contracts build && node --experimental-strip-types --loader ./tests/unit/ts-extension-loader.mjs scripts/agent-ui-visual-context-sandbox-smoke.mjs",
     "smoke:agent-ui:embed:real-model": "AGENT_UI_EMBED_SMOKE_REAL_MODEL=true node scripts/agent-ui-embed-smoke.mjs",
