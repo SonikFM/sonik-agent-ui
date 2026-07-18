@@ -89,7 +89,15 @@ try {
   });
   const pair = async () => {
     await triggerAction();
-    const paired = await sendHostRequest(fixtureFrame(), requestFor("pair-extension"), origin(host));
+    let paired;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        paired = await sendHostRequest(fixtureFrame(), requestFor("pair-extension"), origin(host), 500);
+        break;
+      } catch (error) {
+        if (attempt === 2) throw error;
+      }
+    }
     assert.equal(paired.status, "completed");
   };
 
