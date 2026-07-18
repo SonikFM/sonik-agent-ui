@@ -103,7 +103,12 @@ function harness(definition, suffix, options = {}) {
 }
 
 function readiness(capabilityId, callable = true) {
-  return { capabilityId, callable, reasonCodes: callable ? [] : ["kill_switched"] };
+  return {
+    capabilityId, effectMode: "write", registered: true, implemented: true, authorable: true,
+    definitionCompatible: true, mounted: true, contextReady: true, grantReady: true,
+    previewable: true, committable: true, killSwitched: !callable, versionPinned: true, callable,
+    reasonCodes: callable ? [] : ["kill_switched"], nextAction: callable ? null : "kill_switched",
+  };
 }
 
 function externalEffectIdentity(runId, definition) {

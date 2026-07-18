@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
+  authenticatedResumeEventSchema,
+  boundedNodeOutputSchema,
   jsonValueSchema,
   parseEngineRequestForRegistry,
   parseEngineResponseForRegistry,
   reasoningExecutionContractSchema,
+  workflowBindingSchema,
   workflowSchemaRefKey,
+  workflowWaitpointSchema,
   type EngineRequest,
   type EngineResponse,
   type BoundedNodeOutput,
@@ -72,8 +76,64 @@ export interface WorkflowNodeExecutionContext {
   externalEffectIdentity?: Pick<ExternalEffectIdentity, "namespace" | "keyDigest">;
   inlineOutputByteLimit?: number;
   now?: () => number;
+  runtimeRegistry?: WorkflowRuntimeRegistry;
   executors?: Partial<Record<WorkflowVNextNodeType, WorkflowNodeExecutor>>;
   onAttempt?: (event: WorkflowNodeAttemptEvent) => void;
+}
+
+export interface WorkflowBindingResolutionContext {
+  organizationId?: string;
+  runInput: JsonValue;
+  hostContext: Readonly<Record<string, JsonValue>>;
+  authorizedHostContextKeys: ReadonlySet<string>;
+  nodeOutputs: Readonly<Record<string, unknown>>;
+  nodeOutputSchemas: ReadonlyMap<string, z.ZodType>;
+  loadArtifact?: (artifact: Extract<BoundedNodeOutput, { storage: "artifact" }>["artifact"]) => Promise<unknown>;
+}
+
+function readJsonPath(value: unknown, path: readonly string[]): JsonValue {
+  let current = value;
+  for (const segment of path) {
+    if (segment === "__proto__" || segment === "prototype" || segment === "constructor") throw new Error("invalid_binding_path");
+    if (!current || typeof current !== "object" || !(segment in current)) throw new Error("binding_path_missing");
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return jsonValueSchema.parse(current);
+}
+
+export async function resolveWorkflowBinding(bindingInput: unknown, context: WorkflowBindingResolutionContext): Promise<JsonValue> {
+  const binding = workflowBindingSchema.parse(bindingInput);
+  if (binding.source === "constant") return binding.value;
+  if (binding.source === "run_input") return readJsonPath(context.runInput, binding.path);
+  if (binding.source === "host_context") {
+    if (!context.authorizedHostContextKeys.has(binding.key)) throw new Error("unauthorized_host_context");
+    if (!(binding.key in context.hostContext)) throw new Error("host_context_missing");
+    return context.hostContext[binding.key]!;
+  }
+
+  const output = boundedNodeOutputSchema.parse(context.nodeOutputs[binding.nodeId]);
+  const schema = context.nodeOutputSchemas.get(binding.nodeId);
+  if (!schema) throw new Error("node_output_schema_missing");
+  const value = output.storage === "inline" ? output.value : await (async () => {
+    if (context.organizationId && output.artifact.organizationId !== context.organizationId) throw new Error("artifact_organization_mismatch");
+    if (!context.loadArtifact) throw new Error("artifact_loader_missing");
+    return context.loadArtifact(output.artifact);
+  })();
+  return readJsonPath(schema.parse(value), binding.path);
+}
+
+export function validateWorkflowResumePayload(waitpointInput: unknown, eventInput: unknown, now = Date.now()): JsonValue {
+  const waitpoint = workflowWaitpointSchema.parse(waitpointInput);
+  const event = authenticatedResumeEventSchema.parse(eventInput);
+  if (waitpoint.kind === "budget_yield" || waitpoint.kind !== event.kind
+    || waitpoint.waitpointId !== event.waitpointId || waitpoint.runId !== event.workflowRunId
+    || waitpoint.nodeId !== event.nodeId || waitpoint.subjectId !== event.subjectId) throw new Error("resume_payload_mismatch");
+  if (waitpoint.expiresAt && (Date.parse(waitpoint.expiresAt) < now || Date.parse(event.issuedAt) > Date.parse(waitpoint.expiresAt))) throw new Error("resume_payload_expired");
+  if (event.kind === "approval") {
+    if (waitpoint.kind !== "approval" || waitpoint.logicalEffectId !== event.logicalEffectId) throw new Error("resume_payload_mismatch");
+    return { approved: true };
+  }
+  return event.answer;
 }
 
 function inline(value: JsonValue): EngineResponse {
@@ -148,7 +208,8 @@ export async function dispatchWorkflowNode(
   requestInput: unknown,
   context: WorkflowNodeExecutionContext = {},
 ): Promise<EngineResponse> {
-  const request = parseEngineRequestForRegistry(requestInput, workflowNodeExecutorRuntimeRegistry);
+  const runtimeRegistry = context.runtimeRegistry ?? workflowNodeExecutorRuntimeRegistry;
+  const request = parseEngineRequestForRegistry(requestInput, runtimeRegistry);
   context.onAttempt?.({
     phase: "started",
     workflowRunId: request.workflowRunId,
@@ -168,9 +229,17 @@ export async function dispatchWorkflowNode(
     reasoningContract && !reasoningContract.success
       ? terminal("reasoning_contract_required", "Reasoning requires structured output and execution budgets with no governed nested writes")
       : executor ? await executor(request) : defaultExecutor(request, context),
-    workflowNodeExecutorRuntimeRegistry,
+    runtimeRegistry,
   );
   if (reasoningContract?.success && response.status === "succeeded") {
+    if (response.output.storage === "inline") {
+      const key = workflowSchemaRefKey(reasoningContract.data.structuredOutputSchema);
+      const schema = "get" in runtimeRegistry.schemas && typeof runtimeRegistry.schemas.get === "function"
+        ? runtimeRegistry.schemas.get(key)
+        : (runtimeRegistry.schemas as Readonly<Record<string, z.ZodType>>)[key];
+      if (!schema) response = terminal("reasoning_output_schema_missing", `Reasoning output schema is not registered: ${key}`);
+      else if (!schema.safeParse(response.output.value).success) response = terminal("reasoning_output_schema_invalid", "Reasoning output does not match its declared structured schema");
+    }
     if (executor && !context.reasoningUsage) response = terminal("reasoning_usage_required", "Reasoning adapters must report step and token usage");
     const usage = context.reasoningUsage ?? { steps: 1, tokens: 0 };
     const elapsed = (context.now ?? Date.now)() - startedAt;
