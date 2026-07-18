@@ -139,10 +139,10 @@ export function emitVisualBrowserTelemetry(
 }
 
 export function validateVisualContextSubmission(input: VisualContextSubmission): void {
-  assertVisualContextResultMatchesRequest(input.request, input.result);
-  if (input.result.screenshot?.fidelity === "exact-active-tab") {
+  if (input.request.provider === "chrome-active-tab" || input.result.provider === "chrome-active-tab") {
     throw new Error("Exact active-tab capture requires server-verifiable extension attestation.");
   }
+  assertVisualContextResultMatchesRequest(input.request, input.result);
   if (JSON.stringify(input.request.source) !== JSON.stringify(input.result.source)) {
     throw new Error("Visual context result source does not match the pending request.");
   }

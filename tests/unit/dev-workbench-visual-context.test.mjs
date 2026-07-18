@@ -102,6 +102,54 @@ assert.throws(() => validateVisualContextSubmission({
     screenshot: { ...result.screenshot, provider: "chrome-active-tab", fidelity: "exact-active-tab", captureBasis: "native-active-tab-redacted", temporaryPath: undefined, pngBase64: png.toString("base64") },
   },
 }), /attestation/, "host assertions cannot establish exact-active-tab fidelity");
+assert.throws(() => validateVisualContextSubmission(visualContextSubmissionSchema.parse({
+  workspaceSessionId: "workspace-1",
+  request,
+  result: {
+    ...result,
+    provider: "chrome-active-tab",
+    screenshot: { ...result.screenshot, provider: "chrome-active-tab", fidelity: "exact-active-tab", captureBasis: "native-active-tab-redacted", temporaryPath: undefined, pngBase64: png.toString("base64") },
+  },
+})), /attestation/, "an unattested result provider fails closed even when the request claims an allowed provider");
+const unattestedSubmissions = ["pair-extension", "unpair-extension", "capture"].map((operation, index) => {
+  const unattestedRequest = {
+    ...request,
+    requestId: `unattested-${index}`,
+    operation,
+    source: { id: "host", label: "Host · booking.example.test", surface: "embedded-host", route: "/booking" },
+    provider: "chrome-active-tab",
+  };
+  return visualContextSubmissionSchema.parse({
+    workspaceSessionId: "workspace-1",
+    request: unattestedRequest,
+    result: {
+      ...unattestedRequest,
+      messageSource: "sonik-agent-host",
+      type: "sonik:visual-context:result",
+      status: "completed",
+      ...(operation === "capture" ? {
+        selectionResolution: "not-requested",
+        screenshot: {
+          ...result.screenshot,
+          provider: "chrome-active-tab",
+          fidelity: "exact-active-tab",
+          captureBasis: "native-active-tab-redacted",
+          temporaryPath: undefined,
+          pngBase64: png.toString("base64"),
+        },
+      } : {}),
+    },
+  });
+});
+for (const unattested of unattestedSubmissions) {
+  assert.throws(() => validateVisualContextSubmission(unattested), /attestation/, `${unattested.request.operation} fails closed without server-verifiable attestation`);
+}
+const hostClearRequest = { ...request, requestId: "host-clear", operation: "clear", source: unattestedSubmissions[0].request.source, provider: "host" };
+assert.doesNotThrow(() => validateVisualContextSubmission(visualContextSubmissionSchema.parse({
+  workspaceSessionId: "workspace-1",
+  request: hostClearRequest,
+  result: { ...hostClearRequest, messageSource: "sonik-agent-host", type: "sonik:visual-context:result", status: "completed" },
+})), "ordinary Host provider operations remain allowed");
 const olderRequest = { ...request, requestId: "older" };
 const newerRequest = { ...request, requestId: "newer" };
 const issuedFirst = issueVisualContextRequest({ nextSequence: 1, pending: {} }, olderRequest);
@@ -213,6 +261,15 @@ try {
   assert.equal(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_PATH)).status, "current");
   assert.deepEqual(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_REQUESTS_PATH)).pending, {});
   assert.equal((await submitWorkspaceVisualContext("workspace-1", submission)).ok, false, "replay is rejected after consumption");
+
+  const stableBeforeUnattested = Buffer.from(sandboxFiles.get(VISUAL_CONTEXT_PATH));
+  for (const unattested of unattestedSubmissions) {
+    assert.equal((await registerWorkspaceVisualContextRequest("workspace-1", unattested.request)).ok, true);
+    const rejectedUnattested = await submitWorkspaceVisualContext("workspace-1", unattested);
+    assert.equal(rejectedUnattested.ok, false, `${unattested.request.operation} cannot be accepted by the real service`);
+    assert.deepEqual(sandboxFiles.get(VISUAL_CONTEXT_PATH), stableBeforeUnattested, "unattested results cannot promote state");
+    assert.ok(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_REQUESTS_PATH)).pending[unattested.request.requestId], "rejection occurs before consuming the canonical issuance");
+  }
 } finally {
   Sandbox.get = originalSandboxGet;
 }
