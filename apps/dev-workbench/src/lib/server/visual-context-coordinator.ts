@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { z } from "zod";
+import { createTelemetryEvent, type AgentTelemetryEvent } from "@sonik-agent-ui/agent-observability";
 import {
   assertVisualContextResultMatchesRequest,
   maxVisualContextImageBytes,
@@ -35,6 +36,49 @@ export const visualContextInvalidationSchema = z.strictObject({
 
 export type VisualContextSubmission = z.infer<typeof visualContextSubmissionSchema>;
 export type VisualContextInvalidation = z.infer<typeof visualContextInvalidationSchema>;
+
+export type VisualContextTelemetryEventName =
+  | "visual_context.picker.started"
+  | "visual_context.picker.cancelled"
+  | "visual_context.target.selected"
+  | "visual_context.capture.started"
+  | "visual_context.capture.completed"
+  | "visual_context.capture.failed"
+  | "visual_context.extension_pairing.changed"
+  | "visual_context.result.discarded"
+  | "visual_context.browser_setup.changed";
+
+export function emitVisualContextTelemetry(
+  input: {
+    event: VisualContextTelemetryEventName;
+    workspaceSessionId: string;
+    requestId?: string;
+    operation?: string;
+    provider?: string;
+    status?: string;
+    accepted?: boolean;
+    sourceContextRevision?: number;
+    routeRevision?: number;
+  },
+  write: (line: string) => void = console.info,
+): AgentTelemetryEvent {
+  const emitted = createTelemetryEvent({
+    source: "server",
+    event: input.event,
+    sessionId: input.workspaceSessionId,
+    requestId: input.requestId,
+    payload: {
+      operation: input.operation,
+      provider: input.provider,
+      status: input.status,
+      accepted: input.accepted,
+      sourceContextRevision: input.sourceContextRevision,
+      routeRevision: input.routeRevision,
+    },
+  });
+  write(JSON.stringify(emitted));
+  return emitted;
+}
 
 export function validateVisualContextSubmission(input: VisualContextSubmission): void {
   assertVisualContextResultMatchesRequest(input.request, input.result);
