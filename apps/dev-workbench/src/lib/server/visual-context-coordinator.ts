@@ -275,22 +275,33 @@ export function decodeCanonicalBase64(value: string): Buffer {
 export function createVisualContextLeaseAcquireScript(attempts = 50, sleepSeconds = 0.1): string {
   if (!Number.isInteger(attempts) || attempts < 1 || sleepSeconds < 0) throw new TypeError("Invalid visual context lease retry policy.");
   return `set -eu
-lease="$1"; owner="$2"; expires="$3"; candidate="$lease.$owner.tmp"
+lease="$1"; owner="$2"; expires="$3"; candidate="$lease.$owner.tmp"; guard="$lease.acquire"; guard_held=0
 mkdir -p "$(dirname "$lease")"
-trap 'rm -f "$candidate"' EXIT
+cleanup() {
+  rm -f "$candidate"
+  if [ "$guard_held" -eq 1 ]; then rmdir "$guard" 2>/dev/null || true; fi
+}
+trap cleanup EXIT
 printf '%s\n%s\n' "$owner" "$expires" > "$candidate"
 for attempt in $(seq 1 ${attempts}); do
-  if ln "$candidate" "$lease" 2>/dev/null; then exit 0; fi
+  if ! mkdir "$guard" 2>/dev/null; then sleep ${sleepSeconds}; continue; fi
+  guard_held=1
+  if ln "$candidate" "$lease" 2>/dev/null; then rmdir "$guard"; guard_held=0; exit 0; fi
   current_expires=$(sed -n '2p' "$lease" 2>/dev/null || true)
   case "$current_expires" in
     ''|*[!0-9]*)
       modified=$(stat -c %Y "$lease" 2>/dev/null || printf '0')
-      if [ "$modified" -ge "$(($(date +%s) - 60))" ]; then sleep ${sleepSeconds}; continue; fi
+      if [ "$modified" -ge "$(($(date +%s) - 60))" ]; then rmdir "$guard"; guard_held=0; sleep ${sleepSeconds}; continue; fi
       current_expires=0
       ;;
   esac
   now_ms=$(( $(date +%s) * 1000 ))
-  if [ "$current_expires" -lt "$now_ms" ]; then rm -f "$lease"; continue; fi
+  if [ "$current_expires" -lt "$now_ms" ]; then
+    rm -f "$lease"
+    if ln "$candidate" "$lease" 2>/dev/null; then rmdir "$guard"; guard_held=0; exit 0; fi
+  fi
+  rmdir "$guard"
+  guard_held=0
   sleep ${sleepSeconds}
 done
 exit 75`;

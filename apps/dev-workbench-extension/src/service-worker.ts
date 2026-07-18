@@ -5,6 +5,7 @@ import { TRANSPORT_VERSION, createResult, isExactWorkbenchRequest, isSafeCapture
 
 const pairings = new Map();
 const lifecycle = createPairingLifecycle();
+const capturesInFlight = new Set<number>();
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !Number.isInteger(tab.windowId) || !tab.active || !/^https?:/.test(tab.url ?? "")) return;
@@ -60,6 +61,9 @@ async function handleRequest(message, sender) {
   if (!isExactWorkbenchRequest(request, pairing.allowedOrigins, message.route)) {
     throw new Error("The Workbench origin, route, revision, or request is invalid.");
   }
+  if (request.operation === "capture" && capturesInFlight.has(tabId)) {
+    throw new Error("An active-tab capture is already in progress.");
+  }
   const lease = lifecycle.authorize({
     ...identity, operation: request.operation, requestId: request.requestId, origin: request.origin, route: message.route,
     sourceContextRevision: request.sourceContextRevision, routeRevision: request.routeRevision,
@@ -79,10 +83,10 @@ async function handleRequest(message, sender) {
   }
 
   type CapturePreparation = { viewport: { width: number; height: number; deviceScaleFactor: number }; redactionsApplied: string[] };
-  let prepared: CapturePreparation | null = null;
-  let dataUrl;
+  capturesInFlight.add(tabId);
   try {
-    dataUrl = await captureVisibleTabWithoutSonikChrome({
+    let prepared: CapturePreparation | null = null;
+    const dataUrl = await captureVisibleTabWithoutSonikChrome({
       async hideCaptureChrome() {
         prepared = await chrome.tabs.sendMessage(tabId, { type: "prepare-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce });
         if (!isSafeCapturePreparation(prepared)) throw new Error("Capture redaction preparation failed closed.");
@@ -90,44 +94,42 @@ async function handleRequest(message, sender) {
       captureVisibleTab: () => chrome.tabs.captureVisibleTab(pairing.windowId, { format: "png" }),
       restoreCaptureChrome: () => chrome.tabs.sendMessage(tabId, { type: "clear-capture", version: TRANSPORT_VERSION, nonce: pairing.nonce }),
     });
+    const capturePreparation = prepared as CapturePreparation | null;
+    if (!capturePreparation) throw new Error("Capture redaction preparation failed closed.");
+    const stillActive = await chrome.tabs.query({ active: true, windowId: pairing.windowId });
+    if (stillActive[0]?.id !== tabId || !lifecycle.isCurrent(lease, identity)) {
+      throw new Error("The paired tab stopped being active during capture.");
+    }
+    const png = pngMetadata(dataUrl);
+    if (!matchesCaptureViewport(png, capturePreparation.viewport)) {
+      throw new Error("Active-tab capture dimensions do not match the prepared viewport.");
+    }
+    const sha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", png.bytes))]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    return createResult(request, {
+      ariaSnapshot: null,
+      selectionResolution: "not-requested",
+      screenshot: {
+        mime: "image/png",
+        width: png.width,
+        height: png.height,
+        bytes: png.bytes.length,
+        sha256,
+        provider: "chrome-active-tab",
+        fidelity: "exact-active-tab",
+        captureBasis: "native-active-tab-redacted",
+        viewport: capturePreparation.viewport,
+        redactionsApplied: capturePreparation.redactionsApplied,
+        capturedAt: new Date().toISOString(),
+        pngBase64: png.pngBase64,
+      },
+    });
   } catch (error) {
     pairings.delete(tabId);
     lifecycle.revoke(tabId);
     throw error;
+  } finally {
+    capturesInFlight.delete(tabId);
   }
-  const capturePreparation = prepared as CapturePreparation | null;
-  if (!capturePreparation) throw new Error("Capture redaction preparation failed closed.");
-  const stillActive = await chrome.tabs.query({ active: true, windowId: pairing.windowId });
-  if (stillActive[0]?.id !== tabId || !lifecycle.isCurrent(lease, identity)) {
-    pairings.delete(tabId);
-    lifecycle.revoke(tabId);
-    throw new Error("The paired tab stopped being active during capture.");
-  }
-  const png = pngMetadata(dataUrl);
-  if (!matchesCaptureViewport(png, capturePreparation.viewport)) {
-    pairings.delete(tabId);
-    lifecycle.revoke(tabId);
-    throw new Error("Active-tab capture dimensions do not match the prepared viewport.");
-  }
-  const sha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", png.bytes))]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  return createResult(request, {
-    ariaSnapshot: null,
-    selectionResolution: "not-requested",
-    screenshot: {
-      mime: "image/png",
-      width: png.width,
-      height: png.height,
-      bytes: png.bytes.length,
-      sha256,
-      provider: "chrome-active-tab",
-      fidelity: "exact-active-tab",
-      captureBasis: "native-active-tab-redacted",
-      viewport: capturePreparation.viewport,
-      redactionsApplied: capturePreparation.redactionsApplied,
-      capturedAt: new Date().toISOString(),
-      pngBase64: png.pngBase64,
-    },
-  });
 }

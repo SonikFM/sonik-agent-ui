@@ -21,7 +21,7 @@ export const visualContextRouteSchema = z.string()
   .min(1)
   .max(2_048)
   .startsWith("/")
-  .refine((value) => !value.includes("?") && !value.includes("#") && !value.startsWith("//"), "Route must be a sanitized path without query or hash data.");
+  .refine((value) => !value.includes("?") && !value.includes("#") && !value.startsWith("//") && !/[\\\u0000-\u001f\u007f]/.test(value), "Route must be sanitized without query, hash, backslash, or control characters.");
 
 export const visualContextOperationSchema = z.enum([
   "get-capabilities",

@@ -44,6 +44,13 @@ for (const invalidRequest of [
 ]) {
   assert.throws(() => visualContextRequestSchema.parse(invalidRequest));
 }
+for (const route of ["/\\\\attacker.example/path", "/reservations\u0000hidden", "/reservations\nother"]) {
+  assert.throws(
+    () => visualContextRequestSchema.parse({ ...visualContextFixture.request, source: { ...visualContextFixture.request.source, route } }),
+    /Route must be sanitized/,
+    `visual context routes reject backslashes and control characters: ${JSON.stringify(route)}`,
+  );
+}
 
 for (const forbiddenField of ["selector", "outerHTML", "value", "credentials"]) {
   assert.throws(() => visualContextResultSchema.parse({ ...visualContextFixture.result, [forbiddenField]: "secret" }));

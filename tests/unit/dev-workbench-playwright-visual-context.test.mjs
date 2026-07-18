@@ -21,7 +21,9 @@ assert.deepEqual(appliedRedactions({ sensitiveCount: 0, declaredSensitiveCount: 
 assert.deepEqual(appliedRedactions({ sensitiveCount: 1, declaredSensitiveCount: 1, crossOriginFrameCount: 1, rawAriaSnapshot: "secret@example.com", ariaSnapshot: "[redacted email]" }), [
   "sensitive form fields", "declared sensitive content", "cross-origin frames", "AI accessibility sensitive content", "AI accessibility text",
 ]);
-assert.match(await readFile("apps/dev-workbench/scripts/capture-visual-context.mjs", "utf8"), /const mask = \[page\.locator\(sensitiveSelector\), \.\.\.crossOriginFrames\]/, "Playwright screenshot masks remain a Locator array");
+const captureScriptSource = await readFile("apps/dev-workbench/scripts/capture-visual-context.mjs", "utf8");
+assert.match(captureScriptSource, /const mask = \[page\.locator\(sensitiveSelector\), \.\.\.crossOriginFrames\]/, "Playwright screenshot masks remain a Locator array");
+assert.match(captureScriptSource, /targetUrl\.origin !== previewUrl\.origin[\s\S]*throw new Error[\s\S]*page\.goto\(targetUrl\.href/, "Preview navigation rejects a cross-origin route before page.goto");
 
 const request = {
   requestId: "capture-1",

@@ -173,7 +173,10 @@ export async function captureVisualContext(request, options = {}) {
       deviceScaleFactor: request.viewport?.deviceScaleFactor ?? 1,
     });
     const page = await context.newPage();
-    await page.goto(new URL(request.source.route, options.previewOrigin ?? previewOrigin()).href, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    const previewUrl = new URL(options.previewOrigin ?? previewOrigin());
+    const targetUrl = new URL(request.source.route, previewUrl);
+    if (targetUrl.origin !== previewUrl.origin) throw new Error("Preview capture navigation must remain on the configured origin.");
+    await page.goto(targetUrl.href, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await Promise.all([
       page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined),
       page.evaluate(() => Promise.race([

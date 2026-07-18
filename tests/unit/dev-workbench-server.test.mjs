@@ -162,6 +162,8 @@ assert.deepEqual(hostVisualPersistenceState(true, { operation: "capture", status
   status: "idle", staleReason: null, message: "Host Capture is current.",
 }, "accepted=true alone may report current Host capture");
 const workbenchPageSource = readFileSync("apps/dev-workbench/src/routes/+page.svelte", "utf8");
+const hostContextBridgeSource = readFileSync("apps/dev-workbench/src/lib/client/host-context-bridge.ts", "utf8");
+assert.ok(hostContextBridgeSource.includes("/[\\u0000-\\u001f\\u007f\\\\]/"), "host route sanitization rejects control characters and backslashes");
 assert.match(workbenchPageSource, /let pendingVisualRequest = \$state\.raw<VisualContextRequest \| null>\(null\)/, "pending Host request readiness is reactive without changing request identity");
 assert.ok((workbenchPageSource.match(/pendingHostVisualRequestDisabledReason\(pendingVisualRequest\)/g) ?? []).length >= 4, "UI readiness and every Host action function share the pending-request guard");
 assert.match(workbenchPageSource, /classification === "ignore"[^]*classification === "invalidate"[^]*pendingVisualRequest = null/, "nonmatching results return before exact completion clears pending state");

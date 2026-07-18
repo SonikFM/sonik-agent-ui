@@ -226,6 +226,6 @@ function parseOrigin(value: string): string | null {
 }
 
 function sanitizeRoute(value: unknown): string {
-  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) return "/";
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") || /[\u0000-\u001f\u007f\\]/.test(value)) return "/";
   return value.split(/[?#]/, 1)[0]!.slice(0, 2_048) || "/";
 }

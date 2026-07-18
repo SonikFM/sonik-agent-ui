@@ -281,8 +281,10 @@ try {
 const leaseRoot = await mkdtemp(join(tmpdir(), "sonik-visual-lease-"));
 try {
   const leasePath = join(leaseRoot, "lease");
+  const leaseScript = createVisualContextLeaseAcquireScript(2, 0.01);
+  assert.match(leaseScript, /mkdir "\$guard"/, "lease inspection and stale reclaim share one atomic owner-token guard");
   const runLease = async (owner) => {
-    const command = ["-lc", createVisualContextLeaseAcquireScript(2, 0.01), "_", leasePath, owner, String(Date.now() + 60_000)];
+    const command = ["-lc", leaseScript, "_", leasePath, owner, String(Date.now() + 60_000)];
     try {
       await promisify(execFile)("bash", command);
       return 0;
