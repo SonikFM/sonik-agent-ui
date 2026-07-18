@@ -101,10 +101,11 @@ try {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         paired = await sendHostRequest(fixtureFrame(), requestFor("pair-extension"), origin(host), 500);
-        break;
+        if (paired.status === "completed") break;
       } catch (error) {
         if (attempt === 2) throw error;
       }
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 250));
     }
     assert.equal(paired.status, "completed");
   };
