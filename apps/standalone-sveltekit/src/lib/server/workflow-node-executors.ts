@@ -69,11 +69,13 @@ export interface WorkflowNodeAttemptEvent {
 export interface WorkflowNodeExecutionContext {
   subjectId?: string;
   commandId?: string;
+  logicalEffectId?: string;
   answer?: JsonValue;
   approvalDecision?: "approved" | "rejected";
   reasoning?: unknown;
   reasoningUsage?: { steps: number; tokens: number };
   externalEffectIdentity?: Pick<ExternalEffectIdentity, "namespace" | "keyDigest">;
+  providerSupportsIdempotency?: boolean;
   inlineOutputByteLimit?: number;
   now?: () => number;
   runtimeRegistry?: WorkflowRuntimeRegistry;
@@ -180,7 +182,7 @@ function defaultExecutor(request: EngineRequest, context: WorkflowNodeExecutionC
       if (context.approvalDecision === "rejected") return terminal("approval_rejected", "The approval was rejected");
       return context.approvalDecision === "approved"
         ? inline({ approved: true })
-        : { status: "waiting", waitpoint: { kind: "approval", waitpointId: request.attemptId, runId: request.workflowRunId, nodeId: request.nodeId, subjectId: context.subjectId ?? "unknown", logicalEffectId: request.logicalEffectId ?? request.nodeId, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() } };
+        : { status: "waiting", waitpoint: { kind: "approval", waitpointId: request.attemptId, runId: request.workflowRunId, nodeId: request.nodeId, subjectId: context.subjectId ?? "unknown", logicalEffectId: context.logicalEffectId ?? request.nodeId, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() } };
     case "reasoning": {
       const contract = reasoningExecutionContractSchema.safeParse(context.reasoning);
       if (!contract.success) return terminal("reasoning_contract_required", "Reasoning requires structured output and execution budgets");

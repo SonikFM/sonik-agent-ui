@@ -1,23 +1,29 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { HostSessionEnvelope } from "@sonik-agent-ui/platform-adapters";
-import { publicResumeEventSchema } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import { approvalDecisionSchema, publicResumeEventSchema, type CapabilityReadiness, type WorkflowVNextNode } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import { approvedCommandIdsFromHostSession } from "./host-command-runtime.ts";
 import { resolveStandaloneCapabilityReadiness } from "./standalone-capability-readiness.ts";
 import type { WorkflowDefinitionRepository } from "./workflow-definition-repository.ts";
 import { WorkflowRunDriver } from "./workflow-run-driver.ts";
+import type { WorkflowBindingResolutionContext, WorkflowNodeExecutionContext } from "./workflow-node-executors.ts";
 import type { AsyncWorkflowRunStore, WorkflowRunJournalStore } from "./workflow-run-store.ts";
 import { handleWorkflowRunsAction, workflowRunOwnerFromHostSession, type WorkflowRunsAction, type WorkflowRunsResult } from "./workflow-runs.ts";
 
 export type PublicWorkflowDriverAction =
+  | Extract<WorkflowRunsAction, { action: "start" }>
+  | { action: "preview" | "approve" | "commit"; runId: string; nodeId?: string }
   | { action: "run_until_blocked"; request: unknown }
   | { action: "resume_run"; request: unknown }
-  | { action: "cancel_run"; runId: string };
+  | { action: "cancel_run"; runId: string; lease?: unknown };
 
 export interface PublicWorkflowDriverDeps {
   hostSession: HostSessionEnvelope;
   store: AsyncWorkflowRunStore;
   journal: WorkflowRunJournalStore;
   repository: WorkflowDefinitionRepository;
+  executionContext?: (node: WorkflowVNextNode) => WorkflowNodeExecutionContext;
+  resolveReadiness?: (approvedCommandIds?: readonly string[]) => readonly CapabilityReadiness[];
+  loadArtifact?: WorkflowBindingResolutionContext["loadArtifact"];
 }
 
 export interface PublicWorkflowDriverResponse {
@@ -28,21 +34,34 @@ export interface PublicWorkflowDriverResponse {
 export async function handlePublicWorkflowDriverAction(action: PublicWorkflowDriverAction, deps: PublicWorkflowDriverDeps): Promise<PublicWorkflowDriverResponse> {
   const owner = workflowRunOwnerFromHostSession(deps.hostSession);
   if (!owner) return failure(401, "authenticated_workspace_owner_required");
+  if (action.action === "start") {
+    if (action.source?.kind !== "published") return failure(400, "legacy_workflow_path_not_available_for_vnext");
+    const result = await handleWorkflowRunsAction(action, { hostSession: deps.hostSession, store: deps.store, repository: deps.repository });
+    return { status: result.ok ? 200 : 400, result };
+  }
   if (action.action === "cancel_run" && "lease" in action) return failure(400, "public_lease_forbidden");
-  const request = action.action === "cancel_run" ? {} : action.request;
+  const request = action.action === "run_until_blocked" || action.action === "resume_run" ? action.request : {};
   if (!request || typeof request !== "object" || Array.isArray(request)) return failure(400, "invalid_driver_request");
   const publicRequest = request as Record<string, unknown>;
   for (const field of ["workflowVersionId", "runInput", "lease", "hostSigned"]) {
     if (field in publicRequest) return failure(400, `public_${field}_forbidden`);
   }
   if (action.action !== "resume_run" && "resumeEvent" in publicRequest) return failure(400, "resume_event_not_allowed");
-  const runId = action.action === "cancel_run" ? action.runId : String(publicRequest.workflowRunId ?? "");
+  const runId = "runId" in action ? action.runId : String(publicRequest.workflowRunId ?? "");
   if (!runId) return failure(400, "workflowRunId_required");
   const row = await deps.store.getRun(owner, runId);
   if (!row) return failure(404, "run_not_found");
   const published = await deps.repository.getPublished(owner, row.workflowVersionId);
   if (!published || published.workflowId !== row.workflowId) return failure(404, "published_workflow_not_found");
-  const parsedResumeEvent = action.action === "resume_run" ? publicResumeEventSchema.safeParse(publicRequest.resumeEvent) : null;
+  const snapshot = await deps.journal.getSnapshot(owner, runId);
+  const approvalWait = snapshot?.waits[0];
+  if (action.action === "approve" && (!approvalWait || approvalWait.kind !== "approval")) return failure(409, "approval_wait_not_available");
+  const approvalLogicalEffectId = approvalWait?.kind === "approval" ? approvalWait.logicalEffectId : undefined;
+  const parsedResumeEvent = action.action === "resume_run"
+    ? publicResumeEventSchema.safeParse(publicRequest.resumeEvent)
+    : action.action === "approve"
+      ? publicResumeEventSchema.safeParse({ kind: "approval", eventId: randomUUID(), waitpointId: approvalWait!.waitpointId, workflowRunId: runId, nodeId: approvalWait!.nodeId, runRevision: snapshot!.revision, logicalEffectId: approvalLogicalEffectId, issuedAt: new Date().toISOString() })
+      : null;
   if (action.action === "resume_run" && !parsedResumeEvent?.success) return failure(400, "invalid_resume_event");
   const signedResumeEvent = parsedResumeEvent?.success ? {
     ...parsedResumeEvent.data,
@@ -54,8 +73,16 @@ export async function handlePublicWorkflowDriverAction(action: PublicWorkflowDri
   const serverRequest = { workflowRunId: runId, resumeEvent: signedResumeEvent, lease, budget: { maxNodes: 20, maxWallTimeMs: 10_000 } };
   const internalAction: WorkflowRunsAction = action.action === "cancel_run"
     ? { action: "cancel_run", runId, lease }
-    : { ...action, request: serverRequest };
-  const readiness = () => resolveStandaloneCapabilityReadiness({ hostSession: deps.hostSession, approvedCommandIds: approvedCommandIdsFromHostSession(deps.hostSession) });
+    : action.action === "resume_run"
+      ? { action: "resume_run", request: serverRequest }
+      : { action: "run_until_blocked", request: serverRequest };
+  const durableApprovedCommandIds = Object.entries(snapshot?.outputs ?? {})
+    .filter(([key]) => key.startsWith("__approval_decision__:"))
+    .flatMap(([, output]) => output.storage === "inline" && approvalDecisionSchema.safeParse(output.value).success
+      ? [approvalDecisionSchema.parse(output.value).commandId]
+      : []);
+  const approvedCommandIds = [...new Set([...approvedCommandIdsFromHostSession(deps.hostSession), ...durableApprovedCommandIds])];
+  const readiness = () => deps.resolveReadiness?.(approvedCommandIds) ?? resolveStandaloneCapabilityReadiness({ hostSession: deps.hostSession, approvedCommandIds });
   const driver = new WorkflowRunDriver({
     journal: deps.journal,
     owner,
@@ -67,12 +94,13 @@ export async function handlePublicWorkflowDriverAction(action: PublicWorkflowDri
     },
     runInput: row.input as never,
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
+    authorizedHostContextKeys: new Set(["organizationId", "principalId"]),
+    loadArtifact: deps.loadArtifact,
     resolveReadiness: readiness,
     resolveDependencyPins: () => published.dependencyPins,
     executionContext: (node) => ({
+      ...deps.executionContext?.(node),
       subjectId: owner.userId,
-      ...(node.nodeType === "ask_user" && signedResumeEvent?.kind === "answer" ? { answer: signedResumeEvent.answer } : {}),
-      ...(node.nodeType === "approval" && signedResumeEvent?.kind === "approval" ? { approvalDecision: "approved" as const } : {}),
     }),
     approvalDecision: (commitNodeId, externalEffectIdentity) => {
       if (signedResumeEvent?.kind !== "approval") return undefined;
@@ -82,7 +110,10 @@ export async function handlePublicWorkflowDriverAction(action: PublicWorkflowDri
     },
   });
   try {
+    if (action.action === "approve") return { status: 200, result: { ok: true, run: await driver.approve(serverRequest) } as unknown as WorkflowRunsResult };
     return { status: 200, result: await handleWorkflowRunsAction(internalAction, { hostSession: deps.hostSession, store: deps.store, driver }) };
+  } catch (error) {
+    return failure(200, error instanceof Error ? error.message : "workflow_run_driver_failed");
   } finally {
     await deps.journal.releaseLease(owner, runId, lease.leaseId);
   }

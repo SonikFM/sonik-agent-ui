@@ -216,6 +216,9 @@ export async function handleWorkflowRunsAction(action: WorkflowRunsAction, deps:
 
   const row = await store.getRun(owner, action.runId);
   if (!row) return { ok: false, reason: "run_not_found" };
+  if (!registeredInternalWorkflows[row.workflowId] && !row.workflowVersionId.endsWith("-draft")) {
+    return { ok: false, reason: "legacy_workflow_path_not_available_for_vnext" };
+  }
 
   if (action.action === "preview") {
     const node = nodeById(row.definition, action.nodeId);

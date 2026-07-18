@@ -43,7 +43,9 @@ function harness(definition, suffix, options = {}) {
 }
 
 {
-  const { runId, driver } = harness(train0WorkflowFixtures.conditional, "branch");
+  const { runId, driver } = harness(train0WorkflowFixtures.conditional, "branch", {
+    executionContext: (node) => node.nodeId === "start" ? { executors: { trigger: () => ({ status: "succeeded", output: { storage: "inline", value: { available: false }, byteLength: 19 } }) } } : {},
+  });
   const completed = await driver.start(request(runId, "branch-a"));
   assert.equal(completed.status, "succeeded");
   assert.deepEqual(completed.selectedPath, ["start", "choose", "no"], "one deterministic branch is selected");
@@ -70,9 +72,8 @@ function harness(definition, suffix, options = {}) {
 }
 
 {
-  let answered = false;
   const { runId, driver, journal } = harness(train0WorkflowFixtures.askUser, "ask", {
-    executionContext: (node) => node.nodeType === "ask_user" ? { subjectId: owner.userId, ...(answered ? { answer: "Ada" } : {}) } : {},
+    executionContext: (node) => node.nodeType === "ask_user" ? { subjectId: owner.userId } : {},
   });
   const waiting = await driver.start(request(runId, "ask-a"));
   assert.equal(waiting.status, "waiting");
@@ -80,12 +81,12 @@ function harness(definition, suffix, options = {}) {
   const waitEvent = (await journal.listEvents(owner, runId)).find((event) => event.eventType === "wait_created");
   assert.equal(waitEvent.attemptId, waitpoint.waitpointId, "wait events retain the exact executed attempt identity");
   assert.equal(waitEvent.correlationIds.includes(waitEvent.attemptId), true);
-  answered = true;
   const resumed = await driver.resume({
     ...request(runId, "ask-a"),
     resumeEvent: { kind: "answer", answer: "Ada", eventId: "answer-1", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` },
   });
   assert.equal(resumed.status, "succeeded", "a persisted wait resumes once after service recreation-compatible state load");
+  assert.equal(resumed.outputs.ask.value, "Ada", "the validated resume payload is the canonical waiting-node output");
   await assert.rejects(() => driver.resume({ ...request(runId, "ask-a"), resumeEvent: { kind: "answer", answer: "Ada", eventId: "answer-2", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` } }), /waitpoint|terminal|resume/i);
 }
 
@@ -206,6 +207,7 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
     claimId: "ignored", runId, logicalEffectId: binding.logicalEffectId, attemptId: "ignored",
     idempotencyKey: externalEffectIdempotencyKey(identity), providerSupportsIdempotency: true, externalEffectIdentity: identity,
   });
+  assert.equal(persisted.claim.providerSupportsIdempotency, false, "provider idempotency defaults to false without adapter evidence");
   assert.deepEqual(persisted.claim.result, {
     status: "succeeded",
     output: { storage: "inline", value: { ok: true }, byteLength: 11 },
@@ -385,7 +387,7 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
 {
   const definition = approvalDefinition();
   let providerCalls = 0;
-  const { runId, driver } = harness(definition, "lost-response", {
+  const { runId, driver, journal } = harness(definition, "lost-response", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
     executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { providerCalls += 1; throw new Error("response lost after acceptance"); } } } : {},
@@ -396,6 +398,20 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
   assert.equal(unknown.compatibilityPhase, "outcome_unknown");
   const cancellation = await driver.cancel(runId, lease("lost-cancel"));
   assert.equal(cancellation.compatibilityPhase, "outcome_unknown", "cancellation cannot falsely undo an accepted unknown effect");
+  const transitionEffectClaim = journal.transitionEffectClaim.bind(journal);
+  journal.transitionEffectClaim = (scope, claimId, from, to, result) => from === "outcome_unknown" && to === "reconciled"
+    ? Promise.resolve(null)
+    : transitionEffectClaim(scope, claimId, from, to, result);
+  await assert.rejects(() => driver.runUntilBlocked(request(runId, "lost-a")), /effect_claim_transition_conflict/);
+  assert.equal((await journal.getSnapshot(owner, runId)).selectedPath.includes("commit"), false, "failed reconcile CAS cannot project node completion");
+  journal.transitionEffectClaim = async (_scope, claimId, from, to, result) => ({
+    claimId, runId, logicalEffectId: definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding.logicalEffectId,
+    attemptId: "forged", idempotencyKey: "forged", providerSupportsIdempotency: false,
+    externalEffectIdentity: externalEffectIdentity(runId, definition), status: to, result,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+  await assert.rejects(() => driver.runUntilBlocked(request(runId, "lost-a")), /effect_claim_reconciliation_not_authoritative/, "a truthy CAS response without durable reload confirmation still fails closed");
+  journal.transitionEffectClaim = transitionEffectClaim;
   const reconciled = await driver.runUntilBlocked(request(runId, "lost-a"));
   assert.equal(reconciled.status, "succeeded");
   assert.equal(providerCalls, 1, "reconciliation never replays an accepted provider effect");
