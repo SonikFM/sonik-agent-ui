@@ -100,7 +100,7 @@ function emitLifecycleEvent(
   input: VisualContextSubmission,
   event: VisualContextTelemetryEventName | null,
   accepted?: boolean,
-  status = input.result.status,
+  status: string = input.result.status,
 ): void {
   if (!event) return;
   emitVisualContextTelemetry({
