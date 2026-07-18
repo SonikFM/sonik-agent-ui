@@ -5,8 +5,10 @@ import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { Sandbox } from "../../apps/dev-workbench/node_modules/@vercel/sandbox/dist/index.js";
 import {
   VISUAL_CONTEXT_PATH,
+  VISUAL_CONTEXT_REQUESTS_PATH,
   createVisualContextLeaseAcquireScript,
   decodeCanonicalBase64,
   consumeVisualContextRequest,
@@ -21,10 +23,16 @@ import {
   visualContextSnapshotFromResult,
   visualContextSubmissionSchema,
 } from "../../apps/dev-workbench/src/lib/server/visual-context-coordinator.ts";
-import { createVisualContextPromotionScript, removeVisualContextTemporaryPath } from "../../apps/dev-workbench/src/lib/server/workspace-service.ts";
+import {
+  createVisualContextPromotionScript,
+  registerWorkspaceVisualContextRequest,
+  removeVisualContextTemporaryPath,
+  submitWorkspaceVisualContext,
+} from "../../apps/dev-workbench/src/lib/server/workspace-service.ts";
 import { createDevWorkbenchBootstrapPlan } from "../../apps/dev-workbench/src/lib/server/bootstrap-plan.ts";
 import {
   DEFAULT_REPOSITORY_COMMANDS,
+  DEV_WORKBENCH_MIRROR_PATHS,
   DEV_WORKBENCH_SCHEMA_VERSION,
   repositoryManifestSchema,
 } from "../../apps/dev-workbench/src/lib/contracts/workbench.ts";
@@ -144,6 +152,70 @@ const repository = repositoryManifestSchema.parse({
 });
 const plan = createDevWorkbenchBootstrapPlan({ sessionId: "workspace-1", repository });
 assert.equal(plan.windows.every((window) => window.command.includes(`SONIK_VISUAL_CONTEXT_PATH=${VISUAL_CONTEXT_PATH}`)), true);
+
+const sandboxFiles = new Map([
+  [DEV_WORKBENCH_MIRROR_PATHS.workspace, Buffer.from(JSON.stringify({
+    schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
+    sessionId: "workspace-1",
+    organizationId: "organization-1",
+    sandboxName: "sandbox-1",
+    repository,
+    tmuxSession: "sonik-dev",
+    createdAt: "2026-07-17T12:00:00.000Z",
+  }))],
+]);
+const fakeSandbox = {
+  update: async () => undefined,
+  readFileToBuffer: async ({ path }) => sandboxFiles.get(path) ?? null,
+  writeFiles: async (files) => {
+    for (const file of files) sandboxFiles.set(file.path, Buffer.from(file.content));
+  },
+  runCommand: async ({ cmd, args }) => {
+    if (cmd === "mv") {
+      sandboxFiles.set(args[1], sandboxFiles.get(args[0]));
+      sandboxFiles.delete(args[0]);
+    } else if (cmd === "rm") {
+      sandboxFiles.delete(args.at(-1));
+    } else if (cmd === "bash" && args.length >= 10) {
+      const [, , , stageManifest, stagePng, , stableManifest, stablePng, hasPng] = args;
+      sandboxFiles.set(stableManifest, sandboxFiles.get(stageManifest));
+      sandboxFiles.delete(stageManifest);
+      if (hasPng === "1") {
+        sandboxFiles.set(stablePng, sandboxFiles.get(stagePng));
+        sandboxFiles.delete(stagePng);
+      } else {
+        sandboxFiles.delete(stablePng);
+      }
+    }
+    return { exitCode: 0, stdout: async () => "" };
+  },
+};
+const originalSandboxGet = Sandbox.get;
+Sandbox.get = async () => fakeSandbox;
+try {
+  const registered = await registerWorkspaceVisualContextRequest("workspace-1", request);
+  assert.equal(registered.ok, true, "authenticated PUT persists the canonical request in the sandbox registry");
+  sandboxFiles.set(result.screenshot.temporaryPath, png);
+  const mutatedRequest = { ...request, routeRevision: request.routeRevision + 1 };
+  const rejected = await submitWorkspaceVisualContext("workspace-1", {
+    workspaceSessionId: "workspace-1",
+    request: mutatedRequest,
+    result: { ...result, routeRevision: mutatedRequest.routeRevision },
+  });
+  assert.deepEqual(rejected, { ok: true, value: { accepted: false, snapshot: null } });
+  assert.equal(sandboxFiles.has(VISUAL_CONTEXT_PATH), false, "a mutated POST cannot promote state");
+  assert.equal(sandboxFiles.has(result.screenshot.temporaryPath), false, "a rejected staged PNG is cleaned up");
+  assert.ok(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_REQUESTS_PATH)).pending[request.requestId], "the exact issuance remains pending");
+
+  sandboxFiles.set(result.screenshot.temporaryPath, png);
+  const accepted = await submitWorkspaceVisualContext("workspace-1", submission);
+  assert.equal(accepted.ok && accepted.value.accepted, true, "the exact retried POST consumes and promotes once");
+  assert.equal(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_PATH)).status, "current");
+  assert.deepEqual(JSON.parse(sandboxFiles.get(VISUAL_CONTEXT_REQUESTS_PATH)).pending, {});
+  assert.equal((await submitWorkspaceVisualContext("workspace-1", submission)).ok, false, "replay is rejected after consumption");
+} finally {
+  Sandbox.get = originalSandboxGet;
+}
 
 const leaseRoot = await mkdtemp(join(tmpdir(), "sonik-visual-lease-"));
 try {

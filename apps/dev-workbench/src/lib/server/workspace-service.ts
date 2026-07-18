@@ -410,7 +410,10 @@ export async function submitWorkspaceVisualContext(
   try {
     const result = parsed.data.result;
     const consumed = consumeVisualContextRequest(await readVisualContextRequestRegistry(resumed.value, signal), parsed.data.request);
-    if (!consumed) return { ok: true, value: { accepted: false, snapshot: null } };
+    if (!consumed) {
+      if (temporaryPath) await removeSandboxPath(resumed.value, temporaryPath, signal);
+      return { ok: true, value: { accepted: false, snapshot: null } };
+    }
     await writeVisualContextRequestRegistry(resumed.value, consumed.registry, signal);
     const requestSequence = consumed.sequence;
     if (result.status !== "completed") {
