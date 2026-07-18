@@ -5,6 +5,7 @@ import {
   emitVisualContextTelemetry,
   visualContextInvalidationSchema,
   visualContextSubmissionSchema,
+  type VisualContextSubmission,
   type VisualContextTelemetryEventName,
 } from "$lib/server/visual-context-coordinator";
 import { DEV_WORKBENCH_SESSION_COOKIE } from "$lib/server/session-cookie";
@@ -96,7 +97,7 @@ function terminalEvent(operation: string, status: string, accepted: boolean): Vi
 
 function emitLifecycleEvent(
   workspaceSessionId: string,
-  input: z.infer<typeof visualContextSubmissionSchema>,
+  input: VisualContextSubmission,
   event: VisualContextTelemetryEventName | null,
   accepted?: boolean,
 ): void {

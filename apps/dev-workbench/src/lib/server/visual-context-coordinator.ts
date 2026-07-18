@@ -67,10 +67,10 @@ export function emitVisualContextTelemetry(
     event: input.event,
     sessionId: input.workspaceSessionId,
     requestId: input.requestId,
+    runtimeProvider: input.provider,
+    runtimeStatus: input.status,
     payload: {
       operation: input.operation,
-      provider: input.provider,
-      status: input.status,
       accepted: input.accepted,
       sourceContextRevision: input.sourceContextRevision,
       routeRevision: input.routeRevision,

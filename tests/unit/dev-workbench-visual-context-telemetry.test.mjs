@@ -36,10 +36,10 @@ for (const event of events) {
   assert.equal(emitted.event, event);
   assert.equal(emitted.sessionId, "workspace-1");
   assert.equal(emitted.requestId, "capture-1");
+  assert.equal(emitted.runtimeProvider, "playwright");
+  assert.equal(emitted.runtimeStatus, "completed");
   assert.deepEqual(emitted.payload, {
     operation: "capture",
-    provider: "playwright",
-    status: "completed",
     accepted: true,
     sourceContextRevision: 4,
     routeRevision: 8,
