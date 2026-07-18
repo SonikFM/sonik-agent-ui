@@ -35,6 +35,8 @@ const snapshot = replayCanonicalWorkflowEvents(initial, [train0CanonicalEvent]);
 const future = new Date(Date.now() + 60_000).toISOString();
 
 assert.equal(await journal.acquireLease(owner, train0CanonicalEvent.workflowRunId, { leaseId: "lease-a", ownerId: "worker-a", expiresAt: future }), true);
+assert.equal(await journal.acquireLease(owner, train0CanonicalEvent.workflowRunId, { leaseId: "lease-a", ownerId: "worker-b", expiresAt: future }), false, "a lease token cannot be renewed by a different owner");
+assert.equal(await journal.acquireLease(owner, train0CanonicalEvent.workflowRunId, { leaseId: "lease-a", ownerId: "worker-a", expiresAt: future }), true, "the current token owner can renew its lease");
 assert.equal(await journal.appendEventAndProject(owner, { expectedRevision: 0, leaseId: "lease-a", event: train0CanonicalEvent, snapshot }), true);
 assert.equal(await journal.appendEventAndProject(owner, { expectedRevision: 0, leaseId: "lease-a", event: train0CanonicalEvent, snapshot }), false, "same-revision writers lose the CAS without creating a duplicate");
 assert.deepEqual(await journal.listEvents(owner, train0CanonicalEvent.workflowRunId), [train0CanonicalEvent]);

@@ -6,6 +6,7 @@ import { handleWorkflowDefinitionsAction } from "../../apps/standalone-sveltekit
 
 const host = { source: "amplify-embedded", sessionId: "session-a", userId: "user-a", principalId: "user-a", organizationId: "org-a", authenticated: true, scopes: [] };
 const otherUser = { ...host, sessionId: "session-b", userId: "user-b", principalId: "user-b" };
+const otherOrganization = { ...host, sessionId: "session-c", organizationId: "org-b" };
 const repository = createInMemoryWorkflowDefinitionRepository();
 const call = (action, hostSession = host) => handleWorkflowDefinitionsAction(action, { hostSession, repository });
 const digest = (character) => `sha256:${character.repeat(64)}`;
@@ -109,8 +110,15 @@ const pins = {
 const published = await call({ action: "publish", workflowId: definition.workflowId, expectedRevision: 1, workflowVersionId, dependencyPins: pins });
 assert.equal(published.ok, true);
 assert.deepEqual(published.version.dependencyPins, pins, "publication stores the full dependency pin set");
+assert.equal(published.version.userId, host.userId, "published rows retain publisher provenance");
 assert.equal((await call({ action: "publish", workflowId: definition.workflowId, expectedRevision: 1, workflowVersionId, dependencyPins: pins })).ok, false, "published ids are immutable");
 assert.equal((await call({ action: "resolve", pin: { kind: "published", workflowVersionId, definitionDigest: draft.definitionDigest } })).definition.workflowVersionId, workflowVersionId);
+assert.equal((await call({ action: "resolve", pin: { kind: "published", workflowVersionId, definitionDigest: draft.definitionDigest } }, otherUser)).definition.workflowVersionId, workflowVersionId, "same-organization users resolve published versions");
+assert.deepEqual((await call({ action: "versions", workflowId: definition.workflowId }, otherUser)).versions.map(({ workflowVersionId: id }) => id), [workflowVersionId], "same-organization users list published versions");
+assert.equal((await call({ action: "resolve", pin: { kind: "published", workflowVersionId, definitionDigest: draft.definitionDigest } }, otherOrganization)).definition, null, "published versions remain cross-organization isolated");
+assert.equal((await call({ action: "create", definition }, otherUser)).ok, true);
+const otherUserDraft = (await call({ action: "get", workflowId: definition.workflowId }, otherUser)).draft;
+assert.equal((await call({ action: "publish", workflowId: definition.workflowId, expectedRevision: 0, workflowVersionId, dependencyPins: { ...pins, definitionDigest: otherUserDraft.definitionDigest } }, otherUser)).reason, "revision_conflict_or_version_exists", "published IDs are unique across an organization, not per publisher");
 assert.equal((await call({ action: "resolve", pin: { kind: "published", workflowVersionId, definitionDigest: digest("f") } })).definition, null, "digest is part of the exact published pin");
 
 const unsupportedVersion = structuredClone(train0WorkflowFixtures.linear);
@@ -150,8 +158,9 @@ assert.equal((await call({ action: "list", includeArchived: true })).drafts.some
 assert.equal((await call({ action: "update", workflowId: definition.workflowId, expectedRevision: 3, definition: edited })).ok, false, "archived drafts reject writes");
 assert.deepEqual(await call({ action: "list" }, null), { ok: false, reason: "authenticated_workspace_owner_required" });
 
-const [migration, route, repositorySource] = await Promise.all([
+const [migration, organizationScopeMigration, route, repositorySource] = await Promise.all([
   readFile(new URL("../../packages/workspace-session/migrations/postgres/0016_workflow_definitions.sql", import.meta.url), "utf8"),
+  readFile(new URL("../../packages/workspace-session/migrations/postgres/0019_organization_scoped_workflow_versions.sql", import.meta.url), "utf8"),
   readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/workflow-definitions/+server.ts", import.meta.url), "utf8"),
   readFile(new URL("../../apps/standalone-sveltekit/src/lib/server/workflow-definition-repository.ts", import.meta.url), "utf8"),
 ]);
@@ -161,6 +170,8 @@ for (const table of ["workflow_definition_drafts", "workflow_definition_publishe
 }
 assert.match(migration, /before update or delete[\s\S]*reject_published_workflow_mutation/i, "database rejects published mutation");
 assert.match(migration, /jsonb_typeof\(dependency_pins\) = 'object'/i);
+assert.match(organizationScopeMigration, /add primary key \(organization_id, workflow_version_id\)/i, "published identity is organization scoped");
+assert.match(organizationScopeMigration, /using \(organization_id = sonik_agent_ui\.current_organization_id\(\)\)[\s\S]*with check \(organization_id = sonik_agent_ui\.current_organization_id\(\) and user_id = sonik_agent_ui\.current_user_id\(\)\)/i, "same-org reads retain publisher-scoped inserts");
 assert.match(repositorySource, /draft_revision = draft_revision \+ 1[\s\S]*draft_revision = \$4[\s\S]*returning/i, "cloud draft writes use one CAS statement");
 assert.match(repositorySource, /insert into sonik_agent_ui\.workflow_definition_published_versions[\s\S]*select[\s\S]*draft_revision = \$4[\s\S]*definition_digest = \$6/i, "cloud publish atomically snapshots the expected draft");
 assert.match(route, /createAgentHostSessionEnvelope\(event\)/);

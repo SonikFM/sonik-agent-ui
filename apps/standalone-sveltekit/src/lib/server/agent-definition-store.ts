@@ -14,7 +14,7 @@
 // or restart-durable persistence: a workspace-session-style adapter.
 
 import { createHash } from "node:crypto";
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import {
   agentDefinitionSchema,
   marketplaceManifestSchema,
@@ -161,6 +161,10 @@ function buildAgentDefinitionPackageVersion(
   });
 }
 
+export function parseStoredAgentDefinition(value: unknown): AgentDefinition {
+  return agentDefinitionSchema.parse(typeof value === "string" ? JSON.parse(value) : structuredClone(value));
+}
+
 export function createInMemoryAgentDefinitionStore(): AgentDefinitionStore {
   const drafts = new Map<string, AgentDefinitionDraftRecord>();
   // organizationId + agentId -> published versions, oldest first.
@@ -281,9 +285,7 @@ export function wrapAgentDefinitionStoreAsync(store: AgentDefinitionStore): Asyn
  *  the in-memory store. Schema: packages/workspace-session/migrations/postgres/
  *  0005_agent_definitions.sql (same migration mechanism as workspace-store.ts;
  *  see scripts/run-postgres-migrations.mjs). */
-export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentDefinitionStore {
-  const sql = neon(databaseUrl.trim());
-
+export function createNeonAgentDefinitionStoreFromSql(sql: NeonQueryFunction<false, false>): AsyncAgentDefinitionStore {
   async function scopedRows(
     authority: AgentDefinitionAuthority,
     action: AgentDefinitionAction,
@@ -315,7 +317,7 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     return {
       organizationId: row.organization_id,
       agentId: row.agent_id,
-      definition: row.definition,
+      definition: parseStoredAgentDefinition(row.definition),
       createdByUserId: row.created_by_user_id,
       updatedByUserId: row.updated_by_user_id,
       updatedAt: new Date(row.updated_at).toISOString(),
@@ -333,7 +335,7 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     return {
       organizationId: row.organization_id,
       agentId: row.agent_id,
-      definition: row.definition,
+      definition: parseStoredAgentDefinition(row.definition),
       createdByUserId: row.created_by_user_id,
       updatedByUserId: row.updated_by_user_id,
       updatedAt: new Date(row.updated_at).toISOString(),
@@ -349,7 +351,7 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
     return (rows as { organization_id: string; agent_id: string; definition: AgentDefinition; created_by_user_id: string; updated_by_user_id: string; updated_at: string }[]).map((row) => ({
       organizationId: row.organization_id,
       agentId: row.agent_id,
-      definition: row.definition,
+      definition: parseStoredAgentDefinition(row.definition),
       createdByUserId: row.created_by_user_id,
       updatedByUserId: row.updated_by_user_id,
       updatedAt: new Date(row.updated_at).toISOString(),
@@ -367,9 +369,14 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
 
   async function publish(authority: AgentDefinitionAuthority, input: PublishAgentDefinitionInput): Promise<MarketplacePackageVersion> {
     assertAgentDefinitionAuthorized(authority, "publish");
-    const draft = await getDraft(authority, input.agentId);
+    const draftRows = await scopedRows(authority, "publish", sql`
+      select agent_id, definition from sonik_agent_ui.agent_definition_drafts
+      where organization_id = ${authority.organizationId} and agent_id = ${input.agentId}
+    `);
+    const draft = draftRows[0] as { agent_id: string; definition: unknown } | undefined;
     if (!draft) throw new Error(`No draft agent definition found for ${input.agentId}`);
-    const packageVersionId = `${draft.agentId}@${input.packageSemver}`;
+    const draftDefinition = parseStoredAgentDefinition(draft.definition);
+    const packageVersionId = `${draft.agent_id}@${input.packageSemver}`;
     const existing = await scopedRows(authority, "publish", sql`
       select 1 from sonik_agent_ui.agent_definition_published_versions
       where organization_id = ${authority.organizationId} and package_version_id = ${packageVersionId}
@@ -383,13 +390,13 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
       order by seq desc
       limit 1
     `);
-    assertSemverAdvancesPast(draft.agentId, input.packageSemver, (latestRows[0] as { package_semver: string } | undefined)?.package_semver);
-    const version = buildAgentDefinitionPackageVersion(draft.definition, input, packageVersionId);
+    assertSemverAdvancesPast(draft.agent_id, input.packageSemver, (latestRows[0] as { package_semver: string } | undefined)?.package_semver);
+    const version = buildAgentDefinitionPackageVersion(draftDefinition, input, packageVersionId);
     await scopedRows(authority, "publish", sql`
       insert into sonik_agent_ui.agent_definition_published_versions (
         organization_id, package_version_id, agent_id, version, created_by_user_id
       ) values (
-        ${authority.organizationId}, ${packageVersionId}, ${draft.agentId}, ${JSON.stringify(version)}::jsonb, ${authority.userId}
+        ${authority.organizationId}, ${packageVersionId}, ${draft.agent_id}, ${JSON.stringify(version)}::jsonb, ${authority.userId}
       )
       returning package_version_id
     `);
@@ -418,6 +425,10 @@ export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentD
   }
 
   return { saveDraft, getDraft, listDrafts, deleteDraft, publish, listPublishedVersions, resolvePublished };
+}
+
+export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentDefinitionStore {
+  return createNeonAgentDefinitionStoreFromSql(neon(databaseUrl.trim()));
 }
 
 function readAgentDefinitionDatabaseUrl(env?: Record<string, unknown> | null): string | null {

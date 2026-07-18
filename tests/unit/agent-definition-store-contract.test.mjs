@@ -6,6 +6,8 @@ import {
   createInMemoryAgentDefinitionStore,
   wrapAgentDefinitionStoreAsync,
   createNeonAgentDefinitionStore,
+  createNeonAgentDefinitionStoreFromSql,
+  parseStoredAgentDefinition,
 } from "../../apps/standalone-sveltekit/src/lib/server/agent-definition-store.ts";
 import { agentDefinitionSchema } from "../../packages/tool-contracts/dist/marketplace.js";
 
@@ -61,10 +63,134 @@ async function assertAgentDefinitionStoreContract(store, label) {
   const foreignVersion = await store.publish(foreignAuthority, { agentId: draftDefinition.agentId, packageSemver: "0.1.0" });
   assert.equal(foreignVersion.packageVersionId, versionOne.packageVersionId, `${label}: tenants may independently publish the same agentId and semver`);
 
+  const publishOnlyDefinition = agentDefinitionSchema.parse({ agentId: `${draftDefinition.agentId}.publish-only`, title: "Publish Only" });
+  await store.saveDraft(authority, publishOnlyDefinition);
+  const publishOnlyAuthority = { ...authority, scopes: ["agent-definitions:publish"] };
+  assert.equal(
+    (await store.publish(publishOnlyAuthority, { agentId: publishOnlyDefinition.agentId, packageSemver: "0.1.0" })).packageVersionId,
+    `${publishOnlyDefinition.agentId}@0.1.0`,
+    `${label}: publish scope does not implicitly require view scope`,
+  );
+  await assert.rejects(
+    () => store.listPublishedVersions(publishOnlyAuthority, publishOnlyDefinition.agentId),
+    /agent_definition_view_forbidden/,
+    `${label}: publish-only authority still cannot view published history`,
+  );
+
   console.log(`agent-definition-store-contract: ${label} backing passed`);
 }
 
+function createDeterministicNeonSqlClient() {
+  const drafts = new Map();
+  const published = [];
+  const key = (organizationId, agentId) => JSON.stringify([organizationId, agentId]);
+  const queryText = (query) => query.strings.join(" ? ").replace(/\s+/g, " ").trim().toLowerCase();
+
+  function sql(strings, ...params) {
+    return { strings: [...strings], params };
+  }
+
+  sql.transaction = async (queries) => {
+    assert.equal(queries.length, 2, "Neon store operations establish context and execute one statement atomically");
+    const [contextQuery, operation] = queries;
+    assert.match(queryText(contextQuery), /set_request_context/);
+    const [organizationId, userId] = contextQuery.params;
+    const text = queryText(operation);
+    const params = operation.params;
+
+    if (text.includes("insert into sonik_agent_ui.agent_definition_drafts")) {
+      const draftKey = key(params[0], params[1]);
+      const existing = drafts.get(draftKey);
+      const record = {
+        organization_id: params[0],
+        agent_id: params[1],
+        definition: JSON.parse(params[2]),
+        created_by_user_id: existing?.created_by_user_id ?? params[3],
+        updated_by_user_id: params[4],
+        updated_at: params[5],
+      };
+      drafts.set(draftKey, record);
+      return [[], [structuredClone(record)]];
+    }
+
+    if (text.includes("from sonik_agent_ui.agent_definition_drafts")) {
+      assert.equal(params[0], organizationId);
+      if (params.length === 1) {
+        return [[], [...drafts.values()].filter((record) => record.organization_id === params[0]).map((record) => structuredClone(record))];
+      }
+      const record = drafts.get(key(params[0], params[1]));
+      if (!record) return [[], []];
+      if (text.startsWith("select agent_id, definition")) {
+        return [[], [{ agent_id: record.agent_id, definition: structuredClone(record.definition) }]];
+      }
+      return [[], [structuredClone(record)]];
+    }
+
+    if (text.startsWith("select 1 from sonik_agent_ui.agent_definition_published_versions")) {
+      return [[], published.some((version) => version.organization_id === params[0] && version.package_version_id === params[1]) ? [{ "?column?": 1 }] : []];
+    }
+
+    if (text.includes("select version ->> 'packagesemver'")) {
+      const latest = published.filter((version) => version.organization_id === params[0] && version.agent_id === params[1]).at(-1);
+      return [[], latest ? [{ package_semver: latest.version.packageSemver }] : []];
+    }
+
+    if (text.includes("insert into sonik_agent_ui.agent_definition_published_versions")) {
+      assert.equal(params[0], organizationId);
+      assert.equal(params[4], userId);
+      published.push({
+        organization_id: params[0],
+        package_version_id: params[1],
+        agent_id: params[2],
+        version: JSON.parse(params[3]),
+        created_by_user_id: params[4],
+        seq: published.length + 1,
+      });
+      return [[], [{ package_version_id: params[1] }]];
+    }
+
+    if (text.startsWith("select version from sonik_agent_ui.agent_definition_published_versions")) {
+      const versions = published.filter((version) => version.organization_id === params[0] && version.agent_id === params[1]);
+      if (text.includes("order by seq desc")) {
+        const latest = versions.at(-1);
+        return [[], latest ? [{ version: structuredClone(latest.version) }] : []];
+      }
+      return [[], versions.map((version) => ({ version: structuredClone(version.version) }))];
+    }
+
+    throw new Error(`Unhandled deterministic Neon SQL query: ${text}`);
+  };
+
+  sql.corruptDraftDefinition = (organizationId, agentId, definition) => {
+    drafts.get(key(organizationId, agentId)).definition = structuredClone(definition);
+  };
+
+  return sql;
+}
+
 await assertAgentDefinitionStoreContract(wrapAgentDefinitionStoreAsync(createInMemoryAgentDefinitionStore()), "in-memory");
+await assertAgentDefinitionStoreContract(createNeonAgentDefinitionStoreFromSql(createDeterministicNeonSqlClient()), "neon-sql-client");
+
+const corruptSql = createDeterministicNeonSqlClient();
+const corruptStore = createNeonAgentDefinitionStoreFromSql(corruptSql);
+const corruptAuthority = { organizationId: "org-corrupt", userId: "user-corrupt", scopes: ["agent-definitions:*"] };
+const corruptDefinition = agentDefinitionSchema.parse({ agentId: "sonik.agent.corrupt", title: "Corrupt Stored Agent" });
+await corruptStore.saveDraft(corruptAuthority, corruptDefinition);
+corruptSql.corruptDraftDefinition(corruptAuthority.organizationId, corruptDefinition.agentId, { title: "Missing agent id" });
+await assert.rejects(() => corruptStore.getDraft(corruptAuthority, corruptDefinition.agentId), /agentId/, "getDraft rejects an invalid stored definition");
+await assert.rejects(() => corruptStore.listDrafts(corruptAuthority), /agentId/, "listDrafts rejects an invalid stored definition");
+await assert.rejects(
+  () => corruptStore.publish(corruptAuthority, { agentId: corruptDefinition.agentId, packageSemver: "0.1.0" }),
+  /agentId/,
+  "publish rejects an invalid stored definition",
+);
+
+const storedDefinition = { agentId: "sonik.agent.stored", title: "Stored Agent" };
+const parsedObjectDefinition = parseStoredAgentDefinition(storedDefinition);
+storedDefinition.title = "Mutated";
+assert.equal(parsedObjectDefinition.title, "Stored Agent", "stored JSON objects are validated and cloned");
+assert.equal(parseStoredAgentDefinition(JSON.stringify(storedDefinition)).title, "Mutated", "stored JSON strings are parsed and validated");
+assert.throws(() => parseStoredAgentDefinition('{"title":"Missing agent id"}'), /agentId/, "invalid stored definitions fail validation");
 
 const isolatedStore = createInMemoryAgentDefinitionStore();
 const isolatedAuthority = { organizationId: "org-isolation", userId: "user-isolation", scopes: ["agent-definitions:*"] };

@@ -198,17 +198,49 @@ const migrations = [
 		file: "packages/workspace-session/migrations/postgres/0015_agent_definition_tenant_authority.sql",
 		baselineCheck: `
 			select (
-				exists (
-					select 1 from information_schema.columns
-					where table_schema = 'sonik_agent_ui'
-						and table_name = 'agent_definition_drafts'
-						and column_name = 'organization_id'
+				not exists (
+					select 1
+					from (values
+						('agent_definition_drafts', 'organization_id'),
+						('agent_definition_drafts', 'created_by_user_id'),
+						('agent_definition_drafts', 'updated_by_user_id'),
+						('agent_definition_drafts', 'legacy_quarantined_at'),
+						('agent_definition_published_versions', 'organization_id'),
+						('agent_definition_published_versions', 'created_by_user_id'),
+						('agent_definition_published_versions', 'legacy_quarantined_at')
+					) as required(table_name, column_name)
+					where not exists (
+						select 1 from information_schema.columns
+						where table_schema = 'sonik_agent_ui'
+							and columns.table_name = required.table_name
+							and columns.column_name = required.column_name
+					)
 				)
-				and exists (
-					select 1 from pg_class
-					where oid = to_regclass('sonik_agent_ui.agent_definition_drafts')
-						and relrowsecurity
-						and relforcerowsecurity
+				and to_regclass('sonik_agent_ui.agent_definition_drafts_tenant_agent_key') is not null
+				and to_regclass('sonik_agent_ui.agent_definition_published_versions_tenant_package_key') is not null
+				and to_regclass('sonik_agent_ui.agent_definition_published_versions_tenant_agent_seq_idx') is not null
+				and not exists (
+					select 1
+					from (values
+						('agent_definition_drafts', 'agent_definition_drafts_authority_or_quarantine_check', 'agent_definition_drafts_tenant_scope'),
+						('agent_definition_published_versions', 'agent_definition_published_authority_or_quarantine_check', 'agent_definition_published_versions_tenant_scope')
+					) as required(table_name, constraint_name, policy_name)
+					where not exists (
+						select 1 from pg_class
+						where oid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and relrowsecurity
+							and relforcerowsecurity
+					)
+					or not exists (
+						select 1 from pg_constraint
+						where conrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and conname = required.constraint_name
+					)
+					or not exists (
+						select 1 from pg_policy
+						where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and polname = required.policy_name
+					)
 				)
 			)::text
 		`,
@@ -219,13 +251,69 @@ const migrations = [
 		file: "packages/workspace-session/migrations/postgres/0016_workflow_definitions.sql",
 		baselineCheck: `
 			select (
-				to_regclass('sonik_agent_ui.workflow_definition_drafts') is not null
-				and to_regclass('sonik_agent_ui.workflow_definition_published_versions') is not null
+				not exists (
+					select 1
+					from (values
+						('workflow_definition_drafts', 'organization_id'),
+						('workflow_definition_drafts', 'user_id'),
+						('workflow_definition_drafts', 'workflow_id'),
+						('workflow_definition_drafts', 'draft_revision'),
+						('workflow_definition_drafts', 'definition_digest'),
+						('workflow_definition_drafts', 'definition'),
+						('workflow_definition_drafts', 'archived_at'),
+						('workflow_definition_drafts', 'created_by'),
+						('workflow_definition_drafts', 'updated_by'),
+						('workflow_definition_drafts', 'created_at'),
+						('workflow_definition_drafts', 'updated_at'),
+						('workflow_definition_published_versions', 'organization_id'),
+						('workflow_definition_published_versions', 'user_id'),
+						('workflow_definition_published_versions', 'workflow_id'),
+						('workflow_definition_published_versions', 'workflow_version_id'),
+						('workflow_definition_published_versions', 'source_draft_revision'),
+						('workflow_definition_published_versions', 'definition_digest'),
+						('workflow_definition_published_versions', 'definition'),
+						('workflow_definition_published_versions', 'dependency_pins'),
+						('workflow_definition_published_versions', 'published_by'),
+						('workflow_definition_published_versions', 'published_at')
+					) as required(table_name, column_name)
+					where not exists (
+						select 1 from information_schema.columns
+						where table_schema = 'sonik_agent_ui'
+							and columns.table_name = required.table_name
+							and columns.column_name = required.column_name
+					)
+				)
+				and to_regclass('sonik_agent_ui.workflow_definition_drafts_owner_updated_idx') is not null
+				and to_regclass('sonik_agent_ui.workflow_definition_versions_owner_workflow_idx') is not null
+				and to_regprocedure('sonik_agent_ui.reject_published_workflow_mutation()') is not null
 				and exists (
-					select 1 from pg_class
-					where oid = to_regclass('sonik_agent_ui.workflow_definition_drafts')
-						and relrowsecurity
-						and relforcerowsecurity
+					select 1 from pg_trigger
+					where tgrelid = to_regclass('sonik_agent_ui.workflow_definition_published_versions')
+						and tgname = 'workflow_definition_versions_immutable'
+						and not tgisinternal
+				)
+				and not exists (
+					select 1
+					from (values
+						('workflow_definition_drafts', 'workflow_definition_drafts_pkey', 'workflow_definition_drafts_scope'),
+						('workflow_definition_published_versions', 'workflow_definition_published_versions_pkey', 'workflow_definition_versions_scope')
+					) as required(table_name, constraint_name, policy_name)
+					where not exists (
+						select 1 from pg_class
+						where oid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and relrowsecurity
+							and relforcerowsecurity
+					)
+					or not exists (
+						select 1 from pg_constraint
+						where conrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and conname = required.constraint_name
+					)
+					or not exists (
+						select 1 from pg_policy
+						where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and polname = required.policy_name
+					)
 				)
 			)::text
 		`,
@@ -236,16 +324,89 @@ const migrations = [
 		file: "packages/workspace-session/migrations/postgres/0017_workflow_run_journal.sql",
 		baselineCheck: `
 			select (
-				exists (
-					select 1 from information_schema.columns
-					where table_schema = 'sonik_agent_ui'
-						and table_name = 'agent_workflow_runs'
-						and column_name = 'journal_revision'
+				not exists (
+					select 1
+					from (values
+						('agent_workflow_runs', 'journal_revision'),
+						('agent_workflow_runs', 'journal_sequence'),
+						('agent_workflow_runs', 'canonical_snapshot'),
+						('agent_workflow_runs', 'compatibility_phase'),
+						('agent_workflow_run_events', 'organization_id'),
+						('agent_workflow_run_events', 'user_id'),
+						('agent_workflow_run_events', 'run_id'),
+						('agent_workflow_run_events', 'sequence'),
+						('agent_workflow_run_events', 'revision'),
+						('agent_workflow_run_events', 'event_id'),
+						('agent_workflow_run_events', 'event_type'),
+						('agent_workflow_run_events', 'event'),
+						('agent_workflow_run_events', 'created_at'),
+						('agent_workflow_run_leases', 'organization_id'),
+						('agent_workflow_run_leases', 'user_id'),
+						('agent_workflow_run_leases', 'run_id'),
+						('agent_workflow_run_leases', 'lease_id'),
+						('agent_workflow_run_leases', 'owner_id'),
+						('agent_workflow_run_leases', 'lease_expires_at'),
+						('agent_workflow_run_leases', 'updated_at'),
+						('agent_workflow_run_waitpoints', 'organization_id'),
+						('agent_workflow_run_waitpoints', 'user_id'),
+						('agent_workflow_run_waitpoints', 'run_id'),
+						('agent_workflow_run_waitpoints', 'waitpoint_id'),
+						('agent_workflow_run_waitpoints', 'kind'),
+						('agent_workflow_run_waitpoints', 'waitpoint'),
+						('agent_workflow_run_waitpoints', 'status'),
+						('agent_workflow_run_waitpoints', 'created_at'),
+						('agent_workflow_run_waitpoints', 'updated_at'),
+						('agent_workflow_effect_claims', 'organization_id'),
+						('agent_workflow_effect_claims', 'user_id'),
+						('agent_workflow_effect_claims', 'run_id'),
+						('agent_workflow_effect_claims', 'logical_effect_id'),
+						('agent_workflow_effect_claims', 'claim_id'),
+						('agent_workflow_effect_claims', 'attempt_id'),
+						('agent_workflow_effect_claims', 'idempotency_key'),
+						('agent_workflow_effect_claims', 'provider_supports_idempotency'),
+						('agent_workflow_effect_claims', 'status'),
+						('agent_workflow_effect_claims', 'result'),
+						('agent_workflow_effect_claims', 'created_at'),
+						('agent_workflow_effect_claims', 'updated_at')
+					) as required(table_name, column_name)
+					where not exists (
+						select 1 from information_schema.columns
+						where table_schema = 'sonik_agent_ui'
+							and columns.table_name = required.table_name
+							and columns.column_name = required.column_name
+					)
 				)
-				and to_regclass('sonik_agent_ui.agent_workflow_run_events') is not null
-				and to_regclass('sonik_agent_ui.agent_workflow_run_leases') is not null
-				and to_regclass('sonik_agent_ui.agent_workflow_run_waitpoints') is not null
-				and to_regclass('sonik_agent_ui.agent_workflow_effect_claims') is not null
+				and to_regclass('sonik_agent_ui.agent_workflow_run_leases_expiry_idx') is not null
+				and exists (
+					select 1 from pg_constraint
+					where conrelid = to_regclass('sonik_agent_ui.agent_workflow_runs')
+						and conname = 'agent_workflow_runs_journal_position_check'
+				)
+				and not exists (
+					select 1
+					from (values
+						('agent_workflow_run_events', 'agent_workflow_run_events_pkey', 'agent_workflow_run_events_scope'),
+						('agent_workflow_run_leases', 'agent_workflow_run_leases_pkey', 'agent_workflow_run_leases_scope'),
+						('agent_workflow_run_waitpoints', 'agent_workflow_run_waitpoints_pkey', 'agent_workflow_run_waitpoints_scope'),
+						('agent_workflow_effect_claims', 'agent_workflow_effect_claims_pkey', 'agent_workflow_effect_claims_scope')
+					) as required(table_name, constraint_name, policy_name)
+					where not exists (
+						select 1 from pg_class
+						where oid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and relrowsecurity
+							and relforcerowsecurity
+					)
+					or not exists (
+						select 1 from pg_constraint
+						where conrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and conname = required.constraint_name
+					)
+					or not exists (
+						select 1 from pg_policy
+						where polrelid = to_regclass('sonik_agent_ui.' || required.table_name)
+							and polname = required.policy_name
+					)
+				)
 			)::text
 		`,
 	},
@@ -269,6 +430,79 @@ const migrations = [
 					where schemaname = 'sonik_agent_ui'
 						and tablename = 'agent_workflow_effect_claims'
 						and policyname = 'agent_workflow_effect_claims_scope'
+				)
+			)::text
+		`,
+	},
+	{
+		version: "0019",
+		name: "organization_scoped_workflow_versions",
+		file: "packages/workspace-session/migrations/postgres/0019_organization_scoped_workflow_versions.sql",
+		baselineCheck: `
+			select (
+				(
+					select string_agg(attribute.attname, ',' order by key_column.ordinality)
+					from pg_constraint as constraint_definition
+					cross join lateral unnest(constraint_definition.conkey) with ordinality as key_column(attribute_number, ordinality)
+					join pg_attribute as attribute
+						on attribute.attrelid = constraint_definition.conrelid
+						and attribute.attnum = key_column.attribute_number
+					where constraint_definition.conrelid = to_regclass('sonik_agent_ui.workflow_definition_published_versions')
+						and constraint_definition.contype = 'p'
+				) = 'organization_id,workflow_version_id'
+				and exists (
+					select 1
+					from pg_index as canonical_index
+					where canonical_index.indexrelid = to_regclass('sonik_agent_ui.workflow_definition_versions_organization_workflow_idx')
+						and canonical_index.indisvalid
+						and canonical_index.indisready
+						and regexp_replace(lower(pg_get_indexdef(canonical_index.indexrelid)), '[[:space:]]', '', 'g')
+							= 'createindexworkflow_definition_versions_organization_workflow_idxonsonik_agent_ui.workflow_definition_published_versionsusingbtree(organization_id,workflow_id,published_atdesc)'
+				)
+				and (
+					select relrowsecurity and relforcerowsecurity
+					from pg_class
+					where oid = to_regclass('sonik_agent_ui.workflow_definition_published_versions')
+				)
+				and exists (
+					select 1
+					from pg_trigger as immutable_trigger
+					join pg_proc as trigger_function on trigger_function.oid = immutable_trigger.tgfoid
+					join pg_namespace as function_schema on function_schema.oid = trigger_function.pronamespace
+					join pg_language as function_language on function_language.oid = trigger_function.prolang
+					where immutable_trigger.tgrelid = to_regclass('sonik_agent_ui.workflow_definition_published_versions')
+						and immutable_trigger.tgname = 'workflow_definition_versions_immutable'
+						and not immutable_trigger.tgisinternal
+						and immutable_trigger.tgenabled = 'O'
+						and immutable_trigger.tgtype = 27
+						and immutable_trigger.tgqual is null
+						and immutable_trigger.tgattr = ''::int2vector
+						and function_schema.nspname = 'sonik_agent_ui'
+						and trigger_function.proname = 'reject_published_workflow_mutation'
+						and function_language.lanname = 'plpgsql'
+						and trigger_function.prorettype = 'trigger'::regtype
+						and trigger_function.pronargs = 0
+						and not trigger_function.prosecdef
+						and trigger_function.proconfig @> array['search_path=pg_catalog']
+						and regexp_replace(lower(trigger_function.prosrc), '[[:space:]]', '', 'g')
+							= 'beginraiseexception''publishedworkflowversionsareimmutable''usingerrcode=''55000'';end'
+				)
+				and (
+					select count(*)
+					from pg_policy
+					where polrelid = to_regclass('sonik_agent_ui.workflow_definition_published_versions')
+				) = 1
+				and exists (
+					select 1 from pg_policy as canonical_policy
+					where canonical_policy.polrelid = to_regclass('sonik_agent_ui.workflow_definition_published_versions')
+						and canonical_policy.polname = 'workflow_definition_versions_scope'
+						and canonical_policy.polpermissive
+						and canonical_policy.polcmd = '*'
+						and canonical_policy.polroles = array[0::oid]
+						and regexp_replace(pg_get_expr(canonical_policy.polqual, canonical_policy.polrelid), '[[:space:]]', '', 'g')
+							= '(organization_id=sonik_agent_ui.current_organization_id())'
+						and regexp_replace(pg_get_expr(canonical_policy.polwithcheck, canonical_policy.polrelid), '[[:space:]]', '', 'g')
+							= '((organization_id=sonik_agent_ui.current_organization_id())AND(user_id=sonik_agent_ui.current_user_id()))'
 				)
 			)::text
 		`,

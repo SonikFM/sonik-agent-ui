@@ -184,7 +184,9 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       if (Date.parse(lease.expiresAt) <= Date.now()) return false;
       const key = workflowRunKey(owner, runId);
       const current = leases.get(key);
-      if (current && current.leaseId !== lease.leaseId && Date.parse(current.expiresAt) > Date.now()) return false;
+      if (current
+        && (current.leaseId !== lease.leaseId || current.ownerId !== lease.ownerId)
+        && Date.parse(current.expiresAt) > Date.now()) return false;
       leases.set(key, lease);
       return true;
     },
