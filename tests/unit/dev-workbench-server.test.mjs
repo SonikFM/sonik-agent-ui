@@ -46,6 +46,7 @@ import {
   visualPickDisabledReason,
 } from "../../apps/dev-workbench/src/lib/client/host-context-bridge.ts";
 import { resolveAgentUiDevApiProxyTarget } from "../../apps/standalone-sveltekit/src/lib/server/dev-api-proxy.ts";
+import { createSandboxContextGuide } from "../../apps/dev-workbench/src/lib/server/workspace-service.ts";
 
 const repository = repositoryManifestSchema.parse({
   schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
@@ -192,6 +193,10 @@ assert.match(visualBrowserRouteSource, /runWorkspacePlaywrightVisualContext/, "t
 assert.match(visualBrowserRouteSource, /emitVisualBrowserTelemetry[^]*phase: "started"[^]*phase: "failed"[^]*phase: accepted \? "completed" : "failed"/, "Preview browser requests emit start and terminal telemetry through the privacy-allowlisted seam");
 assert.match(visualBrowserRouteSource, /result\.value\.accepted[^]*status: accepted \? 200 : 202/, "the Preview route propagates stale coordinator outcomes without reporting current success");
 const workspaceServiceSource = readFileSync("apps/dev-workbench/src/lib/server/workspace-service.ts", "utf8");
+const contextGuide = createSandboxContextGuide("worker-a", true);
+assert.match(contextGuide, /host origin plus redacted page context/i);
+assert.match(contextGuide, /host OpenAPI document fetched with that authority/i);
+assert.doesNotMatch(contextGuide, /booking-host|booking host OpenAPI/i);
 assert.equal(workspaceServiceSource.indexOf("capturePlaywrightPreview") < workspaceServiceSource.indexOf("submitWorkspaceVisualContext(sessionId"), true, "provider temp output reaches the G009 coordinator before any stable artifact promotion");
 assert.match(workspaceServiceSource, /if \(!visualContextOperationPromotesStableArtifact\(request\.data\.operation\)\)[^]*snapshot: null[^]*submitWorkspaceVisualContext/, "probe/setup return state without taking the stable artifact coordinator lease");
 assert.match(workspaceServiceSource, /consumeVisualContextRequest\([^]*parsed\.data\.request\)[^]*if \(!consumed\)[^]*removeSandboxPath\([^]*accepted: false[^]*writeVisualContextRequestRegistry/, "a mutated same-id POST cleans staged pixels and is discarded before the exact issuance is consumed");

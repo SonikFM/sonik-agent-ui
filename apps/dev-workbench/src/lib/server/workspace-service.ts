@@ -718,15 +718,15 @@ function sandboxEnvironment(config: DevWorkbenchServerConfig): Record<string, st
   };
 }
 
-function createSandboxContextGuide(pipeBWorker: string, pipeBEnabled: boolean): string {
+export function createSandboxContextGuide(pipeBWorker: string, pipeBEnabled: boolean): string {
   return `# Sonik Agent UI Dev Context
 
 This directory is host-written runtime context for the isolated Agent UI checkout.
 
 - \`page-context.json\`: redacted Workbench state.
-- \`host-context.json\`: booking-host origin plus redacted page context.
+- \`host-context.json\`: host origin plus redacted page context.
 - \`host-authority.json\`: short-lived opaque host authorization. Treat it as a credential.
-- \`openapi.json\`: the booking host OpenAPI document fetched with that authority.
+- \`openapi.json\`: the host OpenAPI document fetched with that authority.
 - \`sitemap.json\`: tracked source and route map for the checkout.
 
 The primary Codex window receives \`SONIK_*_PATH\` environment variables for these files.
