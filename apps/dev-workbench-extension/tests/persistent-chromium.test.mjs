@@ -160,6 +160,7 @@ try {
   assert.ok(workerTarget, "Extension service-worker target is available");
   assert.equal((await cdp.send("Target.closeTarget", { targetId: workerTarget.targetId })).success, true);
   await expectRejected(frame, requestFor("capture"), origin(host));
+  assert.equal(await captureChrome.getAttribute("style"), captureChromeStyle, "Rejected capture restores exact Sonik chrome style");
   await pair();
   assert.equal((await sendHostRequest(frame, requestFor("get-capabilities"), origin(host))).status, "completed");
 
