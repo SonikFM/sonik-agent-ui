@@ -29,9 +29,10 @@
       clearOverlays();
       const redactionsApplied: string[] = [];
       for (const element of document.querySelectorAll("[data-sonik-capture-chrome]")) {
-        if (!(element instanceof HTMLElement)) continue;
-        state.captureChrome.push({ element, style: element.getAttribute("style") });
-        element.style.setProperty("visibility", "hidden", "important");
+        const captureElement = element as HTMLElement;
+        if (!captureElement.style || typeof captureElement.getAttribute !== "function") continue;
+        state.captureChrome.push({ element: captureElement, style: captureElement.getAttribute("style") });
+        captureElement.style.setProperty("visibility", "hidden", "important");
       }
       if (state.captureChrome.length) redactionsApplied.push("Sonik capture chrome");
       const selectors = "input[type=password],input[type=email],input[type=tel],input[autocomplete*=cc-],input[autocomplete*=token],input[autocomplete=one-time-code],input[name*=secret i],input[name*=token i],input[name*=password i],textarea[name*=secret i],textarea[name*=token i],textarea[name*=password i],[data-sonik-redact]";
