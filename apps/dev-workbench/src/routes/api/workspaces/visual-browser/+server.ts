@@ -1,6 +1,7 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { visualContextRequestSchema } from "@sonik-agent-ui/tool-contracts/visual-context";
+import { emitVisualBrowserTelemetry } from "$lib/server/visual-context-coordinator";
 import { DEV_WORKBENCH_SESSION_COOKIE } from "$lib/server/session-cookie";
 import { runWorkspacePlaywrightVisualContext } from "$lib/server/workspace-service";
 
@@ -22,7 +23,19 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
   if (!parsed.success || !["get-capabilities", "setup-browser", "capture"].includes(parsed.data.operation) || parsed.data.provider !== "playwright") {
     return json({ error: "Visual browser request is invalid." }, { status: 400, headers: NO_STORE });
   }
+  emitVisualBrowserTelemetry({ workspaceSessionId: sessionId, request: parsed.data, phase: "started", status: "started" });
   const result = await runWorkspacePlaywrightVisualContext(sessionId, parsed.data, request.signal);
-  if (!result.ok) return json({ error: result.error }, { status: result.error.retryable ? 502 : 400, headers: NO_STORE });
+  if (!result.ok) {
+    emitVisualBrowserTelemetry({ workspaceSessionId: sessionId, request: parsed.data, phase: "failed", status: result.error.code, accepted: false });
+    return json({ error: result.error }, { status: result.error.retryable ? 502 : 400, headers: NO_STORE });
+  }
+  const accepted = result.value.result.status === "completed";
+  emitVisualBrowserTelemetry({
+    workspaceSessionId: sessionId,
+    request: parsed.data,
+    phase: accepted ? "completed" : "failed",
+    status: result.value.result.status,
+    accepted,
+  });
   return json(result.value, { headers: NO_STORE });
 };

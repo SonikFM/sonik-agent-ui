@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { emitVisualContextTelemetry } from "../../apps/dev-workbench/src/lib/server/visual-context-coordinator.ts";
+import {
+  emitVisualBrowserTelemetry,
+  emitVisualContextTelemetry,
+} from "../../apps/dev-workbench/src/lib/server/visual-context-coordinator.ts";
 
 const events = [
   "visual_context.picker.started",
@@ -48,6 +51,50 @@ for (const event of events) {
   for (const forbidden of ["selector", "domPath", "pngBase64", "secret-image-payload", "secret-token-value", "sk-live-secret-value"]) {
     assert.equal(written.includes(forbidden), false, `telemetry must exclude ${forbidden}`);
   }
+}
+
+const previewRequest = {
+  version: "sonik.visual-context.v1",
+  messageSource: "sonik-agent-ui",
+  type: "sonik:visual-context:request",
+  requestId: "preview-1",
+  operation: "capture",
+  provider: "playwright",
+  sourceContextRevision: 2,
+  routeRevision: 3,
+  source: { id: "preview", label: "Preview", surface: "workbench-preview", route: "/private" },
+  selector: "#credit-card",
+  pngBase64: "secret-image-payload",
+};
+const previewEvents = [];
+for (const phase of ["started", "completed", "failed"]) {
+  const emitted = emitVisualBrowserTelemetry({
+    workspaceSessionId: "workspace-1",
+    request: previewRequest,
+    phase,
+    status: phase,
+    accepted: phase === "started" ? undefined : phase === "completed",
+  }, (line) => previewEvents.push(JSON.parse(line)));
+  assert.equal(emitted?.event, `visual_context.capture.${phase}`);
+}
+assert.deepEqual(previewEvents.map((event) => event.payload), [
+  { operation: "capture", sourceContextRevision: 2, routeRevision: 3 },
+  { operation: "capture", accepted: true, sourceContextRevision: 2, routeRevision: 3 },
+  { operation: "capture", accepted: false, sourceContextRevision: 2, routeRevision: 3 },
+]);
+assert.equal(JSON.stringify(previewEvents).includes("selector"), false);
+assert.equal(JSON.stringify(previewEvents).includes("secret-image-payload"), false);
+
+for (const operation of ["get-capabilities", "setup-browser"]) {
+  const emitted = emitVisualBrowserTelemetry({
+    workspaceSessionId: "workspace-1",
+    request: { ...previewRequest, requestId: operation, operation },
+    phase: "completed",
+    status: "available",
+    accepted: true,
+  }, () => {});
+  assert.equal(emitted?.event, "visual_context.browser_setup.changed");
+  assert.equal(emitted?.payload.operation, operation);
 }
 
 console.log("dev-workbench visual context telemetry: ok");

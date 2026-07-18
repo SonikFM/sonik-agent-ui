@@ -128,6 +128,7 @@ assert.match(workbenchPageSource, /aria-live="polite"[^]*announcement/, "browser
 const visualBrowserRouteSource = readFileSync("apps/dev-workbench/src/routes/api/workspaces/visual-browser/+server.ts", "utf8");
 assert.match(visualBrowserRouteSource, /visualContextRequestSchema\.safeParse/, "the authenticated browser endpoint accepts only strict visual requests");
 assert.match(visualBrowserRouteSource, /runWorkspacePlaywrightVisualContext/, "the endpoint delegates to the canonical provider/coordinator service seam");
+assert.match(visualBrowserRouteSource, /emitVisualBrowserTelemetry[^]*phase: "started"[^]*phase: "failed"[^]*phase: accepted \? "completed" : "failed"/, "Preview browser requests emit start and terminal telemetry through the privacy-allowlisted seam");
 const workspaceServiceSource = readFileSync("apps/dev-workbench/src/lib/server/workspace-service.ts", "utf8");
 assert.equal(workspaceServiceSource.indexOf("capturePlaywrightPreview") < workspaceServiceSource.indexOf("submitWorkspaceVisualContext(sessionId"), true, "provider temp output reaches the G009 coordinator before any stable artifact promotion");
 assert.match(workspaceServiceSource, /if \(!visualContextOperationPromotesStableArtifact\(request\.data\.operation\)\)[^]*snapshot: null[^]*submitWorkspaceVisualContext/, "probe/setup return state without taking the stable artifact coordinator lease");

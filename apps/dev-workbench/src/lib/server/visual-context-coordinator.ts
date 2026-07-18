@@ -9,6 +9,7 @@ import {
   visualContextResultSchema,
   visualContextSnapshotSchema,
   visualContextSourceSchema,
+  type VisualContextRequest,
   type VisualContextResult,
   type VisualContextSnapshot,
 } from "@sonik-agent-ui/tool-contracts/visual-context";
@@ -78,6 +79,33 @@ export function emitVisualContextTelemetry(
   });
   write(JSON.stringify(emitted));
   return emitted;
+}
+
+export function emitVisualBrowserTelemetry(
+  input: {
+    workspaceSessionId: string;
+    request: VisualContextRequest;
+    phase: "started" | "completed" | "failed";
+    status: string;
+    accepted?: boolean;
+  },
+  write?: (line: string) => void,
+): AgentTelemetryEvent | null {
+  const event = input.request.operation === "capture"
+    ? `visual_context.capture.${input.phase}` as VisualContextTelemetryEventName
+    : input.phase === "started" ? null : "visual_context.browser_setup.changed";
+  if (!event) return null;
+  return emitVisualContextTelemetry({
+    event,
+    workspaceSessionId: input.workspaceSessionId,
+    requestId: input.request.requestId,
+    operation: input.request.operation,
+    provider: input.request.provider,
+    status: input.status,
+    accepted: input.accepted,
+    sourceContextRevision: input.request.sourceContextRevision,
+    routeRevision: input.request.routeRevision,
+  }, write);
 }
 
 export function validateVisualContextSubmission(input: VisualContextSubmission): void {
