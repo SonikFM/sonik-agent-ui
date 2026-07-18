@@ -32,15 +32,6 @@ const expectRejected = async (frame, request, hostOrigin) => {
 const expectFailed = async (frame, request, hostOrigin) => {
   assert.equal((await sendHostRequest(frame, request, hostOrigin)).status, "failed");
 };
-const closeServer = async (server) => {
-  if (!server) return;
-  server.closeIdleConnections?.();
-  server.closeAllConnections?.();
-  await Promise.race([
-    new Promise((resolve) => server.close(resolve)),
-    new Promise((resolve) => { const timer = setTimeout(resolve, 1_000); timer.unref(); }),
-  ]);
-};
 
 const extension = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-extension-"));
 const profile = await mkdtemp(join(tmpdir(), "sonik-dev-workbench-profile-"));
