@@ -98,6 +98,7 @@ async function handleRequest(message, sender) {
   const stillActive = await chrome.tabs.query({ active: true, windowId: pairing.windowId });
   if (stillActive[0]?.id !== tabId || !lifecycle.isCurrent(lease, identity)) {
     pairings.delete(tabId);
+    lifecycle.revoke(tabId);
     throw new Error("The paired tab stopped being active during capture.");
   }
   const png = pngMetadata(dataUrl);
