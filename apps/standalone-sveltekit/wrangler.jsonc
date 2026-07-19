@@ -47,6 +47,7 @@
     "SONIK_BOOKING_API_BASE_URL": "https://sonik-booking-service-pipe-b.liam-trampota.workers.dev",
     "SONIK_BOOKING_AUTH_MODE": "anonymous",
     "SONIK_AGENT_UI_PERSISTENCE_MODE": "cloud",
+    "SONIK_AGENT_UI_ENABLE_AMPLIFY_LOGIN_PROXY": "true",
     "SONIK_AGENT_UI_ENABLE_SMOKE_HOST_CONTEXT_SIGNER": "true"
   },
   "version_metadata": {
