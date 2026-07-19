@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "svelte": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./message-parts": {
+      "types": "./dist/message-parts.d.ts",
+      "svelte": "./dist/message-parts.js",
+      "default": "./dist/message-parts.js"
     }
   },
   "files": [

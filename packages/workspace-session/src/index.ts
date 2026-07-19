@@ -246,6 +246,33 @@ export interface WorkspaceLayoutSnapshotRecord<TLayout = unknown> {
   created_at: string;
 }
 
+export type WorkspacePageContextSnapshotSource = "browser-page-context" | "trusted-host-adapter" | "system";
+export type WorkspacePageContextSnapshotAuthority = "display-only" | "trusted-server-derived";
+
+export interface WorkspacePageContextSnapshotRecord<TContext = unknown> {
+  id: string;
+  session_id: string;
+  source: WorkspacePageContextSnapshotSource;
+  authority: WorkspacePageContextSnapshotAuthority;
+  route: string | null;
+  surface: string | null;
+  page_type: string | null;
+  active_entity: unknown | null;
+  command_families: string[];
+  skill_families: string[];
+  visible_actions: string[];
+  context: TContext;
+  created_at: string;
+}
+
+export type WorkspacePageContextSnapshotInput<TContext = unknown> = Omit<
+  WorkspacePageContextSnapshotRecord<TContext>,
+  "id" | "created_at" | "route" | "surface" | "page_type" | "active_entity" | "command_families" | "skill_families" | "visible_actions"
+> & Partial<Pick<
+  WorkspacePageContextSnapshotRecord<TContext>,
+  "route" | "surface" | "page_type" | "active_entity" | "command_families" | "skill_families" | "visible_actions"
+>>;
+
 export interface WorkspaceTelemetryEventRecord<TPayload = unknown> {
   id: string;
   session_id: string | null;
@@ -257,6 +284,41 @@ export interface WorkspaceTelemetryEventRecord<TPayload = unknown> {
   error: string | null;
   created_at: string;
 }
+
+export type WorkspaceCommitKind = "reservation" | "intake";
+
+export interface WorkspaceCommitLedgerKey {
+  kind: WorkspaceCommitKind;
+  idempotency_key: string;
+}
+
+export interface WorkspaceCommitLedgerRecord<TReceipt extends Record<string, unknown> = Record<string, unknown>> extends WorkspaceCommitLedgerKey {
+  session_id: string | null;
+  resource_id: string | null;
+  receipt_version: 1;
+  receipt: TReceipt;
+  created_at: string;
+}
+
+export type WorkspaceCommitLedgerInput<TReceipt extends Record<string, unknown> = Record<string, unknown>> = WorkspaceCommitLedgerKey & {
+  session_id?: string | null;
+  resource_id?: string | null;
+  receipt: TReceipt;
+};
+
+export type WorkspaceCommitClaimInput = WorkspaceCommitLedgerKey & {
+  claim_token: string;
+  lease_ms?: number;
+};
+
+export type WorkspaceCommitClaimReleaseInput = WorkspaceCommitLedgerKey & {
+  claim_token: string;
+};
+
+export type WorkspaceCommitClaimResult = WorkspaceCommitLedgerKey & {
+  acquired: boolean;
+  lease_expires_at: string | null;
+};
 
 export type WorkspaceRunStatus = "running" | "succeeded" | "failed" | "canceled";
 
@@ -381,9 +443,21 @@ export interface WorkspaceActivityStore {
   listLayoutSnapshots<TLayout = unknown>(sessionId: string): WorkspaceLayoutSnapshotRecord<TLayout>[];
 }
 
+export interface WorkspacePageContextSnapshotStore {
+  recordPageContextSnapshot<TContext = unknown>(input: WorkspacePageContextSnapshotInput<TContext>): WorkspacePageContextSnapshotRecord<TContext>;
+  listPageContextSnapshots<TContext = unknown>(sessionId: string): WorkspacePageContextSnapshotRecord<TContext>[];
+}
+
 export interface WorkspaceTelemetryStore {
   recordTelemetryEvent<TPayload = unknown>(input: { session_id?: string | null; request_id?: string | null; source: WorkspaceTelemetryEventRecord<TPayload>["source"]; event: string; payload?: TPayload; ok?: boolean | null; error?: string | null }): WorkspaceTelemetryEventRecord<TPayload>;
   listTelemetryEvents(sessionId?: string | null): WorkspaceTelemetryEventRecord[];
+}
+
+export interface WorkspaceCommitLedgerStore {
+  getCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey): WorkspaceCommitLedgerRecord<TReceipt> | null;
+  recordCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerInput<TReceipt>): WorkspaceCommitLedgerRecord<TReceipt>;
+  claimCommit(input: WorkspaceCommitClaimInput): WorkspaceCommitClaimResult;
+  releaseCommitClaim(input: WorkspaceCommitClaimReleaseInput): boolean;
 }
 
 export interface WorkspaceRunStore {
@@ -395,7 +469,7 @@ export interface WorkspaceRunStore {
   listRunEvents<TEvent = unknown>(runId: string): WorkspaceRunEventRecord<TEvent>[];
 }
 
-export type WorkspacePersistenceAdapter = WorkspaceSessionDocumentStore & WorkspaceArtifactStore & WorkspaceFileStore & WorkspaceActivityStore & WorkspaceTelemetryStore & WorkspaceRunStore;
+export type WorkspacePersistenceAdapter = WorkspaceSessionDocumentStore & WorkspaceArtifactStore & WorkspaceFileStore & WorkspaceActivityStore & WorkspacePageContextSnapshotStore & WorkspaceTelemetryStore & WorkspaceCommitLedgerStore & WorkspaceRunStore;
 
 export interface WorkspaceServices {
   persistence: WorkspacePersistenceAdapter;
@@ -475,9 +549,21 @@ export interface AsyncWorkspaceActivityStore {
   listLayoutSnapshots<TLayout = unknown>(sessionId: string): Promise<WorkspaceLayoutSnapshotRecord<TLayout>[]>;
 }
 
+export interface AsyncWorkspacePageContextSnapshotStore {
+  recordPageContextSnapshot<TContext = unknown>(input: WorkspacePageContextSnapshotInput<TContext>): Promise<WorkspacePageContextSnapshotRecord<TContext>>;
+  listPageContextSnapshots<TContext = unknown>(sessionId: string): Promise<WorkspacePageContextSnapshotRecord<TContext>[]>;
+}
+
 export interface AsyncWorkspaceTelemetryStore {
   recordTelemetryEvent<TPayload = unknown>(input: { session_id?: string | null; request_id?: string | null; source: WorkspaceTelemetryEventRecord<TPayload>["source"]; event: string; payload?: TPayload; ok?: boolean | null; error?: string | null }): Promise<WorkspaceTelemetryEventRecord<TPayload>>;
   listTelemetryEvents(sessionId?: string | null): Promise<WorkspaceTelemetryEventRecord[]>;
+}
+
+export interface AsyncWorkspaceCommitLedgerStore {
+  getCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey): Promise<WorkspaceCommitLedgerRecord<TReceipt> | null>;
+  recordCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerInput<TReceipt>): Promise<WorkspaceCommitLedgerRecord<TReceipt>>;
+  claimCommit(input: WorkspaceCommitClaimInput): Promise<WorkspaceCommitClaimResult>;
+  releaseCommitClaim(input: WorkspaceCommitClaimReleaseInput): Promise<boolean>;
 }
 
 export interface AsyncWorkspaceRunStore {
@@ -489,7 +575,7 @@ export interface AsyncWorkspaceRunStore {
   listRunEvents<TEvent = unknown>(runId: string): Promise<WorkspaceRunEventRecord<TEvent>[]>;
 }
 
-export type AsyncWorkspacePersistenceAdapter = AsyncWorkspaceSessionDocumentStore & AsyncWorkspaceArtifactStore & AsyncWorkspaceFileStore & AsyncWorkspaceActivityStore & AsyncWorkspaceTelemetryStore & AsyncWorkspaceRunStore;
+export type AsyncWorkspacePersistenceAdapter = AsyncWorkspaceSessionDocumentStore & AsyncWorkspaceArtifactStore & AsyncWorkspaceFileStore & AsyncWorkspaceActivityStore & AsyncWorkspacePageContextSnapshotStore & AsyncWorkspaceTelemetryStore & AsyncWorkspaceCommitLedgerStore & AsyncWorkspaceRunStore;
 
 export type WorkspacePersistencePolicy = "memory" | "cloud" | "auto";
 
@@ -586,8 +672,14 @@ export function createAsyncWorkspacePersistenceAdapter(adapter: WorkspacePersist
     listToolCalls: async (sessionId) => adapter.listToolCalls(sessionId),
     recordLayoutSnapshot: async <TLayout = unknown>(input: { session_id?: string | null; active_pane_id?: string | null; active_artifact_id?: string | null; layout: TLayout; source?: WorkspaceLayoutSnapshotRecord<TLayout>["source"] }) => adapter.recordLayoutSnapshot<TLayout>(input),
     listLayoutSnapshots: async <TLayout = unknown>(sessionId: string) => adapter.listLayoutSnapshots<TLayout>(sessionId),
+    recordPageContextSnapshot: async <TContext = unknown>(input: WorkspacePageContextSnapshotInput<TContext>) => adapter.recordPageContextSnapshot<TContext>(input),
+    listPageContextSnapshots: async <TContext = unknown>(sessionId: string) => adapter.listPageContextSnapshots<TContext>(sessionId),
     recordTelemetryEvent: async <TPayload = unknown>(input: { session_id?: string | null; request_id?: string | null; source: WorkspaceTelemetryEventRecord<TPayload>["source"]; event: string; payload?: TPayload; ok?: boolean | null; error?: string | null }) => adapter.recordTelemetryEvent<TPayload>(input),
     listTelemetryEvents: async (sessionId) => adapter.listTelemetryEvents(sessionId),
+    getCommitReceipt: async <TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey) => adapter.getCommitReceipt<TReceipt>(input),
+    recordCommitReceipt: async <TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerInput<TReceipt>) => adapter.recordCommitReceipt<TReceipt>(input),
+    claimCommit: async (input) => adapter.claimCommit(input),
+    releaseCommitClaim: async (input) => adapter.releaseCommitClaim(input),
     createRun: async (input) => adapter.createRun(input),
     getRun: async (id) => adapter.getRun(id),
     listRuns: async (sessionId) => adapter.listRuns(sessionId),
@@ -730,6 +822,22 @@ type CloudWorkspaceLayoutSnapshotRow<TLayout = unknown> = {
   created_at: string | Date;
 };
 
+type CloudWorkspacePageContextSnapshotRow<TContext = unknown> = {
+  id: string;
+  session_id: string;
+  source: WorkspacePageContextSnapshotSource;
+  authority: WorkspacePageContextSnapshotAuthority;
+  route: string | null;
+  surface: string | null;
+  page_type: string | null;
+  active_entity: unknown | null;
+  command_families: string[];
+  skill_families: string[];
+  visible_actions: string[];
+  context: TContext;
+  created_at: string | Date;
+};
+
 type CloudWorkspaceRunRow = {
   id: string;
   session_id: string;
@@ -757,6 +865,22 @@ type CloudWorkspaceRunEventRow<TEvent = unknown> = {
   kind: string;
   event: TEvent;
   created_at: string | Date;
+};
+
+type CloudWorkspaceCommitLedgerRow<TReceipt extends Record<string, unknown> = Record<string, unknown>> = {
+  commit_kind: WorkspaceCommitKind;
+  idempotency_key: string;
+  session_id: string | null;
+  resource_id: string | null;
+  receipt_version: number;
+  receipt: TReceipt;
+  created_at: string | Date;
+};
+
+type CloudWorkspaceCommitClaimRow = {
+  commit_kind: WorkspaceCommitKind;
+  idempotency_key: string;
+  lease_expires_at: string | Date;
 };
 
 class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
@@ -805,9 +929,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       const { rows } = await tx.query<CloudWorkspaceSessionRow>(
         `select id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at
          from sonik_agent_ui.agent_workspace_sessions
-         where organization_id = $1 and user_id = $2 and host_session_id is not distinct from $3 and archived = $4
+         where organization_id = $1 and user_id = $2 and archived = $3
          order by last_accessed desc`,
-        [this.#authorized.organizationId, this.#authorized.userId, this.#authorized.hostSession.sessionId ?? null, archived],
+        [this.#authorized.organizationId, this.#authorized.userId, archived],
       );
       return rows.map(mapCloudSessionRow);
     });
@@ -983,8 +1107,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
          and ($5::text is null or documents.title ilike '%' || $5 || '%' or documents.current_content ilike '%' || $5 || '%')
          and exists (select 1 from sonik_agent_ui.agent_workspace_sessions authorized_sessions
            where authorized_sessions.organization_id = documents.organization_id and authorized_sessions.user_id = documents.user_id
-             and authorized_sessions.id = documents.session_id and authorized_sessions.host_session_id is not distinct from $6)`;
-      const filterParams = [this.#authorized.organizationId, this.#authorized.userId, archived, language, search, this.#authorized.hostSession.sessionId ?? null];
+             and authorized_sessions.id = documents.session_id)`;
+      const filterParams = [this.#authorized.organizationId, this.#authorized.userId, archived, language, search];
       const { rows } = await tx.query<CloudWorkspaceDocumentLibraryRow>(
         `select documents.id, documents.session_id, documents.title, documents.language, left(documents.current_content, 500) as current_content, documents.version_count, documents.is_active, documents.archived, documents.created_at, documents.updated_at, sessions.name as session_name, left(documents.current_content, 500) as preview
          from sonik_agent_ui.agent_workspace_documents documents
@@ -992,7 +1116,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
            on sessions.organization_id = documents.organization_id and sessions.user_id = documents.user_id and sessions.id = documents.session_id
          where ${filterSql}
          order by ${orderBy}
-         limit $7 offset $8`,
+         limit $6 offset $7`,
         [...filterParams, limit, offset],
       );
       const [{ total = 0 } = { total: 0 }] = (await tx.query<{ total: number }>(
@@ -1187,7 +1311,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       const existing = await this.#selectDocumentForUpdate(tx, snapshot.id);
       if (!existing) {
         if (await this.#documentIdExists(tx, snapshot.id)) {
-          throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud document is outside the authorized host session.");
+          throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud document is outside the authorized workspace owner.");
         }
         const session = await this.#ensureSession(tx, snapshot.session_id);
         const document = await this.#insertDocument(tx, {
@@ -1290,9 +1414,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       const { rows: sessions } = await tx.query<{ id: string }>(
         `select id
          from sonik_agent_ui.agent_workspace_sessions
-         where organization_id = $1 and user_id = $2 and id = $3 and host_session_id is not distinct from $4 and deleting_at is null
+         where organization_id = $1 and user_id = $2 and id = $3 and deleting_at is null
          for no key update`,
-        [this.#authorized.organizationId, this.#authorized.userId, input.session_id, this.#authorized.hostSession.sessionId ?? null],
+        [this.#authorized.organizationId, this.#authorized.userId, input.session_id],
       );
       const session = sessions[0];
       if (!session) throw new Error("Session not found");
@@ -1402,10 +1526,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
            and exists (
              select 1 from sonik_agent_ui.agent_workspace_sessions
              where organization_id = $1 and user_id = $2 and id = agent_workspace_runs.session_id
-               and agent_workspace_sessions.host_session_id is not distinct from $4
            )
          order by created_at asc`,
-        [this.#authorized.organizationId, this.#authorized.userId, sessionId, this.#authorized.hostSession.sessionId ?? null],
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId],
       );
       return rows.map(mapCloudRunRow);
     });
@@ -1436,10 +1559,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
            and exists (
              select 1 from sonik_agent_ui.agent_workspace_sessions
              where organization_id = $1 and user_id = $2 and id = agent_workspace_runs.session_id
-               and agent_workspace_sessions.host_session_id is not distinct from $10
            )
          returning id, session_id, user_message_id, message_id, status, resumable, error, error_code, request_id, trace_id, traceparent, context_selection, started_at, ended_at, created_at, updated_at`,
-        [this.#authorized.organizationId, this.#authorized.userId, id, next.status, next.resumable, next.error, next.error_code, next.message_id, next.ended_at, this.#authorized.hostSession.sessionId ?? null],
+        [this.#authorized.organizationId, this.#authorized.userId, id, next.status, next.resumable, next.error, next.error_code, next.message_id, next.ended_at],
       );
       return rows[0] ? mapCloudRunRow(rows[0]) : null;
     });
@@ -1448,7 +1570,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
   appendRunEvent<TEvent = unknown>(input: { run_id: string; session_id?: string | null; seq?: number; kind: string; event: TEvent }): Promise<WorkspaceRunEventRecord<TEvent>> {
     return this.#withContext(async (tx) => {
       const run = await this.#selectRun(tx, input.run_id);
-      if (!run) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run not found for the authorized host session.");
+      if (!run) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run not found for the authorized workspace owner.");
       if (input.session_id != null && input.session_id !== run.session_id) throw new Error("Run event session_id must match the parent run session_id.");
       const seq = input.seq ?? (await this.#nextRunEventSeq(tx, input.run_id));
       const { rows } = await tx.query<CloudWorkspaceRunEventRow<TEvent>>(
@@ -1459,10 +1581,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
          join sonik_agent_ui.agent_workspace_sessions
            on agent_workspace_sessions.organization_id = runs.organization_id and agent_workspace_sessions.user_id = runs.user_id and agent_workspace_sessions.id = runs.session_id
          where runs.organization_id = $1 and runs.user_id = $2 and runs.id = $4
-           and agent_workspace_sessions.host_session_id is not distinct from $9
            and ($5::text is null or $5 = runs.session_id)
          returning id, run_id, session_id, seq, kind, event, created_at`,
-        [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-run-event"), input.run_id, input.session_id ?? null, seq, input.kind, JSON.stringify(input.event), this.#authorized.hostSession.sessionId ?? null],
+        [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-run-event"), input.run_id, input.session_id ?? null, seq, input.kind, JSON.stringify(input.event)],
       );
       const row = rows[0];
       if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run event insert returned no row.");
@@ -1480,9 +1601,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
          join sonik_agent_ui.agent_workspace_sessions
            on agent_workspace_sessions.organization_id = runs.organization_id and agent_workspace_sessions.user_id = runs.user_id and agent_workspace_sessions.id = runs.session_id
          where run_events.organization_id = $1 and run_events.user_id = $2 and run_events.run_id = $3
-           and agent_workspace_sessions.host_session_id is not distinct from $4
          order by run_events.seq asc`,
-        [this.#authorized.organizationId, this.#authorized.userId, runId, this.#authorized.hostSession.sessionId ?? null],
+        [this.#authorized.organizationId, this.#authorized.userId, runId],
       );
       return rows.map(mapCloudRunEventRow<TEvent>);
     });
@@ -1496,9 +1616,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
          and exists (
            select 1 from sonik_agent_ui.agent_workspace_sessions
            where organization_id = $1 and user_id = $2 and id = agent_workspace_runs.session_id
-             and agent_workspace_sessions.host_session_id is not distinct from $4
          )`,
-      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+      [this.#authorized.organizationId, this.#authorized.userId, id],
     );
     return rows[0] ? mapCloudRunRow(rows[0]) : null;
   }
@@ -1512,11 +1631,10 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
        left join sonik_agent_ui.agent_workspace_run_events as run_events
          on run_events.organization_id = runs.organization_id and run_events.user_id = runs.user_id and run_events.run_id = runs.id
        where runs.organization_id = $1 and runs.user_id = $2 and runs.id = $3
-         and agent_workspace_sessions.host_session_id is not distinct from $4
        group by runs.id`,
-      [this.#authorized.organizationId, this.#authorized.userId, runId, this.#authorized.hostSession.sessionId ?? null],
+      [this.#authorized.organizationId, this.#authorized.userId, runId],
     );
-    if (!rows[0]) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run not found for the authorized host session.");
+    if (!rows[0]) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud run not found for the authorized workspace owner.");
     return Number(rows[0].next_seq);
   }
 
@@ -1559,11 +1677,141 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       return rows.map(mapCloudLayoutSnapshotRow<TLayout>);
     });
   }
+  recordPageContextSnapshot<TContext = unknown>(input: WorkspacePageContextSnapshotInput<TContext>): Promise<WorkspacePageContextSnapshotRecord<TContext>> {
+    assertPageContextSnapshotAuthority(input);
+    return this.#withContext(async (tx) => {
+      const session = await this.#selectSession(tx, input.session_id);
+      if (!session) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud page-context snapshot session not found for the authorized workspace owner.");
+      const { rows } = await tx.query<CloudWorkspacePageContextSnapshotRow<TContext>>(
+        `insert into sonik_agent_ui.agent_workspace_page_context_snapshots
+          (organization_id, user_id, id, session_id, source, authority, route, surface, page_type, active_entity, command_families, skill_families, visible_actions, context)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14::jsonb)
+         returning id, session_id, source, authority, route, surface, page_type, active_entity, command_families, skill_families, visible_actions, context, created_at`,
+        [
+          this.#authorized.organizationId,
+          this.#authorized.userId,
+          this.#nextId("workspace-page-context"),
+          session.id,
+          input.source,
+          input.authority,
+          input.route ?? null,
+          input.surface ?? null,
+          input.page_type ?? null,
+          input.active_entity == null ? null : JSON.stringify(input.active_entity),
+          input.command_families ?? [],
+          input.skill_families ?? [],
+          input.visible_actions ?? [],
+          JSON.stringify(input.context),
+        ],
+      );
+      const row = rows[0];
+      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud page-context snapshot insert returned no row.");
+      return mapCloudPageContextSnapshotRow<TContext>(row);
+    });
+  }
+  listPageContextSnapshots<TContext = unknown>(sessionId: string): Promise<WorkspacePageContextSnapshotRecord<TContext>[]> {
+    return this.#withContext(async (tx) => {
+      if (!await this.#selectSession(tx, sessionId)) return [];
+      const { rows } = await tx.query<CloudWorkspacePageContextSnapshotRow<TContext>>(
+        `select id, session_id, source, authority, route, surface, page_type, active_entity, command_families, skill_families, visible_actions, context, created_at
+         from sonik_agent_ui.agent_workspace_page_context_snapshots
+         where organization_id = $1 and user_id = $2 and session_id = $3
+         order by created_at desc`,
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId],
+      );
+      return rows.map(mapCloudPageContextSnapshotRow<TContext>);
+    });
+  }
   recordTelemetryEvent<TPayload = unknown>(): Promise<WorkspaceTelemetryEventRecord<TPayload>> {
     return unsupportedCloudWorkspaceOperation("recordTelemetryEvent");
   }
   listTelemetryEvents(): Promise<WorkspaceTelemetryEventRecord[]> {
     return unsupportedCloudWorkspaceOperation("listTelemetryEvents");
+  }
+
+  getCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey): Promise<WorkspaceCommitLedgerRecord<TReceipt> | null> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<CloudWorkspaceCommitLedgerRow<TReceipt>>(
+        `select commit_kind, idempotency_key, session_id, resource_id, receipt_version, receipt, created_at
+         from sonik_agent_ui.agent_workspace_commit_ledger
+         where organization_id = $1 and user_id = $2 and commit_kind = $3 and idempotency_key = $4`,
+        [this.#authorized.organizationId, this.#authorized.userId, input.kind, input.idempotency_key],
+      );
+      return rows[0] ? mapCloudCommitLedgerRow(rows[0]) : null;
+    });
+  }
+
+  recordCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerInput<TReceipt>): Promise<WorkspaceCommitLedgerRecord<TReceipt>> {
+    return this.#withContext(async (tx) => {
+      const params = [
+        this.#authorized.organizationId,
+        this.#authorized.userId,
+        input.kind,
+        input.idempotency_key,
+        input.session_id ?? null,
+        input.resource_id ?? null,
+        JSON.stringify(input.receipt),
+      ];
+      const { rows } = await tx.query<CloudWorkspaceCommitLedgerRow<TReceipt>>(
+        `insert into sonik_agent_ui.agent_workspace_commit_ledger
+          (organization_id, user_id, commit_kind, idempotency_key, session_id, resource_id, receipt)
+         values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+         on conflict (organization_id, user_id, commit_kind, idempotency_key) do nothing
+         returning commit_kind, idempotency_key, session_id, resource_id, receipt_version, receipt, created_at`,
+        params,
+      );
+      if (rows[0]) return mapCloudCommitLedgerRow(rows[0]);
+      const existing = await this.#selectCommitReceipt<TReceipt>(tx, input);
+      if (!existing) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud commit-ledger insert returned no row.");
+      return existing;
+    });
+  }
+
+  claimCommit(input: WorkspaceCommitClaimInput): Promise<WorkspaceCommitClaimResult> {
+    return this.#withContext(async (tx) => {
+      const leaseMs = normalizeCommitLeaseMs(input.lease_ms);
+      const params = [
+        this.#authorized.organizationId,
+        this.#authorized.userId,
+        input.kind,
+        input.idempotency_key,
+        input.claim_token,
+        leaseMs,
+      ];
+      const { rows } = await tx.query<CloudWorkspaceCommitClaimRow>(
+        `insert into sonik_agent_ui.agent_workspace_commit_claims
+          (organization_id, user_id, commit_kind, idempotency_key, claim_token, lease_expires_at)
+         values ($1, $2, $3, $4, $5, now() + ($6::integer * interval '1 millisecond'))
+         on conflict (organization_id, user_id, commit_kind, idempotency_key) do update
+         set claim_token = excluded.claim_token,
+             lease_expires_at = excluded.lease_expires_at,
+             updated_at = now()
+         where sonik_agent_ui.agent_workspace_commit_claims.lease_expires_at <= now()
+         returning commit_kind, idempotency_key, lease_expires_at`,
+        params,
+      );
+      if (rows[0]) {
+        return {
+          kind: rows[0].commit_kind,
+          idempotency_key: rows[0].idempotency_key,
+          acquired: true,
+          lease_expires_at: toIsoTimestamp(rows[0].lease_expires_at),
+        };
+      }
+      return { kind: input.kind, idempotency_key: input.idempotency_key, acquired: false, lease_expires_at: null };
+    });
+  }
+
+  releaseCommitClaim(input: WorkspaceCommitClaimReleaseInput): Promise<boolean> {
+    return this.#withContext(async (tx) => {
+      const { rows } = await tx.query<{ idempotency_key: string }>(
+        `delete from sonik_agent_ui.agent_workspace_commit_claims
+         where organization_id = $1 and user_id = $2 and commit_kind = $3 and idempotency_key = $4 and claim_token = $5
+         returning idempotency_key`,
+        [this.#authorized.organizationId, this.#authorized.userId, input.kind, input.idempotency_key, input.claim_token],
+      );
+      return rows.length > 0;
+    });
   }
 
   async #withContext<T>(fn: (tx: WorkspaceSqlTransaction) => Promise<T>): Promise<T> {
@@ -1582,11 +1830,21 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       const existing = await this.#selectSession(tx, sessionId);
       if (existing) return existing;
       if (await this.#sessionIdExists(tx, sessionId)) {
-        throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud session is outside the authorized host session.");
+        throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud session is outside the authorized workspace owner.");
       }
       return this.#insertSession(tx, { id: sessionId, name: "workspace document session", mode: "document" });
     }
     return this.#insertSession(tx, { id: this.#nextId("workspace-session"), name: DEFAULT_WORKSPACE_SESSION_NAME, mode: "chat" });
+  }
+
+  async #selectCommitReceipt<TReceipt extends Record<string, unknown>>(tx: WorkspaceSqlTransaction, input: WorkspaceCommitLedgerKey): Promise<WorkspaceCommitLedgerRecord<TReceipt> | null> {
+    const { rows } = await tx.query<CloudWorkspaceCommitLedgerRow<TReceipt>>(
+      `select commit_kind, idempotency_key, session_id, resource_id, receipt_version, receipt, created_at
+       from sonik_agent_ui.agent_workspace_commit_ledger
+       where organization_id = $1 and user_id = $2 and commit_kind = $3 and idempotency_key = $4`,
+      [this.#authorized.organizationId, this.#authorized.userId, input.kind, input.idempotency_key],
+    );
+    return rows[0] ? mapCloudCommitLedgerRow(rows[0]) : null;
   }
 
   async #insertSession(tx: WorkspaceSqlTransaction, input: { id: string; name: string; mode: WorkspaceMode; folder?: string | null }): Promise<WorkspaceSessionRecord> {
@@ -1614,8 +1872,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     const { rows } = await tx.query<CloudWorkspaceSessionRow>(
       `select id, name, mode, archived, is_important, folder, message_count, active_document_id, active_artifact_id, created_at, updated_at, last_accessed, last_message_at
        from sonik_agent_ui.agent_workspace_sessions
-       where organization_id = $1 and user_id = $2 and id = $3 and host_session_id is not distinct from $4`,
-      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+       where organization_id = $1 and user_id = $2 and id = $3`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
     );
     return rows[0] ? mapCloudSessionRow(rows[0]) : null;
   }
@@ -1633,7 +1891,7 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     await tx.query(
       `update sonik_agent_ui.agent_workspace_sessions
        set active_document_id = case when $4 then $5 else active_document_id end, active_artifact_id = case when $6 then $7 else active_artifact_id end, mode = coalesce($8, mode), updated_at = now(), last_accessed = now()
-       where organization_id = $1 and user_id = $2 and id = $3 and host_session_id is not distinct from $9`,
+       where organization_id = $1 and user_id = $2 and id = $3`,
       [
         this.#authorized.organizationId,
         this.#authorized.userId,
@@ -1643,7 +1901,6 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
         input.activeArtifactId !== undefined,
         input.activeArtifactId ?? null,
         input.mode ?? null,
-        this.#authorized.hostSession.sessionId ?? null,
       ],
     );
   }
@@ -1652,8 +1909,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
     await tx.query(
       `update sonik_agent_ui.agent_workspace_sessions
        set active_document_id = null, updated_at = now(), last_accessed = now()
-       where organization_id = $1 and user_id = $2 and id = $3 and active_document_id = $4 and host_session_id is not distinct from $5`,
-      [this.#authorized.organizationId, this.#authorized.userId, sessionId, documentId, this.#authorized.hostSession.sessionId ?? null],
+       where organization_id = $1 and user_id = $2 and id = $3 and active_document_id = $4`,
+      [this.#authorized.organizationId, this.#authorized.userId, sessionId, documentId],
     );
   }
 
@@ -1676,8 +1933,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
        from sonik_agent_ui.agent_workspace_documents
        where organization_id = $1 and user_id = $2 and id = $3
          and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
-           where organization_id = $1 and user_id = $2 and id = agent_workspace_documents.session_id and host_session_id is not distinct from $4)`,
-      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_documents.session_id)`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
     );
     const document = rows[0] ? mapCloudDocumentRow(rows[0]) : null;
     return document?.session_id && await this.#selectSession(tx, document.session_id) ? document : null;
@@ -1689,9 +1946,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
        from sonik_agent_ui.agent_workspace_documents
        where organization_id = $1 and user_id = $2 and id = $3
          and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
-           where organization_id = $1 and user_id = $2 and id = agent_workspace_documents.session_id and host_session_id is not distinct from $4)
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_documents.session_id)
        for update`,
-      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+      [this.#authorized.organizationId, this.#authorized.userId, id],
     );
     const document = rows[0] ? mapCloudDocumentRow(rows[0]) : null;
     return document?.session_id && await this.#selectSession(tx, document.session_id) ? document : null;
@@ -1736,8 +1993,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
        from sonik_agent_ui.agent_workspace_artifacts
        where organization_id = $1 and user_id = $2 and id = $3
          and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
-           where organization_id = $1 and user_id = $2 and id = agent_workspace_artifacts.session_id and host_session_id is not distinct from $4)`,
-      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_artifacts.session_id)`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
     );
     const artifact = rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
     return artifact?.session_id && await this.#selectSession(tx, artifact.session_id) ? artifact : null;
@@ -1749,9 +2006,9 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
        from sonik_agent_ui.agent_workspace_artifacts
        where organization_id = $1 and user_id = $2 and id = $3
          and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
-           where organization_id = $1 and user_id = $2 and id = agent_workspace_artifacts.session_id and host_session_id is not distinct from $4)
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_artifacts.session_id)
        for update`,
-      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+      [this.#authorized.organizationId, this.#authorized.userId, id],
     );
     const artifact = rows[0] ? mapCloudArtifactRow<TContent>(rows[0]) : null;
     return artifact?.session_id && await this.#selectSession(tx, artifact.session_id) ? artifact : null;
@@ -1763,8 +2020,8 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
        from sonik_agent_ui.agent_workspace_files
        where organization_id = $1 and user_id = $2 and id = $3 and status <> 'deleted'
          and exists (select 1 from sonik_agent_ui.agent_workspace_sessions
-           where organization_id = $1 and user_id = $2 and id = agent_workspace_files.session_id and host_session_id is not distinct from $4)`,
-      [this.#authorized.organizationId, this.#authorized.userId, id, this.#authorized.hostSession.sessionId ?? null],
+           where organization_id = $1 and user_id = $2 and id = agent_workspace_files.session_id)`,
+      [this.#authorized.organizationId, this.#authorized.userId, id],
     );
     const file = rows[0] ? mapCloudFileRow(rows[0]) : null;
     return file && await this.#selectSession(tx, file.session_id) ? file : null;
@@ -1919,6 +2176,24 @@ function mapCloudLayoutSnapshotRow<TLayout = unknown>(row: CloudWorkspaceLayoutS
   };
 }
 
+function mapCloudPageContextSnapshotRow<TContext = unknown>(row: CloudWorkspacePageContextSnapshotRow<TContext>): WorkspacePageContextSnapshotRecord<TContext> {
+  return {
+    id: row.id,
+    session_id: row.session_id,
+    source: row.source,
+    authority: row.authority,
+    route: row.route ?? null,
+    surface: row.surface ?? null,
+    page_type: row.page_type ?? null,
+    active_entity: row.active_entity == null ? null : clone(row.active_entity),
+    command_families: [...(row.command_families ?? [])],
+    skill_families: [...(row.skill_families ?? [])],
+    visible_actions: [...(row.visible_actions ?? [])],
+    context: clone(row.context),
+    created_at: toIsoTimestamp(row.created_at),
+  };
+}
+
 function mapCloudRunRow(row: CloudWorkspaceRunRow): WorkspaceRunRecord {
   return {
     id: row.id,
@@ -1952,6 +2227,18 @@ function mapCloudRunEventRow<TEvent = unknown>(row: CloudWorkspaceRunEventRow<TE
   };
 }
 
+function mapCloudCommitLedgerRow<TReceipt extends Record<string, unknown>>(row: CloudWorkspaceCommitLedgerRow<TReceipt>): WorkspaceCommitLedgerRecord<TReceipt> {
+  return {
+    kind: row.commit_kind,
+    idempotency_key: row.idempotency_key,
+    session_id: row.session_id ?? null,
+    resource_id: row.resource_id ?? null,
+    receipt_version: 1,
+    receipt: row.receipt,
+    created_at: toIsoTimestamp(row.created_at),
+  };
+}
+
 function resolveDocumentLibraryOrderBy(sort?: string | null): string {
   if (sort === "oldest") return "documents.created_at asc";
   if (sort === "alpha") return "documents.title asc";
@@ -1963,9 +2250,23 @@ function toIsoTimestamp(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+function normalizeCommitLeaseMs(value?: number): number {
+  if (!Number.isFinite(value)) return 120_000;
+  return Math.min(300_000, Math.max(1_000, Math.trunc(value as number)));
+}
+
 export interface InMemoryWorkspacePersistenceOptions {
   maxTelemetryEvents?: number;
   maxTelemetryPayloadChars?: number;
+}
+
+function assertPageContextSnapshotAuthority(input: Pick<WorkspacePageContextSnapshotInput, "source" | "authority">): void {
+  if (input.source === "browser-page-context" && input.authority !== "display-only") {
+    throw new Error("Browser page context snapshots must remain display-only.");
+  }
+  if (input.authority === "trusted-server-derived" && input.source !== "trusted-host-adapter" && input.source !== "system") {
+    throw new Error("Trusted server-derived page context requires a trusted host adapter or system source.");
+  }
 }
 
 export function createInMemoryWorkspacePersistence(options: InMemoryWorkspacePersistenceOptions = {}): WorkspacePersistenceAdapter {
@@ -1984,7 +2285,10 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
   #messages = new Map<string, WorkspaceMessageRecord[]>();
   #toolCalls = new Map<string, WorkspaceToolCallRecord>();
   #layoutSnapshots = new Map<string, WorkspaceLayoutSnapshotRecord[]>();
+  #pageContextSnapshots = new Map<string, WorkspacePageContextSnapshotRecord[]>();
   #telemetryEvents: WorkspaceTelemetryEventRecord[] = [];
+  #commitReceipts = new Map<string, WorkspaceCommitLedgerRecord>();
+  #commitClaims = new Map<string, { claim_token: string; lease_expires_at: number }>();
   #runs = new Map<string, WorkspaceRunRecord>();
   #runEvents = new Map<string, WorkspaceRunEventRecord[]>();
   #deletingSessionIds = new Set<string>();
@@ -2079,6 +2383,7 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
 
     this.#messages.delete(id);
     this.#layoutSnapshots.delete(id);
+    this.#pageContextSnapshots.delete(id);
     for (const [toolCallId, toolCall] of [...this.#toolCalls.entries()]) {
       if (toolCall.session_id === id) this.#toolCalls.delete(toolCallId);
     }
@@ -2560,6 +2865,37 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
     return [...(this.#layoutSnapshots.get(sessionId) ?? [])].map((snapshot) => clone(snapshot as WorkspaceLayoutSnapshotRecord<TLayout>));
   }
 
+  recordPageContextSnapshot<TContext = unknown>(input: WorkspacePageContextSnapshotInput<TContext>): WorkspacePageContextSnapshotRecord<TContext> {
+    assertPageContextSnapshotAuthority(input);
+    const session = this.getSession(input.session_id);
+    if (!session) throw new Error("Session not found");
+    const snapshot: WorkspacePageContextSnapshotRecord<TContext> = {
+      id: this.#nextId("workspace-page-context"),
+      session_id: session.id,
+      source: input.source,
+      authority: input.authority,
+      route: input.route ?? null,
+      surface: input.surface ?? null,
+      page_type: input.page_type ?? null,
+      active_entity: input.active_entity == null ? null : clone(input.active_entity),
+      command_families: [...(input.command_families ?? [])],
+      skill_families: [...(input.skill_families ?? [])],
+      visible_actions: [...(input.visible_actions ?? [])],
+      context: clone(input.context),
+      created_at: this.#now(),
+    };
+    this.#pageContextSnapshots.set(session.id, [
+      snapshot as WorkspacePageContextSnapshotRecord,
+      ...(this.#pageContextSnapshots.get(session.id) ?? []),
+    ]);
+    return clone(snapshot);
+  }
+
+  listPageContextSnapshots<TContext = unknown>(sessionId: string): WorkspacePageContextSnapshotRecord<TContext>[] {
+    return [...(this.#pageContextSnapshots.get(sessionId) ?? [])]
+      .map((snapshot) => clone(snapshot as WorkspacePageContextSnapshotRecord<TContext>));
+  }
+
   recordTelemetryEvent<TPayload = unknown>(input: { session_id?: string | null; request_id?: string | null; source: WorkspaceTelemetryEventRecord<TPayload>["source"]; event: string; payload?: TPayload; ok?: boolean | null; error?: string | null }): WorkspaceTelemetryEventRecord<TPayload> {
     const record: WorkspaceTelemetryEventRecord<TPayload> = {
       id: this.#nextId("workspace-event"),
@@ -2583,6 +2919,52 @@ class InMemoryWorkspacePersistence implements WorkspacePersistenceAdapter {
     return this.#telemetryEvents
       .filter((event) => sessionId === undefined || event.session_id === sessionId)
       .map(clone);
+  }
+
+  getCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey): WorkspaceCommitLedgerRecord<TReceipt> | null {
+    const record = this.#commitReceipts.get(this.#commitReceiptKey(input));
+    return record ? clone(record as WorkspaceCommitLedgerRecord<TReceipt>) : null;
+  }
+
+  recordCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerInput<TReceipt>): WorkspaceCommitLedgerRecord<TReceipt> {
+    const key = this.#commitReceiptKey(input);
+    const existing = this.#commitReceipts.get(key);
+    if (existing) return clone(existing as WorkspaceCommitLedgerRecord<TReceipt>);
+    const record: WorkspaceCommitLedgerRecord<TReceipt> = {
+      kind: input.kind,
+      idempotency_key: input.idempotency_key,
+      session_id: input.session_id ?? null,
+      resource_id: input.resource_id ?? null,
+      receipt_version: 1,
+      receipt: clone(input.receipt),
+      created_at: this.#now(),
+    };
+    this.#commitReceipts.set(key, record as WorkspaceCommitLedgerRecord);
+    return clone(record);
+  }
+
+  claimCommit(input: WorkspaceCommitClaimInput): WorkspaceCommitClaimResult {
+    const key = this.#commitReceiptKey(input);
+    const now = Date.now();
+    const existing = this.#commitClaims.get(key);
+    if (existing && existing.lease_expires_at > now) {
+      return { kind: input.kind, idempotency_key: input.idempotency_key, acquired: false, lease_expires_at: new Date(existing.lease_expires_at).toISOString() };
+    }
+    const leaseExpiresAt = now + normalizeCommitLeaseMs(input.lease_ms);
+    this.#commitClaims.set(key, { claim_token: input.claim_token, lease_expires_at: leaseExpiresAt });
+    return { kind: input.kind, idempotency_key: input.idempotency_key, acquired: true, lease_expires_at: new Date(leaseExpiresAt).toISOString() };
+  }
+
+  releaseCommitClaim(input: WorkspaceCommitClaimReleaseInput): boolean {
+    const key = this.#commitReceiptKey(input);
+    const existing = this.#commitClaims.get(key);
+    if (!existing || existing.claim_token !== input.claim_token) return false;
+    this.#commitClaims.delete(key);
+    return true;
+  }
+
+  #commitReceiptKey(input: WorkspaceCommitLedgerKey): string {
+    return `${input.kind}\u0000${input.idempotency_key}`;
   }
 
   #normalizeTelemetryPayload(value: unknown): unknown {

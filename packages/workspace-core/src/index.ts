@@ -21,6 +21,15 @@ export { closePane, focusArtifact, splitWorkspace } from "./layout/workspace-pat
 export type { WorkspaceRuntimeSnapshot } from "./state/workspace-state.js";
 export { createWorkspaceRuntimeSnapshot, withActiveArtifact } from "./state/workspace-state.js";
 
+export type {
+  CanvasControlDisabledReason,
+  CanvasControlId,
+  CanvasControlState,
+  CanvasControlStateMap,
+  DeriveCanvasControlStatesInput,
+} from "./state/canvas-controls.js";
+export { CANVAS_CONTROL_DISABLED_MESSAGES, deriveCanvasControlStates } from "./state/canvas-controls.js";
+
 export { default as CanvasToolbar } from "./components/CanvasToolbar.svelte";
 export { default as CanvasViewport } from "./components/CanvasViewport.svelte";
 export { default as ChatWindow } from "./components/ChatWindow.svelte";

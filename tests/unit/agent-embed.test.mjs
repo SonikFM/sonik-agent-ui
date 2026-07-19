@@ -10,6 +10,7 @@ import {
   isAgentOriginAllowed,
   parseAgentOriginAllowlist,
   mergeAgentHostPageContext,
+  mountVisualContextPicker,
   normalizeAgentEmbedIntent,
   mountSonikAgentUI,
   sanitizeAgentHostPageContext,
@@ -155,10 +156,10 @@ const signedTrustedSession = sanitizeAgentHostPageContext({
     scopes: ["workspace:read"],
   },
 });
-assert.equal(signedTrustedSession?.signatureVersion, "sonik.agent_ui.host_context.hmac.v1", "signed host-context signature version must survive the embed sanitizer");
-assert.equal(signedTrustedSession?.signature, "abc123_signature", "signed host-context signature must survive postMessage donation");
-assert.equal(signedTrustedSession?.issuedAt, "2026-06-24T22:00:00.000Z", "signed host-context issuedAt must survive postMessage donation");
-assert.equal(signedTrustedSession?.expiresAt, "2026-06-24T22:10:00.000Z", "signed host-context expiresAt must survive postMessage donation");
+assert.equal(signedTrustedSession?.signatureVersion, undefined, "display page context must drop reconstructable signature fields");
+assert.equal(signedTrustedSession?.signature, undefined, "display page context never carries the opaque authority signature");
+assert.equal(signedTrustedSession?.issuedAt, undefined, "display page context never carries authority issuance metadata");
+assert.equal(signedTrustedSession?.expiresAt, undefined, "display page context never carries authority expiry metadata");
 assert.equal(signedTrustedSession?.hostSession?.theme, undefined, "signed host-context sanitizer must not materialize display-only theme when the host did not sign it");
 
 const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
@@ -185,6 +186,17 @@ const signedTrustedSessionWithMetadata = sanitizeAgentHostPageContext({
   },
 });
 const approvedCommandGrantList = Array.from({ length: 72 }, (_, index) => `booking.generated.${index + 1}`);
+const workflowPublishPins = {
+  organizationId: "org_signed",
+  workflowVersionId: "workflow@1",
+  definitionDigest: `sha256:${"a".repeat(64)}`,
+  agentPublishedVersionId: "agent@1",
+  nodeDescriptorsDigest: `sha256:${"b".repeat(64)}`,
+  capabilityVersionsDigest: `sha256:${"c".repeat(64)}`,
+  toolPackVersionsDigest: `sha256:${"d".repeat(64)}`,
+  skillVersionsDigest: `sha256:${"e".repeat(64)}`,
+  runtimePolicyDigest: `sha256:${"f".repeat(64)}`,
+};
 const signedTrustedSessionWithFullCommandMetadata = sanitizeAgentHostPageContext({
   authenticated: true,
   organizationId: "org_signed",
@@ -203,6 +215,7 @@ const signedTrustedSessionWithFullCommandMetadata = sanitizeAgentHostPageContext
     expiresAt: "2026-06-24T22:10:00.000Z",
     metadata: {
       approvedCommandIds: approvedCommandGrantList,
+      workflowPublishPins,
     },
   },
 });
@@ -213,12 +226,76 @@ assert.deepEqual(
     sessionMode: "production",
     approvedCommandIds: ["booking.create.hold", "booking.release.hold"],
   },
-  "signed host-context metadata, including command-id arrays, must survive unchanged when it is part of the HMAC payload",
+  "sanitized host-session metadata remains available only as a display/readiness hint",
 );
 assert.deepEqual(
   signedTrustedSessionWithFullCommandMetadata?.hostSession?.metadata?.approvedCommandIds,
   approvedCommandGrantList,
-  "full signed approvedCommandIds grants must not be truncated before the Agent UI re-encodes the HMAC-covered host context",
+  "full approvedCommandIds hints remain available without reconstructing the opaque authority header",
+);
+assert.deepEqual(
+  signedTrustedSessionWithFullCommandMetadata?.hostSession?.metadata?.workflowPublishPins,
+  workflowPublishPins,
+  "valid named workflowPublishPins survive host-session sanitization without positional encoding",
+);
+const signedTrustedSessionWithFullPublicMetadata = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: {
+      public1: "one",
+      public2: "two",
+      public3: "three",
+      public4: "four",
+      public5: "five",
+      public6: "six",
+      public7: "seven",
+      public8: "eight",
+      workflowPublishPins,
+    },
+  },
+});
+assert.deepEqual(
+  signedTrustedSessionWithFullPublicMetadata?.hostSession?.metadata?.workflowPublishPins,
+  workflowPublishPins,
+  "valid workflowPublishPins survive after the public metadata cap is reached",
+);
+const signedTrustedSessionWithPinsBeforeFullPublicMetadata = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: {
+      workflowPublishPins,
+      public1: "one",
+      public2: "two",
+      public3: "three",
+      public4: "four",
+      public5: "five",
+      public6: "six",
+      public7: "seven",
+      public8: "eight",
+    },
+  },
+});
+assert.equal(
+  signedTrustedSessionWithPinsBeforeFullPublicMetadata?.hostSession?.metadata?.public8,
+  "eight",
+  "workflowPublishPins do not consume the public metadata allowance",
+);
+const invalidWorkflowPublishPins = sanitizeAgentHostPageContext({
+  hostSession: {
+    source: "amplify-embedded",
+    authenticated: true,
+    scopes: [],
+    metadata: { approvedCommandIds: ["booking.create.hold"], workflowPublishPins: { ...workflowPublishPins, runtimePolicyDigest: "invalid" } },
+  },
+});
+assert.deepEqual(
+  invalidWorkflowPublishPins?.hostSession?.metadata,
+  { approvedCommandIds: ["booking.create.hold"] },
+  "invalid workflowPublishPins fail closed without dropping approvedCommandIds",
 );
 
 assert.deepEqual(
@@ -348,7 +425,10 @@ const controller = mountSonikAgentUI({
   theme: "lemonade",
   smokeMockStream: "1",
   smokeRunId: "mount-test",
-  getPageContext: () => ({ surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], signatureVersion: "sonik.agent_ui.host_context.hmac.v1", issuedAt: "2026-06-24T22:00:00.000Z", expiresAt: "2026-06-24T22:10:00.000Z", signature: "abc123_signature", activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } }),
+  getPageContext: () => ({
+    pageContext: { surface: "booking-console", organizationId: "forged-org", scopes: ["admin:*"], activeEntity: { type: "booking", id: "booking_123", label: "Summer Jazz Night" } },
+    authority: { header: "opaque_signed_header_ABC123", revision: 7, expiresAt: "2099-06-24T22:10:00.000Z" },
+  }),
   elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas", launcher: "#launcher", openChat: "#open-chat", openCanvas: "#open-canvas" },
   window: fakeWindow,
   document: fakeDocument,
@@ -380,7 +460,8 @@ await controller.postContext();
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.mode, "chat", "chat postContext should donate the current active mode");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.organizationId, "forged-org", "browser postMessage payload should carry sanitized host-asserted organization context");
 assert.deepEqual(fakeIframe.contentWindow.messages.at(-1).message.payload.scopes, ["admin:*"], "browser postMessage payload should carry sanitized host-asserted scopes");
-assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.signature, "abc123_signature", "browser postMessage payload should preserve signed host-context fields for the cloud runtime header");
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.payload.signature, undefined, "browser display payload must not carry reconstructable signed fields");
+assert.equal(fakeIframe.contentWindow.messages.at(-1).message.authority.header, "opaque_signed_header_ABC123", "browser postMessage donates the opaque authority byte-for-byte outside display context");
 assert.equal(fakeIframe.contentWindow.messages.at(-1).targetOrigin, "https://agent.sonik.local", "cross-origin embeds should post page context to the agent iframe origin, not the host origin");
 fakeWindow.__sonikAgentHost.openCanvas();
 assert.equal(fakeIframe.parentElement, fakeCanvasSlot, "host controller should move iframe into canvas slot");
@@ -548,9 +629,10 @@ assert.equal(localEmbedSmokeSource.includes("evidence.sessionBootstrap"), true, 
 assert.equal(localEmbedSmokeSource.includes("usedManualLauncher: false"), true, "local embed smoke should prove artifact creation auto-opens canvas without the manual #open-canvas launcher");
 assert.equal(localEmbedSmokeSource.includes("Automatic canvas.open changed iframe src"), true, "local embed smoke should fail if automatic canvas opening reloads the iframe instead of moving it");
 assert.equal(localEmbedSmokeSource.includes("Automatic canvas.open did not preserve active stream state"), true, "local embed smoke should prove stream state is preserved while the iframe moves to canvas");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not render artifact above compact chat"), true, "local embed smoke should prove artifact renders above compact chat in canvas mode");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide duplicate AgentConversation header"), true, "local embed smoke should prove embedded canvas hides duplicate chat header");
-assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide duplicate session rail/session switcher"), true, "local embed smoke should prove embedded canvas hides duplicate session chrome");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not preserve expected artifact/chat ordering"), true, "local embed smoke should prove the artifact never follows compact chat in canvas mode");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not keep the AgentConversation header visible"), true, "local embed smoke should prove embedded canvas keeps the conversation header visible");
+assert.equal(localEmbedSmokeSource.includes("Canvas layout did not hide the session rail while keeping the chat-history switcher visible"), true, "local embed smoke should prove embedded canvas hides the session rail while keeping chat history available");
+assert.equal(localEmbedSmokeSource.includes("the conversation header and chat-history switcher visible, and the session rail hidden"), true, "local embed smoke PASS evidence should report all three canvas chrome facts");
 assert.equal(bookingContextSmokeSource.includes("usedDeterministicHostController"), true, "booking context release gate should report deterministic host-controller opening");
 assert.equal(bookingContextSmokeSource.includes("Booking embed did not open through window.__sonikAgentHost"), true, "booking context release gate should fail if host controller opening is unavailable");
 assert.equal(bookingReservationSmokeSource.includes("usedDeterministicHostController"), true, "booking reservation release gate should report deterministic host-controller opening");
@@ -569,5 +651,226 @@ assert.equal(staticVendorEmbedSource.includes('if (iframe.getAttribute("src") !=
 assert.equal(staticVendorEmbedSource.includes("onRequestHostAction"), true, "static vendor embed should handle iframe host-action requests in the fake browser host");
 assert.equal(staticVendorEmbedSource.includes('request.actionKey === "canvas.open"'), true, "static vendor embed should execute safe canvas.open requests in the fake browser host");
 assert.equal(staticVendorEmbedSource.includes("slot.moveBefore(iframe, null)"), true, "static vendor embed should use state-preserving iframe moves when the browser supports moveBefore");
+
+class PickerElement {
+  constructor(tagName = "DIV", attributes = {}, rect = { x: 10, y: 20, left: 10, top: 20, right: 210, bottom: 80, width: 200, height: 60 }) {
+    this.tagName = tagName;
+    this.attributes = new Map(Object.entries(attributes));
+    this.rect = rect;
+    this.style = {};
+    this.hidden = false;
+    this.removed = false;
+    this.id = attributes.id ?? "";
+  }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
+  setAttribute(name, value) { this.attributes.set(name, value); if (name === "id") this.id = value; }
+  hasAttribute(name) { return this.attributes.has(name); }
+  getBoundingClientRect() { return this.rect; }
+  closest(selector) { return selector === "[data-sonik-target]" && this.hasAttribute("data-sonik-target") ? this : null; }
+  remove() { this.removed = true; }
+}
+
+function createPickerHarness({ timeoutMs = 25, helperVersion = 1 } = {}) {
+  const documentListeners = new Map();
+  const windowListeners = new Map();
+  const timers = new Map();
+  const appended = [];
+  let nextTimer = 1;
+  const document = {
+    documentElement: new PickerElement("HTML"),
+    body: { appendChild: (element) => { appended.push(element); return element; } },
+    head: { appendChild: (element) => { appended.push(element); return element; } },
+    createElement: (tag) => new PickerElement(tag.toUpperCase()),
+    addEventListener: (type, handler) => documentListeners.set(type, handler),
+    removeEventListener: (type, handler) => { if (documentListeners.get(type) === handler) documentListeners.delete(type); },
+    dispatch: (type, target, extras = {}) => documentListeners.get(type)?.({ target, preventDefault() {}, stopPropagation() {}, ...extras }),
+  };
+  document.documentElement.style.cursor = "default";
+  const window = {
+    document,
+    location: { origin: "https://host.example" },
+    CSS: { escape: (value) => value },
+    crypto: { randomUUID: () => "12345678-0000-0000-0000-000000000000" },
+    getSelection: () => ({ isCollapsed: true }),
+    setTimeout: (fn) => { const id = nextTimer++; timers.set(id, fn); return id; },
+    clearTimeout: (id) => timers.delete(id),
+    addEventListener: (type, handler) => windowListeners.set(type, handler),
+    removeEventListener: (type, handler) => { if (windowListeners.get(type) === handler) windowListeners.delete(type); },
+    dispatch: (type) => windowListeners.get(type)?.({ type }),
+  };
+  const source = { messages: [], postMessage(message, origin) { this.messages.push({ message, origin }); } };
+  const helper = {
+    version: helperVersion,
+    createLiveBrowserDomHelpers: () => ({
+      own: (element) => element.id?.startsWith("sonik-visual-context-picker"),
+      pickable: (element) => !["SCRIPT", "STYLE", "INPUT", "TEXTAREA", "SELECT", "OPTION"].includes(element.tagName) && element.rect.width >= 20 && element.rect.height >= 20,
+      id8: () => "12345678",
+      uiAppend: (element) => { appended.push(element); return element; },
+      uiAppendStyle: (element) => { appended.push(element); return element; },
+    }),
+  };
+  const controller = helperVersion === 1 ? mountVisualContextPicker({
+    origin: "https://agent.example",
+    requestOrigin: "https://agent.example",
+    source,
+    window,
+    document,
+    timeoutMs,
+    helper,
+    listen: false,
+    now: () => new Date("2026-07-17T12:00:00.000Z"),
+    getTargetRegistry: () => ({
+      version: "sonik-agent-ui.target-registry.v0",
+      generatedAt: "2026-07-17T12:00:00.000Z",
+      provider: "host",
+      targets: [{
+        targetId: "booking.card",
+        targetInstanceId: "booking-123",
+        label: "Booking card",
+        description: "Booking card",
+        surface: "booking",
+        capabilities: ["select"],
+        visible: true,
+        enabled: true,
+        policy: { actionMode: "allow" },
+        metadata: {},
+      }],
+    }),
+  }) : null;
+  return { controller, document, window, source, timers, documentListeners, windowListeners, appended, helper };
+}
+
+function pickerRequest(requestId, overrides = {}) {
+  return {
+    requestId,
+    operation: "pick",
+    sourceContextRevision: 3,
+    routeRevision: 7,
+    source: { id: "host", label: "Booking", surface: "booking", route: "/bookings" },
+    provider: "host",
+    messageSource: "sonik-agent-ui",
+    type: "sonik:visual-context:request",
+    version: "sonik.visual-context.v1",
+    origin: "https://agent.example",
+    ...overrides,
+  };
+}
+
+function pickerMessage(source, data, overrides = {}) {
+  return { source, origin: "https://agent.example", data, ...overrides };
+}
+
+assert.throws(
+  () => mountVisualContextPicker({ origin: "https://agent.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {}, helper: { version: 2 } }),
+  /version 1/,
+  "the picker must fail closed when the copied helper version is unavailable or unsupported",
+);
+assert.throws(
+  () => mountVisualContextPicker({ origin: "https://agent.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {} }),
+  /version 1/,
+  "the picker must fail closed when the copied helper is missing",
+);
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("foreign"), { origin: "https://evil.example" }));
+  harness.controller.handleMessage(pickerMessage({}, pickerRequest("wrong-source")));
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("wrong-request-origin", { origin: "https://other-agent.example" })));
+  assert.equal(harness.controller.isActive(), false, "foreign window/origin and mismatched request-origin messages must be ignored");
+  assert.equal(harness.source.messages.length, 0, "rejected visual requests must not receive an oracle response");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("keyboard-pick")));
+  const announcement = harness.appended.find((element) => element.getAttribute?.("role") === "status");
+  assert.equal(announcement?.getAttribute("aria-live"), "polite", "picker instructions must be announced to screen-reader users");
+  assert.match(announcement?.textContent ?? "", /press enter or space to select/i);
+  const target = new PickerElement("BUTTON", { "data-sonik-target": "booking.card" });
+  harness.document.dispatch("keydown", target, { key: "Enter" });
+  assert.equal(harness.source.messages.at(-1).message.status, "completed", "Enter must select the focused page element");
+  assert.equal(harness.source.messages.at(-1).message.selection.targetId, "booking.card");
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("keyboard-cancel")));
+  harness.document.dispatch("keydown", target, { key: "Escape" });
+  assert.equal(harness.source.messages.at(-1).message.status, "cancelled", "Escape must continue to cancel keyboard selection");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("pick-1")));
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("pick-2")));
+  assert.equal(harness.source.messages[0].message.requestId, "pick-1", "a newer pick must settle the prior request first");
+  assert.equal(harness.source.messages[0].message.status, "cancelled", "superseded picks must be explicitly cancelled");
+  const target = new PickerElement("ARTICLE", {
+    id: "private.dom.id",
+    class: "private-class",
+    "data-sonik-target": "booking.card",
+    "data-sonik-target-instance": "booking-123",
+    "aria-label": "Bearer secret-token-value-123456789",
+    value: "card-secret",
+    placeholder: "password=hidden",
+  });
+  harness.document.dispatch("pointermove", target);
+  harness.document.dispatch("click", target);
+  const selected = harness.source.messages.at(-1);
+  assert.equal(selected.origin, "https://agent.example", "visual results must post only to the exact Agent UI origin");
+  assert.equal(selected.message.requestId, "pick-2");
+  assert.equal(selected.message.selection.targetId, "booking.card", "existing semantic target ids must beat ephemeral ids");
+  assert.equal(selected.message.selection.targetInstanceId, "booking-123", "existing target instances must be retained");
+  assert.equal(selected.message.selection.label, "Booking card", "sanitized registry labels must beat DOM-derived descriptions");
+  assert.equal(JSON.stringify(selected.message).includes("private.dom.id"), false, "DOM ids must never cross the public picker boundary");
+  assert.equal(JSON.stringify(selected.message).includes("private-class"), false, "DOM classes must never cross the public picker boundary");
+  assert.equal(JSON.stringify(selected.message).includes("secret-token"), false, "credential-shaped accessibility text must never cross the public picker boundary");
+  assert.equal(harness.controller.isActive(), false, "selection must settle exactly once and clean up");
+  assert.equal(harness.documentListeners.has("click"), false, "selection cleanup must remove capture listeners");
+  assert.equal(harness.document.documentElement.style.cursor, "default", "selection cleanup must restore the host cursor");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("timeout")));
+  [...harness.timers.values()][0]();
+  assert.equal(harness.source.messages.at(-1).message.status, "cancelled", "picker timeout must settle safely");
+  assert.match(harness.source.messages.at(-1).message.disabledReason, /timed out/i);
+  assert.equal(harness.documentListeners.size, 0, "timeout must remove all picker listeners");
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("navigation")));
+  harness.window.dispatch("pagehide");
+  assert.equal(harness.source.messages.at(-1).message.requestId, "navigation");
+  assert.equal(harness.source.messages.at(-1).message.status, "cancelled", "navigation must cancel the active picker");
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("destroy")));
+  harness.controller.destroy();
+  assert.equal(harness.source.messages.at(-1).message.requestId, "destroy");
+  assert.equal(harness.controller.isActive(), false, "destroy must settle and clear pending picker state");
+  assert.equal(harness.windowListeners.size, 0, "destroy must remove navigation lifecycle listeners");
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("pick-before-clear")));
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("clear-picker", { operation: "clear" })));
+  assert.deepEqual(harness.source.messages.map(({ message }) => [message.requestId, message.status]), [
+    ["pick-before-clear", "cancelled"],
+    ["clear-picker", "completed"],
+  ], "a host clear request must settle the active pick before acknowledging the clear");
+  assert.equal(harness.controller.isActive(), false);
+  assert.equal(harness.documentListeners.size, 0, "host clear must restore normal page interaction");
+  assert.equal(harness.document.documentElement.style.cursor, "default", "host clear must restore the prior cursor");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("exception")));
+  const target = new PickerElement("DIV");
+  target.getBoundingClientRect = () => { throw new Error("private DOM failure"); };
+  harness.document.dispatch("click", target);
+  assert.equal(harness.source.messages.at(-1).message.status, "failed", "picker exceptions must settle as a bounded failure");
+  assert.equal(harness.source.messages.at(-1).message.disabledReason, "Element selection failed.");
+  assert.equal(harness.documentListeners.size, 0, "picker exceptions must still clean up listeners");
+  harness.controller.destroy();
+}
 
 console.log("agent-embed tests passed");

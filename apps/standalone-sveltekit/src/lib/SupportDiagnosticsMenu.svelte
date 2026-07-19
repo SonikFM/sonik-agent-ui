@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount, tick } from "svelte";
   import type { AgentUiDeploymentSnapshot, AgentUiTurnCorrelationSnapshot } from "@sonik-agent-ui/agent-observability";
 
   let {
@@ -24,13 +25,106 @@
   const missing = "Not available yet";
   const chatDisabled = $derived(Boolean(transcriptDisabledReason || busy));
   const diagnosticsDisabled = $derived(Boolean(!activeSessionId || busy));
+
+  let detailsElement: HTMLDetailsElement | null = $state(null);
+  let summaryElement: HTMLElement | null = $state(null);
+  let panelElement: HTMLDivElement | null = $state(null);
+  let panelLeft = $state(0);
+  let panelTop = $state(0);
+  let panelMaxWidth: number | null = $state(null);
+  let panelMaxHeight: number | null = $state(null);
+  let panelPlacement = $state<"below" | "above" | "viewport">("below");
+  const panelStyle = $derived(
+    panelMaxWidth === null || panelMaxHeight === null
+      ? ""
+      : `left:${panelLeft}px;top:${panelTop}px;max-width:${panelMaxWidth}px;max-height:${panelMaxHeight}px`,
+  );
+
+  const VIEWPORT_GUTTER = 16;
+  const PANEL_GAP = 8;
+
+  async function clampPanelToViewport(): Promise<void> {
+    if (!detailsElement?.open) return;
+    await tick();
+    if (!summaryElement || !panelElement) return;
+
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const viewportRight = viewportLeft + viewportWidth;
+    const viewportBottom = viewportTop + viewportHeight;
+    const maxWidth = Math.max(1, viewportWidth - VIEWPORT_GUTTER * 2);
+    const maxHeight = Math.max(1, viewportHeight - VIEWPORT_GUTTER * 2);
+    panelMaxWidth = maxWidth;
+    panelMaxHeight = maxHeight;
+    await tick();
+
+    const triggerRect = summaryElement.getBoundingClientRect();
+    const panelRect = panelElement.getBoundingClientRect();
+    const panelWidth = Math.min(panelRect.width, maxWidth);
+    const panelHeight = Math.min(panelRect.height, maxHeight);
+
+    const left = Math.min(
+      Math.max(triggerRect.right - panelWidth, viewportLeft + VIEWPORT_GUTTER),
+      viewportRight - VIEWPORT_GUTTER - panelWidth,
+    );
+    const belowTop = triggerRect.bottom + PANEL_GAP;
+    const aboveTop = triggerRect.top - PANEL_GAP - panelHeight;
+    let top = viewportTop + VIEWPORT_GUTTER;
+    panelPlacement = "viewport";
+    if (belowTop + panelHeight <= viewportBottom - VIEWPORT_GUTTER) {
+      top = belowTop;
+      panelPlacement = "below";
+    } else if (aboveTop >= viewportTop + VIEWPORT_GUTTER) {
+      top = aboveTop;
+      panelPlacement = "above";
+    }
+
+    panelLeft = left;
+    panelTop = top;
+  }
+
+  function handleToggle(): void {
+    if (detailsElement?.open) void clampPanelToViewport();
+  }
+
+  function handleMenuKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Escape" || !detailsElement?.open) return;
+    event.preventDefault();
+    detailsElement.open = false;
+    summaryElement?.focus();
+  }
+
+  onMount(() => {
+    const handleViewportChange = () => void clampPanelToViewport();
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("keydown", handleMenuKeydown);
+    window.visualViewport?.addEventListener("resize", handleViewportChange);
+    window.visualViewport?.addEventListener("scroll", handleViewportChange);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("keydown", handleMenuKeydown);
+      window.visualViewport?.removeEventListener("resize", handleViewportChange);
+      window.visualViewport?.removeEventListener("scroll", handleViewportChange);
+    };
+  });
 </script>
 
-<details class="support-menu">
-  <summary class="support-menu__summary" aria-label="Open support diagnostics menu">
+<details bind:this={detailsElement} class="support-menu" ontoggle={handleToggle}>
+  <summary bind:this={summaryElement} class="support-menu__summary" aria-label="Open support diagnostics menu">
     Support
   </summary>
-  <div class="support-menu__panel" role="group" aria-label="Support diagnostics">
+  <div
+    bind:this={panelElement}
+    class="support-menu__panel"
+    role="group"
+    aria-label="Support diagnostics"
+    data-support-menu-panel
+    data-placement={panelPlacement}
+    style={panelStyle}
+  >
     <dl class="support-menu__facts">
       <div><dt>Session</dt><dd>{activeSessionId ?? missing}</dd></div>
       <div><dt>Request</dt><dd>{correlation?.requestId ?? missing}</dd></div>
@@ -85,16 +179,17 @@
   }
 
   .support-menu__panel {
-    position: absolute;
-    right: 0;
+    position: fixed;
     z-index: 20;
-    margin-top: 0.5rem;
     width: min(20rem, calc(100vw - 2rem));
-    border: 1px solid var(--border);
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--sonik-border-color);
     border-radius: 0.875rem;
     background: var(--popover, var(--background));
     color: var(--popover-foreground, var(--foreground));
-    box-shadow: 0 16px 40px rgb(0 0 0 / 0.18);
+    box-shadow: var(--app-card-shadow-elevated);
     padding: 0.75rem;
   }
 
@@ -130,7 +225,7 @@
 
   .support-menu__actions button {
     border-radius: 999px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--sonik-border-color);
     padding: 0.35rem 0.65rem;
     font-size: 0.75rem;
   }

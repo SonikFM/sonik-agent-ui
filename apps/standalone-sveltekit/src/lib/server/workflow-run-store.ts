@@ -1,173 +1,609 @@
-// P1 #5 (production-readiness-agent-creation-2026-07-13.md): persists WorkflowRunState rows for
-// the workflow-runs endpoint (the controller's first production caller). Sync in-memory store
-// below is the local-dev/test fallback (mirrors agent-definition-store.ts's own split exactly);
-// the durable Neon-backed AsyncWorkflowRunStore + resolveWorkflowRunStore live at the bottom of
-// this file, same shape and same env vars as resolveAgentDefinitionStore. Schema:
-// packages/workspace-session/migrations/postgres/0007_agent_workflow_runs.sql (appended to the
-// shared migration manifest in scripts/run-postgres-migrations.mjs after Lane A's 0006).
-
-import { neon } from "@neondatabase/serverless";
 import type { WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
 import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
+import {
+  canTransitionEffectClaim,
+  effectClaimSchema,
+  externalEffectIdempotencyKey,
+  parseCanonicalWorkflowEvent,
+  replayCanonicalWorkflowEvents,
+  runLeaseSchema,
+  workflowVNextRunStateSchema,
+  workflowWaitpointSchema,
+  type CanonicalWorkflowEvent,
+  type ExternalEffectIdentity,
+  type WorkflowWaitpoint,
+} from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import type { WorkspaceSqlExecutor, WorkspaceSqlTransaction } from "@sonik-agent-ui/workspace-session";
+import { sanitizePersistenceValue } from "@sonik-agent-ui/agent-observability";
+import { createNeonWorkspaceSqlExecutor } from "./workspace-cloud-sql.ts";
+
+export interface WorkflowRunOwner {
+  organizationId: string;
+  userId: string;
+  /** Insert-time audit provenance only. Host-session rotation never changes ownership. */
+  hostSessionId?: string | null;
+}
+
+export type WorkflowRunSourceKind = "internal" | "draft" | "published";
 
 export interface WorkflowRunRow {
+  organizationId: string;
+  userId: string;
+  hostSessionId: string | null;
   runId: string;
   workflowId: string;
   workflowVersionId: string;
-  /** The exact definition this run was started against -- re-resolving it by id later could drift
-   *  if a draft changes mid-run; the run pins its own copy (D002-style immutability applied to runs). */
+  sourceKind: WorkflowRunSourceKind | null;
+  /** The exact definition this run was started against. */
   definition: WorkflowDefinition;
-  /** Opaque per-workflow input the registered callbacks close over (e.g. the Amplify campaign brief).
-   *  Null for workflows with no registered callbacks. */
+  /** Opaque per-workflow input closed over by registered callbacks. */
   input: unknown;
   state: WorkflowRunState;
   createdAt: string;
   updatedAt: string;
 }
 
+export interface CreateWorkflowRunInput {
+  workflowId: string;
+  workflowVersionId: string;
+  sourceKind: WorkflowRunSourceKind;
+  definition: WorkflowDefinition;
+  input: unknown;
+  state: WorkflowRunState;
+}
+
+export type WorkflowRunSnapshot = ReturnType<typeof workflowVNextRunStateSchema.parse>;
+export type WorkflowRunLease = ReturnType<typeof runLeaseSchema.parse>;
+export type WorkflowEffectClaim = ReturnType<typeof effectClaimSchema.parse> & { result?: unknown };
+
+export interface AppendWorkflowRunEventInput {
+  expectedRevision: number;
+  leaseId: string;
+  event: CanonicalWorkflowEvent;
+  snapshot: WorkflowRunSnapshot;
+}
+
+export interface ClaimWorkflowEffectInput {
+  claimId: string;
+  runId: string;
+  logicalEffectId: string;
+  attemptId: string;
+  idempotencyKey: string;
+  providerSupportsIdempotency: boolean;
+  externalEffectIdentity: ExternalEffectIdentity;
+}
+
+export interface WorkflowRunJournalStore {
+  appendEventAndProject(owner: WorkflowRunOwner, input: AppendWorkflowRunEventInput): Promise<boolean>;
+  getSnapshot(owner: WorkflowRunOwner, runId: string): Promise<WorkflowRunSnapshot | null>;
+  listEvents(owner: WorkflowRunOwner, runId: string): Promise<CanonicalWorkflowEvent[]>;
+  replayEvents(owner: WorkflowRunOwner, initial: WorkflowRunSnapshot): Promise<WorkflowRunSnapshot>;
+  acquireLease(owner: WorkflowRunOwner, runId: string, lease: WorkflowRunLease): Promise<boolean>;
+  releaseLease(owner: WorkflowRunOwner, runId: string, leaseId: string): Promise<boolean>;
+  createWaitpoint(owner: WorkflowRunOwner, waitpoint: WorkflowWaitpoint): Promise<boolean>;
+  resolveWaitpoint(owner: WorkflowRunOwner, runId: string, waitpointId: string): Promise<boolean>;
+  claimEffect(owner: WorkflowRunOwner, input: ClaimWorkflowEffectInput): Promise<{ created: boolean; claim: WorkflowEffectClaim }>;
+  transitionEffectClaim(owner: WorkflowRunOwner, claimId: string, from: WorkflowEffectClaim["status"], to: WorkflowEffectClaim["status"], result?: unknown): Promise<WorkflowEffectClaim | null>;
+}
+
 export interface WorkflowRunStore {
-  createRun(input: { workflowId: string; workflowVersionId: string; definition: WorkflowDefinition; input: unknown; state: WorkflowRunState }): WorkflowRunRow;
-  getRun(runId: string): WorkflowRunRow | null;
-  updateRunState(runId: string, state: WorkflowRunState): WorkflowRunRow | null;
+  createRun(owner: WorkflowRunOwner, input: CreateWorkflowRunInput): WorkflowRunRow;
+  getRun(owner: WorkflowRunOwner, runId: string): WorkflowRunRow | null;
+  listRuns(owner: WorkflowRunOwner): WorkflowRunRow[];
+  updateRunState(owner: WorkflowRunOwner, runId: string, state: WorkflowRunState): WorkflowRunRow | null;
 }
 
 export function createInMemoryWorkflowRunStore(): WorkflowRunStore {
   const rows = new Map<string, WorkflowRunRow>();
 
-  function createRun(input: { workflowId: string; workflowVersionId: string; definition: WorkflowDefinition; input: unknown; state: WorkflowRunState }): WorkflowRunRow {
+  function createRun(ownerInput: WorkflowRunOwner, input: CreateWorkflowRunInput): WorkflowRunRow {
+    assertWorkflowPersistenceSafe(input);
+    const owner = normalizeWorkflowRunOwner(ownerInput);
+    const key = workflowRunKey(owner, input.state.runId);
+    if (rows.has(key)) throw workflowRunConflictError(input.state.runId);
     const now = new Date().toISOString();
-    const row: WorkflowRunRow = {
+    const row: WorkflowRunRow = structuredClone({
+      organizationId: owner.organizationId,
+      userId: owner.userId,
+      hostSessionId: owner.hostSessionId ?? null,
       runId: input.state.runId,
       workflowId: input.workflowId,
       workflowVersionId: input.workflowVersionId,
+      sourceKind: input.sourceKind,
       definition: input.definition,
       input: input.input,
       state: input.state,
       createdAt: now,
       updatedAt: now,
-    };
-    rows.set(row.runId, row);
-    return row;
+    });
+    rows.set(key, row);
+    return structuredClone(row);
   }
 
-  // org scoping seam: filter by organization_id once the auth/org lane lands --
-  // runs are process-wide across tenants until then (same seam as createRun above).
-  function getRun(runId: string): WorkflowRunRow | null {
-    return rows.get(runId) ?? null;
+  function getRun(ownerInput: WorkflowRunOwner, runId: string): WorkflowRunRow | null {
+    const owner = normalizeWorkflowRunOwner(ownerInput);
+    const row = rows.get(workflowRunKey(owner, runId));
+    return row ? structuredClone(row) : null;
   }
 
-  // org scoping seam: scope the update by organization_id once the auth/org lane lands.
-  function updateRunState(runId: string, state: WorkflowRunState): WorkflowRunRow | null {
-    const existing = rows.get(runId);
+  function listRuns(ownerInput: WorkflowRunOwner): WorkflowRunRow[] {
+    const owner = normalizeWorkflowRunOwner(ownerInput);
+    return [...rows.values()]
+      .filter((row) => row.organizationId === owner.organizationId && row.userId === owner.userId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map((row) => structuredClone(row));
+  }
+
+  function updateRunState(ownerInput: WorkflowRunOwner, runId: string, state: WorkflowRunState): WorkflowRunRow | null {
+    assertWorkflowPersistenceSafe(state);
+    const owner = normalizeWorkflowRunOwner(ownerInput);
+    const key = workflowRunKey(owner, runId);
+    const existing = rows.get(key);
     if (!existing) return null;
-    const updated: WorkflowRunRow = { ...existing, state, updatedAt: new Date().toISOString() };
-    rows.set(runId, updated);
-    return updated;
+    const updated: WorkflowRunRow = structuredClone({ ...existing, state, updatedAt: new Date().toISOString() });
+    rows.set(key, updated);
+    return structuredClone(updated);
   }
 
-  return { createRun, getRun, updateRunState };
+  return { createRun, getRun, listRuns, updateRunState };
 }
 
-/** Module-level singleton for the running process, mirroring agent-definition-store.ts's
- *  `agentDefinitionStore` singleton pattern. */
+export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore): WorkflowRunJournalStore {
+  const events = new Map<string, CanonicalWorkflowEvent[]>();
+  const snapshots = new Map<string, WorkflowRunSnapshot>();
+  const leases = new Map<string, WorkflowRunLease>();
+  const waitpoints = new Map<string, WorkflowWaitpoint & { resolved: boolean }>();
+  const claims = new Map<string, WorkflowEffectClaim>();
+  const claimIds = new Map<string, string>();
+
+  return {
+    async appendEventAndProject(ownerInput, input) {
+      const owner = normalizeWorkflowRunOwner(ownerInput);
+      const { event, snapshot } = validateJournalAppend(input);
+      if (!runStore.getRun(owner, event.workflowRunId)) return false;
+      const key = workflowRunKey(owner, event.workflowRunId);
+      const current = snapshots.get(key);
+      const lease = leases.get(key);
+      if ((current?.revision ?? 0) !== input.expectedRevision
+        || lease?.leaseId !== input.leaseId
+        || Date.parse(lease.expiresAt) <= Date.now()) return false;
+      events.set(key, [...(events.get(key) ?? []), event]);
+      snapshots.set(key, snapshot);
+      return true;
+    },
+    async listEvents(ownerInput, runId) {
+      const owner = normalizeWorkflowRunOwner(ownerInput);
+      return structuredClone(events.get(workflowRunKey(owner, runId)) ?? []);
+    },
+    async getSnapshot(ownerInput, runId) {
+      const snapshot = snapshots.get(workflowRunKey(normalizeWorkflowRunOwner(ownerInput), runId));
+      return snapshot ? structuredClone(snapshot) : null;
+    },
+    async replayEvents(owner, initial) {
+      return replayCanonicalWorkflowEvents(initial, await this.listEvents(owner, initial.workflowRunId));
+    },
+    async acquireLease(ownerInput, runId, leaseInput) {
+      const owner = normalizeWorkflowRunOwner(ownerInput);
+      if (!runStore.getRun(owner, runId)) return false;
+      const lease = runLeaseSchema.parse(leaseInput);
+      if (Date.parse(lease.expiresAt) <= Date.now()) return false;
+      const key = workflowRunKey(owner, runId);
+      const current = leases.get(key);
+      if (current
+        && (current.leaseId !== lease.leaseId || current.ownerId !== lease.ownerId)
+        && Date.parse(current.expiresAt) > Date.now()) return false;
+      leases.set(key, lease);
+      return true;
+    },
+    async releaseLease(ownerInput, runId, leaseId) {
+      const key = workflowRunKey(normalizeWorkflowRunOwner(ownerInput), runId);
+      if (leases.get(key)?.leaseId !== leaseId) return false;
+      return leases.delete(key);
+    },
+    async createWaitpoint(ownerInput, waitpointInput) {
+      const owner = normalizeWorkflowRunOwner(ownerInput);
+      const waitpoint = workflowWaitpointSchema.parse(waitpointInput);
+      if (!runStore.getRun(owner, waitpoint.runId)) return false;
+      const key = waitpointKey(owner, waitpoint.runId, waitpoint.waitpointId);
+      if (waitpoints.has(key)) return false;
+      waitpoints.set(key, { ...waitpoint, resolved: false });
+      return true;
+    },
+    async resolveWaitpoint(ownerInput, runId, waitpointId) {
+      const key = waitpointKey(normalizeWorkflowRunOwner(ownerInput), runId, waitpointId);
+      const current = waitpoints.get(key);
+      if (!current || current.resolved || ("expiresAt" in current && current.expiresAt && Date.parse(current.expiresAt) <= Date.now())) return false;
+      waitpoints.set(key, { ...current, resolved: true });
+      return true;
+    },
+    async claimEffect(ownerInput, input) {
+      const owner = normalizeWorkflowRunOwner(ownerInput);
+      if (!runStore.getRun(owner, input.runId)) throw new Error("workflow_run_not_found");
+      validateEffectIdentity(input);
+      const key = effectClaimKey(owner, input.externalEffectIdentity);
+      const current = claims.get(key);
+      if (current) {
+        assertSameExternalEffect(current.externalEffectIdentity, input.externalEffectIdentity);
+        return { created: false, claim: structuredClone(current) };
+      }
+      const now = new Date().toISOString();
+      const claim = effectClaimSchema.parse({ ...input, status: "claimed", createdAt: now, updatedAt: now });
+      claims.set(key, claim);
+      claimIds.set(effectClaimIdKey(owner, claim.claimId), key);
+      return { created: true, claim: structuredClone(claim) };
+    },
+    async transitionEffectClaim(ownerInput, claimId, from, to, result) {
+      if (!canTransitionEffectClaim(from, to)) throw new Error("invalid_effect_claim_transition");
+      const owner = normalizeWorkflowRunOwner(ownerInput);
+      const key = claimIds.get(effectClaimIdKey(owner, claimId));
+      if (!key) return null;
+      const current = claims.get(key);
+      if (!current || current.status !== from) return null;
+      const updated = { ...current, status: to, updatedAt: new Date().toISOString(), ...(result === undefined ? {} : { result: sanitizeWorkflowPersistenceValue(result) }) };
+      claims.set(key, updated);
+      return structuredClone(updated);
+    },
+  };
+}
+
+/** Module-level local/test store. Every operation still requires a stable owner scope. */
 export const workflowRunStore: WorkflowRunStore = createInMemoryWorkflowRunStore();
+const workflowRunJournalStore = createInMemoryWorkflowRunJournalStore(workflowRunStore);
 
-// --- Durable (Neon) backing, P1 #5 (production-readiness-agent-creation-2026-07-13.md) ---
-//
-// Same split as agent-definition-store.ts: the sync store above stays exactly as-is (in-memory,
-// the local-dev/test fallback); Neon queries are inherently async, so durable persistence is a
-// SEPARATE async-returning interface. Callers opt in via resolveWorkflowRunStore(env) and await
-// every call -- identical code path whether or not a DB is actually configured.
 export interface AsyncWorkflowRunStore {
-  createRun(input: { workflowId: string; workflowVersionId: string; definition: WorkflowDefinition; input: unknown; state: WorkflowRunState }): Promise<WorkflowRunRow>;
-  getRun(runId: string): Promise<WorkflowRunRow | null>;
-  updateRunState(runId: string, state: WorkflowRunState): Promise<WorkflowRunRow | null>;
+  createRun(owner: WorkflowRunOwner, input: CreateWorkflowRunInput): Promise<WorkflowRunRow>;
+  getRun(owner: WorkflowRunOwner, runId: string): Promise<WorkflowRunRow | null>;
+  listRuns(owner: WorkflowRunOwner): Promise<WorkflowRunRow[]>;
+  updateRunState(owner: WorkflowRunOwner, runId: string, state: WorkflowRunState): Promise<WorkflowRunRow | null>;
 }
 
-/** Wraps the synchronous in-memory store in a Promise-returning facade, same reasoning as
- *  wrapAgentDefinitionStoreAsync: callers can `await` regardless of which backing is live. */
 export function wrapWorkflowRunStoreAsync(store: WorkflowRunStore): AsyncWorkflowRunStore {
   return {
-    createRun: async (input) => store.createRun(input),
-    getRun: async (runId) => store.getRun(runId),
-    updateRunState: async (runId, state) => store.updateRunState(runId, state),
+    createRun: async (owner, input) => store.createRun(owner, input),
+    getRun: async (owner, runId) => store.getRun(owner, runId),
+    listRuns: async (owner) => store.listRuns(owner),
+    updateRunState: async (owner, runId, state) => store.updateRunState(owner, runId, state),
   };
 }
 
 type WorkflowRunRowColumns = {
+  organization_id: string;
+  user_id: string;
+  host_session_id: string | null;
   run_id: string;
   workflow_id: string;
   workflow_version_id: string;
-  definition: WorkflowDefinition;
+  source_kind: WorkflowRunSourceKind | null;
+  definition: WorkflowDefinition | string;
   input: unknown;
-  state: WorkflowRunState;
+  state: WorkflowRunState | string;
   created_at: string;
   updated_at: string;
 };
 
+const WORKFLOW_RUN_COLUMNS = `
+  organization_id, user_id, host_session_id, run_id, workflow_id,
+  workflow_version_id, source_kind, definition, input, state, created_at, updated_at
+`;
+
 function rowFromColumns(columns: WorkflowRunRowColumns): WorkflowRunRow {
   return {
+    organizationId: columns.organization_id,
+    userId: columns.user_id,
+    hostSessionId: columns.host_session_id,
     runId: columns.run_id,
     workflowId: columns.workflow_id,
     workflowVersionId: columns.workflow_version_id,
-    definition: columns.definition,
-    input: columns.input,
-    state: columns.state,
+    sourceKind: columns.source_kind,
+    definition: parseJsonColumn<WorkflowDefinition>(columns.definition),
+    input: parseJsonColumn(columns.input),
+    state: parseJsonColumn<WorkflowRunState>(columns.state),
     createdAt: new Date(columns.created_at).toISOString(),
     updatedAt: new Date(columns.updated_at).toISOString(),
   };
 }
 
-/** Neon-backed AsyncWorkflowRunStore. Runs are keyed by runId (created once, updated in place as
- *  the lifecycle advances) -- schema: 0007_agent_workflow_runs.sql. */
+/** RLS-backed workflow-run store. Explicit owner predicates are defense in depth. */
+export function createCloudWorkflowRunStore(executor: WorkspaceSqlExecutor): AsyncWorkflowRunStore {
+  async function createRun(ownerInput: WorkflowRunOwner, input: CreateWorkflowRunInput): Promise<WorkflowRunRow> {
+    assertWorkflowPersistenceSafe(input);
+    return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+      const now = new Date().toISOString();
+      const result = await tx.query<WorkflowRunRowColumns>(`
+        insert into sonik_agent_ui.agent_workflow_runs
+          (organization_id, user_id, host_session_id, run_id, workflow_id, workflow_version_id, source_kind, definition, input, state, created_at, updated_at)
+        values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, $11)
+        returning ${WORKFLOW_RUN_COLUMNS}
+      `, [
+        owner.organizationId,
+        owner.userId,
+        owner.hostSessionId ?? null,
+        input.state.runId,
+        input.workflowId,
+        input.workflowVersionId,
+        input.sourceKind,
+        JSON.stringify(input.definition),
+        JSON.stringify(input.input),
+        JSON.stringify(input.state),
+        now,
+      ]);
+      const created = result.rows[0];
+      if (!created) throw new Error("Workflow run insert returned no row");
+      return rowFromColumns(created);
+    });
+  }
+
+  async function getRun(ownerInput: WorkflowRunOwner, runId: string): Promise<WorkflowRunRow | null> {
+    return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+      const result = await tx.query<WorkflowRunRowColumns>(`
+        select ${WORKFLOW_RUN_COLUMNS}
+        from sonik_agent_ui.agent_workflow_runs
+        where organization_id = $1 and user_id = $2 and run_id = $3
+      `, [owner.organizationId, owner.userId, runId]);
+      return result.rows[0] ? rowFromColumns(result.rows[0]) : null;
+    });
+  }
+
+  async function listRuns(ownerInput: WorkflowRunOwner): Promise<WorkflowRunRow[]> {
+    return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+      const result = await tx.query<WorkflowRunRowColumns>(`
+        select ${WORKFLOW_RUN_COLUMNS}
+        from sonik_agent_ui.agent_workflow_runs
+        where organization_id = $1 and user_id = $2
+        order by updated_at desc
+      `, [owner.organizationId, owner.userId]);
+      return result.rows.map(rowFromColumns);
+    });
+  }
+
+  async function updateRunState(ownerInput: WorkflowRunOwner, runId: string, state: WorkflowRunState): Promise<WorkflowRunRow | null> {
+    assertWorkflowPersistenceSafe(state);
+    return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+      const result = await tx.query<WorkflowRunRowColumns>(`
+        update sonik_agent_ui.agent_workflow_runs
+        set state = $4::jsonb, updated_at = $5
+        where organization_id = $1 and user_id = $2 and run_id = $3
+        returning ${WORKFLOW_RUN_COLUMNS}
+      `, [owner.organizationId, owner.userId, runId, JSON.stringify(state), new Date().toISOString()]);
+      return result.rows[0] ? rowFromColumns(result.rows[0]) : null;
+    });
+  }
+
+  return { createRun, getRun, listRuns, updateRunState };
+}
+
+type JournalEventColumns = { event: CanonicalWorkflowEvent | string };
+type EffectClaimColumns = {
+  claim_id: string;
+  run_id: string;
+  logical_effect_id: string;
+  effect_namespace: string;
+  external_effect_key_digest: string;
+  command_id: string;
+  resolved_input_hash: string;
+  attempt_id: string;
+  idempotency_key: string;
+  provider_supports_idempotency: boolean;
+  status: WorkflowEffectClaim["status"];
+  result: unknown;
+  created_at: string;
+  updated_at: string;
+  created?: boolean;
+};
+
+/** Production journal operations. Every state transition is one SQL statement because the Neon
+ * executor re-establishes request context per query rather than holding a callback-wide session. */
+export function createCloudWorkflowRunJournalStore(executor: WorkspaceSqlExecutor): WorkflowRunJournalStore {
+  return {
+    async appendEventAndProject(ownerInput, input) {
+      const { event, snapshot } = validateJournalAppend(input);
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<{ event_id: string }>(`
+          with projected as (
+            update sonik_agent_ui.agent_workflow_runs
+            set journal_revision = $4,
+                journal_sequence = $5,
+                canonical_snapshot = $6::jsonb,
+                compatibility_phase = $7,
+                updated_at = now()
+            where organization_id = $1 and user_id = $2 and run_id = $3
+              and journal_revision = $8
+              and exists (
+                select 1 from sonik_agent_ui.agent_workflow_run_leases
+                where organization_id = $1 and user_id = $2 and run_id = $3
+                  and lease_id = $12 and lease_expires_at > now()
+              )
+            returning organization_id, user_id, run_id
+          ), appended as (
+            insert into sonik_agent_ui.agent_workflow_run_events
+              (organization_id, user_id, run_id, sequence, revision, event_id, event_type, event, created_at)
+            select organization_id, user_id, run_id, $5, $4, $9, $10, $11::jsonb, now()
+            from projected
+            returning event_id
+          )
+          select event_id from appended
+        `, [
+          owner.organizationId,
+          owner.userId,
+          event.workflowRunId,
+          event.revision,
+          event.sequence,
+          JSON.stringify(snapshot),
+          snapshot.compatibilityPhase,
+          input.expectedRevision,
+          event.eventId,
+          event.eventType,
+          JSON.stringify(event),
+          input.leaseId,
+        ]);
+        return result.rows.length === 1;
+      });
+    },
+    async listEvents(ownerInput, runId) {
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<JournalEventColumns>(`
+          select event
+          from sonik_agent_ui.agent_workflow_run_events
+          where organization_id = $1 and user_id = $2 and run_id = $3
+          order by sequence
+        `, [owner.organizationId, owner.userId, runId]);
+        return result.rows.map(({ event }) => parseCanonicalWorkflowEvent(parseJsonColumn(event)));
+      });
+    },
+    async getSnapshot(ownerInput, runId) {
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<{ canonical_snapshot: WorkflowRunSnapshot | string }>(`
+          select canonical_snapshot
+          from sonik_agent_ui.agent_workflow_runs
+          where organization_id = $1 and user_id = $2 and run_id = $3
+            and canonical_snapshot is not null
+        `, [owner.organizationId, owner.userId, runId]);
+        return result.rows[0]
+          ? workflowVNextRunStateSchema.parse(parseJsonColumn(result.rows[0].canonical_snapshot))
+          : null;
+      });
+    },
+    async replayEvents(owner, initial) {
+      return replayCanonicalWorkflowEvents(initial, await this.listEvents(owner, initial.workflowRunId));
+    },
+    async acquireLease(ownerInput, runId, leaseInput) {
+      const lease = runLeaseSchema.parse(leaseInput);
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<{ lease_id: string }>(`
+          insert into sonik_agent_ui.agent_workflow_run_leases
+            (organization_id, user_id, run_id, lease_id, owner_id, lease_expires_at, updated_at)
+          select $1, $2, $3, $4, $5, $6, now()
+          where exists (
+            select 1 from sonik_agent_ui.agent_workflow_runs
+            where organization_id = $1 and user_id = $2 and run_id = $3
+          )
+            and $6::timestamptz > now()
+          on conflict (organization_id, user_id, run_id) do update
+          set lease_id = excluded.lease_id,
+              owner_id = excluded.owner_id,
+              lease_expires_at = excluded.lease_expires_at,
+              updated_at = now()
+          where agent_workflow_run_leases.lease_expires_at <= now()
+             or (agent_workflow_run_leases.lease_id = excluded.lease_id
+                 and agent_workflow_run_leases.owner_id = excluded.owner_id)
+          returning lease_id
+        `, [owner.organizationId, owner.userId, runId, lease.leaseId, lease.ownerId, lease.expiresAt]);
+        return result.rows.length === 1;
+      });
+    },
+    async releaseLease(ownerInput, runId, leaseId) {
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<{ lease_id: string }>(`
+          delete from sonik_agent_ui.agent_workflow_run_leases
+          where organization_id = $1 and user_id = $2 and run_id = $3 and lease_id = $4
+          returning lease_id
+        `, [owner.organizationId, owner.userId, runId, leaseId]);
+        return result.rows.length === 1;
+      });
+    },
+    async createWaitpoint(ownerInput, waitpointInput) {
+      const waitpoint = workflowWaitpointSchema.parse(waitpointInput);
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<{ waitpoint_id: string }>(`
+          insert into sonik_agent_ui.agent_workflow_run_waitpoints
+            (organization_id, user_id, run_id, waitpoint_id, kind, waitpoint, status, created_at, updated_at)
+          select $1, $2, $3, $4, $5, $6::jsonb, 'open', now(), now()
+          where exists (
+            select 1 from sonik_agent_ui.agent_workflow_runs
+            where organization_id = $1 and user_id = $2 and run_id = $3
+          )
+          on conflict (organization_id, user_id, run_id, waitpoint_id) do nothing
+          returning waitpoint_id
+        `, [owner.organizationId, owner.userId, waitpoint.runId, waitpoint.waitpointId, waitpoint.kind, JSON.stringify(waitpoint)]);
+        return result.rows.length === 1;
+      });
+    },
+    async resolveWaitpoint(ownerInput, runId, waitpointId) {
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<{ waitpoint_id: string }>(`
+          update sonik_agent_ui.agent_workflow_run_waitpoints
+          set status = 'resolved', updated_at = now()
+          where organization_id = $1 and user_id = $2 and run_id = $3
+            and waitpoint_id = $4 and status = 'open'
+            and (waitpoint->>'expiresAt' is null or (waitpoint->>'expiresAt')::timestamptz > now())
+          returning waitpoint_id
+        `, [owner.organizationId, owner.userId, runId, waitpointId]);
+        return result.rows.length === 1;
+      });
+    },
+    async claimEffect(ownerInput, input) {
+      validateEffectIdentity(input);
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<EffectClaimColumns>(`
+          with inserted as (
+            insert into sonik_agent_ui.agent_workflow_effect_claims
+              (organization_id, user_id, run_id, logical_effect_id, claim_id, attempt_id,
+               idempotency_key, provider_supports_idempotency, effect_namespace,
+               external_effect_key_digest, command_id, resolved_input_hash, status, created_at, updated_at)
+            select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'claimed', now(), now()
+            where exists (
+              select 1 from sonik_agent_ui.agent_workflow_runs
+              where organization_id = $1 and user_id = $2 and run_id = $3
+            )
+            on conflict (organization_id, effect_namespace, external_effect_key_digest) do nothing
+            returning *, true as created
+          )
+          select claim_id, run_id, logical_effect_id, effect_namespace, external_effect_key_digest, command_id, resolved_input_hash, attempt_id, idempotency_key,
+                 provider_supports_idempotency, status, result, created_at, updated_at, created
+          from inserted
+          union all
+          select claim_id, run_id, logical_effect_id, effect_namespace, external_effect_key_digest, command_id, resolved_input_hash, attempt_id, idempotency_key,
+                 provider_supports_idempotency, status, result, created_at, updated_at, false as created
+          from sonik_agent_ui.agent_workflow_effect_claims
+          where organization_id = $1 and effect_namespace = $9 and external_effect_key_digest = $10
+            and not exists (select 1 from inserted)
+          limit 1
+        `, [
+          owner.organizationId,
+          owner.userId,
+          input.runId,
+          input.logicalEffectId,
+          input.claimId,
+          input.attemptId,
+          input.idempotencyKey,
+          input.providerSupportsIdempotency,
+          input.externalEffectIdentity.namespace,
+          input.externalEffectIdentity.keyDigest,
+          input.externalEffectIdentity.commandId,
+          input.externalEffectIdentity.resolvedInputHash,
+        ]);
+        const row = result.rows[0];
+        if (!row) throw new Error("workflow_run_not_found");
+        const claim = effectClaimFromColumns(row);
+        assertSameExternalEffect(claim.externalEffectIdentity, input.externalEffectIdentity);
+        return { created: row.created === true, claim };
+      });
+    },
+    async transitionEffectClaim(ownerInput, claimId, from, to, resultValue) {
+      if (!canTransitionEffectClaim(from, to)) throw new Error("invalid_effect_claim_transition");
+      return withWorkflowRunOwner(executor, ownerInput, async (tx, owner) => {
+        const result = await tx.query<EffectClaimColumns>(`
+          update sonik_agent_ui.agent_workflow_effect_claims
+          set status = $4, result = $5::jsonb, updated_at = now()
+          where organization_id = $1 and claim_id = $2 and status = $3
+          returning claim_id, run_id, logical_effect_id, effect_namespace, external_effect_key_digest, command_id, resolved_input_hash, attempt_id, idempotency_key,
+                    provider_supports_idempotency, status, result, created_at, updated_at
+        `, [owner.organizationId, claimId, from, to, JSON.stringify(sanitizeWorkflowPersistenceValue(resultValue ?? null))]);
+        return result.rows[0] ? effectClaimFromColumns(result.rows[0]) : null;
+      });
+    },
+  };
+}
+
 export function createNeonWorkflowRunStore(databaseUrl: string): AsyncWorkflowRunStore {
-  const sql = neon(databaseUrl.trim());
+  return createCloudWorkflowRunStore(createNeonWorkspaceSqlExecutor(databaseUrl));
+}
 
-  async function createRun(input: { workflowId: string; workflowVersionId: string; definition: WorkflowDefinition; input: unknown; state: WorkflowRunState }): Promise<WorkflowRunRow> {
-    const now = new Date().toISOString();
-    // org scoping seam: add organization_id (from the resolved host session) once the auth/org
-    // lane lands, same reasoning as agent-definition-store.ts's saveDraft.
-    await sql`
-      insert into sonik_agent_ui.agent_workflow_runs (run_id, workflow_id, workflow_version_id, definition, input, state, created_at, updated_at)
-      values (${input.state.runId}, ${input.workflowId}, ${input.workflowVersionId}, ${JSON.stringify(input.definition)}::jsonb, ${JSON.stringify(input.input)}::jsonb, ${JSON.stringify(input.state)}::jsonb, ${now}, ${now})
-    `;
-    return {
-      runId: input.state.runId,
-      workflowId: input.workflowId,
-      workflowVersionId: input.workflowVersionId,
-      definition: input.definition,
-      input: input.input,
-      state: input.state,
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-
-  // org scoping seam: filter by organization_id once the auth/org lane lands.
-  async function getRun(runId: string): Promise<WorkflowRunRow | null> {
-    const rows = await sql`select * from sonik_agent_ui.agent_workflow_runs where run_id = ${runId}`;
-    if (rows.length === 0) return null;
-    return rowFromColumns(rows[0] as WorkflowRunRowColumns);
-  }
-
-  // org scoping seam: scope the update by organization_id once the auth/org lane lands.
-  async function updateRunState(runId: string, state: WorkflowRunState): Promise<WorkflowRunRow | null> {
-    const rows = await sql`
-      update sonik_agent_ui.agent_workflow_runs
-      set state = ${JSON.stringify(state)}::jsonb, updated_at = ${new Date().toISOString()}
-      where run_id = ${runId}
-      returning *
-    `;
-    if (rows.length === 0) return null;
-    return rowFromColumns(rows[0] as WorkflowRunRowColumns);
-  }
-
-  return { createRun, getRun, updateRunState };
+export function createNeonWorkflowRunJournalStore(databaseUrl: string): WorkflowRunJournalStore {
+  return createCloudWorkflowRunJournalStore(createNeonWorkspaceSqlExecutor(databaseUrl));
 }
 
 function readWorkflowRunDatabaseUrl(env?: Record<string, unknown> | null): string | null {
-  // Same env var names/precedence as agent-definition-store.ts's readAgentDefinitionDatabaseUrl,
-  // so one deploy env config (SONIK_AGENT_UI_DATABASE_URL) backs every store in this app.
   for (const key of ["SONIK_AGENT_UI_DATABASE_URL", "DATABASE_URL", "POSTGRES_URL", "NEON_DATABASE_URL"]) {
     const value = env?.[key];
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -175,9 +611,130 @@ function readWorkflowRunDatabaseUrl(env?: Record<string, unknown> | null): strin
   return null;
 }
 
-/** Per-request resolution: Neon-backed when a DB env is configured, else the in-memory singleton
- *  wrapped async -- no caller code change needed when a DB is wired up later. */
 export function resolveWorkflowRunStore(env?: Record<string, unknown> | null): AsyncWorkflowRunStore {
   const databaseUrl = readWorkflowRunDatabaseUrl(env);
   return databaseUrl ? createNeonWorkflowRunStore(databaseUrl) : wrapWorkflowRunStoreAsync(workflowRunStore);
+}
+
+export function resolveWorkflowRunJournalStore(env?: Record<string, unknown> | null): WorkflowRunJournalStore {
+  const databaseUrl = readWorkflowRunDatabaseUrl(env);
+  return databaseUrl ? createNeonWorkflowRunJournalStore(databaseUrl) : workflowRunJournalStore;
+}
+
+async function withWorkflowRunOwner<T>(
+  executor: WorkspaceSqlExecutor,
+  ownerInput: WorkflowRunOwner,
+  operation: (tx: WorkspaceSqlTransaction, owner: WorkflowRunOwner) => Promise<T>,
+): Promise<T> {
+  const owner = normalizeWorkflowRunOwner(ownerInput);
+  return executor.transaction(async (tx) => {
+    await tx.query("select sonik_agent_ui.set_request_context($1, $2)", [owner.organizationId, owner.userId]);
+    return operation(tx, owner);
+  });
+}
+
+function normalizeWorkflowRunOwner(owner: WorkflowRunOwner): WorkflowRunOwner {
+  const organizationId = owner.organizationId?.trim();
+  const userId = owner.userId?.trim();
+  if (!organizationId || !userId) throw new Error("Workflow run persistence requires organizationId and userId");
+  return {
+    organizationId,
+    userId,
+    hostSessionId: typeof owner.hostSessionId === "string" && owner.hostSessionId.trim() ? owner.hostSessionId.trim() : null,
+  };
+}
+
+function workflowRunKey(owner: WorkflowRunOwner, runId: string): string {
+  return JSON.stringify([owner.organizationId, owner.userId, runId]);
+}
+
+function workflowRunConflictError(runId: string): Error & { code: string } {
+  return Object.assign(new Error(`Workflow run ${runId} already exists for this workspace owner`), { code: "23505" });
+}
+
+function validateJournalAppend(input: AppendWorkflowRunEventInput): { event: CanonicalWorkflowEvent; snapshot: WorkflowRunSnapshot } {
+  assertWorkflowPersistenceSafe(input.event);
+  assertWorkflowPersistenceSafe(input.snapshot);
+  const event = parseCanonicalWorkflowEvent(input.event);
+  const snapshot = workflowVNextRunStateSchema.parse(input.snapshot);
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new Error("invalid_expected_revision");
+  if (typeof input.leaseId !== "string" || !input.leaseId.trim()) throw new Error("invalid_workflow_run_lease");
+  if (event.workflowRunId !== snapshot.workflowRunId
+    || event.revision !== input.expectedRevision + 1
+    || event.sequence !== input.expectedRevision + 1
+    || snapshot.revision !== event.revision
+    || snapshot.eventSequence !== event.sequence) {
+    throw new Error("invalid_workflow_event_projection");
+  }
+  return { event, snapshot };
+}
+
+function validateEffectIdentity(input: ClaimWorkflowEffectInput): void {
+  assertWorkflowPersistenceSafe(input);
+  if (input.idempotencyKey !== externalEffectIdempotencyKey(input.externalEffectIdentity)) {
+    throw new Error("invalid_effect_idempotency");
+  }
+}
+
+function assertSameExternalEffect(existing: ExternalEffectIdentity, requested: ExternalEffectIdentity): void {
+  if (existing.commandId !== requested.commandId || existing.resolvedInputHash !== requested.resolvedInputHash) throw new Error("external_effect_identity_conflict");
+}
+
+function waitpointKey(owner: WorkflowRunOwner, runId: string, waitpointId: string): string {
+  return JSON.stringify([owner.organizationId, owner.userId, runId, waitpointId]);
+}
+
+function effectClaimKey(owner: WorkflowRunOwner, identity: ExternalEffectIdentity): string {
+  return JSON.stringify([owner.organizationId, identity.namespace, identity.keyDigest]);
+}
+
+function effectClaimIdKey(owner: WorkflowRunOwner, claimId: string): string {
+  return JSON.stringify([owner.organizationId, claimId]);
+}
+
+function effectClaimFromColumns(row: EffectClaimColumns): WorkflowEffectClaim {
+  const claim = effectClaimSchema.parse({
+    claimId: row.claim_id,
+    runId: row.run_id,
+    logicalEffectId: row.logical_effect_id,
+    externalEffectIdentity: {
+      namespace: row.effect_namespace,
+      keyDigest: row.external_effect_key_digest,
+      commandId: row.command_id,
+      resolvedInputHash: row.resolved_input_hash,
+    },
+    attemptId: row.attempt_id,
+    idempotencyKey: row.idempotency_key,
+    providerSupportsIdempotency: row.provider_supports_idempotency,
+    status: row.status,
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+  });
+  return row.result == null ? claim : { ...claim, result: sanitizeWorkflowPersistenceValue(parseJsonColumn(row.result)) };
+}
+
+function sanitizeWorkflowPersistenceValue(value: unknown): unknown {
+  return sanitizePersistenceValue(value);
+}
+
+function assertWorkflowPersistenceSafe(value: unknown): void {
+  if (typeof value === "string") {
+    if (sanitizePersistenceValue(value) !== value) throw new Error("workflow_persistence_secret_rejected");
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) assertWorkflowPersistenceSafe(entry);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      const keyProbe = sanitizePersistenceValue({ [key]: "safe" }) as Record<string, unknown>;
+      if (keyProbe[key] !== "safe") throw new Error("workflow_persistence_secret_rejected");
+      assertWorkflowPersistenceSafe(entry);
+    }
+  }
+}
+
+function parseJsonColumn<T = unknown>(value: T | string): T {
+  return typeof value === "string" ? JSON.parse(value) as T : value;
 }

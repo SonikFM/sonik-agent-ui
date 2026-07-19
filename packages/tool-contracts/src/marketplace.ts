@@ -203,6 +203,7 @@ export const commandBackedAppDefinitionSchema = z.object({
 });
 export type CommandBackedAppDefinition = z.infer<typeof commandBackedAppDefinitionSchema>;
 
+/** @deprecated Legacy marketplace workflow shape. New authoring targets workflowVNextDefinitionSchema. */
 export const workflowNodeTypeSchema = z.enum(["trigger", "ask_user", "skill", "artifact", "tool_preview", "approval", "tool_commit", "remote_execution", "evidence", "branch"]);
 export type WorkflowNodeType = z.infer<typeof workflowNodeTypeSchema>;
 
@@ -241,6 +242,7 @@ export const workflowEdgeDefinitionSchema = z.object({
 }).strict();
 export type WorkflowEdgeDefinition = z.infer<typeof workflowEdgeDefinitionSchema>;
 
+/** @deprecated Use workflowVNextDefinitionSchema; bridge legacy records explicitly before canonical upgrade. */
 export const workflowDefinitionSchema = z.object({
   workflowId: z.string().min(1),
   title: z.string().min(1),

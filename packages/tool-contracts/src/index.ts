@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { HostUiTarget, HostUiTargetRegistry } from "./target-registry.js";
+import type { VisualContextSelection } from "./visual-context.js";
 
 
 export const toolSourceSchema = z.enum(["orpc", "openapi", "mcp", "sandbox", "local-ui"]);
@@ -1040,6 +1041,8 @@ export type AgentPageContext = {
   hostUiTargets?: HostUiTarget[];
   /** Full registry envelope when the host wants to expose route/surface provenance. */
   hostUiTargetRegistry?: HostUiTargetRegistry;
+  /** Current bounded visual selection; never contains selectors or host-private locators. */
+  visualSelection?: VisualContextSelection;
   skillFamilies?: string[];
   commandFamilies?: string[];
 };
@@ -2069,3 +2072,14 @@ export function sanitizeAgentAnalyticsHints(value: unknown): AgentAnalyticsHints
 }
 
 export * from "./target-registry.js";
+export * from "./visual-context.js";
+export * as workflowVNext from "./workflow-vnext.ts";
+export {
+  WORKFLOW_VNEXT_SCHEMA_VERSION,
+  bridgeLegacyWorkflowDefinitionToVNext,
+  parseEngineRequestForRegistry,
+  parseEngineResponseForRegistry,
+  validateWorkflowForPublish,
+  workflowEffectIdempotencyKey,
+  workflowVNextDefinitionSchema,
+} from "./workflow-vnext.ts";

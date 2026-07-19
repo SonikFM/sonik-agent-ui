@@ -6,6 +6,7 @@ import {
   capabilityDescriptorSchema,
   capabilityRegistrySchema,
 } from "../../packages/tool-contracts/src/capability-registry.ts";
+import { sonikBookingCapabilityFamilyIds } from "../../packages/tool-contracts/src/capability-family.ts";
 
 // Phase 2 (agent-creation-tool plan, Decision 1): the capability registry is
 // GENERATED from a vendored, SHA-pinned copy of the booking-service SDK's
@@ -85,6 +86,10 @@ const byId = new Map(registry.capabilities.map((capability) => [capability.capab
   assert.ok(mountedIds.length > 0, "mounted booking command artifact carries commands");
   const unregistered = mountedIds.filter((id) => !byId.has(id));
   assert.deepEqual(unregistered, [], "every command reachable via createCommandCatalogTools' mounted families is registered");
+  assert.equal(Object.keys(sonikBookingCapabilityFamilyIds).length, 72, "client-safe family projection covers exactly the mounted catalog");
+  for (const command of mountedArtifact.catalog.commands) {
+    assert.equal(sonikBookingCapabilityFamilyIds[command.id], command.familyId, `${command.id} uses its canonical runtime family`);
+  }
 }
 
 console.log("capability-registry-generation.test.mjs passed");

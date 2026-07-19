@@ -143,7 +143,7 @@ async function ensureEvidenceServer() {
 async function readTelemetryEvents() {
   let events = [];
   try {
-    const response = await fetch(`${evidenceBaseUrl}/events`);
+    const response = await fetch(`${evidenceBaseUrl}/events?runId=${encodeURIComponent(runId)}&limit=500`);
     if (response.ok) events = (await response.json()).events ?? [];
   } catch {
     // Fall through to direct log read.
@@ -292,7 +292,7 @@ try {
   await finish("INCONCLUSIVE", `Playwright browser is not installed/launchable: ${error instanceof Error ? error.message : String(error)}. Run pnpm exec playwright install chromium.`);
 }
 
-const page = await browser.newPage();
+const page = await browser.newPage({ extraHTTPHeaders: { "x-sonik-agent-ui-smoke-persistence-mode": "memory" } });
 page.on("console", (message) => {
   const type = message.type();
   const text = message.text();

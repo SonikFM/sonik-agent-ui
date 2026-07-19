@@ -19,6 +19,7 @@ import type { AgentDefinition } from "@sonik-agent-ui/tool-contracts/marketplace
 import { sonikBookingCapabilityRegistry, type CapabilityRegistry } from "@sonik-agent-ui/tool-contracts/capability-registry";
 import { resolveEffectivePinnedCapabilities, type PinnedCapabilities, type PinnedCapabilityMode } from "@sonik-agent-ui/tool-contracts/capability-pinning";
 import { synthesizeCapabilityGrantsFromRuntimeState, resolveCapabilityToolPermissionModes } from "@sonik-agent-ui/tool-contracts/grant-synthesis";
+import { normalizeCapabilityFamilyModes, sonikBookingCapabilityFamilyIds } from "@sonik-agent-ui/tool-contracts/capability-family";
 
 export type { PinnedCapabilities, PinnedCapabilityMode };
 
@@ -46,13 +47,20 @@ export function definitionToRuntimeSettings(
   definition: AgentDefinition,
   sessionTweaks: Partial<AgentRuntimeSettings> = {},
 ): AgentRuntimeSettings {
+  const defaultDeniedFamilyModes = Object.fromEntries(
+    Object.values(sonikBookingCapabilityFamilyIds).map((familyId) => [familyId, "off"]),
+  );
   const raw: Record<string, unknown> = {
     modelId: sessionTweaks.modelId ?? definition.modelPolicy?.modelId,
     requireZdr: sessionTweaks.requireZdr ?? definition.modelPolicy?.requireZdr,
     skillIds: sessionTweaks.skillIds ?? definition.requiredSkills,
     additionalSystemPrompt: sessionTweaks.additionalSystemPrompt,
     customSkills: sessionTweaks.customSkills,
-    toolPermissionModes: { ...definition.toolPolicy, ...sessionTweaks.toolPermissionModes },
+    toolPermissionModes: {
+      ...defaultDeniedFamilyModes,
+      ...normalizeCapabilityFamilyModes(definition.toolPolicy),
+      ...normalizeCapabilityFamilyModes(sessionTweaks.toolPermissionModes ?? {}),
+    },
     promptModuleOverrides: { ...definition.promptModules.overrides, ...sessionTweaks.promptModuleOverrides },
     skillPromptOverrides: sessionTweaks.skillPromptOverrides,
   };

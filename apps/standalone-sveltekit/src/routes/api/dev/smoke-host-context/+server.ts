@@ -1,5 +1,6 @@
 import { json, error, type RequestHandler } from "@sveltejs/kit";
 import { createSignedTrustedHostContext, encodeTrustedHostContextHeader, type WorkspaceTrustedHostContext } from "$lib/server/workspace-services";
+import { createSmokeHostAuthority } from "$lib/server/smoke-host-authority";
 
 const FIXTURE_ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 const FIXTURE_USER_ID = "fixture-user-0001";
@@ -215,8 +216,9 @@ export const POST: RequestHandler = async ({ request, platform }) => {
   const smokePrincipalId = bookingPrincipalResult.principal?.id ?? FIXTURE_USER_ID;
   const hostSession = {
     ...bootstrapHostSession,
+    source: "amplify-login-proxy",
     userId: smokePrincipalId,
-    principalId: smokePrincipalId,
+    principalId: null,
     metadata: { approvedCommandIds },
   } satisfies NonNullable<WorkspaceTrustedHostContext["hostSession"]>;
 
@@ -229,10 +231,12 @@ export const POST: RequestHandler = async ({ request, platform }) => {
       hostSession,
     },
   });
+  const authority = createSmokeHostAuthority(signed);
+  const signedHeader = authority.header;
   const bookingContextResult = await ensureSmokeBookingContext({
     platform,
     env,
-    signedHeader: encodeTrustedHostContextHeader(signed),
+    signedHeader,
     smokeRunId,
   }).catch((bookingContextError: unknown) => ({
     context: null,
@@ -241,7 +245,14 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
   const warnings = [bookingPrincipalResult.warning, bookingContextResult.warning].filter(Boolean);
   return json(
-    { ok: true, context: signed, bookingContext: bookingContextResult.context, bookingPrincipal: bookingPrincipalResult.principal, warning: warnings.length ? warnings.join(";") : null },
+    {
+      ok: true,
+      context: signed,
+      authority,
+      bookingContext: bookingContextResult.context,
+      bookingPrincipal: bookingPrincipalResult.principal,
+      warning: warnings.length ? warnings.join(";") : null,
+    },
     { headers: { "cache-control": "no-store" } },
   );
 };

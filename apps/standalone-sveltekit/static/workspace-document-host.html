@@ -13,8 +13,8 @@
         width: 100%;
         margin: 0;
         overflow: hidden;
-        background: var(--sonik-background, var(--bg, #111318));
-        color: var(--sonik-foreground, var(--fg, #d6e7ef));
+        background: var(--sonik-background, var(--bg));
+        color: var(--sonik-foreground, var(--fg));
       }
 
       body {
@@ -45,10 +45,10 @@
         transform: none !important;
         border: 0 !important;
         border-radius: 0 !important;
-        box-shadow: none !important;
+        box-shadow: var(--app-shadow-none, none) !important;
         z-index: 1 !important;
-        background: var(--sonik-card, var(--sonik-background, #111318)) !important;
-        color: var(--sonik-foreground, #d6e7ef) !important;
+        background: var(--sonik-card, var(--sonik-background, var(--bg))) !important;
+        color: var(--sonik-foreground, var(--fg)) !important;
       }
 
       .doc-editor-pane.doc-left {
@@ -58,9 +58,9 @@
 
       .workspace-host-loading {
         align-items: center;
-        color: var(--sonik-foreground, var(--fg, #d6e7ef));
+        color: var(--sonik-foreground, var(--fg));
         display: flex;
-        font: 13px/1.5 var(--font-family, 'Fira Code', monospace);
+        font: 12px/1.5 var(--app-font-mono, var(--font-family, monospace));
         height: 100%;
         justify-content: center;
         opacity: 0.72;
@@ -69,16 +69,33 @@
       #doc-editor-textarea,
       #doc-title-input,
       #doc-language-select {
-        background: var(--sonik-control, var(--sonik-card, #151922)) !important;
-        border-color: var(--sonik-border, #2b3340) !important;
-        color: var(--sonik-foreground, #d6e7ef) !important;
+        background: var(--sonik-control, var(--sonik-card, var(--bg))) !important;
+        border-color: var(--sonik-border, var(--border)) !important;
+        color: var(--sonik-foreground, var(--fg)) !important;
       }
 
       #doc-html-preview,
       #doc-rendered-preview,
       #doc-preview-pane {
-        background: var(--sonik-card, #111318) !important;
-        color: var(--sonik-foreground, #d6e7ef) !important;
+        background: var(--sonik-card, var(--bg)) !important;
+        color: var(--sonik-foreground, var(--fg)) !important;
+      }
+
+      @media (max-width: 640px) {
+        .doc-md-toolbar {
+          position: relative;
+          margin-top: 4px !important;
+        }
+
+        .doc-md-toolbar::before {
+          position: absolute;
+          right: 0;
+          bottom: 100%;
+          left: 0;
+          height: 4px;
+          background: var(--sonik-border, var(--border));
+          content: "";
+        }
       }
     </style>
   </head>

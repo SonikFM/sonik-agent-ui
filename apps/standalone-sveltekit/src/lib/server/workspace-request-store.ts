@@ -5,11 +5,19 @@ import type {
   WorkspaceArtifactKind,
   WorkspaceArtifactRecord as BaseWorkspaceArtifactRecord,
   WorkspaceArtifactVersionRecord,
+  WorkspaceCommitClaimInput,
+  WorkspaceCommitClaimReleaseInput,
+  WorkspaceCommitClaimResult,
+  WorkspaceCommitLedgerInput,
+  WorkspaceCommitLedgerKey,
+  WorkspaceCommitLedgerRecord,
   WorkspaceDocumentRecord,
   WorkspaceDocumentVersionRecord,
   WorkspaceLayoutSnapshotRecord,
   WorkspaceMessageRecord,
   WorkspaceMode,
+  WorkspacePageContextSnapshotInput,
+  WorkspacePageContextSnapshotRecord,
   WorkspaceRunEventRecord,
   WorkspaceRunRecord,
   WorkspaceRunStatus,
@@ -127,6 +135,14 @@ export async function listRequestWorkspaceLayoutSnapshots<TLayout = unknown>(eve
   return getRequestWorkspacePersistence(event).listLayoutSnapshots<TLayout>(sessionId);
 }
 
+export async function recordRequestWorkspacePageContextSnapshot<TContext = unknown>(event: RequestWorkspaceEvent, input: WorkspacePageContextSnapshotInput<TContext>): Promise<WorkspacePageContextSnapshotRecord<TContext>> {
+  return getRequestWorkspacePersistence(event).recordPageContextSnapshot<TContext>(input);
+}
+
+export async function listRequestWorkspacePageContextSnapshots<TContext = unknown>(event: RequestWorkspaceEvent, sessionId: string): Promise<WorkspacePageContextSnapshotRecord<TContext>[]> {
+  return getRequestWorkspacePersistence(event).listPageContextSnapshots<TContext>(sessionId);
+}
+
 export async function appendRequestWorkspaceMessage<TParts = unknown>(event: RequestWorkspaceEvent, input: { session_id?: string | null; id?: string; role: WorkspaceMessageRecord<TParts>["role"]; content?: string | null; parts?: TParts | null }): Promise<WorkspaceMessageRecord<TParts>> {
   return getRequestWorkspacePersistence(event).appendMessage(input);
 }
@@ -143,6 +159,22 @@ export async function listRequestWorkspaceTelemetryEvents(event: RequestWorkspac
   }
 }
 
+export async function getRequestWorkspaceCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(event: RequestWorkspaceEvent, input: WorkspaceCommitLedgerKey): Promise<WorkspaceCommitLedgerRecord<TReceipt> | null> {
+  return getRequestWorkspacePersistence(event).getCommitReceipt<TReceipt>(input);
+}
+
+export async function recordRequestWorkspaceCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(event: RequestWorkspaceEvent, input: WorkspaceCommitLedgerInput<TReceipt>): Promise<WorkspaceCommitLedgerRecord<TReceipt>> {
+  return getRequestWorkspacePersistence(event).recordCommitReceipt<TReceipt>(input);
+}
+
+export async function claimRequestWorkspaceCommit(event: RequestWorkspaceEvent, input: WorkspaceCommitClaimInput): Promise<WorkspaceCommitClaimResult> {
+  return getRequestWorkspacePersistence(event).claimCommit(input);
+}
+
+export async function releaseRequestWorkspaceCommitClaim(event: RequestWorkspaceEvent, input: WorkspaceCommitClaimReleaseInput): Promise<boolean> {
+  return getRequestWorkspacePersistence(event).releaseCommitClaim(input);
+}
+
 export async function listRequestWorkspaceRuns(event: RequestWorkspaceEvent, sessionId: string): Promise<WorkspaceRunRecord[]> {
   return getRequestWorkspacePersistence(event).listRuns(sessionId);
 }
@@ -155,11 +187,20 @@ export type {
   DocumentLibraryResult,
   WorkspaceArtifactKind,
   WorkspaceArtifactVersionRecord,
+  WorkspaceCommitClaimInput,
+  WorkspaceCommitClaimReleaseInput,
+  WorkspaceCommitClaimResult,
+  WorkspaceCommitKind,
+  WorkspaceCommitLedgerInput,
+  WorkspaceCommitLedgerKey,
+  WorkspaceCommitLedgerRecord,
   WorkspaceDocumentRecord,
   WorkspaceDocumentVersionRecord,
   WorkspaceLayoutSnapshotRecord,
   WorkspaceMessageRecord,
   WorkspaceMode,
+  WorkspacePageContextSnapshotInput,
+  WorkspacePageContextSnapshotRecord,
   WorkspaceRunEventRecord,
   WorkspaceRunRecord,
   WorkspaceRunStatus,

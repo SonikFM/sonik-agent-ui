@@ -1,6 +1,8 @@
 import { sanitizePageContext, type AgentUiPageContextSnapshot } from "@sonik-agent-ui/agent-observability";
 import type { HostSessionEnvelope, PlatformAdapterContext } from "@sonik-agent-ui/platform-adapters";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
+import { visualContextSelectionSchema } from "@sonik-agent-ui/tool-contracts/visual-context";
+import { workflowDependencyPinsSchema, type WorkflowDependencyPins } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import {
   agentActionChannelVersion,
   createHostActionRequest,
@@ -17,12 +19,16 @@ import {
   type HostUiTarget,
   type HostUiTargetRegistry,
 } from "@sonik-agent-ui/tool-contracts/target-registry";
+import { mountVisualContextPicker, type VisualContextPickerController } from "./visual-context-picker.ts";
+
+export * from "./visual-context-picker.ts";
 
 export const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST = "sonik:agent-ui:request-page-context";
 export const SONIK_AGENT_UI_HOST_ACTION_REQUEST = "sonik:agent-ui:action-request";
 export const SONIK_AGENT_UI_HOST_ACTION_RESULT = "sonik:agent-ui:action-result";
+export const SONIK_VISUAL_CONTEXT_REQUEST = "sonik:visual-context:request";
 
 export type AgentEmbedMode = "workspace" | "chat" | "canvas";
 export type AgentEmbedRailMode = "expanded" | "collapsed" | "hidden";
@@ -53,23 +59,31 @@ export type AgentTrustedHostContext = Pick<PlatformAdapterContext, "authenticate
   hostSession?: HostSessionEnvelope | null;
 };
 
-export type AgentSignedHostContextFields = {
-  signatureVersion?: string | null;
-  issuedAt?: string | null;
-  expiresAt?: string | null;
-  signature?: string | null;
+export type AgentHostAuthorityDonation = {
+  /** Opaque HMAC-covered header. Never decode, normalize, or rebuild this value. */
+  header: string;
+  /** Host-owned monotonic revision used only to reject stale donations. */
+  revision: number;
+  /** Host-declared expiry for client-side freshness selection. */
+  expiresAt: string;
 };
 
-export type AgentHostMergedPageContext = AgentHostPageContext & Partial<AgentTrustedHostContext> & AgentSignedHostContextFields;
+export type AgentHostMergedPageContext = AgentHostPageContext & Partial<AgentTrustedHostContext>;
+
+export type AgentHostContextDonation = {
+  pageContext: AgentHostPageContext;
+  authority?: AgentHostAuthorityDonation | null;
+};
 
 export type AgentHostPageContextMessage = {
   source: typeof SONIK_AGENT_UI_HOST_MESSAGE_SOURCE;
   type: typeof SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE;
   payload: AgentHostPageContext;
+  authority?: AgentHostAuthorityDonation;
   sentAt?: string;
 };
 
-export type AgentHostContextProvider = () => AgentHostPageContext | Promise<AgentHostPageContext>;
+export type AgentHostContextProvider = () => AgentHostPageContext | AgentHostContextDonation | Promise<AgentHostPageContext | AgentHostContextDonation>;
 export type AgentEmbedThemeProvider = string | (() => string | undefined);
 
 export type AgentHostActionRequestInput = {
@@ -184,9 +198,11 @@ export type AgentEmbedController = {
 
 const MAX_SAFE_TEXT_LENGTH = 160;
 const MAX_LIST_ITEMS = 8;
+const MAX_HOST_AUTHORITY_HEADER_LENGTH = 8_192;
+const MAX_HOST_AUTHORITY_JSON_BYTE_LENGTH = MAX_HOST_AUTHORITY_HEADER_LENGTH * 3 / 4;
 const MAX_SIGNED_HOST_CONTEXT_COMMAND_IDS = 256;
 const MAX_HOST_UI_TARGETS = MAX_LIST_ITEMS * 4;
-const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds"]);
+const SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS = new Set(["approvedCommandIds", "workflowPublishPins"]);
 const ALLOWED_CONTEXT_KEYS = new Set([
   "route",
   "surface",
@@ -206,6 +222,7 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "workflow",
   "hostUiTargets",
   "hostUiTargetRegistry",
+  "visualSelection",
   "commandFamilies",
   "skillFamilies",
   "activeEntity",
@@ -213,10 +230,6 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "organizationId",
   "scopes",
   "hostSession",
-  "signatureVersion",
-  "issuedAt",
-  "expiresAt",
-  "signature",
   "at",
 ]);
 const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
@@ -227,6 +240,7 @@ export function isAgentHostPageContextMessage(value: unknown): value is AgentHos
   if (record.source !== SONIK_AGENT_UI_HOST_MESSAGE_SOURCE) return false;
   if (record.type !== SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE) return false;
   if (!record.payload || typeof record.payload !== "object" || Array.isArray(record.payload)) return false;
+  if (record.authority !== undefined && !sanitizeAgentHostAuthorityDonation(record.authority)) return false;
   if (record.sentAt !== undefined && typeof record.sentAt !== "string") return false;
   return true;
 }
@@ -334,13 +348,72 @@ function isAgentPageContextRequestMessage(value: unknown): boolean {
   return record.source === "sonik-agent-ui" && record.type === SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST;
 }
 
-export function createAgentHostPageContextMessage(payload: AgentHostPageContext): AgentHostPageContextMessage {
+export function createAgentHostPageContextMessage(
+  payload: AgentHostPageContext,
+  authority?: AgentHostAuthorityDonation | null,
+): AgentHostPageContextMessage {
+  const safeAuthority = sanitizeAgentHostAuthorityDonation(authority);
   return {
     source: SONIK_AGENT_UI_HOST_MESSAGE_SOURCE,
     type: SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE,
     payload,
+    ...(safeAuthority ? { authority: safeAuthority } : {}),
     sentAt: new Date().toISOString(),
   };
+}
+
+export function sanitizeAgentHostAuthorityDonation(value: unknown): AgentHostAuthorityDonation | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const { header, revision, expiresAt } = record;
+  if (typeof header !== "string" || header.length < 1 || header.length > MAX_HOST_AUTHORITY_HEADER_LENGTH || !/^[A-Za-z0-9_-]+$/.test(header)) return undefined;
+  if (!Number.isSafeInteger(revision) || Number(revision) < 0) return undefined;
+  if (typeof expiresAt !== "string" || expiresAt.length > MAX_SAFE_TEXT_LENGTH || !Number.isFinite(Date.parse(expiresAt))) return undefined;
+  return { header, revision: Number(revision), expiresAt };
+}
+
+/**
+ * Bridges hosts that still donate the signed trusted context inside the legacy
+ * page-context payload. The result remains untrusted until the server verifies
+ * the HMAC; this helper only restores the opaque transport envelope.
+ */
+export function createAgentHostAuthorityDonationFromLegacyPayload(value: unknown): AgentHostAuthorityDonation | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const { authenticated, organizationId, scopes, hostSession, purpose, signatureVersion, issuedAt, expiresAt, signature } = record;
+  if (authenticated !== undefined && typeof authenticated !== "boolean") return undefined;
+  if (organizationId !== undefined && organizationId !== null && (typeof organizationId !== "string" || !organizationId || organizationId.length > MAX_SAFE_TEXT_LENGTH)) return undefined;
+  if (scopes !== undefined && (!Array.isArray(scopes) || scopes.length > 32 || scopes.some((scope) => typeof scope !== "string" || !scope || scope.length > MAX_SAFE_TEXT_LENGTH))) return undefined;
+  if (!hostSession || typeof hostSession !== "object" || Array.isArray(hostSession)) return undefined;
+  if (purpose !== undefined && (typeof purpose !== "string" || !purpose || purpose.length > MAX_SAFE_TEXT_LENGTH)) return undefined;
+  if (typeof signatureVersion !== "string" || !signatureVersion || signatureVersion.length > MAX_SAFE_TEXT_LENGTH) return undefined;
+  if (typeof issuedAt !== "string" || !issuedAt || issuedAt.length > MAX_SAFE_TEXT_LENGTH) return undefined;
+  if (typeof expiresAt !== "string" || !expiresAt || expiresAt.length > MAX_SAFE_TEXT_LENGTH) return undefined;
+  if (typeof signature !== "string" || !signature || signature.length > MAX_SAFE_TEXT_LENGTH || !/^[A-Za-z0-9_-]+$/.test(signature)) return undefined;
+  const revision = Date.parse(issuedAt);
+  if (!Number.isSafeInteger(revision) || revision < 0 || !Number.isFinite(Date.parse(expiresAt))) return undefined;
+
+  try {
+    const trustedContext = {
+      ...(authenticated !== undefined ? { authenticated } : {}),
+      ...(organizationId !== undefined ? { organizationId } : {}),
+      ...(scopes !== undefined ? { scopes } : {}),
+      hostSession,
+      ...(purpose !== undefined ? { purpose } : {}),
+      signatureVersion,
+      issuedAt,
+      expiresAt,
+      signature,
+    };
+    const json = JSON.stringify(trustedContext);
+    if (json.length > MAX_HOST_AUTHORITY_JSON_BYTE_LENGTH) return undefined;
+    const bytes = new TextEncoder().encode(json);
+    if (bytes.byteLength > MAX_HOST_AUTHORITY_JSON_BYTE_LENGTH) return undefined;
+    const header = btoa(String.fromCharCode(...bytes)).replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+    return sanitizeAgentHostAuthorityDonation({ header, revision, expiresAt });
+  } catch {
+    return undefined;
+  }
 }
 
 export function isAgentHostActionRequestMessage(value: unknown): value is HostActionRequest {
@@ -468,15 +541,15 @@ export function sanitizeAgentHostPageContext(value: unknown): AgentHostMergedPag
   const activeEntity = sanitizeAgentHostActiveEntity(record.activeEntity);
   const hostUiTargets = sanitizeHostUiTargets(record.hostUiTargets);
   const hostUiTargetRegistry = sanitizeHostUiTargetRegistry(record.hostUiTargetRegistry);
+  const visualSelection = visualContextSelectionSchema.safeParse(record.visualSelection).data;
   const trusted = sanitizeTrustedHostContext(record as AgentTrustedHostContext);
-  const signedFields = sanitizeSignedHostContextFields(record);
   const context: AgentHostMergedPageContext = {
     ...(base ?? {}),
     ...(activeEntity ? { activeEntity } : {}),
     ...(hostUiTargets ? { hostUiTargets } : {}),
     ...(hostUiTargetRegistry ? { hostUiTargetRegistry } : {}),
+    ...(visualSelection ? { visualSelection } : {}),
     ...trusted,
-    ...signedFields,
   };
   return Object.keys(context).length > 0 ? context : undefined;
 }
@@ -537,6 +610,9 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   const resizeHandle = optionalElement(ownerDocument, options.elements.resizeHandle);
   const hostControllerKey = options.hostControllerKey === null ? null : options.hostControllerKey ?? "__sonikAgentHost";
   const hostWindow = ownerWindow as Window & Record<string, unknown>;
+  let visualContextPicker: VisualContextPickerController | undefined;
+  let visualContextRegistry: HostUiTargetRegistry | undefined;
+  let visualContextRoute: string | undefined;
 
   annotateHostElement(iframe, "iframe");
   annotateHostElement(chatSlot, "chat-slot");
@@ -554,13 +630,21 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
 
   const postContext = async () => {
     try {
+      const donated = await getPageContext();
+      const donation = donated && typeof donated === "object" && !Array.isArray(donated) && "pageContext" in donated
+        ? donated as AgentHostContextDonation
+        : { pageContext: donated as AgentHostPageContext };
       const payload = {
-        ...(sanitizeAgentHostPageContext(await getPageContext()) ?? {}),
+        ...(sanitizeAgentHostPageContext(donation.pageContext) ?? {}),
         ...(activeMode ? { mode: activeMode } : {}),
       };
+      const nextRoute = cleanText(payload.route);
+      if (visualContextRoute && nextRoute && visualContextRoute !== nextRoute) visualContextPicker?.cancel("navigation");
+      visualContextRoute = nextRoute;
+      visualContextRegistry = resolveHostActionRegistry(payload);
       const targetOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
       if (!targetOrigin) return;
-      iframe.contentWindow?.postMessage(createAgentHostPageContextMessage(payload), targetOrigin);
+      iframe.contentWindow?.postMessage(createAgentHostPageContextMessage(payload, donation.authority), targetOrigin);
     } catch (error) {
       options.onError?.(error);
     }
@@ -701,13 +785,37 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
       onError: options.onError,
     });
   };
+  const onRequestVisualContext = (event: MessageEvent) => {
+    if (event.source !== iframe.contentWindow) return;
+    if (!event.data || typeof event.data !== "object" || event.data.type !== SONIK_VISUAL_CONTEXT_REQUEST) return;
+    const agentOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
+    if (!agentOrigin || event.origin !== agentOrigin) return;
+    if (options.allowedOrigins !== undefined && !isAgentOriginAllowed(event.origin, options.allowedOrigins)) return;
+    try {
+      visualContextPicker ??= mountVisualContextPicker({
+        origin: agentOrigin,
+        requestOrigin: agentOrigin,
+        source: iframe.contentWindow as Window,
+        window: ownerWindow,
+        document: ownerDocument,
+        getTargetRegistry: () => visualContextRegistry,
+        listen: false,
+      });
+      visualContextPicker.handleMessage(event);
+    } catch (error) {
+      options.onError?.(error);
+    }
+  };
+  const onMessage = (event: MessageEvent) => {
+    onRequestPageContext(event);
+    onRequestHostAction(event);
+    onRequestVisualContext(event);
+  };
   iframe.addEventListener("load", onLoad);
-  ownerWindow.addEventListener("message", onRequestPageContext);
-  ownerWindow.addEventListener("message", onRequestHostAction);
+  ownerWindow.addEventListener("message", onMessage);
   disposers.push(() => {
     iframe.removeEventListener("load", onLoad);
-    ownerWindow.removeEventListener("message", onRequestPageContext);
-    ownerWindow.removeEventListener("message", onRequestHostAction);
+    ownerWindow.removeEventListener("message", onMessage);
   });
 
   addClick(options.elements.openChat, () => open("chat"));
@@ -733,6 +841,7 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   }
 
   const destroy = () => {
+    visualContextPicker?.destroy();
     for (const timeoutId of contextPostTimeouts.splice(0)) ownerWindow.clearTimeout(timeoutId);
     for (const dispose of disposers.splice(0)) dispose();
     close("all");
@@ -958,7 +1067,7 @@ function sanitizePublicHostUiLocator(locator: HostUiTarget["locator"]): HostUiTa
 }
 
 
-type SanitizedHostSessionMetadataValue = string | number | boolean | string[];
+type SanitizedHostSessionMetadataValue = string | number | boolean | string[] | WorkflowDependencyPins;
 
 function sanitizeHostSessionMetadata(value: unknown): Record<string, SanitizedHostSessionMetadataValue> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -969,6 +1078,13 @@ function sanitizeHostSessionMetadata(value: unknown): Record<string, SanitizedHo
     if (!key) continue;
     const isSignedCommandMetadata = SIGNED_HOST_CONTEXT_COMMAND_METADATA_KEYS.has(key);
     if (!isSignedCommandMetadata && publicMetadataCount >= MAX_LIST_ITEMS) continue;
+    if (key === "workflowPublishPins") {
+      const parsed = workflowDependencyPinsSchema.safeParse(rawValue);
+      if (parsed.success) {
+        entries.push([key, parsed.data]);
+      }
+      continue;
+    }
     if (typeof rawValue === "boolean" || typeof rawValue === "number") {
       entries.push([key, rawValue]);
       if (!isSignedCommandMetadata) publicMetadataCount += 1;
@@ -990,19 +1106,6 @@ function sanitizeHostSessionMetadata(value: unknown): Record<string, SanitizedHo
     }
   }
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function sanitizeSignedHostContextFields(value: Record<string, unknown>): AgentSignedHostContextFields {
-  const signed: AgentSignedHostContextFields = {};
-  const signatureVersion = cleanText(value.signatureVersion);
-  const issuedAt = cleanText(value.issuedAt);
-  const expiresAt = cleanText(value.expiresAt);
-  const signature = cleanText(value.signature);
-  if (signatureVersion) signed.signatureVersion = signatureVersion;
-  if (issuedAt) signed.issuedAt = issuedAt;
-  if (expiresAt) signed.expiresAt = expiresAt;
-  if (signature) signed.signature = signature;
-  return signed;
 }
 
 function sanitizeAgentHostActiveEntity(value: unknown): AgentHostActiveEntity | undefined {

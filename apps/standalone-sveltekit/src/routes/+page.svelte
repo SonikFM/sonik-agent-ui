@@ -10,10 +10,11 @@
   import type { StateStore } from "@json-render/core";
   import { JsonArtifactRenderer } from "@sonik-agent-ui/json-ui-runtime";
   import { JsonRenderDevtools } from "@json-render/devtools-svelte";
-  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentSuggestion, type AgentToolPermissionMode, type ComposerCatalogStatus, type ComposerRecentDocument, type ComposerSuggestionItem, type ComposerToolItem } from "@sonik-agent-ui/chat-surface";
+  import { AgentConversation, AgentSettingsPanel, getSpec, getText, resolveToolActivity, snapshotDataParts, type AgentActivityStatus, type AgentApprovalAffordance, type AgentChatMessage, type AgentSessionHistoryState, type AgentSuggestion, type AgentToolPermissionMode, type ComposerCatalogStatus, type ComposerRecentDocument, type ComposerSuggestionItem, type ComposerToolItem } from "@sonik-agent-ui/chat-surface";
   import { createJsonRenderArtifactSignature, upsertJsonRenderArtifact, type JsonRenderArtifact } from "@sonik-agent-ui/artifact-model";
   import { DEFAULT_WORKSPACE_SESSION_NAME, deriveWorkspaceSessionTitle, isDefaultWorkspaceSessionName } from "@sonik-agent-ui/workspace-session";
   import { RESUME_CONTINUE_PROMPT, createDefaultHostUiTargetRegistry, describeRunError, isRunErrorCode, type AgentAnalyticsEntryFrom, type AgentAnalyticsHints } from "@sonik-agent-ui/tool-contracts";
+  import { workflowDependencyPinsSchema, type WorkflowDependencyPins } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
   import {
     createEmptyAgentRunContextSelection,
     reconcileAgentContextSelection,
@@ -43,10 +44,11 @@
     type ArtifactObservationEvent,
     type ArtifactStatus,
   } from "$lib/artifacts/artifact-observability";
-  import { CanvasViewport, ChatWindow, WorkspaceDocumentFrame, WorkspaceRoot, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
+  import { CANVAS_CONTROL_DISABLED_MESSAGES, CanvasViewport, ChatWindow, WorkspaceDocumentFrame, WorkspaceRoot, deriveCanvasControlStates, type CanvasControlStateMap, type CanvasPanel, type WorkspaceDocumentEvent, type WorkspaceLayoutMode, type WorkspaceRailMode } from "@sonik-agent-ui/workspace-core";
   import { createTelemetryCorrelation, sanitizeDeploymentSnapshot, sanitizeTurnCorrelationSnapshot, type AgentUiActionDescriptor, type AgentUiActionRegistrySnapshot, type AgentUiApprovalStateSnapshot, type AgentUiDeploymentSnapshot, type AgentUiPageAssertions, type AgentUiPageContextSnapshot, type AgentUiPageControl, type AgentUiSemanticActionResult, type AgentUiTargetRegistrySnapshot, type AgentUiTurnCorrelationSnapshot, type AgentUiWorkflowSnapshot } from "@sonik-agent-ui/agent-observability";
   import { hostActionKeySchema, type HostActionKey, type HostActionResult, type HostUiTargetEntityRef } from "@sonik-agent-ui/tool-contracts/target-registry";
   import {
+    createAgentHostAuthorityDonationFromLegacyPayload,
     isAgentHostPageContextMessage,
     mergeAgentHostPageContext,
     normalizeAgentEmbedIntent,
@@ -55,11 +57,19 @@
     requestAgentHostAction,
     type AgentHostMergedPageContext,
     type AgentHostPageContext,
+    type AgentHostAuthorityDonation,
     type AgentEmbedMode,
     type AgentEmbedRailMode,
   } from "@sonik-agent-ui/agent-embed";
-  import { nextSignedWorkspaceHostContextCache, selectSignedWorkspaceHostContext } from "$lib/host-context-authority";
+  import {
+    acceptNewerOpaqueHostAuthority,
+    humanMessageForAgentUiFailure,
+    readAgentUiPublicError,
+    selectOpaqueHostAuthority,
+    shouldReplayForNewerHostAuthority,
+  } from "$lib/host-context-authority";
   import { fetchComposerCatalog } from "$lib/composer-catalog";
+  import { formatDateDisplay, formatSessionOptionTitle } from "$lib/date-display";
   import { createQuestionErrorStatePath, createQuestionLifecycleStatePath, escapeJsonPointerSegment } from "$lib/render/question-card-state";
   import { registry } from "$lib/render/registry";
   import {
@@ -228,8 +238,10 @@
   let pendingActiveArtifactStateChanges: JsonRenderStateChange[] = [];
   let pendingArtifactIntent = $state<string | null>(null);
   let documentEditorOpen = $state(false);
-  // Phase 5 (agent-creation-tool-plan-2026-07-13.md, Decision 3): a third
-  // top-level workspace mode, sibling to the existing chat/canvas/document
+  let canvasPanel = $state<CanvasPanel>("canvas");
+  let canvasIsFullscreen = $state(false);
+  // Local top-level workspace modes remain siblings to the existing
+  // chat/canvas/document workspace
   // workspace (WorkspaceRoot below) -- independent of embedMode (the host
   // embed launcher's "workspace"/"chat"/"canvas" union, agent-embed.ts), which
   // stays untouched. builderController is populated by WorkflowBuilderRoot so
@@ -250,6 +262,7 @@
   let sessionSelectionRevision = 0;
   let sessionRailBusy = $state(false);
   let sessionRailError = $state<string | null>(null);
+  let sessionHistoryState = $state<AgentSessionHistoryState>({ status: "loading" });
   let resumableRun = $state<WorkspaceRunSummary | null>(null);
   let agentModelId = $state(DEFAULT_AGENT_MODEL_ID);
   let agentModelOptions = $state<AgentModelOption[]>(AGENT_MODEL_OPTIONS);
@@ -319,7 +332,13 @@
   let sessionBootstrapPromise: Promise<void> | null = null;
   let hostContextWaitTimer: number | null = null;
   let hostPageContext = $state<AgentHostMergedPageContext | null>(null);
-  let lastSignedHostPageContext = $state<AgentHostMergedPageContext | null>(null);
+  let hostAuthority = $state.raw<AgentHostAuthorityDonation | null>(null);
+  let hostAuthorityRefreshRequested = false;
+  const hostAuthorityWaiters = new Set<{
+    priorRevision: number;
+    resolve: (authority: AgentHostAuthorityDonation | null) => void;
+    timer: number;
+  }>();
   let embeddedHostContextExpected = $state(browser && new URLSearchParams(window.location.search).has("agentUiHostOrigin"));
   let embeddedUrlTheme: string | null = null;
   let embedMode = $state<AgentEmbedMode>(getInitialEmbedIntent().mode);
@@ -396,6 +415,13 @@
   const isStreaming = $derived(
     conversation.status === "streaming" || conversation.status === "submitted",
   );
+  const canvasControlStates = $derived(deriveCanvasControlStates({
+    panel: canvasPanel,
+    isFullscreen: canvasIsFullscreen,
+    hasArtifact: Boolean(activeArtifact),
+    hasDocument: Boolean(activeDocument),
+    isStreaming,
+  }));
   $effect(() => {
     if (isStreaming) hasStreamedSinceMount = true;
   });
@@ -595,7 +621,18 @@
 
   function reservationPreviewSummary(preview: ReservationApprovalPreview): string {
     const guestName = typeof preview.guest.name === "string" && preview.guest.name.trim() ? preview.guest.name.trim() : "Guest";
-    const startsAt = typeof preview.booking.startsAt === "string" ? preview.booking.startsAt : "selected time";
+    const startsAt = formatDateDisplay(
+      typeof preview.booking.startsAt === "string" ? preview.booking.startsAt : null,
+      {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        fallback: "selected time",
+      },
+    );
     const partySize = preview.booking.partySize === undefined ? "party" : `party of ${String(preview.booking.partySize)}`;
     return `${guestName}, ${partySize}, ${startsAt}`;
   }
@@ -1331,7 +1368,7 @@
       if (activeSessionId && userMessageId && !persistedMessageIds.has(userMessageId)) {
         throw new Error("The user message must be saved before generation starts.");
       }
-      const response = await fetch(input, init);
+      const response = await fetchWithHostAuthorityRecovery(input, init);
       const deployment = deploymentSnapshotFromHeaders(response.headers);
       if (deployment) latestDeploymentSnapshot = deployment;
       const record = createTurnCorrelationRecordFromResponse({
@@ -1342,7 +1379,15 @@
       });
       upsertSupportCorrelation(record);
       if (requestId) pendingTurnCorrelationByKey.delete(requestId);
-      return response;
+      const typedFailure = await readAgentUiPublicError(response);
+      if (!typedFailure && (response.ok || !response.headers.get("content-type")?.toLowerCase().includes("application/json"))) return response;
+      const headers = new Headers(response.headers);
+      headers.set("content-type", "text/plain; charset=utf-8");
+      return new Response(typedFailure ? humanMessageForAgentUiFailure(typedFailure) : "Generation failed. Please try again.", {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
     } catch (error) {
       if (prepared) {
         upsertSupportCorrelation(createTurnCorrelationRecord({ ...prepared, status: "error" }));
@@ -1378,17 +1423,18 @@
 
   async function workspaceFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
     if (!isWorkspaceHostContextReady()) {
-      sessionRailError = "Reconnect the embedded page so Sonik Chat can receive signed workspace context.";
-      requestHostPageContext("workspace_fetch_missing_signed_host_context");
-      logSessionTelemetry("workspace.fetch.blocked_missing_host_context", { ok: false, reason: "missing_signed_host_context" });
-      throw new Error("Workspace cloud runtime is not available. (missing-host-context)");
+      const refreshed = await awaitNewerHostAuthority(-1, "workspace_fetch_missing_signed_host_context");
+      if (!refreshed) {
+        sessionRailError = "Reconnect the embedded page so Sonik Chat can receive signed workspace context.";
+        logSessionTelemetry("workspace.fetch.blocked_missing_host_context", { ok: false, reason: "missing_signed_host_context" });
+        throw new Error("Workspace cloud runtime is not available. (missing-host-context)");
+      }
     }
     const requestSessionSelectionRevision = sessionSelectionRevision;
-    const response = await fetch(input, {
+    const response = await fetchWithHostAuthorityRecovery(input, {
       ...init,
       headers: {
         ...createDevSmokeHeaders(),
-        ...createWorkspaceRequestHeaders(),
         ...(workspaceSessionContext ? { "x-sonik-agent-ui-workspace-session-context": workspaceSessionContext } : {}),
         ...headersToRecord(init.headers),
       },
@@ -1397,6 +1443,28 @@
     const refreshedWorkspaceSessionContext = response.headers.get("x-sonik-agent-ui-workspace-session-context");
     if (response.ok && refreshedWorkspaceSessionContext && requestSessionSelectionRevision === sessionSelectionRevision) workspaceSessionContext = refreshedWorkspaceSessionContext;
     return response;
+  }
+
+  async function fetchWithHostAuthorityRecovery(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+    const template = input instanceof Request ? input.clone() : input;
+    const url = input instanceof Request ? input.url : String(input);
+    const method = init.method ?? (input instanceof Request ? input.method : "GET");
+    const priorAuthority = getWorkspaceHostAuthority();
+    const first = await fetchAuthorityAttempt(template, init);
+    const failure = await readAgentUiPublicError(first);
+    if (!shouldReplayForNewerHostAuthority({ method, url, responseStatus: first.status, failure })) return first;
+    const newer = await awaitNewerHostAuthority(priorAuthority?.revision ?? -1, "workspace_fetch_host_auth_required");
+    if (!newer || newer.revision <= (priorAuthority?.revision ?? -1)) return first;
+    return fetchAuthorityAttempt(template, init);
+  }
+
+  function fetchAuthorityAttempt(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
+    const headers = new Headers(init.headers);
+    const authority = getWorkspaceHostAuthority();
+    if (authority) headers.set("x-sonik-agent-ui-host-context", authority.header);
+    else headers.delete("x-sonik-agent-ui-host-context");
+    const attemptInput = input instanceof Request ? input.clone() : input;
+    return fetch(attemptInput, { ...init, headers });
   }
 
   function recordWorkspaceRuntimeDiagnostics(response: Response, input: RequestInfo | URL): void {
@@ -1426,65 +1494,17 @@
   }
 
   function createWorkspaceRequestHeaders(): Record<string, string> {
-    const context = getSignedWorkspaceHostContext();
-    const hostSession = context?.hostSession;
-    const organizationId = hostSession?.organizationId ?? context?.organizationId;
-    const authenticated = hostSession?.authenticated === true || context?.authenticated === true;
-    const userId = hostSession?.userId ?? hostSession?.principalId;
-    if (!authenticated || !organizationId || !userId || !hostSession) return {};
-    return {
-      "x-sonik-agent-ui-host-context": encodeWorkspaceHostContextHeader({
-        authenticated,
-        organizationId,
-        scopes: context?.scopes ?? hostSession.scopes ?? [],
-        signatureVersion: context?.signatureVersion ?? null,
-        issuedAt: context?.issuedAt ?? null,
-        expiresAt: context?.expiresAt ?? null,
-        signature: context?.signature ?? null,
-        hostSession: createSignedWorkspaceHostSession(hostSession, {
-          authenticated,
-          organizationId,
-          userId,
-        }),
-      }),
-    };
+    const authority = getWorkspaceHostAuthority();
+    return authority ? { "x-sonik-agent-ui-host-context": authority.header } : {};
   }
 
-  function createSignedWorkspaceHostSession(
-    hostSession: NonNullable<AgentHostMergedPageContext["hostSession"]>,
-    input: { authenticated: boolean; organizationId: string; userId: string },
-  ) {
-    // This object is HMAC-covered by the embedding host. Do not spread sanitized
-    // display-only fields (for example hostSession.theme) into the header: adding
-    // even a harmless null changes the stable JSON payload and makes the cloud
-    // runtime reject the session as missing-host-context.
-    return {
-      source: hostSession.source,
-      sessionId: hostSession.sessionId ?? null,
-      userId: input.userId,
-      principalId: hostSession.principalId ?? input.userId,
-      organizationId: input.organizationId,
-      authenticated: input.authenticated,
-      scopes: hostSession.scopes ?? [],
-      expiresAt: hostSession.expiresAt ?? null,
-      ...(hostSession.metadata ? { metadata: hostSession.metadata } : {}),
-    };
-  }
-
-  function getSignedWorkspaceHostContext(): AgentHostMergedPageContext | null {
-    return selectSignedWorkspaceHostContext({ current: hostPageContext, cached: lastSignedHostPageContext });
+  function getWorkspaceHostAuthority(): AgentHostAuthorityDonation | null {
+    return selectOpaqueHostAuthority({ current: hostAuthority, cached: null });
   }
 
   function isWorkspaceHostContextReady(): boolean {
     if (!isEmbeddedHostContextExpected()) return true;
-    return Boolean(getSignedWorkspaceHostContext());
-  }
-
-  function encodeWorkspaceHostContextHeader(value: unknown): string {
-    return btoa(unescape(encodeURIComponent(JSON.stringify(value))))
-      .replace(/=+$/g, "")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_");
+    return Boolean(getWorkspaceHostAuthority());
   }
 
   function hasHostPageContext(): boolean {
@@ -1572,7 +1592,46 @@
     }
   }
 
+  function awaitNewerHostAuthority(priorRevision: number, reason: string): Promise<AgentHostAuthorityDonation | null> {
+    const current = getWorkspaceHostAuthority();
+    if (current && current.revision > priorRevision) return Promise.resolve(current);
+    if (typeof window === "undefined" || !isEmbeddedHostContextExpected()) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const waiter = {
+        priorRevision,
+        resolve,
+        timer: window.setTimeout(() => finishHostAuthorityWaiter(waiter, null), 5_000),
+      };
+      // Register before asking the parent so a synchronous host response cannot be missed.
+      hostAuthorityWaiters.add(waiter);
+      if (!hostAuthorityRefreshRequested) {
+        hostAuthorityRefreshRequested = true;
+        requestHostPageContext(reason);
+      }
+    });
+  }
+
+  function finishHostAuthorityWaiter(
+    waiter: { priorRevision: number; resolve: (authority: AgentHostAuthorityDonation | null) => void; timer: number },
+    authority: AgentHostAuthorityDonation | null,
+  ): void {
+    if (!hostAuthorityWaiters.delete(waiter)) return;
+    if (typeof window !== "undefined") window.clearTimeout(waiter.timer);
+    waiter.resolve(authority);
+    if (hostAuthorityWaiters.size === 0) hostAuthorityRefreshRequested = false;
+  }
+
+  function notifyHostAuthorityWaiters(authority: AgentHostAuthorityDonation): void {
+    for (const waiter of [...hostAuthorityWaiters]) {
+      if (authority.revision > waiter.priorRevision) finishHostAuthorityWaiter(waiter, authority);
+    }
+  }
+
   function handleAgentHostMessage(event: MessageEvent): void {
+    if (typeof window === "undefined" || event.source !== window.parent) {
+      logArtifactTelemetry({ source: "client", event: "host.page_context.message_ignored", reason: "source_not_parent", ok: false });
+      return;
+    }
     if (!isAllowedAgentHostOrigin(event.origin)) {
       logArtifactTelemetry({ source: "client", event: "host.page_context.message_ignored", reason: "origin_not_allowed", route: event.origin, ok: false });
       return;
@@ -1592,7 +1651,17 @@
       embedMode = nextContext.mode;
     }
     hostPageContext = nextContext;
-    lastSignedHostPageContext = nextSignedWorkspaceHostContextCache({ next: nextContext });
+    const nextAuthority = event.data.authority ?? createAgentHostAuthorityDonationFromLegacyPayload(event.data.payload);
+    if (nextAuthority) {
+      const previous = hostAuthority;
+      const accepted = acceptNewerOpaqueHostAuthority({ current: previous, next: nextAuthority });
+      if (accepted && accepted.revision > (previous?.revision ?? -1)) {
+        hostAuthority = accepted;
+        notifyHostAuthorityWaiters(accepted);
+      } else {
+        logArtifactTelemetry({ source: "client", event: "host.authority.ignored", reason: "expired_or_non_monotonic_revision", ok: false });
+      }
+    }
     applyEmbeddedThemeFromHost(nextContext.theme ?? embeddedUrlTheme);
     logArtifactTelemetry({
       source: "client",
@@ -1658,6 +1727,7 @@
       visibleActions: [
         ...(isEmbeddedHostContextExpected() ? [] : ["theme-picker"]),
         "workspace-docs",
+        "workflow-builder",
         "start-over",
         "createSession",
         "submitPrompt",
@@ -1747,6 +1817,17 @@
   }
 
   function snapshotApprovalState(): AgentUiApprovalStateSnapshot {
+    if (workspaceMode === "workflow-builder") {
+      return builderController?.approvalState() ?? {
+        schemaVersion: "sonik.agent_ui.approval_state.v1",
+        phase: "idle",
+        activeArtifactId: null,
+        canRequestApproval: false,
+        canApproveAndRun: false,
+        disabledReasons: ["workflow_builder_initializing"],
+        commandPreview: null,
+      };
+    }
     const workflow = snapshotActiveWorkflowState();
     return {
       schemaVersion: "sonik.agent_ui.approval_state.v1",
@@ -1757,6 +1838,19 @@
       disabledReasons: [...workflow.disabledReasons],
       commandPreview: workflow.commandPreview ?? null,
     };
+  }
+
+  function getSignedWorkspaceApprovedCommandIds(): string[] {
+    // Display-only readiness hint. The server still verifies the opaque signed
+    // authority header and never trusts this sanitized page-context projection.
+    const value = hostPageContext?.hostSession?.metadata?.approvedCommandIds;
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim()))];
+  }
+
+  function getSignedWorkflowPublishPins(): WorkflowDependencyPins | undefined {
+    const parsed = workflowDependencyPinsSchema.safeParse(hostPageContext?.hostSession?.metadata?.workflowPublishPins);
+    return parsed.success ? parsed.data : undefined;
   }
 
 
@@ -1807,8 +1901,8 @@
         policyMode: "ask",
       }),
       createActionDescriptor("clearArtifact", "Clear artifact", {
-        enabled: Boolean(activeArtifact) && !isStreaming,
-        disabledReason: activeArtifact ? (isStreaming ? "streaming" : undefined) : "missing_active_artifact",
+        enabled: canvasControlStates.clear.enabled,
+        disabledReason: canvasControlStates.clear.disabledReason,
         policyMode: "ask",
       }),
       createActionDescriptor("reloadSession", "Reload session", {
@@ -2158,6 +2252,12 @@
     return { kind, id, ...(label ? { label } : {}) };
   }
 
+  function snapshotCanvasControls(): CanvasControlStateMap {
+    return Object.fromEntries(
+      Object.entries(canvasControlStates).map(([id, control]) => [id, { ...control }]),
+    ) as CanvasControlStateMap;
+  }
+
   /** Runtime-safe host/page automation seam: snapshot reads + semantic actions only. */
   function installAgentPageControl(): void {
     const targetWindow = window as Window & {
@@ -2172,6 +2272,7 @@
       getTargetRegistry: snapshotTargetRegistry,
       getActiveWorkflowState: snapshotActiveWorkflowState,
       getApprovalState: snapshotApprovalState,
+      getCanvasControls: snapshotCanvasControls,
       getBuilderState: () => builderController?.snapshot() ?? null,
       actions: {
         createSession: async () => {
@@ -2215,6 +2316,15 @@
           return semanticActionResult(true, "Chat cleared.");
         },
         clearArtifact: () => {
+          const clearControl = canvasControlStates.clear;
+          if (!clearControl.enabled) {
+            const disabledReason = clearControl.disabledReason ?? "missing_active_artifact";
+            return semanticActionResult(
+              false,
+              CANVAS_CONTROL_DISABLED_MESSAGES[disabledReason],
+              disabledReason,
+            );
+          }
           handleClearArtifact();
           return semanticActionResult(true, "Artifact cleared.");
         },
@@ -2439,6 +2549,7 @@
       stopLongTaskTelemetry?.();
       window.clearInterval(activityTimer);
       if (hostContextWaitTimer !== null) window.clearTimeout(hostContextWaitTimer);
+      for (const waiter of [...hostAuthorityWaiters]) finishHostAuthorityWaiter(waiter, null);
       window.removeEventListener("message", handleAgentHostMessage);
     };
   });
@@ -2509,7 +2620,7 @@
 
   async function initializeSessions(reason = "manual"): Promise<void> {
     const bootstrapRevision = sessionSelectionRevision;
-    await loadSessions();
+    if (!await loadSessions()) return;
     if (sessionSelectionRevision !== bootstrapRevision || activeSessionId) {
       logSessionTelemetry("session.bootstrap.superseded", { sessionId: activeSessionId, reason });
       return;
@@ -2530,15 +2641,45 @@
     await createSession({ force: true });
   }
 
-  async function loadSessions(): Promise<void> {
+  async function loadSessions(): Promise<boolean> {
     sessionRailError = null;
+    sessionHistoryState = { status: "loading" };
     try {
       const response = await workspaceFetch("/api/sessions");
       if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
       sessions = (await response.json()) as WorkspaceSessionSummary[];
+      sessionHistoryState = { status: sessions.length > 0 ? "ready" : "empty" };
       void loadArchivedSessionCount();
+      return true;
     } catch (error) {
       sessionRailError = friendlySessionError("We couldn't load your chats.", error);
+      sessionHistoryState = { status: "error", message: sessionRailError };
+      return false;
+    }
+  }
+
+  async function refreshSessionHistory(): Promise<void> {
+    if (sessionRailBusy) return;
+    sessionRailBusy = true;
+    try {
+      if (!await loadSessions()) return;
+      const sessionId = activeSessionId ?? sessions[0]?.id ?? null;
+      if (!sessionId) return;
+      const previousActiveSessionId = activeSessionId;
+      const response = await workspaceFetch(`/api/session/${encodeURIComponent(sessionId)}`);
+      if (!response.ok) throw new Error(await readWorkspaceResponseError(response));
+      const detail = (await response.json()) as WorkspaceSessionDetail;
+      if ((previousActiveSessionId && activeSessionId !== previousActiveSessionId) || detail.session.id !== sessionId) return;
+      activeSessionId = detail.session.id;
+      sessions = upsertSessionSummary(sessions, detail.session);
+      hydrateWorkspaceSession(detail);
+      sessionHistoryState = { status: "ready" };
+      sessionRailError = null;
+    } catch (error) {
+      sessionRailError = friendlySessionError("We couldn't refresh your chats.", error);
+      sessionHistoryState = { status: "error", message: sessionRailError };
+    } finally {
+      sessionRailBusy = false;
     }
   }
 
@@ -3317,20 +3458,26 @@
 
   async function uploadComposerFile(file: File, signal: AbortSignal): Promise<AgentContextItem> {
     if (!activeSessionId) throw new Error("Start a conversation before attaching a file.");
+    const correlation = createTelemetryCorrelation();
     const form = new FormData();
     form.append("file", file);
     form.append("session_id", activeSessionId);
     const response = await workspaceFetch("/api/files", {
       method: "POST",
+      headers: {
+        "x-sonik-request-id": correlation.requestId,
+        "x-sonik-trace-id": correlation.traceId,
+        traceparent: correlation.traceparent,
+      },
       signal,
       body: form,
     });
     if (!response.ok) {
-      const failure = await response.json().catch(() => null) as { error?: string; retry_file_id?: string } | null;
+      const failure = await readAgentUiPublicError(response);
       if (failure?.retry_file_id) {
         await workspaceFetch(`/api/files/${encodeURIComponent(failure.retry_file_id)}`, { method: "DELETE" }).catch(() => undefined);
       }
-      throw new Error(failure?.error || "Upload failed");
+      throw new Error(failure ? humanMessageForAgentUiFailure(failure) : "Upload failed. Please try again.");
     }
     const uploaded = await response.json() as { id: string; original_filename: string; media_type: string; byte_size: number };
     return { id: `file:${uploaded.id}`, kind: "file", label: uploaded.original_filename, source: "manual", ref: uploaded.id, detail: `${uploaded.media_type} · ${uploaded.byte_size} bytes` };
@@ -3389,7 +3536,7 @@
     agentModelCatalogStatus = "loading";
     agentModelCatalogMessage = null;
     try {
-      const response = await fetch("/api/agent-models");
+      const response = await workspaceFetch("/api/agent-models");
       if (!response.ok) throw new Error(`model_catalog_http_${response.status}`);
       const catalog = await response.json() as { models?: AgentModelOption[]; source?: string; error?: string };
       const models = Array.isArray(catalog.models) && catalog.models.length > 0 ? catalog.models : AGENT_MODEL_OPTIONS;
@@ -4283,7 +4430,14 @@
 </script>
 
 {#if workspaceMode === "workflow-builder"}
-<WorkflowBuilderRoot onController={(controller) => { builderController = controller; }} onExit={() => { workspaceMode = "workspace"; }} />
+<WorkflowBuilderRoot
+  {workspaceFetch}
+  workspaceContextReady={isWorkspaceHostContextReady()}
+  signedHostApprovedCommandIds={getSignedWorkspaceApprovedCommandIds()}
+  workflowPublishPins={getSignedWorkflowPublishPins()}
+  onController={(controller) => { builderController = controller; }}
+  onExit={() => { workspaceMode = "workspace"; }}
+/>
 {:else}
 <WorkspaceRoot
   title="Sonik Chat"
@@ -4304,6 +4458,7 @@
       {archivedSessions}
       busy={sessionRailBusy}
       error={sessionRailError}
+      historyState={sessionHistoryState}
       collapsed={workspaceRailMode === "collapsed"}
       onCreate={() => void createSession()}
       onSwitch={(sessionId) => void switchSession(sessionId)}
@@ -4318,9 +4473,14 @@
     <ChatWindow title="Sonik Chat" windowControlsEnabled={!isEmbeddedHostContextExpected()}>
     <AgentConversation
       title="Sonik Chat"
-      sessionOptions={isEmbeddedHostContextExpected() ? sessions.map((session) => ({ id: session.id, title: session.name })) : undefined}
+      sessionOptions={isEmbeddedHostContextExpected() ? sessions.map((session) => ({
+        id: session.id,
+        title: formatSessionOptionTitle(session.name, session.last_message_at ?? session.updated_at),
+      })) : undefined}
       {activeSessionId}
       onSessionSwitch={(sessionId) => void switchSession(sessionId)}
+      {sessionHistoryState}
+      onRefreshSessionHistory={refreshSessionHistory}
       messages={conversation.messages as AgentChatMessage[]}
       status={conversation.status}
       error={conversation.error}
@@ -4399,16 +4559,14 @@
         >
           Workspace document
         </button>
-        {#if !isEmbeddedHostContextExpected()}
-          <button
-            type="button"
-            onclick={() => { workspaceMode = workspaceMode === "workspace" ? "workflow-builder" : "workspace"; }}
-            class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            aria-label={workspaceMode === "workspace" ? "Open the workflow builder" : "Return to the chat workspace"}
-          >
-            {workspaceMode === "workspace" ? "Workflow Builder" : "Back to chat"}
-          </button>
-        {/if}
+        <button
+          type="button"
+          onclick={() => { workspaceMode = workspaceMode === "workspace" ? "workflow-builder" : "workspace"; }}
+          class="px-3 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          aria-label={workspaceMode === "workspace" ? "Open the workflow builder" : "Return to the chat workspace"}
+        >
+          {workspaceMode === "workspace" ? "Workflow Builder" : "Back to chat"}
+        </button>
         <SupportDiagnosticsMenu
           activeSessionId={activeSessionId}
           correlation={getLatestActiveSessionCorrelation()}
@@ -4443,6 +4601,9 @@
     <CanvasViewport
       artifact={activeArtifact}
       loading={isStreaming}
+      bind:panel={canvasPanel}
+      bind:isFullscreen={canvasIsFullscreen}
+      controlStates={canvasControlStates}
       {pendingArtifactIntent}
       rawSpec={activeArtifactRawSpec}
       onClear={handleClearArtifact}

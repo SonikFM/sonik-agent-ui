@@ -54,21 +54,22 @@
   {#if windowControlsEnabled}
     <div
       class="chat-window__grip"
+      class:chat-window__grip--floating={isFloating}
       role="group"
-      aria-label="Chat window title bar. Drag to move, double-click to reset."
+      aria-label="Chat window controls. Drag the utility strip to move, or double-click it to reset."
       onpointerdown={windowController.onDragPointerDown}
       onpointermove={windowController.onDragPointerMove}
       onpointerup={windowController.onDragPointerUp}
       onpointercancel={windowController.onDragPointerUp}
       ondblclick={windowController.reset}
     >
-      <span class="chat-window__grip-label">{title}</span>
+      <span class="chat-window__drag-region" aria-hidden="true">Drag</span>
       <div class="chat-window__grip-actions">
         <button
           type="button"
           class="chat-window__move-handle"
           onkeydown={windowController.onDragKeyDown}
-          aria-label="Move chat window. Focus this control, then use arrow keys to reposition it. Press Escape to dock, or double-click the title bar to reset."
+          aria-label="Move chat window. Focus this control, then use arrow keys to reposition it. Press Escape to dock, or double-click the utility strip to reset."
         >
           Move
         </button>
@@ -118,13 +119,14 @@
     border-radius: 0.75rem;
     background: var(--card);
     box-shadow: 0 12px 32px color-mix(in oklab, var(--foreground) 22%, transparent);
+    overflow: visible;
   }
 
   .chat-window__grip {
     display: flex;
     flex-shrink: 0;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 0.5rem;
     border-bottom: 1px solid var(--sonik-border-color);
     background: color-mix(in oklab, var(--card) 95%, transparent);
@@ -133,18 +135,29 @@
     touch-action: none;
   }
 
-  .chat-window__grip-label {
-    color: var(--muted-foreground);
-    font-size: 0.6875rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+  .chat-window__grip--floating {
+    position: absolute;
+    right: 0.5rem;
+    bottom: calc(100% + 0.375rem);
+    z-index: 6;
+    border: 1px solid var(--sonik-border-color);
+    border-radius: 0.625rem;
+    background: var(--card);
+    padding: 0.25rem;
+    box-shadow: var(--app-card-shadow-elevated);
   }
 
   .chat-window__grip-actions {
     display: flex;
     align-items: center;
     gap: 0.375rem;
+  }
+
+  .chat-window__drag-region {
+    padding: 0.125rem 0.25rem;
+    color: var(--muted-foreground);
+    font-size: 0.6875rem;
+    font-weight: 600;
   }
 
   .chat-window__move-handle,
@@ -248,5 +261,10 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+
+  .chat-window--floating .chat-window__body {
+    overflow: hidden;
+    border-radius: inherit;
   }
 </style>

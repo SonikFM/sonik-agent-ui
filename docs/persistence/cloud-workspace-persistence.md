@@ -82,3 +82,17 @@ The adapter should set RLS context through the migration-owned `sonik_agent_ui.s
 ## Local vs cloud
 
 SQLite remains useful for local/desktop/offline persistence, but it should be a separate adapter. This migration targets cloud RLS semantics and should be treated as the Postgres-compatible source of truth for hosted Agent UI persistence.
+
+## Stable history ownership
+
+Signed `organization_id` and `user_id` are the durable workspace-history owner
+and the row-visibility authority enforced by forced RLS. `host_session_id` is
+insert-time audit provenance and command-lifetime context only; it is never a
+session, message, document, artifact, file, run, event, or history visibility
+predicate. Rotating the authenticated host session therefore keeps the same
+owner's history visible without broadening access to another organization or
+user.
+
+This policy requires no migration or backfill. Existing rows with an older or
+null `host_session_id` remain visible to their organization/user owner, and
+read paths leave their IDs, provenance values, and timestamps unchanged.

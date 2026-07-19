@@ -6,7 +6,7 @@ import { createInMemoryWorkspacePersistence } from "../../packages/workspace-ses
 const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
 const generateFetchBlock = pageSource.match(/async function fetchGenerateWithSupportCorrelation[\s\S]*?\n  function upsertSupportCorrelation/)?.[0] ?? "";
 
-assert.match(generateFetchBlock, /await persistConversationMessages\(\)[\s\S]*await fetch\(input, init\)/, "the user message must reach persistence before a run can reference it");
+assert.match(generateFetchBlock, /await persistConversationMessages\(\)[\s\S]*await fetchWithHostAuthorityRecovery\(input, init\)/, "the user message must reach persistence before a run can reference it, including the one bounded authority replay");
 assert.equal(generateFetchBlock.includes("!persistedMessageIds.has(userMessageId)"), true, "generation must fail closed when the initiating user message was not persisted");
 
 const userMessage = { id: "message-user", role: "user", parts: [{ type: "text", text: "hello" }] };

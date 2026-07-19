@@ -301,7 +301,7 @@ function renderSkillPromptBody(skill: SkillCatalog["skills"][number]): string {
     // guard keeps this skill active while an artifact is active, and the patch-first
     // refinement contract (agent-prompt.ts) tells the model the artifact exists and how to
     // patch it whenever one is loaded, reclaiming the truncation budget here.
-    lines.push("Execution mode: intake/preview only; the first action must be the registered intake tool (for booking.context.intake, call createBookingIntakeArtifact exactly once). Do not improvise createJsonArtifact here.");
+    lines.push("Execution mode: intake/preview only; the first action must be the registered intake tool (for booking.context.intake, call createBookingIntakeArtifact exactly once). Do not call a generic artifact tool here.");
   }
   if (Array.isArray(metadata.workflowSteps) && metadata.workflowSteps.length > 0) {
     lines.push("Workflow steps:");

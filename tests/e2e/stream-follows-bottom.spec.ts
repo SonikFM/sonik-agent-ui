@@ -60,8 +60,10 @@ test(
     const scrollContainer = page.locator(".overflow-auto.flex-1");
     await submitPrompt(page, "scroll away during this turn");
     await page.waitForTimeout(50);
-    await scrollContainer.evaluate((el) => { el.scrollTop = 0; });
-    await scrollContainer.dispatchEvent("scroll");
+    await scrollContainer.evaluate((el) => {
+      el.scrollTop = 0;
+      el.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
 
     // Once the user deliberately scrolls away mid-stream, follow-to-bottom should
     // stop and the "Scroll to bottom" affordance should appear -- today's

@@ -1,4 +1,4 @@
-import { AGENT_MODEL_OPTIONS, type AgentModelOption } from "./agent-settings";
+import { AGENT_MODEL_OPTIONS, type AgentModelOption } from "./agent-settings.ts";
 
 export interface GatewayModelCatalogResult {
   models: AgentModelOption[];
@@ -22,6 +22,14 @@ interface GatewayModelRecord {
   pricing?: unknown;
   capabilities?: unknown;
   modality?: unknown;
+  task?: unknown;
+  type?: unknown;
+  inputModalities?: unknown;
+  input_modalities?: unknown;
+  outputModalities?: unknown;
+  output_modalities?: unknown;
+  disabledReason?: unknown;
+  disabled_reason?: unknown;
   tags?: unknown;
 }
 
@@ -82,6 +90,32 @@ function readCapability(capabilities: unknown, keys: string[], tags: unknown): b
   return undefined;
 }
 
+function normalizeMetadataValues(...values: unknown[]): string[] {
+  const normalized = new Set<string>();
+  for (const value of values) {
+    const entries = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,+/]/g) : [];
+    for (const entry of entries) {
+      const item = String(entry).trim().toLowerCase();
+      if (!item) continue;
+      normalized.add(item === "images" ? "image" : item === "videos" ? "video" : item === "embedding" ? "embeddings" : item);
+    }
+  }
+  return [...normalized];
+}
+
+function normalizeTask(value: unknown): string | undefined {
+  const task = asString(value)?.toLowerCase().replace(/[_ ]+/g, "-");
+  const labels: Record<string, string> = {
+    agent: "Agent harness", "agent-harness": "Agent harness",
+    chat: "Chat", conversation: "Chat",
+    embedding: "Embeddings", embeddings: "Embeddings",
+    image: "Image", "image-generation": "Image",
+    audio: "Audio", speech: "Audio", "audio-generation": "Audio", "speech-generation": "Audio",
+    video: "Video", "video-generation": "Video",
+  };
+  return task ? labels[task] ?? task.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") : undefined;
+}
+
 function mapGatewayModel(raw: GatewayModelRecord): AgentModelOption | null {
   const id = asString(raw.id);
   if (!id || !id.includes("/")) return null;
@@ -92,6 +126,9 @@ function mapGatewayModel(raw: GatewayModelRecord): AgentModelOption | null {
   const inputPricePerMillion = pricePerMillion(raw.inputTokenPrice) ?? pricePerMillion(pricing?.input) ?? pricePerMillion(pricing?.inputTokens);
   const outputPricePerMillion = pricePerMillion(raw.outputTokenPrice) ?? pricePerMillion(pricing?.output) ?? pricePerMillion(pricing?.outputTokens);
   const capabilities = raw.capabilities ?? raw.modality;
+  const capabilityRecord = asRecord(capabilities);
+  const inputModalities = normalizeMetadataValues(raw.inputModalities, raw.input_modalities, capabilityRecord?.inputModalities, capabilityRecord?.input_modalities, capabilityRecord?.input);
+  const outputModalities = normalizeMetadataValues(raw.outputModalities, raw.output_modalities, capabilityRecord?.outputModalities, capabilityRecord?.output_modalities, capabilityRecord?.output);
   return {
     id,
     label,
@@ -103,8 +140,13 @@ function mapGatewayModel(raw: GatewayModelRecord): AgentModelOption | null {
     inputPricePerMillion,
     outputPricePerMillion,
     supportsTools: readCapability(capabilities, ["tools", "tool-use", "toolCalls", "functionCalling"], raw.tags),
-    supportsImages: readCapability(capabilities, ["imageInput", "vision", "images"], raw.tags),
+    supportsImages: inputModalities.includes("image") || outputModalities.includes("image") || readCapability(capabilities, ["imageInput", "vision", "images"], raw.tags),
+    supportsVideo: inputModalities.includes("video") || outputModalities.includes("video") || readCapability(capabilities, ["videoInput", "videos"], raw.tags),
     supportsReasoning: readCapability(capabilities, ["reasoning"], raw.tags),
+    task: normalizeTask(raw.task ?? raw.type ?? capabilityRecord?.task),
+    inputModalities,
+    outputModalities,
+    disabledReason: asString(raw.disabledReason) ?? asString(raw.disabled_reason),
     // The public catalog may not expose provider-level ZDR agreement metadata.
     // Enforcement happens at request time via Gateway providerOptions/team policy.
     zdrStatus: "unknown",

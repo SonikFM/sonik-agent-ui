@@ -23,6 +23,20 @@ export const ARTIFACT_INPUT_SCENARIO = "artifact-input-stream";
 export const TOOL_FAILURE_SCENARIO = "tool-failure-stream";
 export const DOCUMENT_INTENT_SCENARIO = "document-intent-stream";
 export const DOCUMENT_FAILURE_SCENARIO = "document-failure-stream";
+export const WORKFLOW_DRAFT_SCENARIO = "workflow-draft-stream";
+
+export function embeddedHostUrl(input: {
+  mode?: "chat" | "workspace" | "canvas";
+  rail?: "expanded" | "hidden";
+} = {}): string {
+  const port = process.env.SONIK_AGENT_UI_E2E_PORT ?? "5173";
+  const params = new URLSearchParams({
+    embedMode: input.mode ?? "chat",
+    agentUiHostOrigin: `http://localhost:${port}`,
+  });
+  if (input.rail) params.set("rail", input.rail);
+  return `/?${params.toString()}`;
+}
 
 /** `scenario` omitted (or null) selects the default text-only dev-smoke stream
  *  (dev-smoke-stream.ts's fallback branch -- three text-delta chunks, no tool call). */
@@ -57,4 +71,9 @@ export async function submitPrompt(page: Page, text: string): Promise<void> {
   const textarea = page.locator("textarea").first();
   await textarea.fill(text);
   await textarea.press("Enter");
+}
+
+export async function openChatActions(page: Page): Promise<void> {
+  await page.getByTestId("agent-chat-actions-trigger").click();
+  await page.getByTestId("agent-chat-actions-popover").waitFor({ state: "visible" });
 }

@@ -30,6 +30,12 @@
     canContinue: boolean;
   }
 
+  export type AgentSessionHistoryState =
+    | { status: "loading" }
+    | { status: "ready" }
+    | { status: "empty" }
+    | { status: "error"; message: string };
+
   export interface AgentApprovalAffordance {
     title: string;
     description: string;
@@ -97,6 +103,8 @@
     sessionOptions?: Array<{ id: string; title: string }>;
     activeSessionId?: string | null;
     onSessionSwitch?: (sessionId: string) => void;
+    sessionHistoryState?: AgentSessionHistoryState;
+    onRefreshSessionHistory?: () => void | Promise<void>;
     actions?: Snippet;
     renderArtifact: Snippet<[Spec, boolean]>;
     shouldRenderArtifact?: (message: AgentChatMessage) => boolean;
@@ -105,6 +113,7 @@
 
 <script lang="ts">
   import * as Conversation from "../vendor/amplify-chat/Conversation/index.js";
+  import { resolveApprovalDisabledState } from "../approval-disabled-state.js";
   import AgentComposer from "./AgentComposer.svelte";
   import AgentMessage from "./AgentMessage.svelte";
 
@@ -149,6 +158,8 @@
     sessionOptions,
     activeSessionId = null,
     onSessionSwitch,
+    sessionHistoryState = { status: "loading" },
+    onRefreshSessionHistory,
     actions,
     renderArtifact,
     shouldRenderArtifact,
@@ -156,6 +167,14 @@
 
   const isStreaming = $derived(status === "streaming" || status === "submitted");
   const isEmpty = $derived(messages.length === 0);
+  const componentId = $props.id();
+  const actionsPopoverId = `${componentId}-actions`;
+  const approvalDisabledState = $derived(resolveApprovalDisabledState({
+    isStreaming,
+    disabled: approvalAffordance?.disabled === true,
+    reason: approvalAffordance?.disabledReason,
+  }));
+  const APPROVAL_DISABLED_REASON_ID = "agent-approval-disabled-reason";
   let suggestionLaunchLock: { sessionId: string | null; messageCount: number } | null = null;
 
   $effect(() => {
@@ -174,6 +193,12 @@
   function clear(): void {
     input = "";
     onClear?.();
+  }
+
+  function refreshSessionHistory(): void {
+    const popover = document.getElementById(actionsPopoverId);
+    if (popover?.matches(":popover-open")) popover.hidePopover();
+    void onRefreshSessionHistory?.();
   }
 
   function launchSuggestion(suggestion: AgentSuggestion): void {
@@ -208,19 +233,18 @@
 </script>
 
 <Conversation.Root class="bg-background text-foreground">
-  <!-- flex-wrap: the embedded sidecar is narrow; without it the actions group
-       overlaps the session switcher (2026-07-13 live report). The switcher
-       carries an explicit "Chat history" caption so a session title like
-       "Create a Booking Workflow" reads as history, not a call to action. -->
-  <header class="border-b border-border bg-card/95 px-8 py-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 flex-shrink-0">
-    <div class="flex items-center gap-3 min-w-0">
+  <header
+    class="flex flex-shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border bg-card/95 px-4 py-2.5"
+    data-agent-conversation-header
+  >
+    <div class="flex min-w-0 flex-1 items-center gap-3">
       {#if sessionOptions && sessionOptions.length > 0 && onSessionSwitch}
         <label class="flex min-w-0 items-center gap-2" data-testid="agent-session-switcher-group">
           <span class="text-xs font-medium whitespace-nowrap text-muted-foreground">Chat history</span>
           <select
             aria-label="Switch chat"
             data-testid="agent-session-switcher"
-            class="min-w-0 max-w-60 truncate rounded-md border border-border bg-card px-2 py-1.5 text-sm font-medium text-foreground"
+            class="min-w-0 max-w-56 truncate rounded-md border border-border bg-card px-2 py-1.5 text-sm font-medium text-foreground"
             value={activeSessionId ?? ""}
             onchange={(event) => {
               const nextId = event.currentTarget.value;
@@ -233,19 +257,69 @@
           </select>
         </label>
       {:else}
-        <h1 class="text-lg font-semibold text-foreground">{title}</h1>
+        <h1 class="truncate text-base font-semibold text-foreground">{title}</h1>
       {/if}
     </div>
-    <div class="flex flex-wrap items-center gap-2">
-      {@render actions?.()}
+    <div class="flex shrink-0 items-center gap-2">
       {#if messages.length > 0}
         <button
+          type="button"
           onclick={clear}
-          class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+          class="rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium whitespace-nowrap text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           New chat
         </button>
       {/if}
+      {#if actions || (onRefreshSessionHistory && sessionHistoryState.status !== "error")}
+        <button
+          type="button"
+          class="rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          popovertarget={actionsPopoverId}
+          aria-controls={actionsPopoverId}
+          aria-label="More chat actions"
+          data-testid="agent-chat-actions-trigger"
+        >
+          More
+        </button>
+        <div
+          id={actionsPopoverId}
+          popover="auto"
+          class="agent-conversation__actions-popover w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-xl"
+          role="group"
+          aria-label="More chat actions"
+          data-testid="agent-chat-actions-popover"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            {@render actions?.()}
+            {#if onRefreshSessionHistory && sessionHistoryState.status !== "error"}
+              <button
+                type="button"
+                class="rounded-full px-3 py-1.5 text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                onclick={refreshSessionHistory}
+                disabled={sessionHistoryState.status === "loading"}
+                data-disabled-reason={sessionHistoryState.status === "loading" ? "Chat history is already loading." : undefined}
+                data-testid="session-history-refresh"
+              >Refresh history</button>
+            {/if}
+          </div>
+        </div>
+      {/if}
     </div>
+    {#if sessionHistoryState.status === "error"}
+      <div
+        class="flex basis-full items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-foreground"
+        role="alert"
+        data-testid="session-history-error"
+      >
+        <span>{sessionHistoryState.message}</span>
+        <button
+          type="button"
+          class="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
+          onclick={() => void onRefreshSessionHistory?.()}
+          data-testid="session-history-retry"
+        >Retry</button>
+      </div>
+    {/if}
   </header>
 
   <Conversation.Content class="px-0 py-0">
@@ -287,24 +361,28 @@
             </p>
           </div>
 
-          <div class="grid gap-3 sm:grid-cols-2" aria-label="Suggested agent workflows">
+          <div
+            class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-3"
+            aria-label="Suggested agent workflows"
+            data-workflow-suggestions-layout="intrinsic-grid"
+          >
             {#each suggestions as suggestion (suggestion.label)}
               <button
                 type="button"
                 onclick={() => launchSuggestion(suggestion)}
                 disabled={isStreaming}
-                class="group rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                class="group min-w-0 rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                 data-workflow-suggestion={suggestion.familyId ?? suggestion.label}
                 data-workflow-readiness={suggestion.readiness ?? "ready"}
               >
-                <span class="flex items-start justify-between gap-3">
+                <span class="flex min-w-0 flex-wrap items-start justify-between gap-3">
                   <span class="min-w-0">
                     <span class="block text-sm font-semibold text-foreground">{suggestion.label}</span>
                     {#if suggestion.description}
                       <span class="mt-1 block text-xs leading-5 text-muted-foreground">{suggestion.description}</span>
                     {/if}
                   </span>
-                  <span class="rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                  <span class="shrink-0 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
                     {suggestion.readinessLabel ?? (suggestion.readiness === "needs_context" ? "Context" : suggestion.readiness === "approval_required" ? "Approval" : suggestion.readiness === "draft_only" ? "Draft" : "Ready")}
                   </span>
                 </span>
@@ -333,8 +411,11 @@
             data-chat-approval-card
             data-status={approvalAffordance.status ?? "draft"}
           >
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div class="min-w-0 space-y-1">
+            <div
+              class="flex flex-wrap items-start justify-between gap-3"
+              data-chat-approval-layout="intrinsic-wrap"
+            >
+              <div class="min-w-0 flex-1 basis-72 space-y-1" data-chat-approval-copy>
                 <div class="flex flex-wrap items-center gap-2">
                   <p class="text-sm font-semibold text-foreground">{approvalAffordance.title}</p>
                   <span class="rounded-full border border-primary/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
@@ -349,17 +430,25 @@
                   <summary class="inline-flex cursor-pointer list-none rounded-full text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Technical command receipt</summary>
                   <p class="mt-1 font-mono text-[11px] break-all">{approvalAffordance.commandId}</p>
                 </details>
-                {#if approvalAffordance.disabled && approvalAffordance.disabledReason}
-                  <p class="text-xs font-medium text-destructive" data-approval-disabled-reason>{approvalAffordance.disabledReason}</p>
+                {#if approvalDisabledState}
+                  <p
+                    id={APPROVAL_DISABLED_REASON_ID}
+                    class="text-xs font-medium text-destructive"
+                    role="status"
+                    aria-live="polite"
+                    data-approval-disabled-reason
+                    data-disabled-reason={approvalDisabledState.code}
+                  >{approvalDisabledState.message}</p>
                 {/if}
               </div>
-              <div class="flex shrink-0 flex-wrap gap-2">
+              <div class="flex min-w-0 flex-1 basis-72 flex-wrap gap-2" data-chat-approval-actions>
                 <button
                   type="button"
                   class="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                   onclick={approvalAffordance.onRequestPreview}
-                  disabled={isStreaming || approvalAffordance.disabled}
-                  data-disabled-reason={isStreaming ? "streaming" : approvalAffordance.disabledReason ?? undefined}
+                  disabled={approvalDisabledState !== null}
+                  data-disabled-reason={approvalDisabledState?.code}
+                  aria-describedby={approvalDisabledState ? APPROVAL_DISABLED_REASON_ID : undefined}
                   data-approval-action="preview"
                 >
                   {approvalAffordance.previewLabel ?? "Preview setup"}
@@ -368,8 +457,9 @@
                   type="button"
                   class="rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   onclick={approvalAffordance.onApprove}
-                  disabled={isStreaming || approvalAffordance.disabled}
-                  data-disabled-reason={isStreaming ? "streaming" : approvalAffordance.disabledReason ?? undefined}
+                  disabled={approvalDisabledState !== null}
+                  data-disabled-reason={approvalDisabledState?.code}
+                  aria-describedby={approvalDisabledState ? APPROVAL_DISABLED_REASON_ID : undefined}
                   data-approval-action="approve"
                 >
                   {approvalAffordance.approveLabel ?? "Approve and create"}
@@ -378,8 +468,9 @@
                   type="button"
                   class="rounded-full px-3 py-1.5 text-xs font-semibold text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   onclick={approvalAffordance.onCancel}
-                  disabled={isStreaming || approvalAffordance.disabled}
-                  data-disabled-reason={isStreaming ? "streaming" : approvalAffordance.disabledReason ?? undefined}
+                  disabled={approvalDisabledState !== null}
+                  data-disabled-reason={approvalDisabledState?.code}
+                  aria-describedby={approvalDisabledState ? APPROVAL_DISABLED_REASON_ID : undefined}
                   data-approval-action="cancel"
                 >
                   {approvalAffordance.cancelLabel ?? "Cancel"}
@@ -441,3 +532,21 @@
     {onUploadFile}
   />
 </Conversation.Root>
+
+<style>
+  .agent-conversation__actions-popover {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    max-height: calc(100dvh - 2rem);
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: flip-block, flip-inline;
+  }
+
+  @supports not (position-area: block-end) {
+    .agent-conversation__actions-popover {
+      top: 4rem;
+      right: 1rem;
+    }
+  }
+</style>

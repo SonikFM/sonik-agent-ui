@@ -37,6 +37,11 @@ const SCENARIOS = [
     loader: null,
   },
   {
+    id: "question-card-error-lifecycle",
+    file: "tests/agent-eval/scenarios/question-card-error-lifecycle.eval.mjs",
+    loader: null,
+  },
+  {
     id: "embedded-experience",
     file: "tests/agent-eval/scenarios/embedded-experience.eval.mjs",
     loader: null,

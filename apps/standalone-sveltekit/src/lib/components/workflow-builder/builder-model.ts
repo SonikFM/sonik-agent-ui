@@ -17,10 +17,100 @@ import {
   type CapabilityDescriptor,
   type CapabilityRegistry,
 } from "@sonik-agent-ui/tool-contracts/capability-registry";
+import {
+  normalizeCapabilityFamilyModes,
+  sonikBookingCapabilityFamilyIds,
+} from "@sonik-agent-ui/tool-contracts/capability-family";
+import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
+import {
+  WORKFLOW_VNEXT_SCHEMA_VERSION,
+  workflowVNextDefinitionSchema,
+  type WorkflowVNextDefinition,
+} from "@sonik-agent-ui/tool-contracts/workflow-vnext";
+import type { AgentUiApprovalStateSnapshot, AgentUiWorkflowPhase } from "@sonik-agent-ui/agent-observability";
 
 export type BuilderTab = "config" | "canvas" | "preview";
 export type WorkflowLockState = "draft" | "locked";
+export type WorkflowDraftLifecycle = "new" | "dirty" | "saving" | "saved" | "publishing" | "published" | "conflicted" | "outdated" | "invalid" | "failed";
 export type KnowledgeRef = AgentDefinition["knowledgeRefs"][number];
+export type ActiveWorkflowRunSelection = { workflowId: string; run: WorkflowRunState };
+export type WorkflowRunAction = "preview" | "approve" | "commit";
+export type WorkflowRunActionDisabledCode =
+  | "workflow_action_busy"
+  | "workflow_run_not_started"
+  | "workflow_preview_node_missing"
+  | "workflow_commit_node_missing"
+  | "workflow_preview_not_ready"
+  | "trusted_host_approval_required"
+  | "workflow_run_already_approved"
+  | "run_approval_required"
+  | "run_approval_does_not_cover_command"
+  | "workflow_run_committed";
+
+export interface WorkflowRunActionDisabledState {
+  code: WorkflowRunActionDisabledCode;
+  message: string;
+}
+
+const WORKFLOW_RUN_ACTION_DISABLED_MESSAGES: Record<WorkflowRunActionDisabledCode, string> = {
+  workflow_action_busy: "Wait for the current workflow action to finish.",
+  workflow_run_not_started: "Start this workflow run before using this action.",
+  workflow_preview_node_missing: "This workflow has no preview step to run.",
+  workflow_commit_node_missing: "This workflow has no trusted commit step.",
+  workflow_preview_not_ready: "Create a workflow preview before approving this run.",
+  trusted_host_approval_required: "Reconnect with a trusted host grant for this command before approving or committing.",
+  workflow_run_already_approved: "This workflow run is already approved.",
+  run_approval_required: "Approve this workflow run before committing it.",
+  run_approval_does_not_cover_command: "The run approval does not cover this commit command. Preview and approve it again.",
+  workflow_run_committed: "This workflow run is already committed.",
+};
+
+export function resolveWorkflowRunBusyDisabledState(busy: boolean): WorkflowRunActionDisabledState | null {
+  return busy
+    ? { code: "workflow_action_busy", message: WORKFLOW_RUN_ACTION_DISABLED_MESSAGES.workflow_action_busy }
+    : null;
+}
+
+/** One typed source for the actual Preview/Approve/Commit button state and its
+ * human/AT-readable explanation. Authority checks intentionally precede
+ * lifecycle checks on approve/commit: a stale approved run never masks that
+ * the currently signed host context no longer grants the command. */
+export function resolveWorkflowRunActionDisabledState(input: {
+  action: WorkflowRunAction;
+  busy: boolean;
+  hasRun: boolean;
+  hasPreviewNode: boolean;
+  hasCommitNode: boolean;
+  phase: WorkflowRunState["phase"] | null;
+  approvalStatus: WorkflowRunState["approvalState"]["status"] | null;
+  signedHostGrantCoversCommit: boolean;
+  runApprovalCoversCommit: boolean;
+}): WorkflowRunActionDisabledState | null {
+  const disabled = (code: WorkflowRunActionDisabledCode): WorkflowRunActionDisabledState => ({
+    code,
+    message: WORKFLOW_RUN_ACTION_DISABLED_MESSAGES[code],
+  });
+  if (input.busy) return resolveWorkflowRunBusyDisabledState(true);
+  if (!input.hasRun) return disabled("workflow_run_not_started");
+
+  if (input.action === "preview") {
+    return input.hasPreviewNode ? null : disabled("workflow_preview_node_missing");
+  }
+
+  if (!input.hasCommitNode) return disabled("workflow_commit_node_missing");
+  if (!input.signedHostGrantCoversCommit) return disabled("trusted_host_approval_required");
+
+  if (input.action === "approve") {
+    if (input.approvalStatus === "approved") return disabled("workflow_run_already_approved");
+    if (input.phase !== "preview_ready") return disabled("workflow_preview_not_ready");
+    return null;
+  }
+
+  if (input.phase === "committed") return disabled("workflow_run_committed");
+  if (input.approvalStatus !== "approved") return disabled("run_approval_required");
+  if (!input.runApprovalCoversCommit) return disabled("run_approval_does_not_cover_command");
+  return null;
+}
 
 export function createEmptyAgentDefinition(agentId: string): AgentDefinition {
   return agentDefinitionSchema.parse({ agentId, title: "Untitled agent" });
@@ -36,39 +126,36 @@ export function createEmptyWorkflowDefinition(workflowId: string): WorkflowDefin
 }
 
 export interface CapabilityFamilyGroup {
-  familyId: string;
+  familyId: string | null;
+  displayId: string;
   capabilities: CapabilityDescriptor[];
 }
 
 /**
  * Groups the flat capability registry into family rows for the tool-scoping
- * drill-down. `CapabilityDescriptor` has no explicit familyId (D013 keeps
- * capability ids as the single dotted namespace) -- the first two dotted
- * segments (e.g. "booking.create" from "booking.create.booking",
- * "amplify.campaign" from "amplify.campaign.create") is a stable,
- * deterministic grouping key that matches how `toolPolicy`/`toolPermissionModes`
- * are keyed at the family level (see agent-runtime-adapter.ts, command-catalog.ts).
+ * drill-down using the client-safe projection generated from the same mounted
+ * command catalog as the server. Registry-only capabilities stay visible but
+ * have no runnable family id and therefore cannot create policy authority.
  */
 export function groupCapabilitiesByFamily(registry: CapabilityRegistry = sonikBookingCapabilityRegistry): CapabilityFamilyGroup[] {
-  const byFamily = new Map<string, CapabilityDescriptor[]>();
+  const byFamily = new Map<string, CapabilityFamilyGroup>();
   for (const capability of registry.capabilities) {
-    const familyId = capability.capabilityId.split(".").slice(0, 2).join(".");
-    const bucket = byFamily.get(familyId) ?? [];
-    bucket.push(capability);
-    byFamily.set(familyId, bucket);
+    const familyId = sonikBookingCapabilityFamilyIds[capability.capabilityId] ?? null;
+    const displayId = familyId ?? capability.capabilityId.split(".").slice(0, 2).join(".");
+    const key = familyId ?? `unavailable:${displayId}`;
+    const bucket = byFamily.get(key) ?? { familyId, displayId, capabilities: [] };
+    bucket.capabilities.push(capability);
+    byFamily.set(key, bucket);
   }
-  return [...byFamily.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([familyId, capabilities]) => ({
-      familyId,
-      capabilities: capabilities.slice().sort((a, b) => a.capabilityId.localeCompare(b.capabilityId)),
-    }));
+  return [...byFamily.values()]
+    .sort((a, b) => a.displayId.localeCompare(b.displayId))
+    .map((family) => ({ ...family, capabilities: family.capabilities.slice().sort((a, b) => a.capabilityId.localeCompare(b.capabilityId)) }));
 }
 
 /** Read-only projection of the definition's toolPolicy for one family --
  *  reflects the grant, never issues it (Onyx drill-down pattern). */
-export function effectiveFamilyMode(definition: AgentDefinition, familyId: string): "off" | "ask" | "allow" {
-  return definition.toolPolicy[familyId] ?? "off";
+export function effectiveFamilyMode(definition: AgentDefinition, familyId: string | null): "off" | "ask" | "allow" {
+  return familyId ? normalizeCapabilityFamilyModes(definition.toolPolicy)[familyId] ?? "off" : "off";
 }
 
 export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
@@ -105,6 +192,97 @@ export interface WorkflowDefinitionValidation {
   issues?: string[];
 }
 
+export function resolveWorkflowDraftLifecycle(input: {
+  valid: boolean;
+  saving: boolean;
+  publishing: boolean;
+  conflicted: boolean;
+  failed: boolean;
+  dirty: boolean;
+  draftRevision: number | null;
+  publishedRevision: number | null;
+}): WorkflowDraftLifecycle {
+  if (!input.valid) return "invalid";
+  if (input.publishing) return "publishing";
+  if (input.saving) return "saving";
+  if (input.conflicted) return "conflicted";
+  if (input.failed) return "failed";
+  if (input.dirty) return "dirty";
+  if (input.draftRevision === null) return "new";
+  if (input.publishedRevision !== null) {
+    return input.publishedRevision === input.draftRevision ? "published" : "outdated";
+  }
+  return "saved";
+}
+
+export function hasUnsavedWorkflowChanges(input: { dirty: boolean; saving: boolean; publishing: boolean }): boolean {
+  return input.dirty || input.saving;
+}
+
+/** Minimal explicit bridge while the canvas still edits the deprecated marketplace shape.
+ * Existing canonical fields must survive the legacy canvas unchanged. */
+export function workflowDefinitionToVNext(workflow: WorkflowDefinition, base?: WorkflowVNextDefinition): WorkflowVNextDefinition {
+  const baseNodes = new Map(base?.nodes.map((node) => [node.nodeId, node]));
+  const baseEdges = new Map(base?.edges.map((edge) => [edge.edgeId, edge]));
+  return workflowVNextDefinitionSchema.parse({
+    schemaVersion: WORKFLOW_VNEXT_SCHEMA_VERSION,
+    workflowId: workflow.workflowId,
+    definitionVersion: base?.definitionVersion ?? 1,
+    title: workflow.title,
+    entryNodeId: base && workflow.nodes.some(({ nodeId }) => nodeId === base.entryNodeId) ? base.entryNodeId : workflow.nodes[0]?.nodeId,
+    nodes: workflow.nodes.map((node) => {
+      const existing = baseNodes.get(node.nodeId);
+      const existingConfig = existing?.config && typeof existing.config === "object" && !Array.isArray(existing.config) ? existing.config : null;
+      const config = existingConfig ? { ...existingConfig } : { title: node.title, effect: node.effect, approvalPolicy: node.approvalPolicy };
+      if (existingConfig) {
+        if (node.title !== (typeof existingConfig.title === "string" ? existingConfig.title : node.nodeId)) config.title = node.title;
+        if (node.effect !== (typeof existingConfig.effect === "string" ? existingConfig.effect : "none")) config.effect = node.effect;
+        if (node.approvalPolicy !== (typeof existingConfig.approvalPolicy === "string" ? existingConfig.approvalPolicy : "none")) config.approvalPolicy = node.approvalPolicy;
+      }
+      return {
+        ...existing,
+        nodeId: node.nodeId,
+        nodeType: node.type,
+        typeVersion: existing?.typeVersion ?? 1,
+        config,
+        bindings: existing?.bindings ?? {},
+        requiredHostContext: node.requiredHostContext ?? [],
+        capabilityPins: node.commandId ? [node.commandId] : [],
+        output: existing?.output ?? { inlineByteLimit: 64 * 1024 },
+      };
+    }),
+    edges: workflow.edges.map((edge) => {
+      const existing = baseEdges.get(edge.edgeId);
+      return existing && existing.from === edge.from && existing.to === edge.to
+        ? existing
+        : { edgeId: edge.edgeId, from: edge.from, to: edge.to, default: !edge.condition };
+    }),
+    facadeToolIds: workflow.facadeToolIds ?? [],
+  });
+}
+
+export function workflowVNextToDefinition(workflow: WorkflowVNextDefinition): WorkflowDefinition {
+  return workflowDefinitionSchema.parse({
+    workflowId: workflow.workflowId,
+    title: workflow.title,
+    version: `0.${workflow.definitionVersion}.0`,
+    nodes: workflow.nodes.map((node) => {
+      const config = node.config && typeof node.config === "object" && !Array.isArray(node.config) ? node.config : {};
+      return {
+        nodeId: node.nodeId,
+        type: node.nodeType,
+        title: typeof config.title === "string" ? config.title : node.nodeId,
+        effect: typeof config.effect === "string" ? config.effect : "none",
+        approvalPolicy: typeof config.approvalPolicy === "string" ? config.approvalPolicy : "none",
+        requiredHostContext: node.requiredHostContext,
+        commandId: node.capabilityPins[0],
+      };
+    }),
+    edges: workflow.edges.map((edge) => ({ edgeId: edge.edgeId, from: edge.from, to: edge.to })),
+    facadeToolIds: workflow.facadeToolIds,
+  });
+}
+
 export function validateWorkflowDefinition(candidate: unknown): WorkflowDefinitionValidation {
   const parsed = workflowDefinitionSchema.safeParse(candidate);
   if (parsed.success) return { ok: true, workflow: parsed.data };
@@ -114,7 +292,7 @@ export function validateWorkflowDefinition(candidate: unknown): WorkflowDefiniti
 /** True once any tool family is granted "ask"/"allow" -- an agent with no
  *  grants at all can run on a model with no tool-use support. */
 export function agentRequiresToolUse(definition: AgentDefinition): boolean {
-  return Object.values(definition.toolPolicy).some((mode) => mode !== "off");
+  return Object.values(normalizeCapabilityFamilyModes(definition.toolPolicy)).some((mode) => mode !== "off");
 }
 
 /** Dify-bar incompatible-model flag for the config panel's model picker:
@@ -130,4 +308,84 @@ export function formatModelContextWindow(value: number | undefined): string {
   if (value >= 1_000_000) return `${Math.round(value / 1_000_000)}M context`;
   if (value >= 1_000) return `${Math.round(value / 1_000)}K context`;
   return `${value} context`;
+}
+
+function workflowRunPhaseForApprovalState(phase: WorkflowRunState["phase"]): AgentUiWorkflowPhase {
+  return phase === "cancelled" ? "idle" : phase;
+}
+
+/**
+ * Projects the active builder run into the existing page-control approval API.
+ * Approval readiness comes from the controller run, while authority comes only
+ * from command ids carried by the currently signed host context. Chat text and
+ * standalone mode never manufacture a grant.
+ */
+export function createWorkflowBuilderApprovalState(
+  run: WorkflowRunState | null,
+  signedHostApprovedCommandIds: readonly string[],
+): AgentUiApprovalStateSnapshot {
+  if (!run) {
+    return {
+      schemaVersion: "sonik.agent_ui.approval_state.v1",
+      phase: "idle",
+      activeArtifactId: null,
+      canRequestApproval: false,
+      canApproveAndRun: false,
+      disabledReasons: ["workflow_run_not_started"],
+      commandPreview: null,
+    };
+  }
+
+  const previewNode = Object.values(run.nodeStates).find((node) => node.type === "tool_preview");
+  const commitNode = Object.values(run.nodeStates).find((node) => node.type === "tool_commit");
+  const commandId = commitNode?.commandId ?? previewNode?.commandId ?? null;
+  const signedGrantCoversCommand = Boolean(commandId && signedHostApprovedCommandIds.includes(commandId));
+  const runApprovalCoversCommand = Boolean(
+    commandId
+      && run.approvalState.status === "approved"
+      && run.approvalState.hostSigned
+      && run.approvalState.approvedCommandIds.includes(commandId),
+  );
+  const canRequestApproval = run.phase === "preview_ready";
+  const disabledReasons: string[] = [];
+
+  if (run.phase === "cancelled") disabledReasons.push("workflow_run_cancelled");
+  else if (run.phase === "error") disabledReasons.push(previewNode?.error?.code ?? "workflow_run_error");
+  else if (run.phase === "committed") disabledReasons.push("workflow_run_committed");
+  else if (!previewNode?.preview) disabledReasons.push("workflow_preview_not_ready");
+  else if (!commandId) disabledReasons.push("workflow_commit_command_missing");
+  else if (!signedGrantCoversCommand) disabledReasons.push("trusted_host_approval_required");
+  else if (run.approvalState.status === "approved" && !runApprovalCoversCommand) {
+    disabledReasons.push("run_approval_does_not_cover_command");
+  }
+
+  return {
+    schemaVersion: "sonik.agent_ui.approval_state.v1",
+    phase: workflowRunPhaseForApprovalState(run.phase),
+    activeArtifactId: run.artifactId,
+    canRequestApproval,
+    canApproveAndRun: canRequestApproval && signedGrantCoversCommand,
+    disabledReasons,
+    commandPreview: previewNode?.preview
+      ? {
+          commandId: previewNode.preview.commandId,
+          stableInputHash: previewNode.preview.stableInputHash,
+          effect: previewNode.preview.effect === "read" || previewNode.preview.effect === "write" || previewNode.preview.effect === "destructive"
+            ? previewNode.preview.effect
+            : "write",
+          approvalRequired: previewNode.preview.approvalRequired,
+        }
+      : null,
+  };
+}
+
+/** Last-interacted panel wins. Reset only clears the run owned by that panel,
+ * so resetting an inactive example cannot erase the active approval card. */
+export function selectActiveWorkflowRun(
+  current: ActiveWorkflowRunSelection | null,
+  workflowId: string,
+  run: WorkflowRunState | null,
+): ActiveWorkflowRunSelection | null {
+  if (run) return { workflowId, run };
+  return current?.workflowId === workflowId ? null : current;
 }

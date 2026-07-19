@@ -1,0 +1,95 @@
+{
+  "version": "sonik.visual-context.v1",
+  "capability": {
+    "operation": "pick",
+    "status": "available",
+    "provider": "host"
+  },
+  "request": {
+    "requestId": "visual-request-1",
+    "operation": "pick",
+    "sourceContextRevision": 3,
+    "routeRevision": 7,
+    "source": {
+      "id": "host",
+      "label": "Example host",
+      "surface": "example-host",
+      "route": "/reservations"
+    },
+    "provider": "host",
+    "messageSource": "sonik-agent-ui",
+    "type": "sonik:visual-context:request",
+    "version": "sonik.visual-context.v1",
+    "origin": "https://example.test"
+  },
+  "result": {
+    "requestId": "visual-request-1",
+    "operation": "pick",
+    "sourceContextRevision": 3,
+    "routeRevision": 7,
+    "source": {
+      "id": "host",
+      "label": "Example host",
+      "surface": "example-host",
+      "route": "/reservations"
+    },
+    "provider": "host",
+    "messageSource": "sonik-agent-host",
+    "type": "sonik:visual-context:result",
+    "version": "sonik.visual-context.v1",
+    "origin": "https://example.test",
+    "status": "completed",
+    "selection": {
+      "targetId": "example.reservation.card",
+      "targetInstanceId": "reservation-123",
+      "label": "Reservation card",
+      "role": "article",
+      "accessibleName": "Reservation details",
+      "bounds": {
+        "x": 24,
+        "y": 80,
+        "width": 640,
+        "height": 320,
+        "coordinateSpace": "viewport"
+      },
+      "selectedAt": "2026-07-17T12:00:00.000Z"
+    }
+  },
+  "snapshot": {
+    "schemaVersion": "sonik.visual-context.v1",
+    "status": "current",
+    "generation": "generation-1",
+    "requestId": "visual-request-2",
+    "sourceContextRevision": 4,
+    "routeRevision": 8,
+    "source": {
+      "id": "preview",
+      "label": "Preview",
+      "surface": "sandbox-preview",
+      "route": "/reservations"
+    },
+    "selection": null,
+    "ariaSnapshot": "- main\n  - heading \"Reservations\"",
+    "selectionResolution": "not-requested",
+    "screenshot": {
+      "path": "/vercel/sandbox/workspace/.sonik/screenshots/latest.png",
+      "mime": "image/png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 4096,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "provider": "playwright",
+      "fidelity": "controlled-preview",
+      "captureBasis": "fresh-playwright-navigation",
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "deviceScaleFactor": 1
+      },
+      "redactionsApplied": ["sensitive inputs"],
+      "capturedAt": "2026-07-17T12:01:00.000Z"
+    },
+    "invalidatedAt": null,
+    "staleReason": null
+  }
+}

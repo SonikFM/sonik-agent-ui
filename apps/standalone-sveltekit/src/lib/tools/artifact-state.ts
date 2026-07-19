@@ -33,6 +33,7 @@ function normalizeTrustedScopeKey(key: string): string {
 
 export type ArtifactStateToolContext = {
   sessionId?: string | null;
+  requestId?: string;
   pageContext?: AgentPageContext;
   persistence?: AsyncWorkspacePersistenceAdapter | null;
   hostSession?: HostSessionEnvelope | null;
@@ -379,6 +380,7 @@ export async function commitBookingContextIntakeCommand(context: ArtifactStateTo
       ...executionContext,
       action: "commit",
       source: "agent-ui",
+      requestId: context.requestId ?? executionContext.requestId,
       sessionId: executionContext.sessionId ?? context.sessionId,
       approved: context.approvedCommandIds?.includes(command.commandId) === true,
       toolPolicy: { familyModes: context.toolPermissionModes },

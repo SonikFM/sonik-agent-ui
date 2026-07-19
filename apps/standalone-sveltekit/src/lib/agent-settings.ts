@@ -1,4 +1,5 @@
 import { AGENT_PROMPT_OVERRIDABLE_MODULE_IDS } from "./agent-prompt.ts";
+import { sonikBookingCapabilityFamilyIds } from "@sonik-agent-ui/tool-contracts/capability-family";
 
 export type AgentToolPermissionMode = "off" | "ask" | "allow";
 export type AgentModelCatalogSource = "fallback" | "gateway";
@@ -15,7 +16,12 @@ export interface AgentModelOption {
   outputPricePerMillion?: number;
   supportsTools?: boolean;
   supportsImages?: boolean;
+  supportsVideo?: boolean;
   supportsReasoning?: boolean;
+  task?: string;
+  inputModalities?: string[];
+  outputModalities?: string[];
+  disabledReason?: string;
   zdrStatus?: "available" | "unknown";
 }
 
@@ -187,7 +193,7 @@ export const AGENT_TOOL_FAMILY_OPTIONS: AgentToolFamilyOption[] = [
 
 const STATIC_MODEL_IDS = new Set(AGENT_MODEL_OPTIONS.map((option) => option.id));
 const SKILL_IDS = new Set(AGENT_SKILL_OPTIONS.map((option) => option.id));
-const TOOL_FAMILY_IDS = new Set(AGENT_TOOL_FAMILY_OPTIONS.map((option) => option.id));
+const TOOL_FAMILY_IDS = new Set([...AGENT_TOOL_FAMILY_OPTIONS.map((option) => option.id), ...Object.values(sonikBookingCapabilityFamilyIds)]);
 // AGENT_SKILL_OPTIONS ids are kept identical to the runtime skill catalog's
 // workflow ids (see server/skill-registry.ts) by convention, so this set also
 // doubles as "known runtime skill ids" for skillPromptOverrides validation

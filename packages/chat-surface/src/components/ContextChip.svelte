@@ -26,7 +26,7 @@
 </script>
 
 <span
-  class="relative inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs text-foreground shadow-sm"
+  class="relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border bg-card pl-2.5 pr-0.5 text-xs text-foreground shadow-sm"
   data-testid={testId}
   data-context-chip={item.id}
   data-context-kind={item.kind}
@@ -40,17 +40,17 @@
 >
   <button
     type="button"
-    class="inline-flex min-w-0 items-center gap-1.5 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    class="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-full py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     aria-label={`Open details for ${item.label}`}
     onclick={() => onOpen?.(item)}
   >
     <span class="h-1.5 w-1.5 rounded-full bg-current opacity-50"></span>
-    <span class="max-w-[12rem] truncate font-medium">{item.label}</span>
+    <span class="min-w-0 max-w-[12rem] truncate font-medium">{item.label}</span>
   </button>
   {#if onRemove}
     <button
       type="button"
-      class="ml-0.5 -mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+      class="ml-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
       data-context-chip-remove={item.id}
       aria-label={`Remove ${item.label} from context`}
       onclick={() => onRemove?.(item.id)}

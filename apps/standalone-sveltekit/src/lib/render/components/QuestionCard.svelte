@@ -15,6 +15,8 @@
   import { createQuestionErrorStatePath } from "../question-card-state";
 
   type AnswerValue = string | number | boolean | Array<string | number | boolean> | null;
+  type LocalValidationProvenance = { message: string; errorPath: string };
+  const CHOICE_DISABLED_REASON = "choice_disabled" as const;
 
   interface Props extends BaseComponentProps<{
     questionId: string;
@@ -46,6 +48,8 @@
 
   let error = $state<string | null>(null);
   let submitStatus = $state<"idle" | "saving" | "failed">("idle");
+  let validationProvenance = $state<LocalValidationProvenance | null>(null);
+  let previousValidationSignature = $state<string | null>(null);
 
   $effect(() => {
     const telemetry = normalized.telemetry;
@@ -71,49 +75,8 @@
 
   const questionErrorPath = $derived(createQuestionErrorStatePath(safeProps.questionId));
 
-  function isSelected(choiceValue: Choice["value"]) {
-    return Array.isArray(value) ? value.includes(choiceValue) : value === choiceValue;
-  }
-
-  function choose(choiceValue: Choice["value"], disabled?: boolean | null) {
-    if (disabled) return;
-    error = null;
-    submitStatus = "idle";
-    stateContext.set(questionErrorPath, null);
-    if (isMulti) {
-      const current = Array.isArray(valueBinding.current) ? [...valueBinding.current] : [];
-      valueBinding.current = current.includes(choiceValue) ? current.filter((item) => item !== choiceValue) : [...current, choiceValue];
-      return;
-    }
-    valueBinding.current = choiceValue;
-  }
-
-  function selectAllChoices() {
-    if (!isMulti) return;
-    error = null;
-    submitStatus = "idle";
-    stateContext.set(questionErrorPath, null);
-    valueBinding.current = choices.filter((choice) => choice.disabled !== true).map((choice) => choice.value);
-  }
-
-  function clearChoices() {
-    if (!isMulti) return;
-    error = null;
-    submitStatus = "idle";
-    stateContext.set(questionErrorPath, null);
-    valueBinding.current = [];
-  }
-
-  function handleText(e: Event) {
-    error = null;
-    submitStatus = "idle";
-    stateContext.set(questionErrorPath, null);
-    const raw = (e.target as HTMLInputElement | HTMLTextAreaElement).value;
-    valueBinding.current = safeProps.answerType === "number" && raw !== "" ? Number(raw) : raw;
-  }
-
-  function questionSpec() {
-    return createAskUserQuestionSpec({
+  function questionInput() {
+    return {
       id: safeProps.questionId,
       title: safeProps.title,
       body: safeProps.body,
@@ -128,11 +91,91 @@
       maxSelections: safeProps.maxSelections ?? undefined,
       confidence: safeProps.confidence ?? undefined,
       reviewRequired: safeProps.reviewRequired === true,
+    };
+  }
+
+  function validationSignature(): string {
+    const input = questionInput();
+    return JSON.stringify({
+      id: input.id,
+      answerType: input.answerType,
+      choices: input.choices.map((choice) => ({ value: choice.value, disabled: choice.disabled === true })),
+      required: input.required,
+      allowSkip: input.allowSkip,
+      skipValue: input.skipValue,
+      writesTo: input.writesTo,
+      minSelections: input.minSelections,
+      maxSelections: input.maxSelections,
+      value: valueBinding.current ?? null,
     });
+  }
+
+  $effect(() => {
+    const nextSignature = validationSignature();
+    if (previousValidationSignature === null) {
+      previousValidationSignature = nextSignature;
+      return;
+    }
+    if (nextSignature === previousValidationSignature) return;
+    previousValidationSignature = nextSignature;
+
+    const provenance = validationProvenance;
+    if (!provenance) return;
+    error = null;
+    submitStatus = "idle";
+    validationProvenance = null;
+    if (stateContext.get(provenance.errorPath) === provenance.message) {
+      stateContext.set(provenance.errorPath, null);
+    }
+  });
+
+  function clearInputError() {
+    error = null;
+    submitStatus = "idle";
+    validationProvenance = null;
+    stateContext.set(questionErrorPath, null);
+  }
+
+  function isSelected(choiceValue: Choice["value"]) {
+    return Array.isArray(value) ? value.includes(choiceValue) : value === choiceValue;
+  }
+
+  function choose(choiceValue: Choice["value"], disabled?: boolean | null) {
+    if (disabled) return;
+    clearInputError();
+    if (isMulti) {
+      const current = Array.isArray(valueBinding.current) ? [...valueBinding.current] : [];
+      valueBinding.current = current.includes(choiceValue) ? current.filter((item) => item !== choiceValue) : [...current, choiceValue];
+      return;
+    }
+    valueBinding.current = choiceValue;
+  }
+
+  function selectAllChoices() {
+    if (!isMulti) return;
+    clearInputError();
+    valueBinding.current = choices.filter((choice) => choice.disabled !== true).map((choice) => choice.value);
+  }
+
+  function clearChoices() {
+    if (!isMulti) return;
+    clearInputError();
+    valueBinding.current = [];
+  }
+
+  function handleText(e: Event) {
+    clearInputError();
+    const raw = (e.target as HTMLInputElement | HTMLTextAreaElement).value;
+    valueBinding.current = safeProps.answerType === "number" && raw !== "" ? Number(raw) : raw;
+  }
+
+  function questionSpec() {
+    return createAskUserQuestionSpec(questionInput());
   }
 
   function submit(skipped = false) {
     emitQuestionSubmitAttemptTelemetry({ questionId: safeProps.questionId, skipped });
+    let validating = true;
     try {
       const updates = createQuestionStateUpdateRecord({
         question: questionSpec(),
@@ -140,12 +183,14 @@
         skipped,
         writesTo: safeProps.writesTo,
       });
+      validating = false;
       stateContext.update({
         ...updates,
         [questionErrorPath]: null,
       });
       error = null;
       submitStatus = "saving";
+      validationProvenance = null;
       emit(skipped ? "skip" : "submit");
       if (typeof window !== "undefined") {
         window.setTimeout(() => {
@@ -156,8 +201,11 @@
       const formatted = formatQuestionSubmitError(err);
       error = formatted.message;
       submitStatus = "failed";
+      validationProvenance = validating
+        ? { message: formatted.message, errorPath: questionErrorPath }
+        : null;
       emitComponentPropValidationTelemetry(formatted.telemetry);
-      stateContext.set(questionErrorPath, error);
+      stateContext.set(questionErrorPath, formatted.message);
     }
   }
 </script>
@@ -205,6 +253,7 @@
             class="rounded-lg border p-3 text-left transition hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-50 {isSelected(choice.value) ? 'border-primary bg-primary/5 ring-2 ring-primary/15' : 'border-border bg-background'}"
             disabled={choice.disabled === true}
             aria-pressed={isSelected(choice.value)}
+            data-disabled-reason={choice.disabled === true ? CHOICE_DISABLED_REASON : undefined}
             onclick={() => choose(choice.value, choice.disabled)}
             data-question-option
             data-question-card-id={safeProps.questionId}

@@ -14,7 +14,7 @@
 // or restart-durable persistence: a workspace-session-style adapter.
 
 import { createHash } from "node:crypto";
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import {
   agentDefinitionSchema,
   marketplaceManifestSchema,
@@ -26,9 +26,46 @@ import {
 } from "@sonik-agent-ui/tool-contracts/marketplace";
 
 export interface AgentDefinitionDraftRecord {
+  organizationId: string;
   agentId: string;
   definition: AgentDefinition;
+  createdByUserId: string;
+  updatedByUserId: string;
   updatedAt: string;
+}
+
+export const AGENT_DEFINITION_ACTIONS = ["view", "edit_draft", "publish", "start", "approve_commit", "inspect_org_history"] as const;
+export type AgentDefinitionAction = (typeof AGENT_DEFINITION_ACTIONS)[number];
+
+export interface AgentDefinitionAuthority {
+  organizationId: string;
+  userId: string;
+  scopes: readonly string[];
+}
+
+type TrustedHostSession = {
+  authenticated?: boolean;
+  organizationId?: string | null;
+  userId?: string | null;
+  scopes?: readonly string[] | null;
+};
+
+export function agentDefinitionScope(action: AgentDefinitionAction): string {
+  return `agent-definitions:${action}`;
+}
+
+export function agentDefinitionAuthorityFromHostSession(session: TrustedHostSession | null | undefined): AgentDefinitionAuthority | null {
+  const organizationId = session?.organizationId?.trim();
+  const userId = session?.userId?.trim();
+  if (!session?.authenticated || !organizationId || !userId) return null;
+  return { organizationId, userId, scopes: session.scopes ?? [] };
+}
+
+export function assertAgentDefinitionAuthorized(authority: AgentDefinitionAuthority | null | undefined, action: AgentDefinitionAction): asserts authority is AgentDefinitionAuthority {
+  if (!authority?.organizationId?.trim() || !authority.userId?.trim()) throw new Error("agent_definition_owner_context_required");
+  if (!authority.scopes.includes(agentDefinitionScope(action)) && !authority.scopes.includes("agent-definitions:*")) {
+    throw new Error(`agent_definition_${action}_forbidden`);
+  }
 }
 
 export interface PublishAgentDefinitionInput {
@@ -41,16 +78,16 @@ export interface PublishAgentDefinitionInput {
 }
 
 export interface AgentDefinitionStore {
-  saveDraft(definition: AgentDefinition): AgentDefinitionDraftRecord;
-  getDraft(agentId: string): AgentDefinitionDraftRecord | null;
-  listDrafts(): AgentDefinitionDraftRecord[];
-  deleteDraft(agentId: string): boolean;
-  publish(input: PublishAgentDefinitionInput): MarketplacePackageVersion;
-  listPublishedVersions(agentId: string): MarketplacePackageVersion[];
+  saveDraft(authority: AgentDefinitionAuthority, definition: AgentDefinition): AgentDefinitionDraftRecord;
+  getDraft(authority: AgentDefinitionAuthority, agentId: string, action?: "view" | "start"): AgentDefinitionDraftRecord | null;
+  listDrafts(authority: AgentDefinitionAuthority): AgentDefinitionDraftRecord[];
+  deleteDraft(authority: AgentDefinitionAuthority, agentId: string): boolean;
+  publish(authority: AgentDefinitionAuthority, input: PublishAgentDefinitionInput): MarketplacePackageVersion;
+  listPublishedVersions(authority: AgentDefinitionAuthority, agentId: string): MarketplacePackageVersion[];
   /** The definition inside the most recently published version, or null if
    *  nothing has ever been published for this agentId (fallback-safe: callers
    *  must treat null as "no publish has happened yet", not an error). */
-  resolvePublished(agentId: string): AgentDefinition | null;
+  resolvePublished(authority: AgentDefinitionAuthority, agentId: string, action?: "view" | "start"): AgentDefinition | null;
 }
 
 const DEFAULT_PUBLISHER: MarketplaceManifest["publisher"] = { publisherId: "sonik.first_party", displayName: "Sonik", type: "sonik" };
@@ -124,59 +161,75 @@ function buildAgentDefinitionPackageVersion(
   });
 }
 
+export function parseStoredAgentDefinition(value: unknown): AgentDefinition {
+  return agentDefinitionSchema.parse(typeof value === "string" ? JSON.parse(value) : structuredClone(value));
+}
+
 export function createInMemoryAgentDefinitionStore(): AgentDefinitionStore {
   const drafts = new Map<string, AgentDefinitionDraftRecord>();
-  // agentId -> published versions, oldest first; "current" is the last entry.
+  // organizationId + agentId -> published versions, oldest first.
   const publishedVersions = new Map<string, MarketplacePackageVersion[]>();
+  const key = (authority: AgentDefinitionAuthority, agentId: string) => JSON.stringify([authority.organizationId, agentId]);
 
-  function saveDraft(definition: AgentDefinition): AgentDefinitionDraftRecord {
-    const parsed = agentDefinitionSchema.parse(definition);
-    const record: AgentDefinitionDraftRecord = { agentId: parsed.agentId, definition: parsed, updatedAt: new Date().toISOString() };
-    drafts.set(parsed.agentId, record);
-    return record;
+  function saveDraft(authority: AgentDefinitionAuthority, definition: AgentDefinition): AgentDefinitionDraftRecord {
+    assertAgentDefinitionAuthorized(authority, "edit_draft");
+    const parsed = agentDefinitionSchema.parse(structuredClone(definition));
+    const existing = drafts.get(key(authority, parsed.agentId));
+    const record: AgentDefinitionDraftRecord = {
+      organizationId: authority.organizationId,
+      agentId: parsed.agentId,
+      definition: parsed,
+      createdByUserId: existing?.createdByUserId ?? authority.userId,
+      updatedByUserId: authority.userId,
+      updatedAt: new Date().toISOString(),
+    };
+    drafts.set(key(authority, parsed.agentId), record);
+    return structuredClone(record);
   }
 
-  // org scoping seam: filter by organization_id once the auth/org lane lands --
-  // drafts are process-wide across tenants until then (same seam as saveDraft above).
-  function getDraft(agentId: string): AgentDefinitionDraftRecord | null {
-    return drafts.get(agentId) ?? null;
+  function getDraft(authority: AgentDefinitionAuthority, agentId: string, action: "view" | "start" = "view"): AgentDefinitionDraftRecord | null {
+    assertAgentDefinitionAuthorized(authority, action);
+    const draft = drafts.get(key(authority, agentId));
+    return draft ? structuredClone(draft) : null;
   }
 
-  // org scoping seam: filter by organization_id once the auth/org lane lands.
-  function listDrafts(): AgentDefinitionDraftRecord[] {
-    return [...drafts.values()];
+  function listDrafts(authority: AgentDefinitionAuthority): AgentDefinitionDraftRecord[] {
+    assertAgentDefinitionAuthorized(authority, "inspect_org_history");
+    return structuredClone([...drafts.values()].filter((draft) => draft.organizationId === authority.organizationId));
   }
 
-  // org scoping seam: scope the delete by organization_id once the auth/org lane lands.
-  function deleteDraft(agentId: string): boolean {
-    return drafts.delete(agentId);
+  function deleteDraft(authority: AgentDefinitionAuthority, agentId: string): boolean {
+    assertAgentDefinitionAuthorized(authority, "edit_draft");
+    return drafts.delete(key(authority, agentId));
   }
 
-  function publish(input: PublishAgentDefinitionInput): MarketplacePackageVersion {
-    const draft = drafts.get(input.agentId);
+  function publish(authority: AgentDefinitionAuthority, input: PublishAgentDefinitionInput): MarketplacePackageVersion {
+    assertAgentDefinitionAuthorized(authority, "publish");
+    const scopedKey = key(authority, input.agentId);
+    const draft = drafts.get(scopedKey);
     if (!draft) throw new Error(`No draft agent definition found for ${input.agentId}`);
     const packageVersionId = `${draft.agentId}@${input.packageSemver}`;
-    const existing = publishedVersions.get(draft.agentId) ?? [];
+    const existing = publishedVersions.get(scopedKey) ?? [];
     if (existing.some((version) => version.packageVersionId === packageVersionId)) {
       throw new Error(`Package version ${packageVersionId} is already published (packageVersionId is immutable, D002) -- bump packageSemver`);
     }
     assertSemverAdvancesPast(draft.agentId, input.packageSemver, existing.at(-1)?.packageSemver);
     const version = buildAgentDefinitionPackageVersion(draft.definition, input, packageVersionId);
-    publishedVersions.set(draft.agentId, [...existing, version]);
-    return version;
+    publishedVersions.set(scopedKey, [...existing, structuredClone(version)]);
+    return structuredClone(version);
   }
 
-  // org scoping seam: filter by organization_id once the auth/org lane lands --
-  // published versions are process-wide across tenants until then.
-  function listPublishedVersions(agentId: string): MarketplacePackageVersion[] {
-    return publishedVersions.get(agentId) ?? [];
+  function listPublishedVersions(authority: AgentDefinitionAuthority, agentId: string): MarketplacePackageVersion[] {
+    assertAgentDefinitionAuthorized(authority, "view");
+    return structuredClone(publishedVersions.get(key(authority, agentId)) ?? []);
   }
 
-  // org scoping seam: same as listPublishedVersions above.
-  function resolvePublished(agentId: string): AgentDefinition | null {
-    const versions = publishedVersions.get(agentId);
+  function resolvePublished(authority: AgentDefinitionAuthority, agentId: string, action: "view" | "start" = "view"): AgentDefinition | null {
+    assertAgentDefinitionAuthorized(authority, action);
+    const versions = publishedVersions.get(key(authority, agentId));
     if (!versions || versions.length === 0) return null;
-    return versions[versions.length - 1].manifest.payload.agent ?? null;
+    const definition = versions[versions.length - 1].manifest.payload.agent;
+    return definition ? structuredClone(definition) : null;
   }
 
   return { saveDraft, getDraft, listDrafts, deleteDraft, publish, listPublishedVersions, resolvePublished };
@@ -185,12 +238,6 @@ export function createInMemoryAgentDefinitionStore(): AgentDefinitionStore {
 /** Module-level singleton for the running process, mirroring workspace-store.ts's
  *  `workspacePersistence` singleton pattern. */
 export const agentDefinitionStore: AgentDefinitionStore = createInMemoryAgentDefinitionStore();
-
-/** Fallback-safe: null means "nothing published yet", never an error -- the
- *  generate route's resolution must degrade to today's behavior on null. */
-export function resolvePublishedAgentDefinition(agentId: string): AgentDefinition | null {
-  return agentDefinitionStore.resolvePublished(agentId);
-}
 
 // marketplacePackageVersionSchema re-exported only for tests that want to
 // validate a version object shape without importing the package directly.
@@ -207,13 +254,13 @@ export { marketplacePackageVersionSchema };
 // per-request via workspace-services.ts's createRequestWorkspaceServices).
 // Callers opt in by calling resolveAgentDefinitionStore(env) and awaiting.
 export interface AsyncAgentDefinitionStore {
-  saveDraft(definition: AgentDefinition): Promise<AgentDefinitionDraftRecord>;
-  getDraft(agentId: string): Promise<AgentDefinitionDraftRecord | null>;
-  listDrafts(): Promise<AgentDefinitionDraftRecord[]>;
-  deleteDraft(agentId: string): Promise<boolean>;
-  publish(input: PublishAgentDefinitionInput): Promise<MarketplacePackageVersion>;
-  listPublishedVersions(agentId: string): Promise<MarketplacePackageVersion[]>;
-  resolvePublished(agentId: string): Promise<AgentDefinition | null>;
+  saveDraft(authority: AgentDefinitionAuthority, definition: AgentDefinition): Promise<AgentDefinitionDraftRecord>;
+  getDraft(authority: AgentDefinitionAuthority, agentId: string, action?: "view" | "start"): Promise<AgentDefinitionDraftRecord | null>;
+  listDrafts(authority: AgentDefinitionAuthority): Promise<AgentDefinitionDraftRecord[]>;
+  deleteDraft(authority: AgentDefinitionAuthority, agentId: string): Promise<boolean>;
+  publish(authority: AgentDefinitionAuthority, input: PublishAgentDefinitionInput): Promise<MarketplacePackageVersion>;
+  listPublishedVersions(authority: AgentDefinitionAuthority, agentId: string): Promise<MarketplacePackageVersion[]>;
+  resolvePublished(authority: AgentDefinitionAuthority, agentId: string, action?: "view" | "start"): Promise<AgentDefinition | null>;
 }
 
 /** Wraps the synchronous in-memory store in a Promise-returning facade so
@@ -222,13 +269,13 @@ export interface AsyncAgentDefinitionStore {
  *  immutability rejection (D002) still surfaces the same way. */
 export function wrapAgentDefinitionStoreAsync(store: AgentDefinitionStore): AsyncAgentDefinitionStore {
   return {
-    saveDraft: async (definition) => store.saveDraft(definition),
-    getDraft: async (agentId) => store.getDraft(agentId),
-    listDrafts: async () => store.listDrafts(),
-    deleteDraft: async (agentId) => store.deleteDraft(agentId),
-    publish: async (input) => store.publish(input),
-    listPublishedVersions: async (agentId) => store.listPublishedVersions(agentId),
-    resolvePublished: async (agentId) => store.resolvePublished(agentId),
+    saveDraft: async (authority, definition) => store.saveDraft(authority, definition),
+    getDraft: async (authority, agentId, action) => store.getDraft(authority, agentId, action),
+    listDrafts: async (authority) => store.listDrafts(authority),
+    deleteDraft: async (authority, agentId) => store.deleteDraft(authority, agentId),
+    publish: async (authority, input) => store.publish(authority, input),
+    listPublishedVersions: async (authority, agentId) => store.listPublishedVersions(authority, agentId),
+    resolvePublished: async (authority, agentId, action) => store.resolvePublished(authority, agentId, action),
   };
 }
 
@@ -238,97 +285,190 @@ export function wrapAgentDefinitionStoreAsync(store: AgentDefinitionStore): Asyn
  *  the in-memory store. Schema: packages/workspace-session/migrations/postgres/
  *  0005_agent_definitions.sql (same migration mechanism as workspace-store.ts;
  *  see scripts/run-postgres-migrations.mjs). */
-export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentDefinitionStore {
-  const sql = neon(databaseUrl.trim());
+export function createNeonAgentDefinitionStoreFromSql(sql: NeonQueryFunction<false, false>): AsyncAgentDefinitionStore {
+  async function scopedRows(
+    authority: AgentDefinitionAuthority,
+    action: AgentDefinitionAction,
+    query: ReturnType<typeof sql>,
+  ): Promise<unknown[]> {
+    assertAgentDefinitionAuthorized(authority, action);
+    const results = await sql.transaction([
+      sql`select sonik_agent_ui.set_request_context(${authority.organizationId}, ${authority.userId})`,
+      query,
+    ]);
+    return results[1] as unknown[];
+  }
 
-  async function saveDraft(definition: AgentDefinition): Promise<AgentDefinitionDraftRecord> {
+  async function saveDraft(authority: AgentDefinitionAuthority, definition: AgentDefinition): Promise<AgentDefinitionDraftRecord> {
     const parsed = agentDefinitionSchema.parse(definition);
     const updatedAt = new Date().toISOString();
-    // org scoping seam: add organization_id (from the resolved host session)
-    // to this insert + a (organization_id, agent_id) key once the auth/org
-    // lane lands -- drafts are process-wide across tenants until then.
-    await sql`
-      insert into sonik_agent_ui.agent_definition_drafts (agent_id, definition, updated_at)
-      values (${parsed.agentId}, ${JSON.stringify(parsed)}::jsonb, ${updatedAt})
-      on conflict (agent_id) do update set definition = excluded.definition, updated_at = excluded.updated_at
-    `;
-    return { agentId: parsed.agentId, definition: parsed, updatedAt };
-  }
-
-  // org scoping seam: filter by organization_id once the auth/org lane lands --
-  // drafts are process-wide across tenants until then (same seam as saveDraft above).
-  async function getDraft(agentId: string): Promise<AgentDefinitionDraftRecord | null> {
-    const rows = await sql`select agent_id, definition, updated_at from sonik_agent_ui.agent_definition_drafts where agent_id = ${agentId}`;
-    if (rows.length === 0) return null;
-    const row = rows[0] as { agent_id: string; definition: AgentDefinition; updated_at: string };
-    return { agentId: row.agent_id, definition: row.definition, updatedAt: new Date(row.updated_at).toISOString() };
-  }
-
-  // org scoping seam: filter by organization_id once the auth/org lane lands.
-  async function listDrafts(): Promise<AgentDefinitionDraftRecord[]> {
-    const rows = await sql`select agent_id, definition, updated_at from sonik_agent_ui.agent_definition_drafts`;
-    return (rows as { agent_id: string; definition: AgentDefinition; updated_at: string }[]).map((row) => ({
+    const rows = await scopedRows(authority, "edit_draft", sql`
+      insert into sonik_agent_ui.agent_definition_drafts (
+        organization_id, agent_id, definition, created_by_user_id, updated_by_user_id, updated_at
+      ) values (
+        ${authority.organizationId}, ${parsed.agentId}, ${JSON.stringify(parsed)}::jsonb,
+        ${authority.userId}, ${authority.userId}, ${updatedAt}
+      )
+      on conflict (organization_id, agent_id) where organization_id is not null
+      do update set definition = excluded.definition, updated_by_user_id = excluded.updated_by_user_id, updated_at = excluded.updated_at
+      returning organization_id, agent_id, definition, created_by_user_id, updated_by_user_id, updated_at
+    `);
+    const row = rows[0] as { organization_id: string; agent_id: string; definition: AgentDefinition; created_by_user_id: string; updated_by_user_id: string; updated_at: string };
+    return {
+      organizationId: row.organization_id,
       agentId: row.agent_id,
-      definition: row.definition,
+      definition: parseStoredAgentDefinition(row.definition),
+      createdByUserId: row.created_by_user_id,
+      updatedByUserId: row.updated_by_user_id,
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
+  async function getDraft(authority: AgentDefinitionAuthority, agentId: string, action: "view" | "start" = "view"): Promise<AgentDefinitionDraftRecord | null> {
+    const rows = await scopedRows(authority, action, sql`
+      select organization_id, agent_id, definition, created_by_user_id, updated_by_user_id, updated_at
+      from sonik_agent_ui.agent_definition_drafts
+      where organization_id = ${authority.organizationId} and agent_id = ${agentId}
+    `);
+    if (rows.length === 0) return null;
+    const row = rows[0] as { organization_id: string; agent_id: string; definition: AgentDefinition; created_by_user_id: string; updated_by_user_id: string; updated_at: string };
+    return {
+      organizationId: row.organization_id,
+      agentId: row.agent_id,
+      definition: parseStoredAgentDefinition(row.definition),
+      createdByUserId: row.created_by_user_id,
+      updatedByUserId: row.updated_by_user_id,
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
+  async function listDrafts(authority: AgentDefinitionAuthority): Promise<AgentDefinitionDraftRecord[]> {
+    const rows = await scopedRows(authority, "inspect_org_history", sql`
+      select organization_id, agent_id, definition, created_by_user_id, updated_by_user_id, updated_at
+      from sonik_agent_ui.agent_definition_drafts
+      where organization_id = ${authority.organizationId}
+    `);
+    return (rows as { organization_id: string; agent_id: string; definition: AgentDefinition; created_by_user_id: string; updated_by_user_id: string; updated_at: string }[]).map((row) => ({
+      organizationId: row.organization_id,
+      agentId: row.agent_id,
+      definition: parseStoredAgentDefinition(row.definition),
+      createdByUserId: row.created_by_user_id,
+      updatedByUserId: row.updated_by_user_id,
       updatedAt: new Date(row.updated_at).toISOString(),
     }));
   }
 
-  // org scoping seam: scope the delete by organization_id once the auth/org lane lands.
-  async function deleteDraft(agentId: string): Promise<boolean> {
-    const rows = await sql`delete from sonik_agent_ui.agent_definition_drafts where agent_id = ${agentId} returning agent_id`;
+  async function deleteDraft(authority: AgentDefinitionAuthority, agentId: string): Promise<boolean> {
+    const rows = await scopedRows(authority, "edit_draft", sql`
+      delete from sonik_agent_ui.agent_definition_drafts
+      where organization_id = ${authority.organizationId} and agent_id = ${agentId}
+      returning agent_id
+    `);
     return rows.length > 0;
   }
 
-  async function publish(input: PublishAgentDefinitionInput): Promise<MarketplacePackageVersion> {
-    const draft = await getDraft(input.agentId);
+  async function publish(authority: AgentDefinitionAuthority, input: PublishAgentDefinitionInput): Promise<MarketplacePackageVersion> {
+    assertAgentDefinitionAuthorized(authority, "publish");
+    const draftRows = await scopedRows(authority, "publish", sql`
+      select agent_id, definition from sonik_agent_ui.agent_definition_drafts
+      where organization_id = ${authority.organizationId} and agent_id = ${input.agentId}
+    `);
+    const draft = draftRows[0] as { agent_id: string; definition: unknown } | undefined;
     if (!draft) throw new Error(`No draft agent definition found for ${input.agentId}`);
-    const packageVersionId = `${draft.agentId}@${input.packageSemver}`;
-    const existing = await sql`select 1 from sonik_agent_ui.agent_definition_published_versions where package_version_id = ${packageVersionId}`;
-    if (existing.length > 0) {
+    const draftDefinition = parseStoredAgentDefinition(draft.definition);
+    const packageVersionId = `${draft.agent_id}@${input.packageSemver}`;
+    const version = buildAgentDefinitionPackageVersion(draftDefinition, input, packageVersionId);
+    const results = await sql.transaction([
+      sql`select sonik_agent_ui.set_request_context(${authority.organizationId}, ${authority.userId})`,
+      sql`
+        with locked_draft as materialized (
+          select agent_id, definition
+          from sonik_agent_ui.agent_definition_drafts
+          where organization_id = ${authority.organizationId} and agent_id = ${input.agentId}
+          for update
+        ), latest as (
+          select version ->> 'packageSemver' as package_semver
+          from sonik_agent_ui.agent_definition_published_versions
+          where organization_id = ${authority.organizationId} and agent_id = ${input.agentId}
+          order by seq desc
+          limit 1
+        ), checked as (
+          select locked_draft.agent_id,
+                 locked_draft.definition,
+                 exists (
+                   select 1 from sonik_agent_ui.agent_definition_published_versions
+                   where organization_id = ${authority.organizationId} and package_version_id = ${packageVersionId}
+                 ) as duplicate,
+                 latest.package_semver
+          from locked_draft
+          left join latest on true
+        ), inserted as (
+          insert into sonik_agent_ui.agent_definition_published_versions (
+            organization_id, package_version_id, agent_id, version, created_by_user_id
+          )
+          select ${authority.organizationId}, ${packageVersionId}, checked.agent_id, ${JSON.stringify(version)}::jsonb, ${authority.userId}
+          from checked
+          where not checked.duplicate
+            and checked.definition = ${JSON.stringify(draftDefinition)}::jsonb
+            and (
+              checked.package_semver is null
+              or string_to_array(substring(${input.packageSemver} from '^[0-9]+\\.[0-9]+\\.[0-9]+'), '.')::int[]
+                 > string_to_array(substring(checked.package_semver from '^[0-9]+\\.[0-9]+\\.[0-9]+'), '.')::int[]
+            )
+          returning package_version_id
+        )
+        select checked.agent_id,
+               checked.definition,
+               checked.duplicate,
+               checked.package_semver,
+               checked.definition <> ${JSON.stringify(draftDefinition)}::jsonb as draft_changed,
+               inserted.package_version_id
+        from checked
+        left join inserted on true
+      `,
+    ], { isolationLevel: "Serializable" });
+    const outcome = (results[1] as unknown[])[0] as {
+      duplicate: boolean;
+      package_semver: string | null;
+      draft_changed: boolean;
+      package_version_id: string | null;
+    } | undefined;
+    if (!outcome) throw new Error(`No draft agent definition found for ${input.agentId}`);
+    if (outcome.duplicate) {
       throw new Error(`Package version ${packageVersionId} is already published (packageVersionId is immutable, D002) -- bump packageSemver`);
     }
-    const latestRows = await sql`
-      select version ->> 'packageSemver' as package_semver from sonik_agent_ui.agent_definition_published_versions
-      where agent_id = ${input.agentId}
-      order by seq desc
-      limit 1
-    `;
-    assertSemverAdvancesPast(draft.agentId, input.packageSemver, (latestRows[0] as { package_semver: string } | undefined)?.package_semver);
-    const version = buildAgentDefinitionPackageVersion(draft.definition, input, packageVersionId);
-    // org scoping seam: same as saveDraft above.
-    await sql`
-      insert into sonik_agent_ui.agent_definition_published_versions (package_version_id, agent_id, version)
-      values (${packageVersionId}, ${draft.agentId}, ${JSON.stringify(version)}::jsonb)
-    `;
+    assertSemverAdvancesPast(draft.agent_id, input.packageSemver, outcome.package_semver ?? undefined);
+    if (outcome.draft_changed) throw new Error(`Draft agent definition changed while publishing ${input.agentId}; retry publish`);
+    if (!outcome.package_version_id) throw new Error(`Agent definition publish failed for ${input.agentId}`);
     return version;
   }
 
-  // org scoping seam: filter by organization_id once the auth/org lane lands --
-  // published versions are process-wide across tenants until then.
-  async function listPublishedVersions(agentId: string): Promise<MarketplacePackageVersion[]> {
-    const rows = await sql`
+  async function listPublishedVersions(authority: AgentDefinitionAuthority, agentId: string): Promise<MarketplacePackageVersion[]> {
+    const rows = await scopedRows(authority, "view", sql`
       select version from sonik_agent_ui.agent_definition_published_versions
-      where agent_id = ${agentId}
+      where organization_id = ${authority.organizationId} and agent_id = ${agentId}
       order by seq asc
-    `;
+    `);
     return (rows as { version: unknown }[]).map((row) => marketplacePackageVersionSchema.parse(row.version));
   }
 
-  // org scoping seam: same as listPublishedVersions above.
-  async function resolvePublished(agentId: string): Promise<AgentDefinition | null> {
-    const rows = await sql`
+  async function resolvePublished(authority: AgentDefinitionAuthority, agentId: string, action: "view" | "start" = "view"): Promise<AgentDefinition | null> {
+    const rows = await scopedRows(authority, action, sql`
       select version from sonik_agent_ui.agent_definition_published_versions
-      where agent_id = ${agentId}
+      where organization_id = ${authority.organizationId} and agent_id = ${agentId}
       order by seq desc
       limit 1
-    `;
+    `);
     if (rows.length === 0) return null;
     const version = marketplacePackageVersionSchema.parse((rows[0] as { version: unknown }).version);
     return version.manifest.payload.agent ?? null;
   }
 
   return { saveDraft, getDraft, listDrafts, deleteDraft, publish, listPublishedVersions, resolvePublished };
+}
+
+export function createNeonAgentDefinitionStore(databaseUrl: string): AsyncAgentDefinitionStore {
+  return createNeonAgentDefinitionStoreFromSql(neon(databaseUrl.trim()));
 }
 
 function readAgentDefinitionDatabaseUrl(env?: Record<string, unknown> | null): string | null {

@@ -8,13 +8,16 @@
     saveMessage: string;
     definitionValid: boolean;
     workflowValid: boolean;
+    workflowLifecycle: import("./builder-model").WorkflowDraftLifecycle;
   };
 
   export interface WorkflowBuilderController {
     snapshot(): WorkflowBuilderSnapshot;
+    approvalState(): import("@sonik-agent-ui/agent-observability").AgentUiApprovalStateSnapshot;
     setTab(tab: WorkflowBuilderSnapshot["tab"]): void;
     saveDraft(): Promise<{ ok: boolean; message: string }>;
     newAgent(): void;
+    publishWorkflow(): Promise<{ ok: boolean; message: string }>;
   }
 </script>
 
@@ -35,25 +38,43 @@
   import WorkflowCanvas from "./WorkflowCanvas.svelte";
   import DebugPreviewPane from "./DebugPreviewPane.svelte";
   import WorkflowRunPanel from "./WorkflowRunPanel.svelte";
+  import OrganizerPanel from "./OrganizerPanel.svelte";
+  import RunHistoryPanel from "./RunHistoryPanel.svelte";
+  import type { OrganizerAction, OrganizerParameter, OrganizerPatchRequest, WorkflowHistoryProjection } from "./organizer-model";
   import {
     createEmptyAgentDefinition,
     createEmptyWorkflowDefinition,
     validateAgentDefinition,
     validateWorkflowDefinition,
+    createWorkflowBuilderApprovalState,
+    selectActiveWorkflowRun,
+    resolveWorkflowDraftLifecycle,
+    hasUnsavedWorkflowChanges,
+    workflowDefinitionToVNext,
+    workflowVNextToDefinition,
+    type ActiveWorkflowRunSelection,
     type WorkflowLockState,
+    type WorkflowDraftLifecycle,
   } from "./builder-model";
   import { bookingReservationWorkflowManifest, amplifyCampaignWorkflowManifest } from "@sonik-agent-ui/tool-contracts/marketplace-fixtures";
   import type { AgentDefinition, WorkflowDefinition } from "@sonik-agent-ui/tool-contracts/marketplace";
+  import type { WorkflowRunState } from "@sonik-agent-ui/tool-contracts/workflow-run-state";
+  import { capabilityReadinessSchema, type CapabilityReadiness, type WorkflowDependencyPins, type WorkflowVNextDefinition } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
   import { AGENT_MODEL_OPTIONS, type AgentModelOption } from "$lib/agent-settings";
 
   interface Props {
+    workspaceFetch: typeof fetch;
+    workspaceContextReady?: boolean;
+    signedHostApprovedCommandIds?: string[];
+    workflowPublishPins?: WorkflowDependencyPins;
+    activeSessionId?: string | null;
     onController?: (controller: WorkflowBuilderController | null) => void;
     /** Return to the chat workspace. The mode toggle lives in WorkspaceRoot's
      *  toolbar, which unmounts in builder mode — without this the builder is a
      *  one-way door (Lane D e2e finding, prod slice 2026-07-13). */
     onExit?: () => void;
   }
-  let { onController, onExit }: Props = $props();
+  let { workspaceFetch, workspaceContextReady = true, signedHostApprovedCommandIds = [], workflowPublishPins, activeSessionId = null, onController, onExit }: Props = $props();
 
   function freshAgentId(): string {
     return `agent_${Math.random().toString(36).slice(2, 10)}`;
@@ -76,9 +97,50 @@
   const runnableExampleWorkflow = amplifyCampaignWorkflowManifest.payload.workflow as WorkflowDefinition;
   let draftWorkflow = $state<WorkflowDefinition>(createEmptyWorkflowDefinition(`${initialAgentId}.workflow`));
   let draftLockState = $state<WorkflowLockState>("draft");
+  let activeRunSelection = $state<ActiveWorkflowRunSelection | null>(null);
+  type DraftRecord = { organizationId: string; workflowId: string; draftRevision: number; definitionDigest: string; definition: WorkflowVNextDefinition };
+  type VersionRecord = { organizationId: string; workflowVersionId: string; sourceDraftRevision: number; definitionDigest: string; publishedAt: string };
+  let persistedDrafts = $state<DraftRecord[]>([]);
+  let workflowDraft = $state<DraftRecord | null>(null);
+  let canonicalWorkflow = $state<WorkflowVNextDefinition | null>(null);
+  let workflowVersions = $state<VersionRecord[]>([]);
+  let workflowDirty = $state(false);
+  let workflowSaving = $state(false);
+  let workflowPublishing = $state(false);
+  let workflowConflicted = $state(false);
+  let workflowFailed = $state(false);
+  let publishedRevision = $state<number | null>(null);
+  let audience = $state<"builder" | "organizer" | "history">("builder");
+  let organizerBusy = $state(false);
+  let historyBusy = $state(false);
+  let workflowHistory = $state<WorkflowHistoryProjection | null>(null);
 
   const definitionValidation = $derived(validateAgentDefinition(definition));
   const workflowValidation = $derived(validateWorkflowDefinition(draftWorkflow));
+  const workflowLifecycle = $derived<WorkflowDraftLifecycle>(resolveWorkflowDraftLifecycle({
+    valid: workflowValidation.ok,
+    saving: workflowSaving || saveStatus === "saving",
+    publishing: workflowPublishing,
+    conflicted: workflowConflicted,
+    failed: workflowFailed,
+    dirty: workflowDirty,
+    draftRevision: workflowDraft?.draftRevision ?? null,
+    publishedRevision,
+  }));
+  const currentPublishedVersion = $derived(workflowVersions.find((version) => version.sourceDraftRevision === workflowDraft?.draftRevision) ?? null);
+  const publishedSource = $derived(workflowLifecycle === "published" && currentPublishedVersion
+    ? {
+        kind: "published" as const,
+        organizationId: currentPublishedVersion.organizationId,
+        workflowVersionId: currentPublishedVersion.workflowVersionId,
+        definitionDigest: currentPublishedVersion.definitionDigest,
+      }
+    : undefined);
+  let organizerParameters = $state<OrganizerParameter[]>([]);
+  let organizerSafePatchPaths = $state<string[]>([]);
+  const activeReceiptIds = $derived(activeRunSelection?.run.receipts
+    .map((receipt) => receipt.receiptRef)
+    .filter((receiptId): receiptId is string => Boolean(receiptId)) ?? []);
 
   // Model catalog: fetched here (not in AgentConfigPanel) so the config panel
   // stays network-free -- same /api/agent-models route + fallback shape the
@@ -86,12 +148,21 @@
   let modelOptions = $state<AgentModelOption[]>(AGENT_MODEL_OPTIONS);
   let modelCatalogStatus = $state<"idle" | "loading" | "ready" | "fallback" | "error">("idle");
   let modelCatalogMessage = $state<string | null>(null);
+  let capabilityReadiness = $state<CapabilityReadiness[] | null>(null);
+  let capabilityPolicyChangeReadiness = $state<CapabilityReadiness[] | null>(null);
+  let capabilityReadinessRequest = 0;
 
   async function refreshModelCatalog(): Promise<void> {
+    if (!workspaceContextReady) {
+      modelOptions = AGENT_MODEL_OPTIONS;
+      modelCatalogStatus = "error";
+      modelCatalogMessage = "Reconnect the embedded page with an authenticated workspace session to load cloud models.";
+      return;
+    }
     modelCatalogStatus = "loading";
     modelCatalogMessage = null;
     try {
-      const response = await fetch("/api/agent-models");
+      const response = await workspaceFetch("/api/agent-models");
       if (!response.ok) throw new Error(`model_catalog_http_${response.status}`);
       const catalog = await response.json() as { models?: AgentModelOption[]; source?: string; error?: string };
       const models = Array.isArray(catalog.models) && catalog.models.length > 0 ? catalog.models : AGENT_MODEL_OPTIONS;
@@ -105,7 +176,34 @@
     }
   }
 
+  async function refreshCapabilityReadiness(toolPolicy: AgentDefinition["toolPolicy"]): Promise<void> {
+    const requestId = ++capabilityReadinessRequest;
+    capabilityReadiness = null;
+    capabilityPolicyChangeReadiness = null;
+    if (!workspaceContextReady) return;
+    try {
+      const response = await workspaceFetch("/api/capability-readiness", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolPolicy }),
+      });
+      const body = await response.json().catch(() => null) as { readiness?: unknown; policyChangeReadiness?: unknown } | null;
+      const readiness = capabilityReadinessSchema.array().safeParse(body?.readiness);
+      const policyChangeReadiness = capabilityReadinessSchema.array().safeParse(body?.policyChangeReadiness);
+      if (requestId !== capabilityReadinessRequest || !response.ok || !readiness.success || !policyChangeReadiness.success) return;
+      capabilityReadiness = readiness.data;
+      capabilityPolicyChangeReadiness = policyChangeReadiness.data;
+    } catch {
+      // Null is the explicit fail-closed state consumed by AgentConfigPanel.
+    }
+  }
+
   async function saveDraft(): Promise<{ ok: boolean; message: string }> {
+    if (!workspaceContextReady) {
+      saveStatus = "error";
+      saveMessage = "Reconnect the embedded page with an authenticated workspace session to save agent drafts.";
+      return { ok: false, message: saveMessage };
+    }
     const validation = validateAgentDefinition($state.snapshot(definition));
     if (!validation.ok) {
       saveStatus = "error";
@@ -114,7 +212,7 @@
     }
     saveStatus = "saving";
     try {
-      const response = await fetch("/api/agent-definitions", {
+      const response = await workspaceFetch("/api/agent-definitions", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "save_draft", definition: validation.definition }),
@@ -125,6 +223,8 @@
         saveMessage = body?.error ?? `Save failed (${response.status})`;
         return { ok: false, message: saveMessage };
       }
+      const workflowResult = await saveWorkflowDraft();
+      if (!workflowResult.ok) return workflowResult;
       saveStatus = "saved";
       saveMessage = "Draft saved.";
       return { ok: true, message: saveMessage };
@@ -135,17 +235,258 @@
     }
   }
 
+  async function workflowDefinitions(body: Record<string, unknown>): Promise<Record<string, any>> {
+    const response = await workspaceFetch("/api/workflow-definitions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json().catch(() => null) as Record<string, any> | null;
+    if (!response.ok || result?.ok !== true) throw new Error(result?.reason ?? `Workflow request failed (${response.status})`);
+    return result;
+  }
+
+  async function saveWorkflowDraft(): Promise<{ ok: boolean; message: string }> {
+    if (!workflowValidation.ok) {
+      saveStatus = "error";
+      saveMessage = workflowValidation.issues?.[0] ?? "Workflow failed validation.";
+      return { ok: false, message: saveMessage };
+    }
+    workflowSaving = true;
+    workflowConflicted = false;
+    workflowFailed = false;
+    try {
+      const next = workflowDefinitionToVNext(workflowValidation.workflow!, canonicalWorkflow ?? undefined);
+      const result = await workflowDefinitions(workflowDraft
+        ? { action: "update", workflowId: next.workflowId, expectedRevision: workflowDraft.draftRevision, definition: next }
+        : { action: "create", definition: next });
+      workflowDraft = result.draft as DraftRecord;
+      canonicalWorkflow = workflowDraft.definition;
+      workflowDirty = false;
+      workflowFailed = false;
+      await refreshWorkflowVersions();
+      return { ok: true, message: "Workflow draft saved." };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workflow save failed.";
+      workflowConflicted = message.includes("conflict");
+      workflowFailed = !workflowConflicted;
+      saveStatus = "error";
+      saveMessage = message;
+      return { ok: false, message };
+    } finally { workflowSaving = false; }
+  }
+
+  async function refreshPersistedWorkflows(): Promise<void> {
+    if (!workspaceContextReady) return;
+    try { persistedDrafts = (await workflowDefinitions({ action: "list" })).drafts ?? []; }
+    catch { persistedDrafts = []; }
+  }
+
+  async function loadWorkflow(workflowId: string): Promise<void> {
+    if (!workflowId || !confirmDiscardUnsavedWorkflow()) return;
+    const result = await workflowDefinitions({ action: "get", workflowId });
+    if (!result.draft) return;
+    workflowDraft = result.draft as DraftRecord;
+    canonicalWorkflow = workflowDraft.definition;
+    draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
+    workflowDirty = false;
+    workflowConflicted = false;
+    workflowFailed = false;
+    await refreshWorkflowVersions();
+  }
+
+  async function refreshWorkflowVersions(): Promise<void> {
+    if (!workflowDraft) { workflowVersions = []; publishedRevision = null; return; }
+    const result = await workflowDefinitions({ action: "versions", workflowId: workflowDraft.workflowId });
+    workflowVersions = result.versions ?? [];
+    publishedRevision = workflowVersions.find((version) => version.sourceDraftRevision === workflowDraft?.draftRevision)?.sourceDraftRevision
+      ?? workflowVersions[0]?.sourceDraftRevision
+      ?? null;
+  }
+
+  async function publishWorkflow(): Promise<{ ok: boolean; message: string }> {
+    if (!workflowDraft || !workflowPublishPins) return { ok: false, message: "Authoritative publish dependency pins are required." };
+    workflowPublishing = true;
+    workflowFailed = false;
+    try {
+      const { organizationId: _organizationId, workflowVersionId: _workflowVersionId, definitionDigest: _definitionDigest, ...dependencyPins } = workflowPublishPins;
+      await workflowDefinitions({ action: "publish", workflowId: workflowDraft.workflowId, expectedRevision: workflowDraft.draftRevision, dependencyPins });
+      publishedRevision = workflowDraft.draftRevision;
+      await refreshWorkflowVersions();
+      saveMessage = "Workflow published.";
+      return { ok: true, message: saveMessage };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Publish failed.";
+      workflowFailed = true;
+      saveMessage = message;
+      return { ok: false, message };
+    } finally { workflowPublishing = false; }
+  }
+
+  async function cloneWorkflow(): Promise<void> {
+    if (!workflowDraft || !confirmDiscardUnsavedWorkflow()) return;
+    const targetWorkflowId = `${workflowDraft.workflowId}.copy.${Date.now().toString(36)}`;
+    const result = await workflowDefinitions({ action: "clone", source: { kind: "draft", workflowId: workflowDraft.workflowId, draftRevision: workflowDraft.draftRevision, definitionDigest: workflowDraft.definitionDigest }, targetWorkflowId });
+    workflowDraft = result.draft as DraftRecord;
+    canonicalWorkflow = workflowDraft.definition;
+    draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
+    workflowDirty = false;
+    workflowFailed = false;
+    workflowVersions = [];
+    publishedRevision = null;
+  }
+
+  async function configureOrganizer(request: OrganizerPatchRequest): Promise<void> {
+    organizerBusy = true;
+    try {
+      const result = await workflowDefinitions(request as unknown as Record<string, unknown>);
+      workflowDraft = result.draft as DraftRecord;
+      canonicalWorkflow = workflowDraft.definition;
+      draftWorkflow = workflowVNextToDefinition(workflowDraft.definition);
+      workflowDirty = false;
+      workflowConflicted = false;
+      workflowFailed = false;
+      saveStatus = "saved";
+      saveMessage = `Organizer configuration saved at revision ${workflowDraft.draftRevision}.`;
+      await refreshWorkflowVersions();
+      await refreshOrganizerFields();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Organizer configuration failed.";
+      workflowConflicted = message.includes("conflict");
+      workflowFailed = !workflowConflicted;
+      saveStatus = "error";
+      saveMessage = message;
+    } finally { organizerBusy = false; }
+  }
+
+  async function refreshOrganizerFields(): Promise<void> {
+    if (!workflowDraft) { organizerParameters = []; organizerSafePatchPaths = []; return; }
+    try {
+      const result = await workflowDefinitions({ action: "organizer_fields", workflowId: workflowDraft.workflowId });
+      organizerParameters = result.parameters ?? [];
+      organizerSafePatchPaths = result.safePatchPaths ?? [];
+    } catch {
+      organizerParameters = [];
+      organizerSafePatchPaths = [];
+    }
+  }
+
+  async function handleOrganizerAction(action: OrganizerAction): Promise<void> {
+    if (action === "publish") { await publishWorkflow(); return; }
+    const selector = action === "test"
+      ? '[data-workflow-run-action="start"]'
+      : '[data-workflow-run-action="approve"]';
+    const target = document.querySelector<HTMLElement>(selector);
+    target?.focus();
+    saveMessage = target && document.activeElement === target
+      ? `${action === "test" ? "Run" : "Approval"} control focused.`
+      : action === "test"
+        ? "Run controls are available below."
+        : "Start and preview this workflow before reviewing its approval.";
+  }
+
+  async function refreshWorkflowHistory(extra: Record<string, string> = {}): Promise<void> {
+    const query = new URLSearchParams(extra);
+    if (activeSessionId) query.set("sessionId", activeSessionId);
+    if (activeRunSelection?.run.runId) query.set("workflowRunId", activeRunSelection.run.runId);
+    historyBusy = true;
+    try {
+      const response = await workspaceFetch(`/api/workflow-history?${query}`);
+      const result = await response.json().catch(() => null) as { ok?: boolean; history?: WorkflowHistoryProjection; reason?: string } | null;
+      if (!response.ok || result?.ok !== true || !result.history) throw new Error(result?.reason ?? `History request failed (${response.status})`);
+      workflowHistory = result.history;
+    } catch (error) {
+      workflowHistory = null;
+      saveMessage = error instanceof Error ? error.message : "Workflow history failed to load.";
+    } finally { historyBusy = false; }
+  }
+
   function newAgent(): void {
+    if (!confirmDiscardUnsavedWorkflow()) return;
     agentId = freshAgentId();
     definition = createEmptyAgentDefinition(agentId);
     draftWorkflow = createEmptyWorkflowDefinition(`${agentId}.workflow`);
     saveStatus = "idle";
     saveMessage = "";
     tab = "config";
+    activeRunSelection = null;
+    workflowDraft = null;
+    canonicalWorkflow = null;
+    workflowVersions = [];
+    workflowDirty = false;
+    workflowSaving = false;
+    workflowPublishing = false;
+    workflowConflicted = false;
+    workflowFailed = false;
+    publishedRevision = null;
   }
 
   function setTab(next: WorkflowBuilderSnapshot["tab"]): void {
     tab = next;
+  }
+
+  function confirmDiscardUnsavedWorkflow(): boolean {
+    return !hasUnsavedWorkflowChanges({ dirty: workflowDirty, saving: workflowSaving || saveStatus === "saving", publishing: workflowPublishing })
+      || window.confirm("Discard unsaved workflow changes?");
+  }
+
+  function exitBuilder(): void {
+    if (confirmDiscardUnsavedWorkflow()) onExit?.();
+  }
+
+  type BuilderAction = "add" | "validate" | "publish" | "start" | "trace" | "resume";
+  function validateBuilder(): void {
+    builderAnnouncement = workflowValidation.ok
+      ? "Workflow is valid."
+      : `Workflow is invalid: ${workflowValidation.issues?.[0] ?? "Review the highlighted fields."}`;
+  }
+
+  function activateBuilderAction(action: BuilderAction): void {
+    if (action === "trace") {
+      const trace = document.querySelector<HTMLDetailsElement>("[data-workflow-run-trace]");
+      if (!trace) { builderAnnouncement = "trace control is not available."; return; }
+      trace.open = true;
+      const target = trace.querySelector<HTMLElement>("summary");
+      target?.focus();
+      builderAnnouncement = "Run trace opened for inspection.";
+      return;
+    }
+    if (action === "resume") {
+      const target = document.querySelector<HTMLElement>("[data-workflow-run-resume-action]");
+      target?.focus();
+      builderAnnouncement = target && document.activeElement === target
+        ? "Paused workflow resume action focused."
+        : "resume control is not available.";
+      return;
+    }
+    const selectors: Record<BuilderAction, string> = {
+      add: '[data-builder-action="add"]',
+      validate: '[data-builder-action="validate"]',
+      publish: '[data-builder-action="publish"]',
+      start: '[data-workflow-run-panel] button',
+      trace: '[data-workflow-run-trace] summary',
+      resume: '[data-workflow-run-resume-action]',
+    };
+    const target = document.querySelector<HTMLElement>(selectors[action]);
+    if (action === "add" || action === "validate") target?.click();
+    target?.focus();
+    builderAnnouncement = target && document.activeElement === target
+      ? `${target.textContent?.trim() || action} control focused.`
+      : `${action} control is not available.`;
+  }
+
+  let builderAnnouncement = $state("");
+  function handleBuilderShortcut(event: KeyboardEvent): void {
+    if (!event.altKey || !event.shiftKey) return;
+    const action = ({ a: "add", v: "validate", p: "publish", r: "start", t: "trace", m: "resume" } as const)[event.key.toLowerCase() as "a" | "v" | "p" | "r" | "t" | "m"];
+    if (!action) return;
+    event.preventDefault();
+    activateBuilderAction(action);
+  }
+
+  function handleRunStateChange(workflowId: string, nextRun: WorkflowRunState | null): void {
+    activeRunSelection = selectActiveWorkflowRun(activeRunSelection, workflowId, nextRun);
+    if (audience === "history") void refreshWorkflowHistory();
   }
 
   const controller: WorkflowBuilderController = {
@@ -156,10 +497,13 @@
       saveMessage,
       definitionValid: definitionValidation.ok,
       workflowValid: workflowValidation.ok,
+      workflowLifecycle,
     }),
+    approvalState: () => createWorkflowBuilderApprovalState(activeRunSelection?.run ?? null, signedHostApprovedCommandIds),
     setTab,
     saveDraft,
     newAgent,
+    publishWorkflow,
   };
 
   $effect(() => {
@@ -169,32 +513,76 @@
 
   $effect(() => {
     void refreshModelCatalog();
+    void refreshPersistedWorkflows();
+  });
+
+  $effect(() => {
+    void refreshCapabilityReadiness({ ...definition.toolPolicy });
+  });
+
+  $effect(() => {
+    const beforeunload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedWorkflowChanges({ dirty: workflowDirty, saving: workflowSaving || saveStatus === "saving", publishing: workflowPublishing })) return;
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", beforeunload);
+    window.addEventListener("keydown", handleBuilderShortcut);
+    return () => {
+      window.removeEventListener("beforeunload", beforeunload);
+      window.removeEventListener("keydown", handleBuilderShortcut);
+    };
   });
 </script>
 
 <div class="flex h-full flex-col gap-4 p-4" data-agent-mode="workflow-builder">
-  <div class="flex items-center justify-between gap-3">
-    <div class="flex items-center gap-2">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center gap-2">
       <h1 class="text-lg font-semibold">Workflow Builder</h1>
       <Badge variant="outline">{agentId}</Badge>
+      <Badge variant={workflowLifecycle === "invalid" || workflowLifecycle === "conflicted" || workflowLifecycle === "failed" ? "destructive" : "secondary"} data-workflow-lifecycle={workflowLifecycle} aria-live="polite">{workflowLifecycle}</Badge>
       {#if !definitionValidation.ok}
         <Badge variant="destructive">invalid definition</Badge>
       {/if}
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       {#if onExit}
-        <Button variant="ghost" onclick={() => onExit?.()} aria-label="Return to the chat workspace">Back to chat</Button>
+        <Button variant="ghost" onclick={exitBuilder} aria-label="Return to the chat workspace">Back to chat</Button>
       {/if}
       <Button variant="outline" onclick={newAgent}>New agent</Button>
+      <Button variant="outline" onclick={() => void cloneWorkflow()} disabled={!workflowDraft}>Clone workflow</Button>
+      {#if audience === "builder"}
+        <Button data-builder-action="validate" variant="outline" onclick={validateBuilder} aria-keyshortcuts="Alt+Shift+V">Validate</Button>
+        <Button data-builder-action="publish" variant="outline" onclick={() => void publishWorkflow()} disabled={!workflowDraft || !workflowPublishPins || workflowLifecycle === "dirty" || workflowLifecycle === "invalid" || workflowLifecycle === "saving" || workflowLifecycle === "publishing"} title={workflowPublishPins ? "Publish this saved revision" : "Authoritative dependency pins are required to publish"}>{workflowPublishing ? "Publishing…" : "Publish"}</Button>
+      {/if}
       <Button onclick={() => void saveDraft()} disabled={saveStatus === "saving"}>
         {saveStatus === "saving" ? "Saving…" : "Save draft"}
       </Button>
     </div>
   </div>
+  <p class="sr-only" aria-live="polite">{builderAnnouncement}</p>
   {#if saveMessage}
     <p class="text-sm {saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground'}">{saveMessage}</p>
   {/if}
+  {#if persistedDrafts.length > 0}
+    <label class="flex items-center gap-2 text-sm">
+      <span>Saved workflows</span>
+      <select class="rounded-md border border-input bg-background px-2 py-1" onchange={(event) => void loadWorkflow((event.currentTarget as HTMLSelectElement).value)}>
+        <option value="">Select a draft</option>
+        {#each persistedDrafts as draft}
+          <option value={draft.workflowId}>{draft.workflowId} · r{draft.draftRevision}</option>
+        {/each}
+      </select>
+      {#if workflowVersions.length}<span>{workflowVersions.length} published version{workflowVersions.length === 1 ? "" : "s"}</span>{/if}
+    </label>
+  {/if}
 
+  <nav class="flex gap-2" aria-label="Workflow audience">
+    <Button variant={audience === "builder" ? "default" : "outline"} onclick={() => { audience = "builder"; }}>Builder</Button>
+    <Button variant={audience === "organizer" ? "default" : "outline"} onclick={() => { audience = "organizer"; void refreshOrganizerFields(); }}>Organizer</Button>
+    <Button variant={audience === "history" ? "default" : "outline"} onclick={() => { audience = "history"; void refreshWorkflowHistory(); }}>History</Button>
+  </nav>
+
+  {#if audience === "builder"}
   <Tabs.Root value={tab} onValueChange={(value) => setTab((value ?? "config") as WorkflowBuilderSnapshot["tab"])}>
     <Tabs.List>
       <Tabs.Trigger value="config">Config</Tabs.Trigger>
@@ -206,6 +594,8 @@
       <AgentConfigPanel
         bind:definition
         validationIssues={definitionValidation.issues ?? []}
+        {capabilityReadiness}
+        {capabilityPolicyChangeReadiness}
         {modelOptions}
         {modelCatalogStatus}
         {modelCatalogMessage}
@@ -221,8 +611,14 @@
             <Card.Description>Editable. Schema-validated against workflowDefinitionSchema on every change. Describe one in Debug &amp; Preview and it loads here; Run drives it through the controller.</Card.Description>
           </Card.Header>
           <Card.Content class="flex flex-col gap-4">
-            <WorkflowCanvas bind:workflow={draftWorkflow} lockState={draftLockState} />
-            <WorkflowRunPanel workflow={draftWorkflow} />
+            <WorkflowCanvas bind:workflow={draftWorkflow} lockState={draftLockState} onMutation={() => { workflowDirty = true; workflowConflicted = false; workflowFailed = false; }} />
+            <WorkflowRunPanel
+              workflow={draftWorkflow}
+              {workspaceFetch}
+              {signedHostApprovedCommandIds}
+              {publishedSource}
+              onRunStateChange={handleRunStateChange}
+            />
           </Card.Content>
         </Card.Root>
         <Card.Root>
@@ -241,7 +637,12 @@
           </Card.Header>
           <Card.Content class="flex flex-col gap-4">
             <WorkflowCanvas workflow={runnableExampleWorkflow} lockState="locked" />
-            <WorkflowRunPanel workflow={runnableExampleWorkflow} />
+            <WorkflowRunPanel
+              workflow={runnableExampleWorkflow}
+              {workspaceFetch}
+              {signedHostApprovedCommandIds}
+              onRunStateChange={handleRunStateChange}
+            />
           </Card.Content>
         </Card.Root>
       </div>
@@ -250,15 +651,48 @@
     <Tabs.Content value="preview">
       <DebugPreviewPane
         draftAgentId={agentId}
+        {workspaceFetch}
+        {capabilityReadiness}
+        prepareDraft={saveDraft}
         onWorkflowDrafted={(drafted) => {
           // Describe -> draft -> canvas: the drafting agent's validated workflow
           // loads into the editable draft and jumps to the canvas so it's ready
           // to inspect and Run.
           draftWorkflow = drafted;
+          canonicalWorkflow = null;
           draftLockState = "draft";
+          workflowDirty = true;
           setTab("canvas");
         }}
       />
     </Tabs.Content>
   </Tabs.Root>
+  {:else if audience === "organizer"}
+    <OrganizerPanel
+      workflow={draftWorkflow}
+      revision={workflowDraft?.draftRevision ?? 0}
+      parameters={organizerParameters}
+      safePatchPaths={organizerSafePatchPaths}
+      busy={organizerBusy || !workflowDraft}
+      receiptIds={activeReceiptIds}
+      onConfigure={(request) => void configureOrganizer(request)}
+      onAction={(action) => void handleOrganizerAction(action)}
+      onInspectReceipt={(receiptId) => { audience = "history"; void refreshWorkflowHistory({ receiptId }); }}
+    />
+    <WorkflowRunPanel
+      workflow={draftWorkflow}
+      {workspaceFetch}
+      {signedHostApprovedCommandIds}
+      {publishedSource}
+      onRunStateChange={handleRunStateChange}
+    />
+  {:else}
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-sm text-muted-foreground">Redacted operator history for the active session and workflow run. Builder and organizer state remain separate.</p>
+        <Button variant="outline" onclick={() => void refreshWorkflowHistory()} disabled={historyBusy}>{historyBusy ? "Loading…" : "Refresh history"}</Button>
+      </div>
+      <RunHistoryPanel history={workflowHistory} />
+    </div>
+  {/if}
 </div>

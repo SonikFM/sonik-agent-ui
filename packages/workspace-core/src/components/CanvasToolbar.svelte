@@ -1,4 +1,6 @@
 <script lang="ts" module>
+  import type { CanvasControlStateMap } from "../state/canvas-controls.js";
+
   export type CanvasPanel = "canvas" | "document" | "editor" | "inspector" | "raw";
 
   export interface CanvasToolbarProps {
@@ -9,6 +11,7 @@
     hasArtifact?: boolean;
     documentAvailable?: boolean;
     isFullscreen?: boolean;
+    controlStates: CanvasControlStateMap;
     onPanelChange?: (panel: CanvasPanel) => void;
     onToggleFullscreen?: () => void;
     artifactVersions?: Array<{ version: number; label?: string }>;
@@ -26,6 +29,8 @@
 </script>
 
 <script lang="ts">
+  import { CANVAS_CONTROL_DISABLED_MESSAGES } from "../state/canvas-controls.js";
+
   let {
     title,
     subtitle,
@@ -34,6 +39,7 @@
     hasArtifact = false,
     documentAvailable = false,
     isFullscreen = false,
+    controlStates,
     onPanelChange,
     onToggleFullscreen,
     artifactVersions = [],
@@ -62,13 +68,24 @@
     if (panelId === "document") return documentAvailable;
     return hasArtifact;
   }
+
+  const disabledReasons = $derived.by(() => {
+    const reasons = Object.values(controlStates)
+      .filter((control) => !control.enabled && control.disabledReason)
+      .map((control) => control.disabledReason!);
+    return [...new Set(reasons)];
+  });
+
+  function controlReasonId(reason: string | undefined): string | undefined {
+    return reason ? `canvas-control-reason-${reason}` : undefined;
+  }
 </script>
 
 <header
   class="canvas-toolbar"
   class:canvas-toolbar--draggable={Boolean(onDragPointerDown)}
   role={onDragPointerDown ? "group" : undefined}
-  aria-label={onDragPointerDown ? "Canvas window title bar. Drag to move." : undefined}
+  aria-label={onDragPointerDown ? "Canvas window drag handle" : undefined}
   onpointerdown={onDragPointerDown}
   onpointermove={onDragPointerMove}
   onpointerup={onDragPointerUp}
@@ -88,7 +105,7 @@
           type="button"
           class="canvas-toolbar__move-handle"
           onkeydown={onDragKeyDown}
-          aria-label="Move canvas window. Focus this control, then use arrow keys to reposition it. Double-click the title bar or use Reset layout to restore the default position."
+          aria-label="Move canvas window. Focus this control, then use arrow keys to reposition it. Double-click the Canvas window drag handle or use Reset layout to restore the default position."
         >
           Move
         </button>
@@ -117,10 +134,15 @@
 
     <div class="canvas-toolbar__panel-tabs" aria-label="Artifact view mode">
       {#each panelButtons as item (item.id)}
+        {@const control = item.id === "canvas" ? controlStates.preview : item.id === "document" ? controlStates.document : null}
         <button
           type="button"
-          disabled={!panelEnabled(item.id)}
-          class:active={panel === item.id}
+          disabled={control ? !control.enabled : !panelEnabled(item.id)}
+          class:active={control ? control.active : panel === item.id}
+          data-canvas-control={control?.id}
+          data-disabled-reason={control?.disabledReason}
+          aria-describedby={controlReasonId(control?.disabledReason)}
+          aria-pressed={control ? control.active : undefined}
           onclick={() => onPanelChange?.(item.id)}
         >
           {item.label}
@@ -141,8 +163,13 @@
 
     <button
       type="button"
-      disabled={!hasArtifact && !documentAvailable}
+      disabled={!controlStates.fullscreen.enabled}
       class="canvas-toolbar__button"
+      class:active={controlStates.fullscreen.active}
+      data-canvas-control="fullscreen"
+      data-disabled-reason={controlStates.fullscreen.disabledReason}
+      aria-describedby={controlReasonId(controlStates.fullscreen.disabledReason)}
+      aria-pressed={controlStates.fullscreen.active}
       onclick={onToggleFullscreen}
     >
       {isFullscreen ? "Exit" : "Fullscreen"}
@@ -151,12 +178,25 @@
     {#if onClear}
       <button
         type="button"
-        disabled={!hasArtifact}
+        disabled={!controlStates.clear.enabled}
         class="canvas-toolbar__button"
+        data-canvas-control="clear"
+        data-disabled-reason={controlStates.clear.disabledReason}
+        aria-describedby={controlReasonId(controlStates.clear.disabledReason)}
         onclick={onClear}
       >
         Clear
       </button>
+    {/if}
+
+    {#if disabledReasons.length > 0}
+      <div class="canvas-toolbar__disabled-reasons" aria-live="polite">
+        {#each disabledReasons as reason (reason)}
+          <span id={controlReasonId(reason)} data-canvas-disabled-message={reason}>
+            {CANVAS_CONTROL_DISABLED_MESSAGES[reason]}
+          </span>
+        {/each}
+      </div>
     {/if}
   </div>
 </header>
@@ -214,7 +254,7 @@
     color: var(--muted-foreground);
     font-size: 0.6875rem;
     font-weight: 700;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
   }
 
@@ -286,9 +326,21 @@
 
   .canvas-toolbar__panel-tabs button:hover,
   .canvas-toolbar__button:hover,
-  .canvas-toolbar__panel-tabs button.active {
+  .canvas-toolbar__panel-tabs button.active,
+  .canvas-toolbar__button.active {
     background: var(--accent);
     color: var(--foreground);
+  }
+
+  .canvas-toolbar__panel-tabs button.active,
+  .canvas-toolbar__button.active {
+    box-shadow: inset 0 0 0 1px var(--ring);
+  }
+
+  .canvas-toolbar__panel-tabs button:focus-visible,
+  .canvas-toolbar__button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   .canvas-toolbar__panel-tabs button:disabled,
@@ -300,5 +352,15 @@
   .canvas-toolbar__button {
     border: 1px solid var(--sonik-border-color);
     background: var(--background);
+  }
+
+  .canvas-toolbar__disabled-reasons {
+    display: flex;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.25rem 0.75rem;
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
   }
 </style>

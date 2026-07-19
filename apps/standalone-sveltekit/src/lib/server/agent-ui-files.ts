@@ -49,15 +49,44 @@ export type PublicAgentUiFile = Pick<
 
 export class AgentUiFileError extends Error {
   readonly status: number;
+  readonly code: AgentUiFileErrorCode;
+  readonly phase: AgentUiFileErrorPhase;
+  readonly safeToRetry: boolean;
   readonly retryFileId?: string;
 
-  constructor(status: number, message: string, retryFileId?: string) {
+  constructor(status: number, message: string, options?: string | {
+    code?: AgentUiFileErrorCode;
+    phase?: AgentUiFileErrorPhase;
+    safeToRetry?: boolean;
+    retryFileId?: string;
+  }) {
     super(message);
     this.name = "AgentUiFileError";
     this.status = status;
-    this.retryFileId = retryFileId;
+    this.code = typeof options === "object" && options.code ? options.code : defaultAgentUiFileErrorCode(status, message);
+    this.phase = typeof options === "object" && options.phase ? options.phase : "post_write";
+    this.safeToRetry = typeof options === "object" && options.safeToRetry === true;
+    this.retryFileId = typeof options === "string" ? options : options?.retryFileId;
   }
 }
+
+export type AgentUiFileErrorPhase = "read" | "pre_write" | "pre_stream" | "post_write";
+export type AgentUiFileErrorCode =
+  | "host_auth_required"
+  | "session_not_found"
+  | "file_not_found"
+  | "file_storage_unavailable"
+  | "file_type_unsupported"
+  | "file_extension_mismatch"
+  | "file_too_large"
+  | "file_upload_failed"
+  | "file_read_failed"
+  | "file_delete_failed"
+  | "file_processing_failed"
+  | "selected_files_require_google"
+  | "selected_files_zdr_incompatible"
+  | "rate_limit_exceeded"
+  | "invalid_request";
 
 export type AgentUiModelFilePart = {
   type: "file";
@@ -69,28 +98,41 @@ export type AgentUiModelFilePart = {
 const GOOGLE_REFERENCE_TTL_MS = 47 * 60 * 60 * 1000;
 export const AGENT_UI_GOOGLE_PREPROCESSING_BUDGET_MS = 120_000;
 
-export function requireAgentUiFileAuth(session: WorkspaceHostSessionSnapshot): { organizationId: string; userId: string } {
+export function requireAgentUiFileAuth(
+  session: WorkspaceHostSessionSnapshot,
+  input: { phase?: AgentUiFileErrorPhase; safeToRetry?: boolean } = {},
+): { organizationId: string; userId: string } {
   if (!session.authenticated || !session.organizationId || !session.userId || !session.sessionId) {
-    throw new AgentUiFileError(401, "Authenticated host session required");
+    throw new AgentUiFileError(401, "Authenticated host session required", {
+      code: "host_auth_required",
+      phase: input.phase ?? "pre_write",
+      safeToRetry: input.safeToRetry ?? false,
+    });
   }
   return { organizationId: session.organizationId, userId: session.userId };
 }
 
 export async function resolveAgentUiWorkspaceSession(
   event: RequestWorkspaceEvent,
-  input: { sessionId?: string | null },
+  input: { sessionId?: string | null; phase?: AgentUiFileErrorPhase; safeToRetry?: boolean },
 ): Promise<{ sessionId: string; auth: WorkspaceHostSessionSnapshot; persistence: AsyncWorkspacePersistenceAdapter }> {
   const auth = resolveTrustedHostSessionSnapshot(event);
-  requireAgentUiFileAuth(auth);
+  requireAgentUiFileAuth(auth, input);
   const persistence = getRequestWorkspacePersistence(event);
   const sessionId = input.sessionId?.trim();
   const session = sessionId ? await persistence.getSession(sessionId) : null;
-  if (!session) throw new AgentUiFileError(404, "Session not found");
+  if (!session) {
+    throw new AgentUiFileError(404, "Session not found", {
+      code: "session_not_found",
+      phase: input.phase ?? "read",
+      safeToRetry: input.safeToRetry ?? false,
+    });
+  }
   return { sessionId: session.id, auth, persistence };
 }
 
 export function requireAgentUiFileBucket(bucket: AgentUiFileBucket | null | undefined): AgentUiFileBucket {
-  if (!bucket) throw new AgentUiFileError(503, "Private file storage is unavailable");
+  if (!bucket) throw new AgentUiFileError(503, "Private file storage is unavailable", { code: "file_storage_unavailable", phase: "pre_write" });
   return bucket;
 }
 
@@ -98,12 +140,12 @@ export function validateAgentUiFile(file: File): void {
   const mediaType = file.type.toLowerCase();
   const extensions = AGENT_UI_FILE_POLICY.get(mediaType);
   if (!extensions) {
-    throw new AgentUiFileError(415, unsupportedAgentUiFileMessage(file.name));
+    throw new AgentUiFileError(415, unsupportedAgentUiFileMessage(file.name), { code: "file_type_unsupported", phase: "pre_write" });
   }
   const extension = file.name.toLowerCase().match(/\.([^.]+)$/)?.[1];
-  if (!extension || !extensions.includes(extension)) throw new AgentUiFileError(415, "File extension does not match its media type");
+  if (!extension || !extensions.includes(extension)) throw new AgentUiFileError(415, "File extension does not match its media type", { code: "file_extension_mismatch", phase: "pre_write" });
   if (file.size > AGENT_UI_FILE_MAX_BYTES) {
-    throw new AgentUiFileError(413, "File exceeds the 10 MiB limit");
+    throw new AgentUiFileError(413, "File exceeds the 10 MiB limit", { code: "file_too_large", phase: "pre_write" });
   }
 }
 
@@ -122,7 +164,7 @@ export async function uploadAgentUiFile(input: {
   persistence: AsyncWorkspacePersistenceAdapter;
   bucket?: AgentUiFileBucket | null;
 }): Promise<WorkspaceFileRecord> {
-  requireAgentUiFileAuth(input.auth);
+  requireAgentUiFileAuth(input.auth, { phase: "pre_write", safeToRetry: true });
   const bucket = requireAgentUiFileBucket(input.bucket);
   validateAgentUiFile(input.file);
 
@@ -386,4 +428,15 @@ function contentDisposition(filename: string): string {
 
 function toHex(value: ArrayBuffer): string {
   return Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function defaultAgentUiFileErrorCode(status: number, message: string): AgentUiFileErrorCode {
+  if (status === 401) return "host_auth_required";
+  if (status === 404) return /session/i.test(message) ? "session_not_found" : "file_not_found";
+  if (status === 413) return "file_too_large";
+  if (status === 415) return /extension/i.test(message) ? "file_extension_mismatch" : "file_type_unsupported";
+  if (status === 502) return "file_processing_failed";
+  if (status === 503) return "file_storage_unavailable";
+  if (status >= 500) return "file_upload_failed";
+  return "invalid_request";
 }

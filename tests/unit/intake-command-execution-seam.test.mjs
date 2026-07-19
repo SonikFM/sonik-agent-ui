@@ -214,7 +214,7 @@ assert.equal(unsupportedCommitFetchCalls.length, 0, "unsupported manifests must 
 
 const fetchCalls = [];
 const fetcher = async (input, init = {}) => {
-  fetchCalls.push({ url: String(input), method: init.method, body: init.body ? JSON.parse(String(init.body)) : null });
+  fetchCalls.push({ url: String(input), method: init.method, headers: new Headers(init.headers), body: init.body ? JSON.parse(String(init.body)) : null });
   return new Response(JSON.stringify({ id: "ctx_dans_joint", name: "Dan's Joint Intake", kind: "venue_schedule" }), {
     status: 201,
     headers: { "content-type": "application/json" },
@@ -223,6 +223,7 @@ const fetcher = async (input, init = {}) => {
 
 const commitContext = {
   sessionId,
+  requestId: "intake:artifact-intake-command:v6",
   pageContext,
   approvedCommandIds: ["booking.create.context"],
   bookingServiceBaseUrl: "https://booking.example.test",
@@ -246,6 +247,7 @@ assert.equal(commit.ok, true, "trusted approved command should commit through ru
 assert.equal(commit.command.commandId, "booking.create.context");
 assert.equal(fetchCalls.length, 1);
 assert.equal(fetchCalls[0].method, "POST");
+assert.equal(fetchCalls[0].headers.get("x-sonik-idempotency-key"), "intake:artifact-intake-command:v6:booking.create.context", "intake retries must reuse the durable approval idempotency key");
 assert.equal(fetchCalls[0].body.kind, "venue_schedule");
 assert.equal(fetchCalls[0].body.name, "Dan's Club", "commit should preserve the approved business/context name");
 assert.equal(fetchCalls[0].body.slug, "dan-s-club", "commit should preserve the approved business/context slug");

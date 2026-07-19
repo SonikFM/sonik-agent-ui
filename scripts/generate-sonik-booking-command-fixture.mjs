@@ -9,6 +9,7 @@ const configPath = resolve(root, "tests/fixtures/sonik-booking/generator.config.
 const outputPath = resolve(root, "tests/fixtures/generated/sonik-booking-command-artifacts.generated.json");
 const runtimeOutputPath = resolve(root, "apps/standalone-sveltekit/src/lib/server/generated/sonik-booking-command-artifacts.generated.json");
 const outputPaths = [outputPath, runtimeOutputPath];
+const capabilityFamilyOutputPath = resolve(root, "packages/tool-contracts/src/sonik-booking-capability-families.generated.json");
 const checkMode = process.argv.includes("--check");
 
 const document = JSON.parse(await readFile(documentPath, "utf8"));
@@ -34,6 +35,11 @@ const output = {
 };
 
 const serializedOutput = `${JSON.stringify(output, null, 2)}\n`;
+const serializedCapabilityFamilies = `${JSON.stringify(
+  Object.fromEntries(artifacts.catalog.commands.map((command) => [command.id, command.familyId]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)),
+  null,
+  2,
+)}\n`;
 
 if (checkMode) {
   for (const currentOutputPath of outputPaths) {
@@ -54,10 +60,19 @@ if (checkMode) {
 
     console.log(`Checked ${currentOutputPath}`);
   }
+  const existingCapabilityFamilies = await readFile(capabilityFamilyOutputPath, "utf8").catch(() => "");
+  if (existingCapabilityFamilies !== serializedCapabilityFamilies) {
+    console.error(`Generated capability-family projection is stale: ${capabilityFamilyOutputPath}`);
+    console.error("Run pnpm generate:commands:sonik-booking and commit the updated artifact.");
+    process.exit(1);
+  }
+  console.log(`Checked ${capabilityFamilyOutputPath}`);
 } else {
   for (const currentOutputPath of outputPaths) {
     await writeFile(currentOutputPath, serializedOutput);
     console.log(`Wrote ${currentOutputPath}`);
   }
+  await writeFile(capabilityFamilyOutputPath, serializedCapabilityFamilies);
+  console.log(`Wrote ${capabilityFamilyOutputPath}`);
 }
 console.log(JSON.stringify(output.summary));
