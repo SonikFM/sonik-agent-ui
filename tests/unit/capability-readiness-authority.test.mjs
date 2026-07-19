@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { resolveCapabilityReadiness, requireCallableCapability } from "../../apps/standalone-sveltekit/src/lib/server/capability-readiness.ts";
+import { resolveCapabilityReadiness, requireCallableCapabilities, requireCallableCapability } from "../../apps/standalone-sveltekit/src/lib/server/capability-readiness.ts";
+import { resolveStandaloneCapabilityReadiness } from "../../apps/standalone-sveltekit/src/lib/server/standalone-capability-readiness.ts";
+import { sonikBookingCapabilityRegistry } from "../../packages/tool-contracts/src/capability-registry.ts";
 
 const capabilityId = "test.read.item";
 const registry = {
@@ -28,6 +30,31 @@ const ready = resolveCapabilityReadiness(base)[0];
 assert.equal(ready.callable, true);
 assert.deepEqual(ready.reasonCodes, []);
 assert.equal(requireCallableCapability([ready], capabilityId), ready);
+assert.deepEqual(requireCallableCapabilities([ready], [capabilityId, capabilityId]), [ready], "the shared guard deduplicates required capability ids");
+
+for (const [axis, reason] of [
+  ["registered", "not_registered"], ["implemented", "not_implemented"], ["authorable", "not_authorable"],
+  ["definitionCompatible", "definition_incompatible"], ["mounted", "not_mounted"], ["contextReady", "missing_context"],
+  ["grantReady", "missing_host_grant"], ["previewable", "preview_required"], ["versionPinned", "version_not_pinned"],
+]) {
+  assert.throws(
+    () => requireCallableCapability([{ ...ready, [axis]: false, callable: true, reasonCodes: [], nextAction: null }], capabilityId),
+    new RegExp(reason),
+    `${axis} cannot be hidden by a stale callable projection`,
+  );
+}
+assert.throws(() => requireCallableCapability([{ ...ready, killSwitched: true, callable: true, reasonCodes: [], nextAction: null }], capabilityId), /kill_switched/);
+
+const writeRegistry = { ...registry, capabilities: [{ ...registry.capabilities[0], effect: "write" }] };
+const writeReady = resolveCapabilityReadiness({
+  ...base,
+  registry: writeRegistry,
+  catalog: { ...base.catalog, commands: [{ ...command, effect: "write" }] },
+  runtimeAdapters: [{ provider: "test", bindings: [{ commandId: capabilityId, status: "mounted-write", commit: () => ({ summary: {} }) }] }],
+  approvedCommandIds: [capabilityId],
+})[0];
+assert.equal(writeReady.callable, true);
+assert.throws(() => requireCallableCapability([{ ...writeReady, committable: false, callable: true, reasonCodes: [], nextAction: null }], capabilityId), /approval_required/);
 
 const missingContext = resolveCapabilityReadiness({ ...base, executionContext: { authenticated: false, organizationId: null, scopes: [] } })[0];
 assert.equal(missingContext.contextReady, false);
@@ -63,6 +90,11 @@ const dispatchState = resolveCapabilityReadiness({ ...base, revokedCapabilityIds
 assert.deepEqual(dispatchState.reasonCodes, ["kill_switched"]);
 assert.throws(() => requireCallableCapability([dispatchState], capabilityId), /kill_switched/, "dispatch re-resolves the kill switch");
 assert.throws(() => requireCallableCapability([], "unknown.capability"), /not_registered/, "unknown capabilities default deny");
+
+const currentPins = Object.fromEntries(sonikBookingCapabilityRegistry.capabilities.map(({ capabilityId, version }) => [capabilityId, version]));
+const versionedCapability = sonikBookingCapabilityRegistry.capabilities[0];
+assert.equal(resolveStandaloneCapabilityReadiness({ hostSessionMode: "standalone-demo" }).find(({ capabilityId }) => capabilityId === versionedCapability.capabilityId).versionPinned, true, "pin-less projections consume the current versioned registry");
+assert.equal(resolveStandaloneCapabilityReadiness({ hostSessionMode: "standalone-demo", capabilityVersionPins: { ...currentPins, [versionedCapability.capabilityId]: versionedCapability.version + 1 } }).find(({ capabilityId }) => capabilityId === versionedCapability.capabilityId).versionPinned, false, "supplied stale pins fail closed without a separate requireVersionPins flag");
 
 const wiredFiles = {
   catalog: "apps/standalone-sveltekit/src/lib/tools/command-catalog.ts",

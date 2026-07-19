@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createInMemoryWorkflowRunJournalStore } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
 import { WorkflowRunDriver } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-driver.ts";
-import { hashWorkflowInput } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
+import { hashWorkflowInput, workflowNodeExecutorRuntimeRegistry } from "../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts";
 import { handleWorkflowRunsAction } from "../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts";
-import { externalEffectIdempotencyKey } from "../../packages/tool-contracts/src/workflow-vnext.ts";
+import { externalEffectIdempotencyKey, workflowSchemaRefKey } from "../../packages/tool-contracts/src/workflow-vnext.ts";
 import { train0SelectedPathRunState, train0WorkflowFixtures } from "../../packages/tool-contracts/src/workflow-vnext-fixtures.ts";
 
 const owner = { organizationId: "org-1", userId: "user-1" };
@@ -43,11 +43,42 @@ function harness(definition, suffix, options = {}) {
 }
 
 {
-  const { runId, driver } = harness(train0WorkflowFixtures.conditional, "branch");
+  const { runId, driver } = harness(train0WorkflowFixtures.conditional, "branch", {
+    executionContext: (node) => node.nodeId === "start" ? { executors: { trigger: () => ({ status: "succeeded", output: { storage: "inline", value: { available: false }, byteLength: 19 } }) } } : {},
+  });
   const completed = await driver.start(request(runId, "branch-a"));
   assert.equal(completed.status, "succeeded");
   assert.deepEqual(completed.selectedPath, ["start", "choose", "no"], "one deterministic branch is selected");
   assert.equal(completed.selectedPath.includes("yes"), false, "unselected branches never dispatch");
+}
+
+{
+  const definition = structuredClone(train0WorkflowFixtures.conditional);
+  const branch = definition.nodes.find((node) => node.nodeType === "branch");
+  branch.bindings = {};
+  branch.requiredHostContext = ["optional"];
+  definition.edges.find((edge) => edge.predicate).predicate = { operator: "exists", left: { source: "host_context", key: "optional" } };
+  const { runId, driver } = harness(definition, "exists-missing");
+  const completed = await driver.start(request(runId, "exists-missing-a"));
+  assert.deepEqual(completed.selectedPath, ["start", "choose", "no"], "exists treats an authorized missing binding as false");
+
+  branch.requiredHostContext = [];
+  const unauthorized = harness(definition, "exists-unauthorized");
+  await assert.rejects(() => unauthorized.driver.start(request(unauthorized.runId, "exists-unauthorized-a")), /unauthorized_host_context/, "exists does not hide binding authorization errors");
+}
+
+{
+  const trigger = workflowNodeExecutorRuntimeRegistry.descriptors.find((descriptor) => descriptor.nodeType === "trigger");
+  const runtimeRegistry = {
+    descriptors: workflowNodeExecutorRuntimeRegistry.descriptors,
+    schemas: new Map(workflowNodeExecutorRuntimeRegistry.schemas),
+  };
+  runtimeRegistry.schemas.set(workflowSchemaRefKey(trigger.inputSchema), { parse(value) { if (value?.required !== true) throw new Error("required"); return value; } });
+  const { runId, driver } = harness(train0WorkflowFixtures.linear, "authoritative-registry", {
+    runtimeRegistry,
+    executionContext: () => ({ runtimeRegistry: workflowNodeExecutorRuntimeRegistry }),
+  });
+  await assert.rejects(() => driver.start(request(runId, "authoritative-registry-a")), /required/, "driver registry remains authoritative at dispatch");
 }
 
 {
@@ -70,9 +101,8 @@ function harness(definition, suffix, options = {}) {
 }
 
 {
-  let answered = false;
   const { runId, driver, journal } = harness(train0WorkflowFixtures.askUser, "ask", {
-    executionContext: (node) => node.nodeType === "ask_user" ? { subjectId: owner.userId, ...(answered ? { answer: "Ada" } : {}) } : {},
+    executionContext: (node) => node.nodeType === "ask_user" ? { subjectId: owner.userId } : {},
   });
   const waiting = await driver.start(request(runId, "ask-a"));
   assert.equal(waiting.status, "waiting");
@@ -80,12 +110,12 @@ function harness(definition, suffix, options = {}) {
   const waitEvent = (await journal.listEvents(owner, runId)).find((event) => event.eventType === "wait_created");
   assert.equal(waitEvent.attemptId, waitpoint.waitpointId, "wait events retain the exact executed attempt identity");
   assert.equal(waitEvent.correlationIds.includes(waitEvent.attemptId), true);
-  answered = true;
   const resumed = await driver.resume({
     ...request(runId, "ask-a"),
     resumeEvent: { kind: "answer", answer: "Ada", eventId: "answer-1", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` },
   });
   assert.equal(resumed.status, "succeeded", "a persisted wait resumes once after service recreation-compatible state load");
+  assert.equal(resumed.outputs.ask.value, "Ada", "the validated resume payload is the canonical waiting-node output");
   await assert.rejects(() => driver.resume({ ...request(runId, "ask-a"), resumeEvent: { kind: "answer", answer: "Ada", eventId: "answer-2", waitpointId: waitpoint.waitpointId, workflowRunId: runId, organizationId: owner.organizationId, nodeId: waitpoint.nodeId, runRevision: waiting.revision, subjectId: owner.userId, issuedAt: new Date().toISOString(), authenticationEvidenceDigest: `sha256:${"a".repeat(64)}` } }), /waitpoint|terminal|resume/i);
 }
 
@@ -103,7 +133,12 @@ function harness(definition, suffix, options = {}) {
 }
 
 function readiness(capabilityId, callable = true) {
-  return { capabilityId, callable, reasonCodes: callable ? [] : ["kill_switched"] };
+  return {
+    capabilityId, effectMode: "write", registered: true, implemented: true, authorable: true,
+    definitionCompatible: true, mounted: true, contextReady: true, grantReady: true,
+    previewable: true, committable: true, killSwitched: !callable, versionPinned: true, callable,
+    reasonCodes: callable ? [] : ["kill_switched"], nextAction: callable ? null : "kill_switched",
+  };
 }
 
 function externalEffectIdentity(runId, definition) {
@@ -201,6 +236,7 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
     claimId: "ignored", runId, logicalEffectId: binding.logicalEffectId, attemptId: "ignored",
     idempotencyKey: externalEffectIdempotencyKey(identity), providerSupportsIdempotency: true, externalEffectIdentity: identity,
   });
+  assert.equal(persisted.claim.providerSupportsIdempotency, false, "provider idempotency defaults to false without adapter evidence");
   assert.deepEqual(persisted.claim.result, {
     status: "succeeded",
     output: { storage: "inline", value: { ok: true }, byteLength: 11 },
@@ -345,6 +381,29 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
 
 {
   const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].config = { retry: { maxAttempts: 1_000_000 } };
+  let attempts = 0;
+  const { runId, driver } = harness(definition, "retry-cap", { executionContext: (node) => node.nodeType === "skill" ? { executors: { skill: () => { attempts += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {} });
+  await driver.start(request(runId, "retry-cap-a"));
+  assert.equal(attempts, 100, "configured retries are capped at a practical finite bound");
+}
+
+for (const [name, maxAttempts] of [["negative", -1], ["zero", 0]]) {
+  const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].config = { retry: { maxAttempts } };
+  let attempts = 0;
+  const { runId, driver } = harness(definition, `retry-${name}`, { executionContext: (node) => node.nodeType === "skill" ? { executors: { skill: () => { attempts += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {} });
+  await driver.start(request(runId, `retry-${name}-a`));
+  assert.equal(attempts, 1, `${name} retry limits normalize to one finite attempt`);
+}
+for (const [name, maxAttempts] of [["nan", Number.NaN], ["infinity", Number.POSITIVE_INFINITY]]) {
+  const definition = structuredClone(train0WorkflowFixtures.linear);
+  definition.nodes[1].config = { retry: { maxAttempts } };
+  assert.throws(() => harness(definition, `retry-${name}`), /Invalid input/, `${name} retry limits are rejected at the definition boundary`);
+}
+
+{
+  const definition = structuredClone(train0WorkflowFixtures.linear);
   definition.nodes[1].nodeType = "tool_preview";
   let attempts = 0;
   const attemptedIds = [];
@@ -368,19 +427,19 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
 {
   const definition = structuredClone(train0WorkflowFixtures.linear);
   definition.nodes[1].nodeType = "reasoning";
-  definition.nodes[1].reasoning = { structuredOutputSchema: { schemaId: "reasoning.output", version: 1, digest: `sha256:${"a".repeat(64)}` }, budgets: { maxSteps: 2, maxTokens: 10, maxWallTimeMs: 100 }, nestedCapabilityEffects: [] };
+  definition.nodes[1].reasoning = { structuredOutputSchema: { schemaId: "reasoning.output", version: 1, digest: `sha256:${"a".repeat(64)}` }, budgets: { maxSteps: 1_000_000, maxTokens: 10, maxWallTimeMs: 10_000 }, nestedCapabilityEffects: [] };
   let attempts = 0;
   const { runId, driver } = harness(definition, "reasoning-budget", { executionContext: (node) => node.nodeType === "reasoning" ? { reasoning: node.reasoning, executors: { reasoning: () => { attempts += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } } } : {} });
   const failed = await driver.start(request(runId, "reasoning-budget-a"));
   assert.equal(failed.status, "failed");
   assert.equal(failed.compatibilityPhase, "reasoning_budget_exhausted");
-  assert.equal(attempts, 2, "reasoning maxSteps is an execution bound, not advisory metadata");
+  assert.equal(attempts, 100, "reasoning retries are capped at a practical finite bound");
 }
 
 {
   const definition = approvalDefinition();
   let providerCalls = 0;
-  const { runId, driver } = harness(definition, "lost-response", {
+  const { runId, driver, journal } = harness(definition, "lost-response", {
     hostContext: { organizationId: owner.organizationId, principalId: owner.userId },
     resolveReadiness: () => [readiness("booking.create.booking")],
     executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "approval" ? { approvalDecision: "approved" } : node.nodeType === "tool_commit" ? { executors: { tool_commit: () => { providerCalls += 1; throw new Error("response lost after acceptance"); } } } : {},
@@ -391,6 +450,20 @@ assert.equal(hashWorkflowInput({ b: 2, a: { d: 4, c: 3 } }), hashWorkflowInput({
   assert.equal(unknown.compatibilityPhase, "outcome_unknown");
   const cancellation = await driver.cancel(runId, lease("lost-cancel"));
   assert.equal(cancellation.compatibilityPhase, "outcome_unknown", "cancellation cannot falsely undo an accepted unknown effect");
+  const transitionEffectClaim = journal.transitionEffectClaim.bind(journal);
+  journal.transitionEffectClaim = (scope, claimId, from, to, result) => from === "outcome_unknown" && to === "reconciled"
+    ? Promise.resolve(null)
+    : transitionEffectClaim(scope, claimId, from, to, result);
+  await assert.rejects(() => driver.runUntilBlocked(request(runId, "lost-a")), /effect_claim_transition_conflict/);
+  assert.equal((await journal.getSnapshot(owner, runId)).selectedPath.includes("commit"), false, "failed reconcile CAS cannot project node completion");
+  journal.transitionEffectClaim = async (_scope, claimId, from, to, result) => ({
+    claimId, runId, logicalEffectId: definition.nodes.find((node) => node.nodeType === "tool_commit").effectBinding.logicalEffectId,
+    attemptId: "forged", idempotencyKey: "forged", providerSupportsIdempotency: false,
+    externalEffectIdentity: externalEffectIdentity(runId, definition), status: to, result,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+  await assert.rejects(() => driver.runUntilBlocked(request(runId, "lost-a")), /effect_claim_reconciliation_not_authoritative/, "a truthy CAS response without durable reload confirmation still fails closed");
+  journal.transitionEffectClaim = transitionEffectClaim;
   const reconciled = await driver.runUntilBlocked(request(runId, "lost-a"));
   assert.equal(reconciled.status, "succeeded");
   assert.equal(providerCalls, 1, "reconciliation never replays an accepted provider effect");

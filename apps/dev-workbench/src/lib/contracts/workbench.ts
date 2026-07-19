@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { VisualContextOperation, VisualContextResult } from "@sonik-agent-ui/tool-contracts/visual-context";
 
 export const DEV_WORKBENCH_SCHEMA_VERSION = "sonik.dev-workbench.v1" as const;
 export const DEV_WORKBENCH_ROOT = "/vercel/sandbox/workspace" as const;
@@ -97,8 +98,8 @@ export const repositorySitemapSchema = z.object({
 export type RepositorySitemap = z.infer<typeof repositorySitemapSchema>;
 
 export const tmuxWindowSchema = z.object({
-  name: z.enum(["codex", "dev", "shell"]),
-  index: z.number().int().min(0).max(2),
+  name: z.enum(["codex", "dev", "shell", "logs"]),
+  index: z.number().int().min(0).max(3),
   command: commandSchema,
   workingDirectory: z.literal(DEV_WORKBENCH_REPOSITORY_ROOT),
 }).strict();
@@ -106,6 +107,10 @@ export type TmuxWindow = z.infer<typeof tmuxWindowSchema>;
 
 export const pageContextMirrorPathsSchema = z.object({
   pageContext: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/page-context.json`),
+  hostContext: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/host-context.json`),
+  hostAuthority: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/host-authority.json`),
+  openApi: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/openapi.json`),
+  guide: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/README.md`),
   consoleEvents: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/console.jsonl`),
   networkEvents: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/network.jsonl`),
   latestScreenshot: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/screenshots/latest.png`),
@@ -116,6 +121,10 @@ export type PageContextMirrorPaths = z.infer<typeof pageContextMirrorPathsSchema
 
 export const DEV_WORKBENCH_MIRROR_PATHS = pageContextMirrorPathsSchema.parse({
   pageContext: `${DEV_WORKBENCH_STATE_ROOT}/page-context.json`,
+  hostContext: `${DEV_WORKBENCH_STATE_ROOT}/host-context.json`,
+  hostAuthority: `${DEV_WORKBENCH_STATE_ROOT}/host-authority.json`,
+  openApi: `${DEV_WORKBENCH_STATE_ROOT}/openapi.json`,
+  guide: `${DEV_WORKBENCH_STATE_ROOT}/README.md`,
   consoleEvents: `${DEV_WORKBENCH_STATE_ROOT}/console.jsonl`,
   networkEvents: `${DEV_WORKBENCH_STATE_ROOT}/network.jsonl`,
   latestScreenshot: `${DEV_WORKBENCH_STATE_ROOT}/screenshots/latest.png`,
@@ -194,7 +203,7 @@ export const devWorkbenchSessionDescriptorSchema = z.object({
   repository: repositoryManifestSchema,
   repositoryRoot: z.literal(DEV_WORKBENCH_REPOSITORY_ROOT),
   tmuxSession: identifierSchema,
-  tmuxWindows: z.array(tmuxWindowSchema).length(3),
+  tmuxWindows: z.array(tmuxWindowSchema).length(4),
   mirrorPaths: pageContextMirrorPathsSchema,
   preview: previewConnectionDescriptorSchema.nullable(),
   terminal: terminalConnectionDescriptorSchema.nullable(),
@@ -255,6 +264,83 @@ export const pageContextMirrorSchema = z.object({
   browserContextAuthority: z.literal("display-only"),
 }).strict();
 export type PageContextMirror = z.infer<typeof pageContextMirrorSchema>;
+
+export const hostAuthorityMirrorSchema = z.object({
+  header: z.string().min(1).max(16_384).regex(/^[A-Za-z0-9_-]+$/),
+  revision: z.number().int().nonnegative(),
+  expiresAt: isoDateSchema,
+}).strict();
+export type HostAuthorityMirror = z.infer<typeof hostAuthorityMirrorSchema>;
+
+export const workspaceContextSyncSchema = z.object({
+  pageContext: pageContextMirrorSchema,
+  host: z.object({
+    origin: httpsUrlSchema.refine((value) => {
+      const url = new URL(value);
+      return url.pathname === "/" && !url.search && !url.hash;
+    }, "Expected an HTTPS origin"),
+    pageContext: z.record(z.string().min(1).max(256), z.unknown()),
+    authority: hostAuthorityMirrorSchema.nullable(),
+  }).strict().nullable(),
+}).strict();
+export type WorkspaceContextSync = z.infer<typeof workspaceContextSyncSchema>;
+
+export const workbenchVisualSourceSchema = z.object({
+  id: z.enum(["preview", "host"]),
+  label: z.string().trim().min(1).max(160),
+  surface: identifierSchema,
+  route: z.string().min(1).max(2_048).startsWith("/")
+    .refine((value) => !value.includes("?") && !value.includes("#") && !value.startsWith("//"), "Expected a sanitized route"),
+}).strict();
+export type WorkbenchVisualSource = z.infer<typeof workbenchVisualSourceSchema>;
+
+export const workbenchVisualContextStateSchema = z.object({
+  sources: z.array(workbenchVisualSourceSchema).max(2),
+  selectedSourceId: z.enum(["preview", "host"]).nullable(),
+  sourceContextRevision: z.number().int().nonnegative(),
+  routeRevision: z.number().int().nonnegative(),
+  status: z.enum(["idle", "picking", "capturing", "invalidated", "error"]),
+  statusMessage: z.string().min(1).max(512).nullable(),
+  staleReason: z.enum(["source-changed", "route-changed", "navigation", "cancelled", "provider-lost"]).nullable(),
+}).strict().superRefine((state, ctx) => {
+  if (state.selectedSourceId && !state.sources.some((source) => source.id === state.selectedSourceId)) {
+    ctx.addIssue({ code: "custom", path: ["selectedSourceId"], message: "Selected visual source must be discovered." });
+  }
+  if (state.status === "invalidated" && !state.staleReason) {
+    ctx.addIssue({ code: "custom", path: ["staleReason"], message: "Invalidated visual context requires a reason." });
+  }
+});
+export type WorkbenchVisualContextState = z.infer<typeof workbenchVisualContextStateSchema>;
+
+export const visualBrowserStateSchema = z.strictObject({
+  capability: z.enum(["installed", "missing", "launch-failed"]),
+  setup: z.enum(["idle", "pending", "succeeded", "failed"]),
+  disabledReason: z.string().min(1).max(160).nullable(),
+}).superRefine((state, ctx) => {
+  if (state.capability === "installed" && state.disabledReason) {
+    ctx.addIssue({ code: "custom", path: ["disabledReason"], message: "Installed browser capability cannot be disabled." });
+  }
+  if (state.capability !== "installed" && !state.disabledReason) {
+    ctx.addIssue({ code: "custom", path: ["disabledReason"], message: "Unavailable browser capability requires a reason." });
+  }
+});
+export type VisualBrowserState = z.infer<typeof visualBrowserStateSchema>;
+
+export function visualBrowserStateFromResult(result: VisualContextResult): VisualBrowserState {
+  const capture = result.capabilities?.find((capability) => capability.operation === "capture");
+  const capability = capture?.status === "available" ? "installed" : capture?.status === "unavailable" ? "missing" : "launch-failed";
+  return visualBrowserStateSchema.parse({
+    capability,
+    setup: result.operation === "setup-browser" ? capability === "installed" ? "succeeded" : "failed" : "idle",
+    disabledReason: capability === "installed" ? null : capability === "missing"
+      ? "Controlled browser capture is not installed."
+      : "Controlled browser capture could not launch.",
+  });
+}
+
+export function visualContextOperationPromotesStableArtifact(operation: VisualContextOperation): boolean {
+  return operation === "capture";
+}
 
 const realtimePayloadSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("status.changed"), status: devWorkbenchLifecycleStatusSchema }).strict(),

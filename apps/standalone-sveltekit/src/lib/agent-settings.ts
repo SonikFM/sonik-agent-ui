@@ -16,7 +16,12 @@ export interface AgentModelOption {
   outputPricePerMillion?: number;
   supportsTools?: boolean;
   supportsImages?: boolean;
+  supportsVideo?: boolean;
   supportsReasoning?: boolean;
+  task?: string;
+  inputModalities?: string[];
+  outputModalities?: string[];
+  disabledReason?: string;
   zdrStatus?: "available" | "unknown";
 }
 

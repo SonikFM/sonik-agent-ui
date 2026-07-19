@@ -23,6 +23,15 @@ importers:
 
   apps/dev-workbench:
     dependencies:
+      '@sonik-agent-ui/agent-embed':
+        specifier: workspace:*
+        version: link:../../packages/agent-embed
+      '@sonik-agent-ui/agent-observability':
+        specifier: workspace:*
+        version: link:../../packages/agent-observability
+      '@sonik-agent-ui/tool-contracts':
+        specifier: workspace:*
+        version: link:../../packages/tool-contracts
       '@vercel/sandbox':
         specifier: 2.7.0
         version: 2.7.0
@@ -60,6 +69,12 @@ importers:
       vite:
         specifier: ^7.3.1
         version: 7.3.1(@types/node@25.9.4)(jiti@2.7.0)(lightningcss@1.31.1)
+
+  apps/dev-workbench-extension:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   apps/standalone-sveltekit:
     dependencies:

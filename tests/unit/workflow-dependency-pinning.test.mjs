@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createInMemoryWorkflowDefinitionRepository, workflowDefinitionDigest } from "../../apps/standalone-sveltekit/src/lib/server/workflow-definition-repository.ts";
+import { createInMemoryWorkflowDefinitionRepository } from "../../apps/standalone-sveltekit/src/lib/server/workflow-definition-repository.ts";
 import { createInMemoryWorkflowRunJournalStore } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts";
 import { WorkflowRunDriver } from "../../apps/standalone-sveltekit/src/lib/server/workflow-run-driver.ts";
 import { train0SelectedPathRunState, train0WorkflowFixtures } from "../../packages/tool-contracts/src/workflow-vnext-fixtures.ts";
@@ -21,8 +21,9 @@ const repository = createInMemoryWorkflowDefinitionRepository();
 const v1Definition = structuredClone(train0WorkflowFixtures.linear);
 const v1Draft = await repository.createDraft(owner, v1Definition, owner.userId);
 assert.ok(v1Draft);
-const v1VersionId = `${v1Definition.workflowId}@1`;
-const publishedV1 = await repository.publish(owner, { workflowId: v1Definition.workflowId, expectedRevision: 0, workflowVersionId: v1VersionId, definitionDigest: v1Draft.definitionDigest, dependencyPins: { ...v1Pins, workflowVersionId: v1VersionId, definitionDigest: v1Draft.definitionDigest }, actorId: owner.userId });
+const { organizationId: _organizationId, workflowVersionId: _workflowVersionId, definitionDigest: _definitionDigest, ...publishPins } = v1Pins;
+const v1VersionId = `${v1Definition.workflowId}@0.0.1`;
+const publishedV1 = await repository.publish(owner, { workflowId: v1Definition.workflowId, expectedRevision: 0, dependencyPins: publishPins, actorId: owner.userId });
 assert.ok(publishedV1, "V1 is published through the lifecycle repository");
 
 const runId = "run-pin-v1-after-v2";
@@ -35,9 +36,8 @@ assert.equal((await driver.start(request)).status, "waiting", "V1 starts and per
 const v2Definition = { ...v1Definition, definitionVersion: 2, title: "V2" };
 const v2Draft = await repository.updateDraft(owner, v1Definition.workflowId, 0, v2Definition, owner.userId);
 assert.ok(v2Draft);
-const v2VersionId = `${v1Definition.workflowId}@2`;
-const v2Pins = { ...publishedV1.dependencyPins, workflowVersionId: v2VersionId, definitionDigest: workflowDefinitionDigest(v2Definition) };
-const publishedV2 = await repository.publish(owner, { workflowId: v1Definition.workflowId, expectedRevision: 1, workflowVersionId: v2VersionId, definitionDigest: v2Draft.definitionDigest, dependencyPins: v2Pins, actorId: owner.userId });
+const v2VersionId = `${v1Definition.workflowId}@0.0.2`;
+const publishedV2 = await repository.publish(owner, { workflowId: v1Definition.workflowId, expectedRevision: 1, dependencyPins: publishPins, actorId: owner.userId });
 assert.ok(publishedV2, "V2 is published through the same lifecycle repository");
 const pinned = await driver.resume({ ...request, budget: { maxNodes: 20, maxWallTimeMs: 10_000 } });
 assert.equal(pinned.status, "succeeded", "publishing V2 cannot move an existing V1 run off its immutable pins");

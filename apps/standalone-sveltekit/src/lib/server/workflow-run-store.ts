@@ -24,6 +24,8 @@ export interface WorkflowRunOwner {
   hostSessionId?: string | null;
 }
 
+export type WorkflowRunSourceKind = "internal" | "draft" | "published";
+
 export interface WorkflowRunRow {
   organizationId: string;
   userId: string;
@@ -31,6 +33,7 @@ export interface WorkflowRunRow {
   runId: string;
   workflowId: string;
   workflowVersionId: string;
+  sourceKind: WorkflowRunSourceKind | null;
   /** The exact definition this run was started against. */
   definition: WorkflowDefinition;
   /** Opaque per-workflow input closed over by registered callbacks. */
@@ -43,6 +46,7 @@ export interface WorkflowRunRow {
 export interface CreateWorkflowRunInput {
   workflowId: string;
   workflowVersionId: string;
+  sourceKind: WorkflowRunSourceKind;
   definition: WorkflowDefinition;
   input: unknown;
   state: WorkflowRunState;
@@ -105,6 +109,7 @@ export function createInMemoryWorkflowRunStore(): WorkflowRunStore {
       runId: input.state.runId,
       workflowId: input.workflowId,
       workflowVersionId: input.workflowVersionId,
+      sourceKind: input.sourceKind,
       definition: input.definition,
       input: input.input,
       state: input.state,
@@ -184,7 +189,9 @@ export function createInMemoryWorkflowRunJournalStore(runStore: WorkflowRunStore
       if (Date.parse(lease.expiresAt) <= Date.now()) return false;
       const key = workflowRunKey(owner, runId);
       const current = leases.get(key);
-      if (current && current.leaseId !== lease.leaseId && Date.parse(current.expiresAt) > Date.now()) return false;
+      if (current
+        && (current.leaseId !== lease.leaseId || current.ownerId !== lease.ownerId)
+        && Date.parse(current.expiresAt) > Date.now()) return false;
       leases.set(key, lease);
       return true;
     },
@@ -266,6 +273,7 @@ type WorkflowRunRowColumns = {
   run_id: string;
   workflow_id: string;
   workflow_version_id: string;
+  source_kind: WorkflowRunSourceKind | null;
   definition: WorkflowDefinition | string;
   input: unknown;
   state: WorkflowRunState | string;
@@ -275,7 +283,7 @@ type WorkflowRunRowColumns = {
 
 const WORKFLOW_RUN_COLUMNS = `
   organization_id, user_id, host_session_id, run_id, workflow_id,
-  workflow_version_id, definition, input, state, created_at, updated_at
+  workflow_version_id, source_kind, definition, input, state, created_at, updated_at
 `;
 
 function rowFromColumns(columns: WorkflowRunRowColumns): WorkflowRunRow {
@@ -286,6 +294,7 @@ function rowFromColumns(columns: WorkflowRunRowColumns): WorkflowRunRow {
     runId: columns.run_id,
     workflowId: columns.workflow_id,
     workflowVersionId: columns.workflow_version_id,
+    sourceKind: columns.source_kind,
     definition: parseJsonColumn<WorkflowDefinition>(columns.definition),
     input: parseJsonColumn(columns.input),
     state: parseJsonColumn<WorkflowRunState>(columns.state),
@@ -302,8 +311,8 @@ export function createCloudWorkflowRunStore(executor: WorkspaceSqlExecutor): Asy
       const now = new Date().toISOString();
       const result = await tx.query<WorkflowRunRowColumns>(`
         insert into sonik_agent_ui.agent_workflow_runs
-          (organization_id, user_id, host_session_id, run_id, workflow_id, workflow_version_id, definition, input, state, created_at, updated_at)
-        values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $10)
+          (organization_id, user_id, host_session_id, run_id, workflow_id, workflow_version_id, source_kind, definition, input, state, created_at, updated_at)
+        values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, $11)
         returning ${WORKFLOW_RUN_COLUMNS}
       `, [
         owner.organizationId,
@@ -312,6 +321,7 @@ export function createCloudWorkflowRunStore(executor: WorkspaceSqlExecutor): Asy
         input.state.runId,
         input.workflowId,
         input.workflowVersionId,
+        input.sourceKind,
         JSON.stringify(input.definition),
         JSON.stringify(input.input),
         JSON.stringify(input.state),

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,7 +10,7 @@ import path from "node:path";
 // fixture (the one workflow this endpoint has real, reviewed callbacks for; booking stays
 // reads-only-by-construction here, unchanged from /api/reservation/commit).
 
-const [workflowRunsModule, workflowRunStoreModule, knowledgeStoreModule, campaignWorkflowModule, workflowDefinitionModule, publicWorkflowRunsModule, workflowFixturesModule, builderModelModule] = await Promise.all([
+const [workflowRunsModule, workflowRunStoreModule, knowledgeStoreModule, campaignWorkflowModule, workflowDefinitionModule, publicWorkflowRunsModule, workflowFixturesModule, builderModelModule, workflowExecutorsModule] = await Promise.all([
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts"),
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts"),
   import("../../apps/standalone-sveltekit/src/lib/knowledge/knowledge-store.ts"),
@@ -19,6 +19,7 @@ const [workflowRunsModule, workflowRunStoreModule, knowledgeStoreModule, campaig
   import("../../apps/standalone-sveltekit/src/lib/server/workflow-runs-public.ts"),
   import("../../packages/tool-contracts/src/workflow-vnext-fixtures.ts"),
   import("../../apps/standalone-sveltekit/src/lib/components/workflow-builder/builder-model.ts"),
+  import("../../apps/standalone-sveltekit/src/lib/server/workflow-node-executors.ts"),
 ]);
 const { handleWorkflowRunsAction, workflowRunOwnerFromHostSession } = workflowRunsModule;
 const { createCloudWorkflowRunStore, createInMemoryWorkflowRunJournalStore, createInMemoryWorkflowRunStore, wrapWorkflowRunStoreAsync } = workflowRunStoreModule;
@@ -28,6 +29,7 @@ const { createInMemoryWorkflowDefinitionRepository } = workflowDefinitionModule;
 const { handlePublicWorkflowDriverAction } = publicWorkflowRunsModule;
 const { train0SelectedPathRunState, train0WorkflowFixtures } = workflowFixturesModule;
 const { workflowVNextToDefinition } = builderModelModule;
+const { hashWorkflowInput } = workflowExecutorsModule;
 
 const brief = { productName: "Loyalty Weekend", audience: "returning_members", offer: "20% off", launchDate: "2026-08-01" };
 
@@ -51,6 +53,15 @@ const otherUserOwner = workflowRunOwnerFromHostSession(otherUserHostSession);
 const otherOrgOwner = workflowRunOwnerFromHostSession(otherOrgHostSession);
 assert.ok(owner && rotatedOwner && otherUserOwner && otherOrgOwner);
 
+function callableReadiness(capabilityId, callable = true) {
+  return {
+    capabilityId, effectMode: "write", registered: true, implemented: true, authorable: true,
+    definitionCompatible: true, mounted: true, contextReady: true, grantReady: callable,
+    previewable: true, committable: callable, killSwitched: false, versionPinned: true, callable,
+    reasonCodes: callable ? [] : ["approval_required"], nextAction: callable ? null : "request_approval",
+  };
+}
+
 function createFakeWorkflowRunExecutor() {
   const rows = new Map();
   const statements = [];
@@ -73,7 +84,7 @@ function createFakeWorkflowRunExecutor() {
           assert.ok(context, "every cloud workflow-run query must establish request context first");
 
           if (/^insert into sonik_agent_ui\.agent_workflow_runs/i.test(normalized)) {
-            const [organizationId, userId, hostSessionId, runId, workflowId, workflowVersionId, definition, input, state, now] = params;
+            const [organizationId, userId, hostSessionId, runId, workflowId, workflowVersionId, sourceKind, definition, input, state, now] = params;
             const rowKey = key(organizationId, userId, runId);
             if (rows.has(rowKey)) throw Object.assign(new Error("duplicate key"), { code: "23505" });
             const row = {
@@ -83,6 +94,7 @@ function createFakeWorkflowRunExecutor() {
               run_id: runId,
               workflow_id: workflowId,
               workflow_version_id: workflowVersionId,
+              source_kind: sourceKind,
               definition: JSON.parse(definition),
               input: JSON.parse(input),
               state: JSON.parse(state),
@@ -140,21 +152,15 @@ try {
   };
   const publishedDraft = await publishedRepository.createDraft(owner, publishedDefinition, owner.userId);
   assert.ok(publishedDraft);
-  const publishedWorkflowVersionId = "amplify.campaign.create@0.1.0";
-  const publishedPins = {
-    ...structuredClone(train0SelectedPathRunState.dependencyPins),
-    organizationId: owner.organizationId,
-    workflowVersionId: publishedWorkflowVersionId,
-    definitionDigest: publishedDraft.definitionDigest,
-  };
-  assert.ok(await publishedRepository.publish(owner, {
+  const { organizationId: _publishedOrganizationId, workflowVersionId: _publishedWorkflowVersionId, definitionDigest: _publishedDefinitionDigest, ...publishedPins } = structuredClone(train0SelectedPathRunState.dependencyPins);
+  const published = await publishedRepository.publish(owner, {
     workflowId: publishedDefinition.workflowId,
     expectedRevision: publishedDraft.draftRevision,
-    workflowVersionId: publishedWorkflowVersionId,
-    definitionDigest: publishedDraft.definitionDigest,
     dependencyPins: publishedPins,
     actorId: owner.userId,
-  }));
+  });
+  assert.ok(published);
+  const publishedWorkflowVersionId = published.workflowVersionId;
   const publishedStart = await handleWorkflowRunsAction({
     action: "start",
     workflowId: publishedDefinition.workflowId,
@@ -168,6 +174,7 @@ try {
   assert.equal(publishedStart.ok, true, "an exact published pin starts successfully");
   const publishedRow = await store.getRun(owner, publishedStart.run.runId);
   assert.equal(publishedRow.workflowVersionId, publishedWorkflowVersionId);
+  assert.equal(publishedRow.sourceKind, "published");
   assert.deepEqual(
     publishedRow.definition,
     workflowVNextToDefinition(publishedDefinition),
@@ -192,6 +199,7 @@ try {
   const persistedAfterStart = await store.getRun(owner, runId);
   assert.ok(persistedAfterStart, "start persists a run row");
   assert.equal(persistedAfterStart.workflowVersionId, "sonik.amplify.campaign.workflow@0.1.0");
+  assert.equal(persistedAfterStart.sourceKind, "internal");
 
   // 2. preview: drives the tool_preview node through the shared controller.
   const previewed = await handleWorkflowRunsAction({ action: "preview", runId, nodeId: "preview" }, deps(authenticatedHostSessionRotated));
@@ -360,6 +368,7 @@ try {
   const cloudInput = {
     workflowId: persistedAfterStart.workflowId,
     workflowVersionId: persistedAfterStart.workflowVersionId,
+    sourceKind: "internal",
     definition: persistedAfterStart.definition,
     input: persistedAfterStart.input,
     state: { ...persistedAfterStart.state, runId: "cloud-shared-run-id" },
@@ -369,6 +378,15 @@ try {
   assert.equal((await cloudStore.getRun(rotatedOwner, "cloud-shared-run-id"))?.runId, "cloud-shared-run-id");
   assert.deepEqual((await cloudStore.listRuns(rotatedOwner)).map((row) => row.runId), ["cloud-shared-run-id"]);
   assert.equal((await cloudStore.updateRunState(rotatedOwner, "cloud-shared-run-id", cloudInput.state))?.hostSessionId, owner.hostSessionId, "cloud updates preserve insert-time provenance");
+  const legacyRunId = "legacy-null-source-kind";
+  fakeExecutor.rows.set(JSON.stringify([owner.organizationId, owner.userId, legacyRunId]), {
+    ...fakeExecutor.rows.get(JSON.stringify([owner.organizationId, owner.userId, "cloud-shared-run-id"])),
+    run_id: legacyRunId,
+    workflow_id: "legacy.unregistered",
+    source_kind: null,
+  });
+  assert.equal((await cloudStore.getRun(owner, legacyRunId))?.sourceKind, null, "legacy rows preserve their missing provenance instead of inventing authority");
+  assert.deepEqual(await handleWorkflowRunsAction({ action: "preview", runId: legacyRunId, nodeId: "preview" }, { hostSession: authenticatedHostSession, store: cloudStore }), { ok: false, reason: "legacy_workflow_path_not_available_for_vnext" }, "legacy rows without explicit provenance remain quarantined");
   for (const foreignOwner of [otherUserOwner, otherOrgOwner]) {
     assert.equal(await cloudStore.getRun(foreignOwner, "cloud-shared-run-id"), null);
     assert.deepEqual(await cloudStore.listRuns(foreignOwner), []);
@@ -385,26 +403,40 @@ try {
     assert.doesNotMatch(statement.sql, /host_session_id\s*=/i, "host session is provenance, never a visibility predicate");
   }
 
-  const [routeSource, publicRouteSource, storeSource, migrationSource, runnerSource] = await Promise.all([
+  const [routeSource, publicRouteSource, storeSource, migrationSource, runnerSource, workflowRunsSource] = await Promise.all([
     readFile(new URL("../../apps/standalone-sveltekit/src/routes/api/workflow-runs/+server.ts", import.meta.url), "utf8"),
     readFile(new URL("../../apps/standalone-sveltekit/src/lib/server/workflow-runs-public.ts", import.meta.url), "utf8"),
     readFile(new URL("../../apps/standalone-sveltekit/src/lib/server/workflow-run-store.ts", import.meta.url), "utf8"),
     readFile(new URL("../../packages/workspace-session/migrations/postgres/0013_workflow_run_owner_scope.sql", import.meta.url), "utf8"),
     readFile(new URL("../../scripts/run-postgres-migrations.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../../apps/standalone-sveltekit/src/lib/server/workflow-runs.ts", import.meta.url), "utf8"),
   ]);
   assert.match(routeSource, /createAgentHostSessionEnvelope\(event\)/);
   assert.match(routeSource, /workflowRunOwnerFromHostSession\(hostSession\)/);
   assert.match(routeSource, /status: 401/);
   assert.match(routeSource, /await handlePublicWorkflowDriverAction\(action as PublicWorkflowDriverAction, \{[\s\S]*journal: resolveWorkflowRunJournalStore\(env\)[\s\S]*repository: resolveWorkflowDefinitionRepository\(env\)/, "the HTTP route invokes the executable public controller with durable dependencies");
+  assert.match(routeSource, /createStandaloneHostCommandRuntimeBundle[\s\S]*executeHostCatalogCommand/, "production mounts the governed host command runtime");
+  assert.match(routeSource, /getRequestWorkspacePersistence[\s\S]*loadArtifact:/, "production mounts the workspace artifact authority");
+  assert.doesNotMatch(routeSource, /action\.action === "run_until_blocked" \|\| action\.action === "resume_run" \|\| action\.action === "cancel_run"/, "every public workflow action uses the canonical public authority");
   assert.doesNotMatch(routeSource, /new WorkflowRunDriver|publicResumeEventSchema|randomUUID|driverLease/, "the thin route cannot retain orphan inline driver logic");
   assert.match(publicRouteSource, /store\.getRun\(owner, runId\)[\s\S]*repository\.getPublished\(owner, row\.workflowVersionId\)/, "public driver actions load the durable run before resolving its pinned version");
   assert.match(publicRouteSource, /runInput: row\.input/, "public driver recreation uses persisted input, not client input");
   assert.match(publicRouteSource, /publicResumeEventSchema\.safeParse/, "resume payloads cross a strict public DTO boundary");
-  assert.match(publicRouteSource, /node\.nodeType === "ask_user"[\s\S]*answer: signedResumeEvent\.answer/, "validated answers reach ask-user execution");
+  assert.doesNotMatch(publicRouteSource, /answer: signedResumeEvent\.answer/, "resume payloads are projected by the driver instead of request-local executor context");
   assert.match(publicRouteSource, /finally \{[\s\S]*releaseLease/, "server-owned leases are released after every public pump");
   assert.match(publicRouteSource, /cancel_run" && "lease" in action[\s\S]*public_lease_forbidden/, "cancel cannot accept a client-owned lease");
   assert.match(publicRouteSource, /action\.action !== "resume_run" && "resumeEvent" in publicRequest/, "only resume actions may carry a resume event");
   assert.doesNotMatch(publicRouteSource, /request\?\.runInput|request\?\.workflowVersionId/, "client version/input never recreate a persisted run");
+  const productionRoot = new URL("../../apps/standalone-sveltekit/src/", import.meta.url);
+  const productionFiles = (await readdir(productionRoot, { recursive: true })).filter((file) => /\.(?:ts|svelte)$/.test(file));
+  const productionSource = (await Promise.all(productionFiles.map((file) => readFile(new URL(file, productionRoot), "utf8")))).join("\n");
+  for (const workflowId of ["train0.linear", "train0.conditional", "train0.ask-user", "train0.approval", "train0.failure-retry", "train0.public-artifact-multi-commit"]) {
+    assert.equal(productionSource.includes(workflowId), false, `${workflowId} is absent from every production execution module`);
+  }
+  assert.ok(
+    workflowRunsSource.indexOf("legacy_workflow_path_not_available_for_vnext") < workflowRunsSource.indexOf("const callbacks = resolveCallbacks"),
+    "published/vNext rows fail closed before the explicitly quarantined internal/draft controller",
+  );
   assert.match(storeSource, /set_request_context\(\$1, \$2\)/);
   assert.match(storeSource, /where organization_id = \$1 and user_id = \$2 and run_id = \$3/g);
   assert.match(migrationSource, /unique \(organization_id, user_id, run_id\)/i);
@@ -413,31 +445,59 @@ try {
   assert.match(migrationSource, /Rows created before this migration[\s\S]*intentionally invisible/i, "legacy unowned rows must fail closed");
   assert.match(runnerSource, /0013_workflow_run_owner_scope\.sql/);
 
-  async function publicDriverHarness(definition, runId, input) {
+  async function publicDriverHarness(definition, runId, input, requestedVersionId) {
     const baseStore = createInMemoryWorkflowRunStore();
     const store = wrapWorkflowRunStoreAsync(baseStore);
     const journal = createInMemoryWorkflowRunJournalStore(baseStore);
     const repository = createInMemoryWorkflowDefinitionRepository();
     const draft = await repository.createDraft(owner, definition, owner.userId);
     assert.ok(draft);
-    const workflowVersionId = `${definition.workflowId}@1`;
-    const dependencyPins = {
-      ...structuredClone(train0SelectedPathRunState.dependencyPins),
-      organizationId: owner.organizationId,
-      workflowVersionId,
-      definitionDigest: draft.definitionDigest,
-    };
+    const { organizationId: _organizationId, workflowVersionId: _workflowVersionId, definitionDigest: _definitionDigest, ...dependencyPins } = structuredClone(train0SelectedPathRunState.dependencyPins);
     const published = await repository.publish(owner, {
       workflowId: definition.workflowId,
       expectedRevision: draft.draftRevision,
-      workflowVersionId,
-      definitionDigest: draft.definitionDigest,
       dependencyPins,
       actorId: owner.userId,
     });
     assert.ok(published);
-    baseStore.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, definition: {}, input, state: { runId } });
-    return { deps: { hostSession: authenticatedHostSession, store, journal, repository }, journal, published };
+    const workflowVersionId = requestedVersionId ?? published.workflowVersionId;
+    const resolvedPublished = requestedVersionId
+      ? { ...published, workflowVersionId, dependencyPins: { ...published.dependencyPins, workflowVersionId } }
+      : published;
+    const runtimeRepository = requestedVersionId
+      ? { ...repository, getPublished: async (scope, versionId) => versionId === workflowVersionId ? resolvedPublished : repository.getPublished(scope, versionId) }
+      : repository;
+    baseStore.createRun(owner, { workflowId: definition.workflowId, workflowVersionId, sourceKind: "published", definition: {}, input, state: { runId } });
+    return { deps: { hostSession: authenticatedHostSession, store, journal, repository: runtimeRepository }, journal, published: resolvedPublished };
+  }
+
+  {
+    const runId = "published-version-ending-draft";
+    const versionId = `${train0WorkflowFixtures.linear.workflowId}@1-draft`;
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.linear, runId, null, versionId);
+    const completed = await handlePublicWorkflowDriverAction({ action: "preview", runId }, publicDeps);
+    assert.equal(completed.result.ok, true, "an explicitly published run remains public even when its version ID ends in -draft");
+    const quarantined = await handleWorkflowRunsAction({ action: "preview", runId, nodeId: "start" }, { hostSession: authenticatedHostSession, store: publicDeps.store });
+    assert.deepEqual(quarantined, { ok: false, reason: "legacy_workflow_path_not_available_for_vnext" }, "a published -draft suffix cannot bypass the legacy controller quarantine");
+  }
+
+  {
+    const runId = "public-preview-authority";
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.linear, runId, { persisted: true });
+    const previewed = await handlePublicWorkflowDriverAction({ action: "preview", runId, nodeId: "client-cannot-step" }, publicDeps);
+    assert.equal(previewed.result.ok, true);
+    assert.equal(previewed.result.run.status, "succeeded");
+    assert.deepEqual(previewed.result.run.selectedPath, ["start", "work"], "preview pumps scheduler-owned canonical traversal");
+  }
+
+  {
+    const runId = "public-driver-error-redaction";
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.linear, runId, null);
+    const rejected = await handlePublicWorkflowDriverAction({ action: "run_until_blocked", request: { workflowRunId: runId } }, {
+      ...publicDeps,
+      journal: { ...publicDeps.journal, appendEventAndProject: async () => { throw new Error("provider_database_secret"); } },
+    });
+    assert.deepEqual(rejected.result, { ok: false, reason: "workflow_run_driver_failed" }, "public driver actions redact unexpected inner driver errors");
   }
 
   {
@@ -461,6 +521,149 @@ try {
     assert.equal(resumed.result.ok, true);
     assert.equal(resumed.result.run.status, "succeeded", "an immediate public resume advances after lease release");
     assert.deepEqual(resumed.result.run.outputs.ask.value, { name: "Ada" }, "the validated public answer reaches ask_user execution");
+  }
+
+  {
+    const runId = "public-conditional";
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.conditional, runId, null);
+    const completed = await handlePublicWorkflowDriverAction({ action: "preview", runId }, {
+      ...publicDeps,
+      executionContext: (node) => node.nodeId === "start" ? { executors: { trigger: () => ({ status: "succeeded", output: { storage: "inline", value: { available: true }, byteLength: 18 } }) } } : {},
+    });
+    assert.deepEqual(completed.result.run.selectedPath, ["start", "choose", "yes"]);
+  }
+
+  {
+    const runId = "public-conditional-false";
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.conditional, runId, null);
+    let yesCalls = 0;
+    let noCalls = 0;
+    const completed = await handlePublicWorkflowDriverAction({ action: "preview", runId }, {
+      ...publicDeps,
+      executionContext: (node) => node.nodeId === "start"
+        ? { executors: { trigger: () => ({ status: "succeeded", output: { storage: "inline", value: { available: false }, byteLength: 19 } }) } }
+        : node.nodeId === "yes"
+          ? { executors: { evidence: () => { yesCalls += 1; throw new Error("unselected branch dispatched"); } } }
+          : node.nodeId === "no"
+            ? { executors: { artifact: (request) => { noCalls += 1; return { status: "succeeded", output: { storage: "inline", value: request.input, byteLength: new TextEncoder().encode(JSON.stringify(request.input)).byteLength } }; } } }
+            : {},
+    });
+    assert.deepEqual(completed.result.run.selectedPath, ["start", "choose", "no"]);
+    assert.equal(yesCalls, 0);
+    assert.equal(noCalls, 1);
+  }
+
+  {
+    const definition = structuredClone(train0WorkflowFixtures.approval);
+    const resolvedInputHash = hashWorkflowInput({});
+    for (const node of definition.nodes) for (const effect of [node.previewEffect, node.approvalEffect, node.effectBinding]) if (effect) effect.resolvedInputHash = resolvedInputHash;
+    const runId = "public-approval";
+    const { deps: publicDeps } = await publicDriverHarness(definition, runId, null);
+    let providerCalls = 0;
+    const governedDeps = {
+      ...publicDeps,
+      hostSession: authenticatedHostSessionNoGrant,
+      resolveReadiness: (approvedCommandIds = []) => [callableReadiness("booking.create.booking", approvedCommandIds.includes("booking.create.booking"))],
+      executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "tool_commit" ? {
+        providerSupportsIdempotency: true,
+        executors: { tool_commit: () => { providerCalls += 1; return { status: "succeeded", output: { storage: "inline", value: { ok: true }, byteLength: 11 }, receipt: { receiptId: "public-approval-receipt", semanticStatus: "success" } }; } },
+      } : {},
+    };
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "preview", runId }, governedDeps)).result.run.status, "waiting");
+    let releasedAfterFailure = false;
+    const releaseLease = governedDeps.journal.releaseLease.bind(governedDeps.journal);
+    const rejected = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit" }, {
+      ...governedDeps,
+      journal: {
+        ...governedDeps.journal,
+        appendEventAndProject: async () => { throw new Error("approval_projection_failed"); },
+        releaseLease: async (...args) => { releasedAfterFailure = true; return releaseLease(...args); },
+      },
+    });
+    assert.deepEqual(rejected.result, { ok: false, reason: "workflow_run_driver_failed" });
+    assert.equal(releasedAfterFailure, true, "structured approval failures still release the server lease");
+    const recognized = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit" }, {
+      ...governedDeps,
+      journal: { ...governedDeps.journal, appendEventAndProject: async () => { throw new Error("run_revision_or_lease_conflict"); } },
+    });
+    assert.deepEqual(recognized.result, { ok: false, reason: "run_revision_or_lease_conflict" });
+    const staleApproval = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "client-hint-ignored" }, governedDeps);
+    assert.deepEqual(staleApproval.result, { ok: false, reason: "approval_node_mismatch" }, "approval must bind to the current waiting node");
+    const approved = await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit" }, governedDeps);
+    assert.equal(approved.result.run.status, "running", JSON.stringify(approved.result));
+    assert.equal(providerCalls, 0, "approval CAS persists authority without pumping the write");
+    assert.ok(approved.result.run.outputs["__approval_decision__:approval"], "exact signed decision survives driver recreation");
+    const restarted = await handlePublicWorkflowDriverAction({ action: "run_until_blocked", request: { workflowRunId: runId } }, governedDeps);
+    assert.equal(restarted.result.run.status, "succeeded", JSON.stringify(restarted.result));
+    assert.equal(providerCalls, 1);
+  }
+
+  {
+    const definition = structuredClone(train0WorkflowFixtures.approval);
+    const resolvedInputHash = hashWorkflowInput({});
+    for (const node of definition.nodes) for (const effect of [node.previewEffect, node.approvalEffect, node.effectBinding]) if (effect) effect.resolvedInputHash = resolvedInputHash;
+    const runId = "public-unsafe-write-retry";
+    const { deps: publicDeps } = await publicDriverHarness(definition, runId, null);
+    let providerCalls = 0;
+    const governedDeps = {
+      ...publicDeps,
+      resolveReadiness: () => [callableReadiness("booking.create.booking")],
+      executionContext: (node) => node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "tool_commit" ? {
+        executors: { tool_commit: () => { providerCalls += 1; return { status: "retryable_error", error: { code: "provider_busy", message: "retry", retrySafe: true } }; } },
+      } : {},
+    };
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "preview", runId }, governedDeps)).result.run.status, "waiting");
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit" }, governedDeps)).result.run.status, "running");
+    const failed = await handlePublicWorkflowDriverAction({ action: "commit", runId }, governedDeps);
+    assert.equal(failed.result.run.status, "failed");
+    assert.equal(failed.result.run.compatibilityPhase, "unsafe_write_retry_refused");
+    assert.equal(providerCalls, 1);
+  }
+
+  {
+    const runId = "public-failure-retry";
+    const { deps: publicDeps } = await publicDriverHarness(train0WorkflowFixtures.failureRetry, runId, null);
+    let attempts = 0;
+    const completed = await handlePublicWorkflowDriverAction({ action: "preview", runId }, {
+      ...publicDeps,
+      executionContext: (node) => node.nodeType === "skill" ? { executors: { skill: () => ++attempts === 1
+        ? { status: "retryable_error", error: { code: "temporary", message: "retry", retrySafe: true } }
+        : { status: "succeeded", output: { storage: "inline", value: { ok: true }, byteLength: 11 } } } } : {},
+    });
+    assert.equal(completed.result.run.status, "succeeded");
+    assert.equal(attempts, 2, "bounded safe work retries without client node stepping");
+  }
+
+  {
+    const definition = structuredClone(train0WorkflowFixtures.multiCommit);
+    definition.workflowId = "train0.public-artifact-multi-commit";
+    const artifact = { artifactId: "artifact-public", organizationId: owner.organizationId, contentType: "application/json", digest: `sha256:${"b".repeat(64)}`, byteLength: 31, createdByNodeId: "start" };
+    const artifactBinding = { source: "node_output", nodeId: "start", path: ["booking", "id"] };
+    definition.nodes.find((node) => node.nodeId === "preview-a").bindings = { bookingId: artifactBinding };
+    definition.nodes.find((node) => node.nodeId === "commit-a").bindings = { bookingId: artifactBinding };
+    const hashes = { a: hashWorkflowInput({ bookingId: "booking-a" }), b: hashWorkflowInput({}) };
+    for (const node of definition.nodes) {
+      const hash = node.nodeId.endsWith("-a") ? hashes.a : node.nodeId.endsWith("-b") ? hashes.b : null;
+      if (hash) for (const effect of [node.previewEffect, node.approvalEffect, node.effectBinding]) if (effect) effect.resolvedInputHash = hash;
+    }
+    const runId = "public-artifact-multi";
+    const { deps: publicDeps } = await publicDriverHarness(definition, runId, null);
+    let providerCalls = 0;
+    const governedDeps = {
+      ...publicDeps,
+      resolveReadiness: () => [callableReadiness("booking.create.booking")],
+      loadArtifact: async () => ({ booking: { id: "booking-a" } }),
+      executionContext: (node) => node.nodeId === "start" ? { executors: { trigger: () => ({ status: "succeeded", output: { storage: "artifact", artifact } }) } } : node.nodeType === "tool_preview" ? { commandId: "booking.create.booking" } : node.nodeType === "tool_commit" ? {
+        providerSupportsIdempotency: true,
+        executors: { tool_commit: () => { providerCalls += 1; return { status: "succeeded", output: { storage: "inline", value: { ok: true }, byteLength: 11 }, receipt: { receiptId: `multi-${providerCalls}`, semanticStatus: "success" } }; } },
+      } : {},
+    };
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "preview", runId }, governedDeps)).result.run.status, "waiting");
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit-a" }, governedDeps)).result.run.status, "running");
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "commit", runId }, governedDeps)).result.run.status, "waiting");
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "approve", runId, nodeId: "commit-b" }, governedDeps)).result.run.status, "running");
+    assert.equal((await handlePublicWorkflowDriverAction({ action: "commit", runId }, governedDeps)).result.run.status, "succeeded");
+    assert.equal(providerCalls, 2, "distinct approvals produce two distinct governed effects");
   }
 
   {

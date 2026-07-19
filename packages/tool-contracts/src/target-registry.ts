@@ -8,6 +8,7 @@ export const semanticTargetIdSchema = z.string()
   .regex(/^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$/i, "Target ids must be stable semantic ids, not raw selectors or DOM paths.");
 
 export const hostUiTargetCapabilitySchema = z.enum([
+  "select",
   "highlight",
   "focus",
   "scroll",
@@ -85,7 +86,7 @@ export const hostUiTargetSchema = z.strictObject({
   }
   if (target.locator?.kind === "bounds" && target.bounds) {
     const locatorBounds = target.locator.bounds;
-    if (locatorBounds.x !== target.bounds.x || locatorBounds.y !== target.bounds.y || locatorBounds.width !== target.bounds.width || locatorBounds.height !== target.bounds.height) {
+    if (locatorBounds.x !== target.bounds.x || locatorBounds.y !== target.bounds.y || locatorBounds.width !== target.bounds.width || locatorBounds.height !== target.bounds.height || locatorBounds.coordinateSpace !== target.bounds.coordinateSpace) {
       ctx.addIssue({ code: "custom", path: ["bounds"], message: "Top-level bounds and locator bounds must match when both are provided." });
     }
   }
@@ -251,7 +252,7 @@ export function createHostUiTargetKey(target: Pick<HostUiTarget, "targetId" | "t
 }
 
 export function findHostUiTarget(registry: HostUiTargetRegistry, lookup: HostUiTargetLookup): HostUiTarget | undefined {
-  return registry.targets.find((target) => {
+  const matches = registry.targets.filter((target) => {
     if (target.targetId !== lookup.targetId) return false;
     if (lookup.targetInstanceId && target.targetInstanceId !== lookup.targetInstanceId) return false;
     if (lookup.entityRef) {
@@ -261,6 +262,7 @@ export function findHostUiTarget(registry: HostUiTargetRegistry, lookup: HostUiT
     if (lookup.capability && !target.capabilities.includes(lookup.capability)) return false;
     return true;
   });
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export function createHostActionRequest(input: Omit<HostActionRequest, "source" | "type" | "version"> & Partial<Pick<HostActionRequest, "source" | "type" | "version">>): HostActionRequest {
@@ -585,7 +587,7 @@ function defaultPolicyForAction(actionKey: HostActionKey): HostActionPolicyMode 
 }
 
 function containsApprovalBypass(value: unknown, depth = 0): boolean {
-  if (depth > 8) return false;
+  if (depth > 8) return true;
   if (!value || typeof value !== "object") return false;
   if (Array.isArray(value)) return value.some((item) => containsApprovalBypass(item, depth + 1));
   for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {

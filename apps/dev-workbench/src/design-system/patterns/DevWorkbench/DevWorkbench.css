@@ -24,6 +24,22 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.dev-workbench[data-terminal-only="true"] {
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__toolbar,
+.dev-workbench[data-terminal-only="true"] .dev-workbench__dock-controls {
+  display: none;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__panel-header {
+  min-height: 2rem;
+  padding-block: 0.25rem;
+}
+
 .dev-workbench__toolbar,
 .dev-workbench__panel-header,
 .dev-workbench__details-nav,
@@ -131,6 +147,38 @@
   gap: 0.4rem;
 }
 
+.dev-workbench__source-control {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--dw-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.dev-workbench__source-control select {
+  min-height: 2.75rem;
+  max-width: 11rem;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--radius-field, 0.4rem);
+  background: var(--dw-raised);
+  color: inherit;
+}
+
+.dev-workbench__visual-status {
+  grid-column: 2 / 3;
+  overflow: hidden;
+  color: var(--dw-muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-workbench :is(button, select, summary):focus-visible {
+  outline: 2px solid var(--dw-accent);
+  outline-offset: 2px;
+}
+
 .dev-workbench__button,
 .dev-workbench__tab,
 .dev-workbench__dock-controls button,
@@ -156,23 +204,24 @@
   font-size: 0.7rem;
 }
 
-.dev-workbench__button--primary:not(:disabled) {
+.dev-workbench__button--primary:not(:disabled):not([aria-disabled="true"]) {
   border-color: color-mix(in oklab, var(--dw-accent) 70%, var(--dw-border));
   background: color-mix(in oklab, var(--dw-accent) 20%, var(--dw-raised));
 }
 
-.dev-workbench__button:hover:not(:disabled),
+.dev-workbench__button:hover:not(:disabled):not([aria-disabled="true"]),
 .dev-workbench__tab:hover,
 .dev-workbench__tab[aria-selected="true"],
 .dev-workbench__dock-controls button:hover:not(:disabled),
 .dev-workbench__dock-controls button[aria-pressed="true"],
-.dev-workbench__overflow-menu button:hover:not(:disabled),
+.dev-workbench__overflow-menu button:hover:not(:disabled):not([aria-disabled="true"]),
 .dev-workbench__overflow[open] > summary {
   border-color: var(--dw-accent);
   background: color-mix(in oklab, var(--dw-accent) 12%, var(--dw-raised));
 }
 
-.dev-workbench button:disabled {
+.dev-workbench button:disabled,
+.dev-workbench button[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.55;
 }

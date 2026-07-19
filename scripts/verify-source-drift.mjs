@@ -23,10 +23,16 @@ const upstreamRoot = manifest.upstream?.repoPath
 	? path.resolve(expandEnv(manifest.upstream.repoPath, { allowMissing: true }))
 	: repoRoot;
 const upstreamAvailable = await pathExists(upstreamRoot);
-if (upstreamAvailable) {
-	verifyUpstreamRevision(upstreamRoot, manifest.upstream?.revision);
-} else if (requireSource) {
-	throw new Error(`Upstream source is required but unavailable: ${upstreamRoot}`);
+const upstreamRevisionMatches = upstreamAvailable
+	? verifyUpstreamRevision(upstreamRoot, manifest.upstream?.revision)
+	: false;
+const sourceAvailable = upstreamAvailable && upstreamRevisionMatches;
+if (requireSource && !sourceAvailable) {
+	throw new Error(
+		upstreamAvailable
+			? `Upstream source must be checked out at pinned revision: ${manifest.upstream?.revision}`
+			: `Upstream source is required but unavailable: ${upstreamRoot}`,
+	);
 }
 const allowed = new Set(
 	(manifest.allowedLocalModifications ?? []).map((entry) => entry.path),
@@ -52,15 +58,11 @@ async function pathExists(filePath) {
 }
 
 function verifyUpstreamRevision(upstreamRoot, expectedRevision) {
-	if (!expectedRevision) return;
+	if (!expectedRevision) return true;
 	const actual = execFileSync("git", ["-C", upstreamRoot, "rev-parse", "HEAD"], {
 		encoding: "utf8",
 	}).trim();
-	if (actual !== expectedRevision) {
-		throw new Error(
-			`Upstream revision mismatch: expected ${expectedRevision}, got ${actual}`,
-		);
-	}
+	return actual === expectedRevision;
 }
 
 function resolveSource(entry) {
@@ -119,7 +121,7 @@ for (const entry of manifest.entries ?? []) {
 	const destination = resolveDestination(entry);
 	const destinationFiles = await listFiles(destination, entry.ignore ?? []);
 	let sourceFiles = [];
-	if (upstreamAvailable) {
+	if (sourceAvailable) {
 		sourceFiles = await listFiles(source, entry.ignore ?? []);
 		const all = new Set([...sourceFiles, ...destinationFiles]);
 		for (const relative of [...all].sort()) {
@@ -145,7 +147,7 @@ for (const entry of manifest.entries ?? []) {
 		}
 	}
 
-	if (!upstreamAvailable || writeIntegrity) {
+	if (!sourceAvailable || writeIntegrity) {
 		const integrityFiles = entry.integrity?.files ?? [];
 		if (!writeIntegrity && integrityFiles.length === 0) {
 			drift.push(
@@ -197,6 +199,8 @@ if (writeIntegrity) {
 }
 
 const sourceNote = upstreamAvailable
-	? "copied source matches manifest"
+	? upstreamRevisionMatches
+		? "copied source matches manifest"
+		: "mutable checkout differs from pinned revision; copied source matches manifest integrity"
 	: "copied source matches manifest integrity";
 console.log(`[copy-retrofit] ${sourceNote}`);

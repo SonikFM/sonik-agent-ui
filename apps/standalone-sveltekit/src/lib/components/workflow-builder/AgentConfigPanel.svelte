@@ -57,7 +57,7 @@
 
   function handleModelListKeydown(event: KeyboardEvent): void {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const options = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="option"]:not([aria-disabled="true"])')];
+    const options = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)')];
     if (options.length === 0) return;
     event.preventDefault();
     const current = options.indexOf(document.activeElement as HTMLButtonElement);
@@ -234,12 +234,12 @@
           {@const selected = (definition.modelPolicy?.modelId ?? "") === option.id}
           <button
             type="button"
-            class="flex h-20 shrink-0 items-start justify-between gap-3 overflow-hidden p-2 text-left text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {selected ? 'bg-accent/30' : ''}"
+            class="flex h-20 shrink-0 items-start justify-between gap-3 overflow-hidden p-2 text-left text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 {selected ? 'bg-accent/30' : ''}"
             role="option"
             aria-selected={selected}
-            aria-disabled={Boolean(disabledReason)}
+            disabled={Boolean(disabledReason)}
             title={disabledReason ?? undefined}
-            onclick={() => disabledReason ? undefined : setModel(option.id)}
+            onclick={() => setModel(option.id)}
           >
             <span class="flex min-w-0 flex-col gap-1">
               <span class="flex flex-wrap items-center gap-2">

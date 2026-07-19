@@ -11,6 +11,9 @@ export type DevWorkbenchServerConfig = {
   timeoutMs: number;
   repository: RepositoryManifest;
   agentApiOrigin: string;
+  cloudflareAccountId: string | null;
+  cloudflareApiToken: string | null;
+  pipeBWorker: string;
 };
 
 export type DevWorkbenchConfigResult =
@@ -20,6 +23,7 @@ export type DevWorkbenchConfigResult =
 const DEFAULT_TIMEOUT_MS = 45 * 60 * 1_000;
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_AGENT_API_ORIGIN = "https://sonik-agent-ui.liam-trampota.workers.dev";
+const DEFAULT_PIPE_B_WORKER = "sonik-dev-observability-pipe-b";
 
 export function readDevWorkbenchConfig(env: Record<string, string | undefined>): DevWorkbenchConfigResult {
   if (env.DEV_WORKBENCH_ENABLED !== "true") {
@@ -41,6 +45,10 @@ export function readDevWorkbenchConfig(env: Record<string, string | undefined>):
   if (!agentApiOrigin) {
     return { ok: false, reason: "DEV_WORKBENCH_AGENT_API_ORIGIN must be an HTTPS origin without credentials or a path." };
   }
+  const cloudflareAccountId = cleanOptionalSecret(env.DEV_WORKBENCH_CLOUDFLARE_ACCOUNT_ID);
+  const cloudflareApiToken = cleanOptionalSecret(env.DEV_WORKBENCH_CLOUDFLARE_API_TOKEN);
+  const pipeBWorker = cleanWorkerName(env.DEV_WORKBENCH_PIPE_B_WORKER ?? DEFAULT_PIPE_B_WORKER);
+  if (!pipeBWorker) return { ok: false, reason: "DEV_WORKBENCH_PIPE_B_WORKER is invalid." };
 
   const repository = repositoryManifestSchema.safeParse({
     schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
@@ -57,8 +65,27 @@ export function readDevWorkbenchConfig(env: Record<string, string | undefined>):
 
   return {
     ok: true,
-    value: { enabled: true, organizationId, timeoutMs, repository: repository.data, agentApiOrigin },
+    value: {
+      enabled: true,
+      organizationId,
+      timeoutMs,
+      repository: repository.data,
+      agentApiOrigin,
+      cloudflareAccountId,
+      cloudflareApiToken,
+      pipeBWorker,
+    },
   };
+}
+
+function cleanOptionalSecret(value: string | undefined): string | null {
+  const cleaned = value?.trim();
+  return cleaned ? cleaned : null;
+}
+
+function cleanWorkerName(value: string): string | null {
+  const cleaned = value.trim();
+  return /^[a-z0-9][a-z0-9-]{0,62}$/.test(cleaned) ? cleaned : null;
 }
 
 function parseOrigin(value: string): string | null {

@@ -24,6 +24,7 @@ import {
   inferEffectFromProcedureId,
   isValidOrpcProcedureId,
   validateQuestionAnswer,
+  visualContextVersion,
 } from "../../packages/tool-contracts/src/index.ts";
 import {
   createCommandIndexContext,
@@ -56,6 +57,7 @@ import {
 } from "../../apps/standalone-sveltekit/src/lib/server/host-command-runtime.ts";
 
 assert.equal(inferEffectFromHttpMethod("GET"), "read");
+assert.equal(visualContextVersion, "sonik.visual-context.v1", "the public runtime index resolves the visual-context .js shim under strip-types");
 assert.equal(inferEffectFromHttpMethod("POST"), "write");
 assert.equal(inferEffectFromHttpMethod("DELETE"), "destructive");
 assert.equal(inferEffectFromProcedureId("booking.contexts.list"), "read");

@@ -345,6 +345,21 @@ assert.deepEqual(waitAttempt.history.events.find((event) => event.eventId === "w
 });
 assert.equal(Object.values(waitAttemptCalls).every((count) => count <= 1), true, "wait attempt correlation preserves one read per authoritative store");
 
+for (const [query, message] of [
+  [{ sessionId: "session-a", toolCallId: "tool-forged" }, "forged tool call"],
+  [{ workflowRunId: "workflow-run-a", requestId: "request-forged" }, "forged request"],
+  [{ workflowRunId: "workflow-run-a", traceId: "trace-forged" }, "forged trace"],
+  [{ conversationRunId: "conversation-run-decoy", workflowRunId: "workflow-run-a" }, "cross-run conversation/workflow pair"],
+]) {
+  const forged = await getWorkflowHistory(
+    query,
+    identifierDeps({ workflowGet: 0, workflowList: 0, journal: 0, conversationGet: 0, conversationList: 0, conversationEvents: 0, tools: 0, artifact: 0 }),
+  );
+  for (const key of ["conversations", "workflows", "nodes", "toolCalls", "approvals", "artifacts", "receipts", "events"]) {
+    assert.deepEqual(forged.history[key], [], `${message} fails the whole causal projection closed`);
+  }
+}
+
 for (const [operation, query] of [
   ["getArtifact", { artifactId: "artifact-a" }],
   ["listToolCalls", { sessionId: "session-a" }],

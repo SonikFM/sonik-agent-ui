@@ -1,6 +1,7 @@
 import { sanitizePageContext, type AgentUiPageContextSnapshot } from "@sonik-agent-ui/agent-observability";
 import type { HostSessionEnvelope, PlatformAdapterContext } from "@sonik-agent-ui/platform-adapters";
 import type { AgentPageContext } from "@sonik-agent-ui/tool-contracts";
+import { visualContextSelectionSchema } from "@sonik-agent-ui/tool-contracts/visual-context";
 import { workflowDependencyPinsSchema, type WorkflowDependencyPins } from "@sonik-agent-ui/tool-contracts/workflow-vnext";
 import {
   agentActionChannelVersion,
@@ -18,12 +19,16 @@ import {
   type HostUiTarget,
   type HostUiTargetRegistry,
 } from "@sonik-agent-ui/tool-contracts/target-registry";
+import { mountVisualContextPicker, type VisualContextPickerController } from "./visual-context-picker.ts";
+
+export * from "./visual-context-picker.ts";
 
 export const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_REQUEST = "sonik:agent-ui:request-page-context";
 export const SONIK_AGENT_UI_HOST_ACTION_REQUEST = "sonik:agent-ui:action-request";
 export const SONIK_AGENT_UI_HOST_ACTION_RESULT = "sonik:agent-ui:action-result";
+export const SONIK_VISUAL_CONTEXT_REQUEST = "sonik:visual-context:request";
 
 export type AgentEmbedMode = "workspace" | "chat" | "canvas";
 export type AgentEmbedRailMode = "expanded" | "collapsed" | "hidden";
@@ -217,6 +222,7 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "workflow",
   "hostUiTargets",
   "hostUiTargetRegistry",
+  "visualSelection",
   "commandFamilies",
   "skillFamilies",
   "activeEntity",
@@ -535,12 +541,14 @@ export function sanitizeAgentHostPageContext(value: unknown): AgentHostMergedPag
   const activeEntity = sanitizeAgentHostActiveEntity(record.activeEntity);
   const hostUiTargets = sanitizeHostUiTargets(record.hostUiTargets);
   const hostUiTargetRegistry = sanitizeHostUiTargetRegistry(record.hostUiTargetRegistry);
+  const visualSelection = visualContextSelectionSchema.safeParse(record.visualSelection).data;
   const trusted = sanitizeTrustedHostContext(record as AgentTrustedHostContext);
   const context: AgentHostMergedPageContext = {
     ...(base ?? {}),
     ...(activeEntity ? { activeEntity } : {}),
     ...(hostUiTargets ? { hostUiTargets } : {}),
     ...(hostUiTargetRegistry ? { hostUiTargetRegistry } : {}),
+    ...(visualSelection ? { visualSelection } : {}),
     ...trusted,
   };
   return Object.keys(context).length > 0 ? context : undefined;
@@ -602,6 +610,9 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   const resizeHandle = optionalElement(ownerDocument, options.elements.resizeHandle);
   const hostControllerKey = options.hostControllerKey === null ? null : options.hostControllerKey ?? "__sonikAgentHost";
   const hostWindow = ownerWindow as Window & Record<string, unknown>;
+  let visualContextPicker: VisualContextPickerController | undefined;
+  let visualContextRegistry: HostUiTargetRegistry | undefined;
+  let visualContextRoute: string | undefined;
 
   annotateHostElement(iframe, "iframe");
   annotateHostElement(chatSlot, "chat-slot");
@@ -627,6 +638,10 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
         ...(sanitizeAgentHostPageContext(donation.pageContext) ?? {}),
         ...(activeMode ? { mode: activeMode } : {}),
       };
+      const nextRoute = cleanText(payload.route);
+      if (visualContextRoute && nextRoute && visualContextRoute !== nextRoute) visualContextPicker?.cancel("navigation");
+      visualContextRoute = nextRoute;
+      visualContextRegistry = resolveHostActionRegistry(payload);
       const targetOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
       if (!targetOrigin) return;
       iframe.contentWindow?.postMessage(createAgentHostPageContextMessage(payload, donation.authority), targetOrigin);
@@ -770,13 +785,37 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
       onError: options.onError,
     });
   };
+  const onRequestVisualContext = (event: MessageEvent) => {
+    if (event.source !== iframe.contentWindow) return;
+    if (!event.data || typeof event.data !== "object" || event.data.type !== SONIK_VISUAL_CONTEXT_REQUEST) return;
+    const agentOrigin = resolveMountedAgentTargetOrigin(iframe, options.agentUrl, ownerWindow);
+    if (!agentOrigin || event.origin !== agentOrigin) return;
+    if (options.allowedOrigins !== undefined && !isAgentOriginAllowed(event.origin, options.allowedOrigins)) return;
+    try {
+      visualContextPicker ??= mountVisualContextPicker({
+        origin: agentOrigin,
+        requestOrigin: agentOrigin,
+        source: iframe.contentWindow as Window,
+        window: ownerWindow,
+        document: ownerDocument,
+        getTargetRegistry: () => visualContextRegistry,
+        listen: false,
+      });
+      visualContextPicker.handleMessage(event);
+    } catch (error) {
+      options.onError?.(error);
+    }
+  };
+  const onMessage = (event: MessageEvent) => {
+    onRequestPageContext(event);
+    onRequestHostAction(event);
+    onRequestVisualContext(event);
+  };
   iframe.addEventListener("load", onLoad);
-  ownerWindow.addEventListener("message", onRequestPageContext);
-  ownerWindow.addEventListener("message", onRequestHostAction);
+  ownerWindow.addEventListener("message", onMessage);
   disposers.push(() => {
     iframe.removeEventListener("load", onLoad);
-    ownerWindow.removeEventListener("message", onRequestPageContext);
-    ownerWindow.removeEventListener("message", onRequestHostAction);
+    ownerWindow.removeEventListener("message", onMessage);
   });
 
   addClick(options.elements.openChat, () => open("chat"));
@@ -802,6 +841,7 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   }
 
   const destroy = () => {
+    visualContextPicker?.destroy();
     for (const timeoutId of contextPostTimeouts.splice(0)) ownerWindow.clearTimeout(timeoutId);
     for (const dispose of disposers.splice(0)) dispose();
     close("all");

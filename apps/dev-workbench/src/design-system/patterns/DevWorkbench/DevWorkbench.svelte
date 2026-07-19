@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import "./DevWorkbench.css";
-  import type { DevWorkbenchCallbacks } from "./actions";
+  import { runEnabledAction, type DevWorkbenchCallbacks } from "./actions";
   import {
     DEFAULT_TERMINAL_LAYOUT,
     DEFAULT_TERMINAL_SIZE,
@@ -18,6 +18,8 @@
   type Props = DevWorkbenchViewProps & DevWorkbenchCallbacks & {
     /** Host-owned xterm mount. The renderer never receives the PTY token. */
     terminalContent?: Snippet;
+    /** Compact embed surface used when Dev Mode replaces an Agent UI chat rail. */
+    terminalOnly?: boolean;
   };
 
   let {
@@ -26,6 +28,7 @@
     workspace,
     preview,
     terminal,
+    visualContext,
     activeDetail,
     problems,
     changedFiles,
@@ -36,10 +39,16 @@
     onReconnectTerminal,
     onRestartPreview,
     onCaptureSnapshot,
+    onVisualSourceChange,
+    onPickVisualTarget,
+    onCaptureVisualContext,
+    onSetupVisualBrowser,
+    onPairVisualExtension,
     onOpenPreview,
     onStopWorkspace,
     onDetailChange,
     terminalContent,
+    terminalOnly = false,
   }: Props = $props();
 
   let splitElement: HTMLDivElement;
@@ -50,7 +59,7 @@
 
   const revisionLabel = $derived(repository.revision.length > 12 ? repository.revision.slice(0, 12) : repository.revision);
   const effectiveDock = $derived<TerminalDock>(
-    terminalDock === "fullscreen" ? "fullscreen" : narrowViewport ? "bottom" : terminalDock,
+    terminalOnly || terminalDock === "fullscreen" ? "fullscreen" : narrowViewport ? "bottom" : terminalDock,
   );
   const terminalSizePercent = $derived(Math.round(terminalSize * 100));
   const splitStyle = $derived(`--dw-terminal-size: ${terminalSizePercent}%;`);
@@ -181,8 +190,10 @@
 <main
   class="dev-workbench"
   data-terminal-dock={effectiveDock}
+  data-terminal-only={terminalOnly}
   data-resizing={resizing}
-  aria-labelledby="dev-workbench-title"
+  aria-labelledby={terminalOnly ? undefined : "dev-workbench-title"}
+  aria-label={terminalOnly ? title : undefined}
 >
   <header class="dev-workbench__toolbar">
     <div class="dev-workbench__identity">
@@ -201,6 +212,35 @@
     </div>
 
     <div class="dev-workbench__actions" aria-label="Workspace controls">
+      <label class="dev-workbench__source-control">
+        <span>Source</span>
+        <select
+          aria-label="Visual context source"
+          value={visualContext.selectedSourceId ?? ""}
+          disabled={!visualContext.sources.length}
+          onchange={(event) => onVisualSourceChange?.((event.currentTarget as HTMLSelectElement).value as "preview" | "host")}
+        >
+          {#if !visualContext.sources.length}<option value="">No source</option>{/if}
+          {#each visualContext.sources as source (source.id)}
+            <option value={source.id}>{source.label}</option>
+          {/each}
+        </select>
+      </label>
+      <button
+        class="dev-workbench__button dev-workbench__button--compact"
+        type="button"
+        disabled={!actions.pickVisualTarget.enabled}
+        title={actions.pickVisualTarget.disabledReason ?? "Pick an element"}
+        onclick={() => onPickVisualTarget?.()}
+      >Pick</button>
+      <button
+        class="dev-workbench__button dev-workbench__button--compact"
+        type="button"
+        aria-disabled={!actions.captureVisualContext.enabled}
+        aria-describedby={!actions.captureVisualContext.enabled ? "workbench-action-readiness" : undefined}
+        title={actions.captureVisualContext.disabledReason ?? "Capture visual context"}
+        onclick={() => runEnabledAction(actions.captureVisualContext.enabled, onCaptureVisualContext)}
+      >Capture</button>
       <button
         class="dev-workbench__button dev-workbench__button--primary"
         type="button"
@@ -214,6 +254,26 @@
       <details class="dev-workbench__overflow">
         <summary class="dev-workbench__button">More</summary>
         <div class="dev-workbench__overflow-menu" aria-label="More workspace actions">
+          <button
+            type="button"
+            aria-disabled={!actions.setupVisualBrowser.enabled}
+            aria-describedby={!actions.setupVisualBrowser.enabled ? "workbench-action-readiness" : undefined}
+            title={actions.setupVisualBrowser.disabledReason ?? "Set up controlled browser capture"}
+            onclick={(event) => runEnabledAction(
+              actions.setupVisualBrowser.enabled,
+              () => runMenuAction(event, onSetupVisualBrowser),
+            )}
+          >
+            Set up browser capture
+          </button>
+          <button
+            type="button"
+            disabled={!actions.pairVisualExtension.enabled}
+            title={actions.pairVisualExtension.disabledReason ?? "Pair active-tab extension"}
+            onclick={(event) => runMenuAction(event, onPairVisualExtension)}
+          >
+            Pair active-tab extension
+          </button>
           <button
             type="button"
             disabled={!actions.captureSnapshot.enabled}
@@ -251,6 +311,9 @@
         </ul>
       </details>
     {/if}
+    <span class="dev-workbench__visual-status" aria-hidden="true">
+      {visualContext.statusMessage}
+    </span>
   </header>
 
   <div
@@ -383,6 +446,13 @@ $ tmux attach -t {terminal.sessionName}</pre>
             <p class="dev-workbench__terminal-note">
               {terminal.disabledReason ?? "The authenticated PTY is ready for the xterm renderer."}
             </p>
+            {#if terminalOnly && actions.startWorkspace.enabled}
+              <button
+                class="dev-workbench__button dev-workbench__button--primary"
+                type="button"
+                onclick={() => onStartWorkspace?.()}
+              >Start workspace</button>
+            {/if}
           </div>
         {/if}
       </div>

@@ -48,6 +48,7 @@ function publicError(
 export async function createVercelDevWorkbenchSandbox(input: {
   sessionId: string;
   timeoutMs?: number;
+  env?: Record<string, string>;
   signal?: AbortSignal;
 }): Promise<VercelDevWorkbenchResult<Sandbox>> {
   try {
@@ -59,6 +60,7 @@ export async function createVercelDevWorkbenchSandbox(input: {
       ports: [DEV_WORKBENCH_PREVIEW_PORT],
       timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       tags: { app: "sonik-dev-workbench" },
+      ...(input.env && Object.keys(input.env).length > 0 ? { env: input.env } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });
     return { ok: true, value: sandbox };

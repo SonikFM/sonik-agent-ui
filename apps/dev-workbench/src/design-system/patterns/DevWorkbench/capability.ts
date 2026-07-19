@@ -22,6 +22,8 @@ export function createDevWorkbenchCapability(props: DevWorkbenchViewProps) {
       terminalReady: props.terminal.status === "ready",
       browserContextIsDisplayOnly: true,
       sourceAndPreviewShareCheckout: props.workspace.status === "ready",
+      visualSourceDiscovered: props.visualContext.sources.length > 0,
+      visualContextCurrent: props.visualContext.status !== "invalidated",
     },
   } as const;
 }

@@ -9,6 +9,7 @@
     createOrganizerPatchRequest,
     type OrganizerAction,
     type OrganizerParameter,
+    type OrganizerParameterValue,
     type OrganizerPatchRequest,
   } from "./organizer-model";
 
@@ -36,7 +37,7 @@
     receiptIds = [],
   }: Props = $props();
 
-  let values = $state<Record<string, string | number | boolean>>({});
+  let values = $state<Record<string, OrganizerParameterValue>>({});
   const editableParameters = $derived(parameters.filter((parameter) => safePatchPaths.includes(parameter.path)));
   const operatorSections = [
     ["Identity", /identity|title|name/i],
@@ -45,11 +46,11 @@
     ["Curated capabilities", /capabilit|tool/i],
   ] as const;
 
-  function currentValue(parameter: OrganizerParameter): string | number | boolean {
+  function currentValue(parameter: OrganizerParameter): OrganizerParameterValue {
     return values[parameter.path] ?? parameter.value;
   }
 
-  function setValue(parameter: OrganizerParameter, value: string | number | boolean): void {
+  function setValue(parameter: OrganizerParameter, value: OrganizerParameterValue): void {
     values = { ...values, [parameter.path]: value };
   }
 
@@ -89,12 +90,14 @@
               />
               {parameter.description ?? parameter.label}
             </label>
-          {:else if parameter.type === "textarea"}
+          {:else if parameter.type === "textarea" || parameter.type === "string_list"}
             <textarea
               id={`organizer-${parameter.path}`}
               class="min-h-24 rounded-md border border-input bg-background p-2 text-sm"
-              value={String(currentValue(parameter))}
-              oninput={(event) => setValue(parameter, event.currentTarget.value)}
+              value={parameter.type === "string_list" ? (currentValue(parameter) as string[]).join(", ") : String(currentValue(parameter))}
+              oninput={(event) => setValue(parameter, parameter.type === "string_list"
+                ? event.currentTarget.value.split(",").map((entry) => entry.trim()).filter(Boolean)
+                : event.currentTarget.value)}
             ></textarea>
           {:else}
             <Input

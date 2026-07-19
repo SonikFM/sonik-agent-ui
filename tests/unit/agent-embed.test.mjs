@@ -10,6 +10,7 @@ import {
   isAgentOriginAllowed,
   parseAgentOriginAllowlist,
   mergeAgentHostPageContext,
+  mountVisualContextPicker,
   normalizeAgentEmbedIntent,
   mountSonikAgentUI,
   sanitizeAgentHostPageContext,
@@ -650,5 +651,226 @@ assert.equal(staticVendorEmbedSource.includes('if (iframe.getAttribute("src") !=
 assert.equal(staticVendorEmbedSource.includes("onRequestHostAction"), true, "static vendor embed should handle iframe host-action requests in the fake browser host");
 assert.equal(staticVendorEmbedSource.includes('request.actionKey === "canvas.open"'), true, "static vendor embed should execute safe canvas.open requests in the fake browser host");
 assert.equal(staticVendorEmbedSource.includes("slot.moveBefore(iframe, null)"), true, "static vendor embed should use state-preserving iframe moves when the browser supports moveBefore");
+
+class PickerElement {
+  constructor(tagName = "DIV", attributes = {}, rect = { x: 10, y: 20, left: 10, top: 20, right: 210, bottom: 80, width: 200, height: 60 }) {
+    this.tagName = tagName;
+    this.attributes = new Map(Object.entries(attributes));
+    this.rect = rect;
+    this.style = {};
+    this.hidden = false;
+    this.removed = false;
+    this.id = attributes.id ?? "";
+  }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
+  setAttribute(name, value) { this.attributes.set(name, value); if (name === "id") this.id = value; }
+  hasAttribute(name) { return this.attributes.has(name); }
+  getBoundingClientRect() { return this.rect; }
+  closest(selector) { return selector === "[data-sonik-target]" && this.hasAttribute("data-sonik-target") ? this : null; }
+  remove() { this.removed = true; }
+}
+
+function createPickerHarness({ timeoutMs = 25, helperVersion = 1 } = {}) {
+  const documentListeners = new Map();
+  const windowListeners = new Map();
+  const timers = new Map();
+  const appended = [];
+  let nextTimer = 1;
+  const document = {
+    documentElement: new PickerElement("HTML"),
+    body: { appendChild: (element) => { appended.push(element); return element; } },
+    head: { appendChild: (element) => { appended.push(element); return element; } },
+    createElement: (tag) => new PickerElement(tag.toUpperCase()),
+    addEventListener: (type, handler) => documentListeners.set(type, handler),
+    removeEventListener: (type, handler) => { if (documentListeners.get(type) === handler) documentListeners.delete(type); },
+    dispatch: (type, target, extras = {}) => documentListeners.get(type)?.({ target, preventDefault() {}, stopPropagation() {}, ...extras }),
+  };
+  document.documentElement.style.cursor = "default";
+  const window = {
+    document,
+    location: { origin: "https://host.example" },
+    CSS: { escape: (value) => value },
+    crypto: { randomUUID: () => "12345678-0000-0000-0000-000000000000" },
+    getSelection: () => ({ isCollapsed: true }),
+    setTimeout: (fn) => { const id = nextTimer++; timers.set(id, fn); return id; },
+    clearTimeout: (id) => timers.delete(id),
+    addEventListener: (type, handler) => windowListeners.set(type, handler),
+    removeEventListener: (type, handler) => { if (windowListeners.get(type) === handler) windowListeners.delete(type); },
+    dispatch: (type) => windowListeners.get(type)?.({ type }),
+  };
+  const source = { messages: [], postMessage(message, origin) { this.messages.push({ message, origin }); } };
+  const helper = {
+    version: helperVersion,
+    createLiveBrowserDomHelpers: () => ({
+      own: (element) => element.id?.startsWith("sonik-visual-context-picker"),
+      pickable: (element) => !["SCRIPT", "STYLE", "INPUT", "TEXTAREA", "SELECT", "OPTION"].includes(element.tagName) && element.rect.width >= 20 && element.rect.height >= 20,
+      id8: () => "12345678",
+      uiAppend: (element) => { appended.push(element); return element; },
+      uiAppendStyle: (element) => { appended.push(element); return element; },
+    }),
+  };
+  const controller = helperVersion === 1 ? mountVisualContextPicker({
+    origin: "https://agent.example",
+    requestOrigin: "https://agent.example",
+    source,
+    window,
+    document,
+    timeoutMs,
+    helper,
+    listen: false,
+    now: () => new Date("2026-07-17T12:00:00.000Z"),
+    getTargetRegistry: () => ({
+      version: "sonik-agent-ui.target-registry.v0",
+      generatedAt: "2026-07-17T12:00:00.000Z",
+      provider: "host",
+      targets: [{
+        targetId: "booking.card",
+        targetInstanceId: "booking-123",
+        label: "Booking card",
+        description: "Booking card",
+        surface: "booking",
+        capabilities: ["select"],
+        visible: true,
+        enabled: true,
+        policy: { actionMode: "allow" },
+        metadata: {},
+      }],
+    }),
+  }) : null;
+  return { controller, document, window, source, timers, documentListeners, windowListeners, appended, helper };
+}
+
+function pickerRequest(requestId, overrides = {}) {
+  return {
+    requestId,
+    operation: "pick",
+    sourceContextRevision: 3,
+    routeRevision: 7,
+    source: { id: "host", label: "Booking", surface: "booking", route: "/bookings" },
+    provider: "host",
+    messageSource: "sonik-agent-ui",
+    type: "sonik:visual-context:request",
+    version: "sonik.visual-context.v1",
+    origin: "https://agent.example",
+    ...overrides,
+  };
+}
+
+function pickerMessage(source, data, overrides = {}) {
+  return { source, origin: "https://agent.example", data, ...overrides };
+}
+
+assert.throws(
+  () => mountVisualContextPicker({ origin: "https://agent.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {}, helper: { version: 2 } }),
+  /version 1/,
+  "the picker must fail closed when the copied helper version is unavailable or unsupported",
+);
+assert.throws(
+  () => mountVisualContextPicker({ origin: "https://agent.example", source: {}, window: { location: { origin: "https://host.example" }, document: {} }, document: {} }),
+  /version 1/,
+  "the picker must fail closed when the copied helper is missing",
+);
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("foreign"), { origin: "https://evil.example" }));
+  harness.controller.handleMessage(pickerMessage({}, pickerRequest("wrong-source")));
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("wrong-request-origin", { origin: "https://other-agent.example" })));
+  assert.equal(harness.controller.isActive(), false, "foreign window/origin and mismatched request-origin messages must be ignored");
+  assert.equal(harness.source.messages.length, 0, "rejected visual requests must not receive an oracle response");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("keyboard-pick")));
+  const announcement = harness.appended.find((element) => element.getAttribute?.("role") === "status");
+  assert.equal(announcement?.getAttribute("aria-live"), "polite", "picker instructions must be announced to screen-reader users");
+  assert.match(announcement?.textContent ?? "", /press enter or space to select/i);
+  const target = new PickerElement("BUTTON", { "data-sonik-target": "booking.card" });
+  harness.document.dispatch("keydown", target, { key: "Enter" });
+  assert.equal(harness.source.messages.at(-1).message.status, "completed", "Enter must select the focused page element");
+  assert.equal(harness.source.messages.at(-1).message.selection.targetId, "booking.card");
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("keyboard-cancel")));
+  harness.document.dispatch("keydown", target, { key: "Escape" });
+  assert.equal(harness.source.messages.at(-1).message.status, "cancelled", "Escape must continue to cancel keyboard selection");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("pick-1")));
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("pick-2")));
+  assert.equal(harness.source.messages[0].message.requestId, "pick-1", "a newer pick must settle the prior request first");
+  assert.equal(harness.source.messages[0].message.status, "cancelled", "superseded picks must be explicitly cancelled");
+  const target = new PickerElement("ARTICLE", {
+    id: "private.dom.id",
+    class: "private-class",
+    "data-sonik-target": "booking.card",
+    "data-sonik-target-instance": "booking-123",
+    "aria-label": "Bearer secret-token-value-123456789",
+    value: "card-secret",
+    placeholder: "password=hidden",
+  });
+  harness.document.dispatch("pointermove", target);
+  harness.document.dispatch("click", target);
+  const selected = harness.source.messages.at(-1);
+  assert.equal(selected.origin, "https://agent.example", "visual results must post only to the exact Agent UI origin");
+  assert.equal(selected.message.requestId, "pick-2");
+  assert.equal(selected.message.selection.targetId, "booking.card", "existing semantic target ids must beat ephemeral ids");
+  assert.equal(selected.message.selection.targetInstanceId, "booking-123", "existing target instances must be retained");
+  assert.equal(selected.message.selection.label, "Booking card", "sanitized registry labels must beat DOM-derived descriptions");
+  assert.equal(JSON.stringify(selected.message).includes("private.dom.id"), false, "DOM ids must never cross the public picker boundary");
+  assert.equal(JSON.stringify(selected.message).includes("private-class"), false, "DOM classes must never cross the public picker boundary");
+  assert.equal(JSON.stringify(selected.message).includes("secret-token"), false, "credential-shaped accessibility text must never cross the public picker boundary");
+  assert.equal(harness.controller.isActive(), false, "selection must settle exactly once and clean up");
+  assert.equal(harness.documentListeners.has("click"), false, "selection cleanup must remove capture listeners");
+  assert.equal(harness.document.documentElement.style.cursor, "default", "selection cleanup must restore the host cursor");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("timeout")));
+  [...harness.timers.values()][0]();
+  assert.equal(harness.source.messages.at(-1).message.status, "cancelled", "picker timeout must settle safely");
+  assert.match(harness.source.messages.at(-1).message.disabledReason, /timed out/i);
+  assert.equal(harness.documentListeners.size, 0, "timeout must remove all picker listeners");
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("navigation")));
+  harness.window.dispatch("pagehide");
+  assert.equal(harness.source.messages.at(-1).message.requestId, "navigation");
+  assert.equal(harness.source.messages.at(-1).message.status, "cancelled", "navigation must cancel the active picker");
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("destroy")));
+  harness.controller.destroy();
+  assert.equal(harness.source.messages.at(-1).message.requestId, "destroy");
+  assert.equal(harness.controller.isActive(), false, "destroy must settle and clear pending picker state");
+  assert.equal(harness.windowListeners.size, 0, "destroy must remove navigation lifecycle listeners");
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("pick-before-clear")));
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("clear-picker", { operation: "clear" })));
+  assert.deepEqual(harness.source.messages.map(({ message }) => [message.requestId, message.status]), [
+    ["pick-before-clear", "cancelled"],
+    ["clear-picker", "completed"],
+  ], "a host clear request must settle the active pick before acknowledging the clear");
+  assert.equal(harness.controller.isActive(), false);
+  assert.equal(harness.documentListeners.size, 0, "host clear must restore normal page interaction");
+  assert.equal(harness.document.documentElement.style.cursor, "default", "host clear must restore the prior cursor");
+  harness.controller.destroy();
+}
+
+{
+  const harness = createPickerHarness();
+  harness.controller.handleMessage(pickerMessage(harness.source, pickerRequest("exception")));
+  const target = new PickerElement("DIV");
+  target.getBoundingClientRect = () => { throw new Error("private DOM failure"); };
+  harness.document.dispatch("click", target);
+  assert.equal(harness.source.messages.at(-1).message.status, "failed", "picker exceptions must settle as a bounded failure");
+  assert.equal(harness.source.messages.at(-1).message.disabledReason, "Element selection failed.");
+  assert.equal(harness.documentListeners.size, 0, "picker exceptions must still clean up listeners");
+  harness.controller.destroy();
+}
 
 console.log("agent-embed tests passed");
