@@ -1,0 +1,38 @@
+name: API Reliability Tripwire
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-reliability-tripwire-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-reliability-tripwire:
+    name: Guard API reliability execution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      # Static only. Live reliability traffic belongs in an authorized host verification lane.
+      - name: Detect API changes and unsafe PR traffic
+        env:
+          API_RELIABILITY_PATHS_JSON: >-
+            ["^packages/(platform-adapters|tool-contracts|command-generator)/","^apps/standalone-sveltekit/src/routes/api/","(^|/)(api|routes|contracts|schemas|webhooks?)(/|\\.|$)","(^|/)(openapi|postman)(/|\\.|$)"]
+        run: |
+          if [ -n "${{ github.base_ref }}" ]; then
+            node scripts/ci/check-api-reliability-tripwire.mjs --base "origin/${{ github.base_ref }}"
+          else
+            node scripts/ci/check-api-reliability-tripwire.mjs
+          fi
