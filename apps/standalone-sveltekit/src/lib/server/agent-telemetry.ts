@@ -70,7 +70,7 @@ export async function writeAgentTelemetry(event: AgentTelemetryEvent, persistenc
     if (persistence) await persistence.recordTelemetryEvent(record);
     else recordWorkspaceTelemetryEvent(record);
   } catch {
-    // Intentional fail-safe: process/Worker logs remain non-blocking evidence when durable persistence is unavailable.
+    // Intentional fail-safe: workspace telemetry is only a bounded mirror; process/Worker logs remain non-blocking fallback evidence.
   }
 }
 
