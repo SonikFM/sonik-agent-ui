@@ -65,7 +65,7 @@
           <thead><tr><th>Check</th><th>Result</th><th>Coverage</th></tr></thead>
           <tbody>
             <tr><td><code>pnpm test:workbench</code></td><td class="pass">Pass</td><td>Workbench server, contracts, cookie, sandbox, reconnect, visual context.</td></tr>
-            <tr><td><code>pnpm test:workbench:embedded</code></td><td class="pass">1/1</td><td>Real SvelteKit render, visible controls, Bottom dock, reload persistence, restored visual state, no page errors.</td></tr>
+            <tr><td><code>pnpm test:workbench:embedded</code></td><td class="pass">1/1</td><td>Real SvelteKit render, explicit Preview loading-to-ready transition, visible controls, Bottom dock, reload persistence, restored visual state, no page errors.</td></tr>
             <tr><td><code>pnpm --filter @sonik-agent-ui/dev-workbench check-types</code></td><td class="pass">Pass</td><td>0 errors, 0 warnings.</td></tr>
             <tr><td><code>pnpm --filter @sonik-agent-ui/dev-workbench build</code></td><td class="pass">Pass</td><td>Production SvelteKit/Vercel build.</td></tr>
             <tr><td><code>bunx playwright test e2e/agent-ui-launcher.spec.ts --workers=1</code></td><td class="pass">4/4</td><td>Booking launcher, Dev open/close, route navigation reopen, persisted close intent.</td></tr>
@@ -77,12 +77,14 @@
       <section>
         <h2>Promotion evidence</h2>
         <ul>
-          <li>Workbench production alias: <code>https://dev-workbench-sooty.vercel.app</code> — deployment <code>dpl_8GurjsgWB9yJZxP7LBN9xB5cNSAK</code>.</li>
+          <li>Workbench production alias: <code>https://dev-workbench-sooty.vercel.app</code> — deployment <code>dpl_3x9n6QYCVRHcnCi2VvDGZG16jj22</code>.</li>
           <li>Booking Pipe B: <code>https://sonik-booking-app-pipe-b.liam-trampota.workers.dev</code> — Worker version <code>4e86e877-456d-4c4d-a479-a5197eda0655</code>.</li>
           <li>Authenticated production smoke returned HTTP 200 with Source, Pick, Capture, Right, Bottom, and Full screen visible and no page errors.</li>
           <li>Live Bottom-dock selection remained Bottom after reload and its local storage record remained stable.</li>
+          <li>A fresh production sandbox showed the explicit Preview loading state, reached verified interactive readiness in 146.8 seconds including provisioning, then retained the same sandbox, tmux session, and Bottom layout after reload.</li>
+          <li>Rendered evidence is saved under <code>/Users/danielletterio/Desktop/sonik-workbench-verification-2026-07-20/</code>, including <code>05-workbench-preview-connecting.png</code> and <code>06-workbench-preview-ready.png</code>.</li>
           <li>A cross-origin Booking Pipe B parent/iframe smoke received the Workbench context request and the Workbench reported <code>host-donation</code>, signed-in, organization-present context.</li>
-          <li>All 12 disposable sandboxes created by production smoke isolation were stopped and deleted; no smoke sandbox remains running.</li>
+          <li>All disposable sandboxes created by production smoke isolation were stopped and deleted; no smoke sandbox remains running.</li>
         </ul>
       </section>
 
