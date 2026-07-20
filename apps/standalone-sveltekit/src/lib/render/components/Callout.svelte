@@ -12,31 +12,31 @@
 
   const configs = {
     info: {
-      border: "border-l-blue-500",
-      bg: "bg-blue-500/5",
-      iconColor: "text-blue-500",
+      border: "border-l-info",
+      bg: "bg-info/10",
+      iconColor: "text-info",
     },
     tip: {
-      border: "border-l-emerald-500",
-      bg: "bg-emerald-500/5",
-      iconColor: "text-emerald-500",
+      border: "border-l-success",
+      bg: "bg-success/10",
+      iconColor: "text-success",
     },
     warning: {
-      border: "border-l-amber-500",
-      bg: "bg-amber-500/5",
-      iconColor: "text-amber-500",
+      border: "border-l-warning",
+      bg: "bg-warning/10",
+      iconColor: "text-warning",
     },
     important: {
-      border: "border-l-purple-500",
-      bg: "bg-purple-500/5",
-      iconColor: "text-purple-500",
+      border: "border-l-secondary",
+      bg: "bg-secondary/10",
+      iconColor: "text-secondary",
     },
   };
 
   const config = $derived(configs[props.type ?? "info"] ?? configs.info);
 </script>
 
-<div class="border-l-4 {config.border} {config.bg} rounded-r-lg p-4">
+<div role="note" class="border-l-4 {config.border} {config.bg} rounded-r-lg p-4">
   <div class="flex items-start gap-3">
     {#if props.type === "tip"}
       <Lightbulb class="h-5 w-5 mt-0.5 shrink-0 {config.iconColor}" />
