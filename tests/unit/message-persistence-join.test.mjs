@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createJoinableWorker } from "../../apps/standalone-sveltekit/src/lib/joinable-worker.ts";
+
+const pageSource = await readFile("apps/standalone-sveltekit/src/routes/+page.svelte", "utf8");
+assert.match(pageSource, /const persistConversationMessages = createJoinableWorker\(persistConversationMessagesOnce\)/);
+assert.doesNotMatch(pageSource, /messagePersistInFlight/);
 
 let releaseFirst;
 const firstWrite = new Promise((resolve) => {
