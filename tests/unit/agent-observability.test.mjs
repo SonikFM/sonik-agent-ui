@@ -154,6 +154,7 @@ const privateThought = "raw private thought";
     source: "client",
     event: "telemetry.private-thought",
     payload: {
+      safe: "kept",
       nested: {
         reasoning: privateThought,
         Thinking: privateThought,
@@ -167,6 +168,7 @@ const privateThought = "raw private thought";
     },
   });
   assert.equal(JSON.stringify(event).includes(privateThought), false, "private-thought keys must be redacted at the shared telemetry boundary");
+  assert.deepEqual(event.payload, { safe: "kept", nested: {} }, "private-thought keys are removed without dropping safe siblings");
 }
 
 {
