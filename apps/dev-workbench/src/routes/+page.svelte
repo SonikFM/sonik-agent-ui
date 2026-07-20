@@ -24,6 +24,7 @@
   import {
     DevWorkbench,
     createDevWorkbenchCapability,
+    derivePreviewStatus,
     devWorkbenchStartingFixture,
     workbenchDetailSchema,
     type DevWorkbenchViewProps,
@@ -157,7 +158,7 @@
       },
       preview: workspace.preview
         ? {
-            status: visualSourceId === "preview" && visualStaleReason ? "stale" : previewInteractive ? "ready" : "connecting",
+            status: derivePreviewStatus(true, previewInteractive),
             url: createEmbeddedPreviewUrl({
               previewUrl: workspace.preview.url,
               workbenchOrigin,
@@ -721,7 +722,7 @@
       if (!response.ok) throw new Error(await publicError(response));
       const result = await response.json() as { openApiWritten?: unknown };
       announcement = result.openApiWritten === true
-        ? "Host context, signed authority, and OpenAPI are available inside the sandbox."
+        ? "Sanitized host context and OpenAPI are available inside the sandbox. Signed authority was consumed only by the server."
         : "Host context is available inside the sandbox; OpenAPI could not be refreshed.";
     } catch (error) {
       visibleError = safeMessage(error, "Page context could not be synchronized.");
