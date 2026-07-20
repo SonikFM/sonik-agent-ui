@@ -35,8 +35,14 @@ assert.match(
 assert.match(
   pageSvelte,
   /import\s*\{\s*explorerCatalog\s*\}\s*from\s*"\$lib\/render\/catalog"/,
-  "+page.svelte must import the runtime JSON-render catalog for devtools inspection",
+  "+page.svelte must import the catalog that validates rendered artifacts",
 );
+assert.match(
+  pageSvelte,
+  /<JsonRenderDevtools[^>]*catalog=\{explorerCatalog\}[^>]*\/>/,
+  "+page.svelte must expose the real render catalog to development devtools",
+);
+assert.doesNotMatch(pageSvelte, /<JsonRenderDevtools[^>]*catalog=\{null\}/, "development devtools must not hide the available catalog");
 assert.match(
   pageSvelte,
   /\{#if dev(?:\s*&&[^}]*)?\}[\s\S]*?<JsonRenderDevtools[^>]*\/>[\s\S]*?\{\/if\}/,
