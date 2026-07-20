@@ -43,7 +43,7 @@
           <div><span class="label">Automated suite</span><span class="value">Passing</span></div>
           <div><span class="label">Workbench build</span><span class="value">Passing</span></div>
           <div><span class="label">Booking build</span><span class="value">Passing</span></div>
-          <div><span class="label">Live auth session</span><span class="value pending">Verify after promotion</span></div>
+          <div><span class="label">Live Workbench smoke</span><span class="value pass">Passing</span></div>
         </div>
       </header>
 
@@ -72,6 +72,16 @@
             <tr><td><code>bun run check && bun run build</code></td><td class="pass">Pass</td><td>Booking type/Svelte checks and Cloudflare production build; existing unrelated warnings remain.</td></tr>
           </tbody>
         </table>
+      </section>
+
+      <section>
+        <h2>Promotion evidence</h2>
+        <ul>
+          <li>Workbench production alias: <code>https://dev-workbench-sooty.vercel.app</code> — deployment <code>dpl_7cgWNNbQMqH5PjHhvzt6gwEy7Jzs</code>.</li>
+          <li>Booking Pipe B: <code>https://sonik-booking-app-pipe-b.liam-trampota.workers.dev</code> — Worker version <code>4e86e877-456d-4c4d-a479-a5197eda0655</code>.</li>
+          <li>Authenticated production smoke returned HTTP 200 with Source, Pick, Capture, Right, Bottom, and Full screen visible and no page errors.</li>
+          <li>Live Bottom-dock selection remained Bottom after reload and its local storage record remained stable.</li>
+        </ul>
       </section>
 
       <section>
