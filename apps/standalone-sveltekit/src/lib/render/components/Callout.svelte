@@ -27,9 +27,9 @@
       iconColor: "text-warning",
     },
     important: {
-      border: "border-l-secondary",
-      bg: "bg-secondary/10",
-      iconColor: "text-secondary",
+      border: "border-l-primary",
+      bg: "bg-primary/10",
+      iconColor: "text-primary",
     },
   };
 
