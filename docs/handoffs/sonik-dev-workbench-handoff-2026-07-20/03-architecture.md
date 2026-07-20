@@ -114,7 +114,6 @@ type WorkspaceAttachment = {
   repository: { slug: string; revision: string; root: string };
   tmuxSession: string;
   preview: { status: PreviewStatus; url?: string };
-  hostAuthorityHandle?: string;
   contextPaths: {
     page: string;
     visual: string;
@@ -125,7 +124,7 @@ type WorkspaceAttachment = {
 };
 ```
 
-This is data, not a live SDK object. Provider clients are reconstructed on the server. `hostAuthorityHandle` is an expiring, revocable server-only reference with explicit access control; host authority is excluded from the guest filesystem and client state.
+This is data, not a live SDK object. Provider clients are reconstructed on the server. Current host authority is received through the browser `postMessage` relay and consumed by the Workbench server for the OpenAPI fetch. It is excluded from the guest filesystem, sandbox artifacts, and sanitized page/OpenAPI output; the page retains it only in the existing in-memory relay message long enough to synchronize or refresh context.
 
 ### 3.2 Capability readiness
 
@@ -149,25 +148,25 @@ The same structure should drive buttons, Codex context, tool discovery, and diag
 Terminal bytes remain on the direct PTY connection. Product state uses bounded events:
 
 ```ts
-type WorkbenchEventPayloads = {
-  "status.changed": { status: "provisioning" | "cloning" | "installing" | "starting" | "ready" | "suspending" | "suspended" | "stopping" | "stopped" | "failed" };
-  "preview.available": { expiresAt: string };
-  "terminal.available": { sandboxExpiresAt: string };
-  "page-context.updated": { path: string };
-  "repository.changed": { paths: string[] };
-  error: { code: string; message: string };
-};
-
-type WorkbenchEvent<K extends keyof WorkbenchEventPayloads = keyof WorkbenchEventPayloads> = {
-  id: string;
-  workspaceId: string;
+type WorkbenchEvent = {
+  schemaVersion: "sonik.dev-workbench.v1";
+  eventId: string;
   sequence: number;
-  at: string;
-  kind: K;
-  correlationId?: string;
-  payload: WorkbenchEventPayloads[K];
+  occurredAt: string;
+  sessionId: string;
+  organizationId: string;
+  channelKey: ["org", string, "agentChannel", string];
+  payload:
+    | { type: "status.changed"; status: "provisioning" | "cloning" | "installing" | "starting" | "ready" | "suspending" | "suspended" | "stopping" | "stopped" | "failed" }
+    | { type: "preview.available"; expiresAt: string }
+    | { type: "terminal.available"; sandboxExpiresAt: string }
+    | { type: "page-context.updated"; path: "/vercel/sandbox/workspace/.sonik/page-context.json" }
+    | { type: "repository.changed"; paths: string[] }
+    | { type: "error"; error: { code: string; message: string; operation: string; retryable: boolean } };
 };
 ```
+
+The exact envelope fields are schemaVersion, eventId, sequence, occurredAt, sessionId, organizationId, channelKey, payload. `payload.type` discriminates the six supported variants: `status.changed`, `preview.available`, `terminal.available`, `page-context.updated`, `repository.changed`, and `error`. The exported strict Zod schema rejects cross-kind fields and unknown envelope or payload fields.
 
 Realtime egress transports these events and cursors; it does not proxy the terminal.
 

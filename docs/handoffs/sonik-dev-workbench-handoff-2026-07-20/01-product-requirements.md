@@ -99,7 +99,7 @@ This is developer tooling, not a general customer-facing terminal.
 | HC-01 | Booking passes an authenticated, server-derived host-session attachment to Agent UI and Dev Workbench. | P0 |
 | HC-02 | The Workbench displays independently: host connected, page context current, signed authority available, and tool/provider readiness. | P0 |
 | HC-03 | Browser page context is sanitized evidence only; it cannot grant scopes or replace server-verified authority. | P0 |
-| HC-04 | Startup writes sanitized page, sitemap, and OpenAPI/command context to documented sandbox paths. Host authority remains a server-only handle protected by explicit access control, expiry, and revocation; it never enters the guest artifact namespace. | P0 |
+| HC-04 | Startup writes sanitized page, sitemap, and OpenAPI/command context to documented sandbox paths. Current host authority is browser-relayed and server-consumed for the OpenAPI fetch; it never enters the guest sandbox or sanitized artifact namespace. | P0 |
 | HC-05 | Context refreshes or invalidates on host navigation, workspace change, source change, and session expiry. | P0 |
 | HC-06 | Errors explain the failing layer: embed origin, host relay, session attachment, provider/tool scope, or backend availability. | P0 |
 | HC-07 | Amplify can adopt the same neutral host bridge without forking the Agent UI/Workbench contract. | P1 |

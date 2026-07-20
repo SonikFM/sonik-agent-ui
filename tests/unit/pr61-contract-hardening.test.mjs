@@ -1,37 +1,56 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { derivePreviewStatus } from "../../apps/dev-workbench/src/design-system/patterns/DevWorkbench/capability.ts";
+import { DEV_WORKBENCH_MIRROR_PATHS, DEV_WORKBENCH_SCHEMA_VERSION, devWorkbenchRealtimeEnvelopeSchema } from "../../apps/dev-workbench/src/lib/contracts/workbench.ts";
 
 const read = (path) => readFileSync(path, "utf8");
 const handoff = "docs/handoffs/sonik-dev-workbench-handoff-2026-07-20";
 
-test("host authority stays server-only", () => {
+test("host authority is relayed for server consumption without entering the guest sandbox", () => {
   const requirements = read(`${handoff}/01-product-requirements.md`);
   const architecture = read(`${handoff}/03-architecture.md`);
+  const page = read("apps/dev-workbench/src/routes/+page.svelte");
 
-  assert.match(requirements, /server-only[^\n]*(access|ACL)[^\n]*expir[^\n]*revoc/i);
-  assert.match(architecture, /hostAuthorityHandle/);
+  assert.match(requirements, /browser-relayed[^\n]*server-consumed/i);
+  assert.doesNotMatch(architecture, /hostAuthorityHandle/);
   assert.doesNotMatch(architecture, /contextPaths:[^}]*hostAuthority/s);
-  assert.match(architecture, /host authority[^\n]*(guest filesystem|client state)/i);
+  assert.match(architecture, /host authority[^\n]*(guest filesystem|sandbox artifacts)/i);
+  assert.doesNotMatch(page, /signed authority[^\n]*inside the sandbox/i);
 });
 
-test("preview status and event payloads match runtime contracts", () => {
-  const architecture = read(`${handoff}/03-architecture.md`);
+test("visual artifact staleness does not make a healthy interactive preview stale", () => {
+  assert.equal(derivePreviewStatus(true, true), "ready");
+  assert.equal(derivePreviewStatus(true, false), "connecting");
+  assert.equal(derivePreviewStatus(false, true), "unavailable");
+});
 
-  assert.match(architecture, /type PreviewStatus =[^;]*"connecting"[^;]*"ready"[^;]*"stale"[^;]*"unavailable"[^;]*"error"/);
-  assert.match(architecture, /type WorkbenchEventPayloads =/);
-  assert.match(architecture, /type WorkbenchEvent<K extends keyof WorkbenchEventPayloads[^>]*>/);
-  assert.match(architecture, /payload: WorkbenchEventPayloads\[K\]/);
-  for (const kind of [
-    "status.changed",
-    "preview.available",
-    "terminal.available",
-    "page-context.updated",
-    "repository.changed",
-    "error",
-  ]) assert.match(architecture, new RegExp(`"${kind.replace(".", "\\.")}"`));
-  assert.match(architecture, /planned event kinds/i);
-  assert.doesNotMatch(architecture, /payload: unknown/);
+test("handoff event examples parse through the strict runtime wire contract", () => {
+  const architecture = read(`${handoff}/03-architecture.md`);
+  const base = {
+    schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
+    eventId: "event-1",
+    sequence: 1,
+    occurredAt: "2026-07-20T12:00:00.000Z",
+    sessionId: "session-1",
+    organizationId: "org-1",
+    channelKey: ["org", "org-1", "agentChannel", "session-1"],
+  };
+  const payloads = [
+    { type: "status.changed", status: "ready" },
+    { type: "preview.available", expiresAt: "2026-07-20T13:00:00.000Z" },
+    { type: "terminal.available", sandboxExpiresAt: "2026-07-20T13:00:00.000Z" },
+    { type: "page-context.updated", path: DEV_WORKBENCH_MIRROR_PATHS.pageContext },
+    { type: "repository.changed", paths: ["src/app.ts"] },
+    { type: "error", error: { code: "unknown", message: "Safe failure", operation: "test", retryable: false } },
+  ];
+
+  for (const [sequence, payload] of payloads.entries()) {
+    assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, sequence, payload }).success, true, payload.type);
+  }
+  assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, payload: { type: "preview.available", status: "ready" } }).success, false);
+  assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, payload: payloads[0], kind: "status.changed" }).success, false);
+  assert.match(architecture, /schemaVersion, eventId, sequence, occurredAt, sessionId, organizationId, channelKey, payload/);
 });
 
 test("handoff provenance is portable", () => {
