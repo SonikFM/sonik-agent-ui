@@ -38,7 +38,6 @@ const workspace = {
   mirrorPaths: {
     pageContext: `${stateRoot}/page-context.json`,
     hostContext: `${stateRoot}/host-context.json`,
-    hostAuthority: `${stateRoot}/host-authority.json`,
     openApi: `${stateRoot}/openapi.json`,
     guide: `${stateRoot}/README.md`,
     consoleEvents: `${stateRoot}/console.jsonl`,

@@ -157,7 +157,7 @@
       },
       preview: workspace.preview
         ? {
-            status: previewInteractive ? "ready" : "connecting",
+            status: visualSourceId === "preview" && visualStaleReason ? "stale" : previewInteractive ? "ready" : "connecting",
             url: createEmbeddedPreviewUrl({
               previewUrl: workspace.preview.url,
               workbenchOrigin,

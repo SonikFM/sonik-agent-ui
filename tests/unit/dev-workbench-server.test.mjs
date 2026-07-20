@@ -443,8 +443,6 @@ if (configured.ok) {
   assert.equal(configured.value.repository.repositoryId, "github.com.sonikfm.sonik-agent-ui");
   assert.deepEqual(configured.value.repository.commands.codex, ["npx", "--yes", "@openai/codex@0.144.5"]);
   assert.equal(configured.value.agentApiOrigin, "https://sonik-agent-ui.liam-trampota.workers.dev");
-  assert.equal(configured.value.pipeBWorker, "sonik-dev-observability-pipe-b");
-  assert.equal(configured.value.cloudflareApiToken, null);
 }
 assert.deepEqual(devWorkbenchSessionCookieOptions(new URL("https://workbench.example.com")), {
   httpOnly: true,

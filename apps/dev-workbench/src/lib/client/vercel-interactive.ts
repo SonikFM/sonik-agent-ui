@@ -4,7 +4,6 @@ export type InteractiveStartInput = {
   cwd: string;
   cols: number;
   rows: number;
-  env?: Record<string, string>;
 };
 
 export type InteractiveControlMessage =
@@ -33,7 +32,7 @@ export function createInteractiveStartMessage(input: InteractiveStartInput): Int
     type: "start",
     command: input.command,
     args: input.args ?? [],
-    env: Object.entries({ TERM: "xterm-256color", ...input.env }).map(([key, value]) => `${key}=${value}`),
+    env: ["TERM=xterm-256color"],
     cwd: input.cwd,
     cols: positiveInteger(input.cols, "cols"),
     rows: positiveInteger(input.rows, "rows"),
