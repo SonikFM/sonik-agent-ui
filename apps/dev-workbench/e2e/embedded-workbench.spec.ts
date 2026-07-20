@@ -98,6 +98,17 @@ test("terminal embed keeps controls and reconnects restored state after remount"
     contentType: "application/json",
     body: JSON.stringify({ browser: { capability: "installed", setup: "idle", disabledReason: null } }),
   }));
+  await page.route("https://preview.example.test/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: `<script>
+      setTimeout(() => parent.postMessage({
+        source: "sonik-agent-ui",
+        type: "sonik:agent-ui:request-page-context",
+        reason: "mount",
+      }, new URLSearchParams(location.search).get("agentUiHostOrigin")), 10_000);
+    </script>`,
+  }));
 
   await page.goto("/?surface=terminal");
   const shell = page.locator("main.dev-workbench");
@@ -111,6 +122,11 @@ test("terminal embed keeps controls and reconnects restored state after remount"
   const positions = page.getByRole("group", { name: "Terminal position" });
   await expect(positions).toBeVisible();
   await positions.getByRole("button", { name: "Bottom" }).click();
+  await expect(shell).toHaveAttribute("data-terminal-dock", "bottom");
+  await expect(page.getByText("Starting the preview interface")).toBeVisible();
+  await expect(page.locator('section[aria-labelledby="preview-heading"] .dev-workbench__status')).toHaveText("ready", { timeout: 15_000 });
+  await expect(page.getByText("Starting the preview interface")).toBeHidden();
+
   await expect(shell).toHaveAttribute("data-terminal-dock", "bottom");
   await expect(page.getByTitle("Live development preview")).toBeVisible();
 
