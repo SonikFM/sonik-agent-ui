@@ -4,6 +4,7 @@
   import { env as publicEnv } from "$env/dynamic/public";
   import type { PageData } from "./$types";
   import { SvelteSet, SvelteMap } from "svelte/reactivity";
+  import { createJoinableWorker } from "$lib/joinable-worker";
   import { Chat } from "@ai-sdk/svelte";
   import { DefaultChatTransport } from "ai";
   import { JsonUIProvider, type DataPart, type Spec } from "@json-render/svelte";
@@ -318,7 +319,7 @@
   // canvas escalation to freshly streamed artifacts — restored history must
   // never force the host's canvas open (see notifyHostCanvasOpen).
   let hasStreamedSinceMount = false;
-  let messagePersistInFlight = false;
+  const persistConversationMessages = createJoinableWorker(persistConversationMessagesOnce);
   let pendingDocumentSnapshot: ActiveDocumentSnapshot | null = null;
   let documentPersistPromise: Promise<void> | null = null;
   let lastPersistedDocumentSignature = "";
@@ -3100,10 +3101,9 @@
     return artifactWarehouse.getActiveJsonRenderArtifact(detail.session.id);
   }
 
-  async function persistConversationMessages(): Promise<void> {
+  async function persistConversationMessagesOnce(): Promise<void> {
     const sessionId = activeSessionId;
     if (!sessionId) return;
-    if (messagePersistInFlight) return;
     const messagesToPersist = conversation.messages.filter((message) => !persistedMessageIds.has(message.id));
     if (messagesToPersist.length === 0) {
       lastPersistStatus = "idle";
@@ -3112,7 +3112,6 @@
 
     lastPersistStatus = "eligible";
     logSessionTelemetry("session.messages.persist_eligible", { sessionId, reason: `${messagesToPersist.length} message(s)` });
-    messagePersistInFlight = true;
     lastPersistStatus = "in_flight";
     logSessionTelemetry("session.messages.persist_start", { sessionId, reason: `${messagesToPersist.length} message(s)` });
     try {
@@ -3153,8 +3152,6 @@
         error: sessionRailError,
       });
       throw error;
-    } finally {
-      messagePersistInFlight = false;
     }
   }
 
