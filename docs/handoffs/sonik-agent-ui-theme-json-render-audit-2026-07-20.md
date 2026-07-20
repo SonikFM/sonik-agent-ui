@@ -15,7 +15,7 @@
 | JSON-render core and Svelte runtime | **complete** | Workspace packages provide `@json-render/core` and `@json-render/svelte`, including validation, state, actions, repeat/visibility, streaming, directives, and the Svelte provider/renderer path. |
 | Sonik JSON-render catalog/registry | **complete** | `explorerCatalog` and `registry.ts` bind 33 components across layout, display, input, intake, and action tiers. Tool input validates against the same catalog schemas used by rendering. |
 | Artifact creation, promotion, state, and receipts | **complete** | `createJsonArtifact` parses bounded stringified input, applies lossless repair, validates structure and catalog props, then emits the artifact envelope. Promotion, controlled state persistence, version conflict handling, and inert intake/action receipts have targeted tests. |
-| Devtools | **partial** | Vendored core and Svelte adapters are mounted only in dev and protected by their production no-op. The panel receives the live state store, but the audited baseline passes `catalog={null}`, so its catalog tab cannot describe the real 33-component surface. |
+| Devtools | **complete** | Baseline finding: the panel received the live state store but passed `catalog={null}`. Repaired in G004 commit `d511614`: it now receives `explorerCatalog`, while retaining the `$app/environment` dev gate and package production no-op. `jsonrender-devtools-vendor.test.mjs` covers the catalog and guards. |
 | JSONL and mixed streams | **complete** | Core implements JSONL patch parsing and mixed prose/spec streams; the app taps generate streams and promotes partial/complete specs into the canvas. |
 | YAML wire path | **partial** | Core prompt/edit-mode code contains YAML instructions, but this checkout has no `@json-render/yaml` workspace package or wired standalone YAML intake. It is upstream inventory, not a product path here. |
 | shadcn-svelte relationship | **partial** | The app retains copied shadcn-style Svelte primitives for selected controls, but `app.css` projects them onto Daisy/Sonik variables. There is no separate `@json-render/shadcn-svelte` package in this checkout; the product registry remains the authority. |
@@ -51,7 +51,7 @@ These are review lenses, not additional design systems.
 1. **High — Hallmark / design-ban mismatch:** `Callout.svelte` uses `border-l-4` as a structural status accent. The colors are semantic (`info`, `success`, `warning`, `secondary`), but the left stripe is explicitly banned by the current product guidance. Use the existing Daisy alert/status vocabulary without a directional stripe.
 2. **High — Hallmark / motion mismatch:** `.animate-shimmer` uses a text gradient. It is applied to thinking/tool status copy, conflicts with the no-gradient rule, and reduced-motion mode only disables animation without restoring normal text fill. A semantic solid-color status is the smaller and clearer solution.
 3. **Medium — Impeccable / hierarchy:** the theme picker is a native, labeled select and is appropriately low-risk. However, exposing every bundled Daisy theme makes a comparison tool visually adjacent to product themes; the existing grouping prevents authority confusion and should be preserved.
-4. **Medium — Impeccable / system feedback:** JSON-render state and receipt paths are explicit and tested, but devtools omits the actual catalog. Passing the type-compatible catalog would make component validity inspectable rather than forcing developers to infer it.
+4. **Repaired in G004 — Impeccable / system feedback:** baseline devtools omitted the actual catalog. Commit `d511614` passes the type-compatible `explorerCatalog`, making component validity inspectable while preserving both production guards.
 5. **Low — anti-slop boundary:** copied shadcn-style primitives are acceptable only as implementation details backed by Daisy/Sonik variables. Do not import donor theme systems, generated tokens, or a second registry to solve isolated component gaps.
 
 ## Functional JSON-render path
@@ -82,7 +82,7 @@ tool result / stream data parts
           trusted state endpoint / versioned persistence / telemetry
                               │
                               └─ dev-only JsonRenderDevtools
-                                 (live store, catalog absent in baseline)
+                                 (live store + explorerCatalog)
 ```
 
 The primary files are:
@@ -117,11 +117,10 @@ The common CI failure shown on the donor branches is dependency/lockfile drift d
 ## Ranked follow-up
 
 1. **P0 — finish the two surgical conformance fixes:** replace the Callout stripe with semantic Daisy status styling and replace shimmer gradient text with a solid semantic status; retain a reduced-motion regression check.
-2. **P0 — attach the real catalog to devtools:** pass `explorerCatalog` if its type matches the Svelte adapter, preserving both the `$app/environment` dev gate and package production guard. Test that the catalog is non-null and production remains inert.
-3. **P1 — run integrated visual/accessibility proof:** verify Operator Dark, gunmetal light/dark, system mode, embedded host override, keyboard focus, contrast, and reduced motion against representative chat, canvas, and intake artifacts.
-4. **P1 — keep one catalog authority:** add or adapt components only through `catalog.ts` + `registry.ts` + a targeted rendering test. Do not introduce the donor AI-elements registry or a separate shadcn theme authority.
-5. **P2 — donor behavior matrix:** if a current product story needs streamed Markdown, composer scroll, Kbd, or Inbox behavior, extract one behavior at a time from PRs #2–#8 after their failing checks and accessibility findings are resolved.
-6. **P3 — defer secondary renderers:** codegen, Ink, MCP, image, React Email/PDF/Three, and a full YAML wire package remain out of the primary product path until a concrete user story and trust boundary exist.
+2. **P1 — run integrated visual/accessibility proof:** verify Operator Dark, gunmetal light/dark, system mode, embedded host override, keyboard focus, contrast, and reduced motion against representative chat, canvas, and intake artifacts.
+3. **P1 — keep one catalog authority:** add or adapt components only through `catalog.ts` + `registry.ts` + a targeted rendering test. Do not introduce the donor AI-elements registry or a separate shadcn theme authority.
+4. **P2 — donor behavior matrix:** if a current product story needs streamed Markdown, composer scroll, Kbd, or Inbox behavior, extract one behavior at a time from PRs #2–#8 after their failing checks and accessibility findings are resolved.
+5. **P3 — defer secondary renderers:** codegen, Ink, MCP, image, React Email/PDF/Three, and a full YAML wire package remain out of the primary product path until a concrete user story and trust boundary exist.
 
 ## Evidence and commands
 
