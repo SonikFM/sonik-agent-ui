@@ -27,6 +27,10 @@ test("capability reports actual terminal and preview readiness", () => {
   assert.equal(devWorkbenchReadyFixture.actions.pickVisualTarget.enabled, true);
   assert.equal(devWorkbenchReadyFixture.actions.captureVisualContext.enabled, true);
   assert.match(devWorkbenchReadyFixture.actions.pairVisualExtension.disabledReason ?? "", /Host source/);
+
+  const staleFixture = { ...devWorkbenchReadyFixture, preview: { ...devWorkbenchReadyFixture.preview, status: "stale" as const } };
+  assert.equal(adaptDevWorkbenchA2ui(staleFixture).ok, true, "stale is a canonical preview UI state");
+  assert.equal(createDevWorkbenchCapability(staleFixture).assertions.previewReady, false, "stale previews never report ready");
 });
 
 test("visual source controls remain native, distinct, and compact", () => {

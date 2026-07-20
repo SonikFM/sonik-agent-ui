@@ -205,9 +205,14 @@ assert.match(visualBrowserRouteSource, /runWorkspacePlaywrightVisualContext/, "t
 assert.match(visualBrowserRouteSource, /emitVisualBrowserTelemetry[^]*phase: "started"[^]*phase: "failed"[^]*phase: accepted \? "completed" : "failed"/, "Preview browser requests emit start and terminal telemetry through the privacy-allowlisted seam");
 assert.match(visualBrowserRouteSource, /result\.value\.accepted[^]*status: accepted \? 200 : 202/, "the Preview route propagates stale coordinator outcomes without reporting current success");
 const workspaceServiceSource = readFileSync("apps/dev-workbench/src/lib/server/workspace-service.ts", "utf8");
+const vercelSandboxSource = readFileSync("apps/dev-workbench/src/lib/server/vercel-sandbox.ts", "utf8");
 assert.match(workspaceServiceSource, /host-context\.json.*host origin plus redacted page context/i);
 assert.match(workspaceServiceSource, /openapi\.json.*host OpenAPI document fetched with that authority/i);
 assert.doesNotMatch(workspaceServiceSource, /booking-host origin|booking host OpenAPI/i);
+assert.equal("hostAuthority" in DEV_WORKBENCH_MIRROR_PATHS, false, "host authority stays server-side instead of entering the guest mirror namespace");
+assert.doesNotMatch(workspaceServiceSource, /host-authority\.json/, "the sandbox guide and file writer never expose host authority");
+assert.doesNotMatch(workspaceServiceSource, /function sandboxEnvironment/, "workspace provisioning cannot construct a control-plane credential environment");
+assert.doesNotMatch(vercelSandboxSource, /input\.env|env:\s*input\.env/, "Sandbox.create has no generic environment passthrough");
 
 const contextSandboxFiles = new Map([
   [DEV_WORKBENCH_MIRROR_PATHS.workspace, Buffer.from(JSON.stringify({
@@ -341,8 +346,9 @@ assert.deepEqual(plan.commands.map((command) => command.id), [
   "select-codex-window",
 ]);
 assert.equal(plan.commands[2].args.at(-1), DEV_WORKBENCH_REPOSITORY_ROOT);
-assert.equal(plan.windows[0].command.includes(`SONIK_HOST_AUTHORITY_PATH=${DEV_WORKBENCH_MIRROR_PATHS.hostAuthority}`), true);
+assert.doesNotMatch(plan.windows.flatMap((window) => window.command).join(" "), /HOST_AUTHORITY|CLOUDFLARE|GITHUB|DATABASE|VISUAL_GROUNDING/, "tmux commands exclude control-plane credentials and authority handles");
 assert.equal(plan.windows[3].command.join(" ").includes("Pipe B access is not configured"), true);
+assert.equal(plan.windows[3].command.join(" ").includes("Set DEV_WORKBENCH_CLOUDFLARE_API_TOKEN"), false, "the unavailable logs window does not instruct operators to inject a control-plane credential");
 assert.equal(DEFAULT_REPOSITORY_COMMANDS.dev.includes("--"), false, "Vite flags must reach the dev script without a positional delimiter");
 const hostedPlan = createDevWorkbenchBootstrapPlan({
   sessionId: "session_123",
@@ -554,6 +560,7 @@ try {
   Sandbox.get = originalSandboxGet;
 }
 assert.equal(syncedContext.host?.authority?.header, "opaque_signed_host_authority");
+assert.equal([...contextSandboxFiles.keys()].some((path) => /host-authority/i.test(path)), false, "context synchronization never writes authority into the sandbox");
 assert.throws(
   () => workspaceContextSyncSchema.parse({ ...syncedContext, host: { ...syncedContext.host, origin: "http://localhost:3000" } }),
   /Expected an HTTPS URL/,
