@@ -150,30 +150,22 @@ button {
 }
 
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
+  0%,
   100% {
-    background-position: 200% 0;
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
 .animate-shimmer {
-  background: linear-gradient(
-    90deg,
-    currentColor 25%,
-    color-mix(in oklab, currentColor 45%, var(--color-base-100)) 50%,
-    currentColor 75%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: shimmer 2s ease-in-out infinite;
+  animation: shimmer 1.5s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-shimmer {
     animation: none;
+    opacity: 1;
   }
 }
