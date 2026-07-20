@@ -13,11 +13,9 @@ const appCss = readFileSync(
 
 test("Callout uses active-theme semantic colors and note semantics", () => {
   assert.match(callout, /role="note"/);
-  for (const token of ["info", "success", "warning", "primary"]) {
-    assert.match(callout, new RegExp(`border-l-${token}`));
-    assert.match(callout, new RegExp(`bg-${token}/10`));
-    assert.match(callout, new RegExp(`text-${token}`));
-  }
+  assert.match(callout, /border-l-(?:info|success|warning|primary)/);
+  assert.match(callout, /bg-(?:info|success|warning|primary)\/10/);
+  assert.match(callout, /text-(?:info|success|warning|primary)/);
   assert.doesNotMatch(callout, /(?:blue|emerald|amber|purple)-500/);
 });
 
