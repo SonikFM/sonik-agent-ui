@@ -34,6 +34,11 @@ assert.match(
 );
 assert.match(
   pageSvelte,
+  /import\s*\{\s*explorerCatalog\s*\}\s*from\s*"\$lib\/render\/catalog"/,
+  "+page.svelte must import the runtime JSON-render catalog for devtools inspection",
+);
+assert.match(
+  pageSvelte,
   /\{#if dev(?:\s*&&[^}]*)?\}[\s\S]*?<JsonRenderDevtools[^>]*\/>[\s\S]*?\{\/if\}/,
   "+page.svelte must mount <JsonRenderDevtools /> gated behind the dev flag from $app/environment",
 );
@@ -45,6 +50,11 @@ assert.match(
   pageSvelte,
   /<JsonUIProvider[^>]*>\s*\n\s*<JsonRenderDevtools/,
   "+page.svelte must mount <JsonRenderDevtools /> inside a JsonUIProvider so getStateContext() does not throw",
+);
+assert.match(
+  pageSvelte,
+  /<JsonRenderDevtools[^>]*catalog=\{explorerCatalog\}[^>]*\/>/,
+  "+page.svelte must pass the runtime JSON-render catalog to devtools",
 );
 assert.match(pageSvelte, /import\s*\{\s*browser,\s*dev\s*\}\s*from\s*"\$app\/environment"/, "+page.svelte must import dev from $app/environment for the devtools gate");
 
