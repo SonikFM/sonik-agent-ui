@@ -56,8 +56,7 @@ export async function writeAgentTelemetry(event: AgentTelemetryEvent, persistenc
   // caller already set one explicitly. A no-op outside any controller-driven run (activeWorkflowRunId
   // is undefined there), so every call site that predates this is unchanged.
   const payload = emitAgentTelemetrySync(event);
-  const logPath = resolveTelemetryLogPath();
-  await appendTelemetryJsonl(logPath, payload);
+  void appendTelemetryJsonl(resolveTelemetryLogPath(), payload);
   const record = {
       session_id: payload.sessionId ?? null,
       request_id: payload.requestId ?? null,

@@ -813,7 +813,7 @@ export const POST: RequestHandler = async (event) => {
     });
   }
   durableRunId = runRecorder?.runId ?? smokeRunId;
-  void writeRequestTelemetry({
+  await writeRequestTelemetry({
     source: "server",
     event: "api.generate.run_started",
     requestId,
@@ -823,7 +823,7 @@ export const POST: RequestHandler = async (event) => {
     sessionId: telemetrySessionId,
     messageId: lastMessage?.id,
     ok: true,
-  }).catch(() => undefined);
+  });
 
   if (shouldUseDevSmokeStream(request)) {
     const smokeInput = {
