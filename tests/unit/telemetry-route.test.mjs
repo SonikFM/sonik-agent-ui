@@ -35,7 +35,7 @@ globalThis.__telemetryRoutePersistence = persistenceA;
 
 const secret = `sk-${"route-secret".repeat(3)}`;
 const privateThought = "raw route private thought";
-const written = await POST({ request: new Request("https://agent-ui.local/api/telemetry", { method: "POST", body: JSON.stringify({ event: { source: "client", event: "telemetry.route.persisted", sessionId: "session-a", payload: { apiKey: secret, nested: { Reasoning: privateThought, scratch_pad: privateThought, "chain.of.thought": privateThought } } } }) }) });
+const written = await POST({ request: new Request("https://agent-ui.local/api/telemetry", { method: "POST", body: JSON.stringify({ event: { source: "client", event: "telemetry.route.persisted", sessionId: "session-a", payload: { apiKey: secret, safe: "kept", nested: { Reasoning: privateThought, scratch_pad: privateThought, "chain.of.thought": privateThought } } } }) }) });
 assert.equal(written.status, 200);
 
 const detail = await GET({ params: { id: "session-a" }, request: new Request("https://agent-ui.local/api/session/session-a"), locals: {}, platform: undefined });
@@ -44,6 +44,8 @@ assert.equal(body.telemetry.at(-1)?.event, "telemetry.route.persisted", "telemet
 assert.equal(JSON.stringify(body).includes(secret), false, "session telemetry must not expose secret sentinels");
 assert.equal(JSON.stringify(body).includes(privateThought), false, "session telemetry must not persist private-thought sentinels");
 assert.equal(body.telemetry.at(-1)?.payload.payload.apiKey, "[REDACTED]");
+assert.deepEqual(body.telemetry.at(-1)?.payload.payload.nested, {});
+assert.equal(body.telemetry.at(-1)?.payload.payload.safe, "kept");
 
 const persistenceB = createAsyncWorkspacePersistenceAdapter(createInMemoryWorkspacePersistence());
 globalThis.__telemetryRoutePersistence = persistenceB;
