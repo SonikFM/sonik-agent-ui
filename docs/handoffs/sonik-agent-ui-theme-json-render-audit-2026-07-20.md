@@ -11,7 +11,7 @@
 | DaisyUI/Tailwind theme authority | **complete** | The standalone app installs DaisyUI `5.5.23` and Tailwind 4. `app.css` imports DaisyUI themes first and maps compatibility aliases back to Daisy semantic variables rather than creating another token authority. |
 | Operator Dark and embedded host precedence | **complete** | `sonik-operator-dark` is the registry default. `resolveEmbeddedThemeSetting` prefers a valid host theme, then stored preference, then the operator default; the targeted unit test covers all three branches. |
 | Theme picker and system response | **complete** | The native select exposes product, experimental, and DaisyUI comparison themes. Runtime application updates `data-theme`, `data-theme-setting`, `data-color-scheme`, and `color-scheme`; system-mode media changes are observed. |
-| Theme/component conformance | **partial** | Most shared primitives consume semantic aliases. The audited baseline still has a left-stripe `Callout` and a gradient-text shimmer; these conflict with the stated Sonik/Hallmark bans even though their colors are semantic. The shimmer does stop animation for reduced motion, but the fallback does not restore ordinary text paint. |
+| Theme/component conformance | **complete** | Baseline findings were a left-stripe `Callout` and gradient-clipped shimmer text with an incomplete reduced-motion fallback. Repaired in G004 commit `68a6f54` (leader merge `4505144`): Callout now uses Daisy semantic alert/full-border surfaces, and status motion is an opacity pulse with readable `opacity: 1` when reduced motion is requested. `theme-render-semantics.test.mjs` covers the banned-pattern absence and fallback. |
 | JSON-render core and Svelte runtime | **complete** | Workspace packages provide `@json-render/core` and `@json-render/svelte`, including validation, state, actions, repeat/visibility, streaming, directives, and the Svelte provider/renderer path. |
 | Sonik JSON-render catalog/registry | **complete** | `explorerCatalog` and `registry.ts` bind 33 components across layout, display, input, intake, and action tiers. Tool input validates against the same catalog schemas used by rendering. |
 | Artifact creation, promotion, state, and receipts | **complete** | `createJsonArtifact` parses bounded stringified input, applies lossless repair, validates structure and catalog props, then emits the artifact envelope. Promotion, controlled state persistence, version conflict handling, and inert intake/action receipts have targeted tests. |
@@ -48,8 +48,8 @@ The authority boundary is coherent: DaisyUI owns semantic colors and geometry; S
 
 These are review lenses, not additional design systems.
 
-1. **High — Hallmark / design-ban mismatch:** `Callout.svelte` uses `border-l-4` as a structural status accent. The colors are semantic (`info`, `success`, `warning`, `secondary`), but the left stripe is explicitly banned by the current product guidance. Use the existing Daisy alert/status vocabulary without a directional stripe.
-2. **High — Hallmark / motion mismatch:** `.animate-shimmer` uses a text gradient. It is applied to thinking/tool status copy, conflicts with the no-gradient rule, and reduced-motion mode only disables animation without restoring normal text fill. A semantic solid-color status is the smaller and clearer solution.
+1. **Repaired in G004 — Hallmark / design-ban mismatch:** baseline `Callout.svelte` used `border-l-4` and directional status mappings. Commit `68a6f54` replaces them with Daisy `alert` plus full-border semantic surfaces while preserving `role="note"`, content hierarchy, and info/success/warning/primary meaning.
+2. **Repaired in G004 — Hallmark / motion mismatch:** baseline `.animate-shimmer` used gradient-clipped transparent text and only stopped animation under reduced motion. Commit `68a6f54` replaces it with an opacity-only status pulse and restores readable `opacity: 1` in reduced-motion mode. Regression assertions landed in `theme-render-semantics.test.mjs`; stale integrated assertions were aligned in follow-up commit `dd454eb`.
 3. **Medium — Impeccable / hierarchy:** the theme picker is a native, labeled select and is appropriately low-risk. However, exposing every bundled Daisy theme makes a comparison tool visually adjacent to product themes; the existing grouping prevents authority confusion and should be preserved.
 4. **Repaired in G004 — Impeccable / system feedback:** baseline devtools omitted the actual catalog. Commit `d511614` passes the type-compatible `explorerCatalog`, making component validity inspectable while preserving both production guards.
 5. **Low — anti-slop boundary:** copied shadcn-style primitives are acceptable only as implementation details backed by Daisy/Sonik variables. Do not import donor theme systems, generated tokens, or a second registry to solve isolated component gaps.
@@ -116,11 +116,10 @@ The common CI failure shown on the donor branches is dependency/lockfile drift d
 
 ## Ranked follow-up
 
-1. **P0 — finish the two surgical conformance fixes:** replace the Callout stripe with semantic Daisy status styling and replace shimmer gradient text with a solid semantic status; retain a reduced-motion regression check.
-2. **P1 — run integrated visual/accessibility proof:** verify Operator Dark, gunmetal light/dark, system mode, embedded host override, keyboard focus, contrast, and reduced motion against representative chat, canvas, and intake artifacts.
-3. **P1 — keep one catalog authority:** add or adapt components only through `catalog.ts` + `registry.ts` + a targeted rendering test. Do not introduce the donor AI-elements registry or a separate shadcn theme authority.
-4. **P2 — donor behavior matrix:** if a current product story needs streamed Markdown, composer scroll, Kbd, or Inbox behavior, extract one behavior at a time from PRs #2–#8 after their failing checks and accessibility findings are resolved.
-5. **P3 — defer secondary renderers:** codegen, Ink, MCP, image, React Email/PDF/Three, and a full YAML wire package remain out of the primary product path until a concrete user story and trust boundary exist.
+1. **P1 — run integrated visual/accessibility proof:** verify Operator Dark, gunmetal light/dark, system mode, embedded host override, keyboard focus, contrast, and reduced motion against representative chat, canvas, and intake artifacts.
+2. **P1 — keep one catalog authority:** add or adapt components only through `catalog.ts` + `registry.ts` + a targeted rendering test. Do not introduce the donor AI-elements registry or a separate shadcn theme authority.
+3. **P2 — donor behavior matrix:** if a current product story needs streamed Markdown, composer scroll, Kbd, or Inbox behavior, extract one behavior at a time from PRs #2–#8 after their failing checks and accessibility findings are resolved.
+4. **P3 — defer secondary renderers:** codegen, Ink, MCP, image, React Email/PDF/Three, and a full YAML wire package remain out of the primary product path until a concrete user story and trust boundary exist.
 
 ## Evidence and commands
 
