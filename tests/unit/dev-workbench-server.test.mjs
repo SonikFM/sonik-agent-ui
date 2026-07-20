@@ -184,7 +184,7 @@ assert.match(workbenchPageSource, /providerLost[^]*visualExtensionPaired = false
 assert.match(workbenchPageSource, /selectedVisualSourceId !== sourceId[^]*visualExtensionPaired = false/, "source context changes reset the context-bound extension pairing");
 assert.match(workbenchPageSource, /previousRoute[^]*pairingLost = visualExtensionPaired[^]*visualExtensionPaired = false/, "Host navigation resets the active-tab pairing before reporting stale context");
 assert.match(workbenchPageSource, /await restoreVisualContext\(next\.sessionId\)/, "workspace reconnect restores persisted visual state before refreshing providers");
-assert.match(workbenchPageSource, /status: visualSourceId === "preview" && visualStaleReason \? "stale" : previewInteractive \? "ready" : "connecting"/, "Preview readiness rejects stale context and otherwise waits for an authenticated frame message");
+assert.match(workbenchPageSource, /status: derivePreviewStatus\(true, previewInteractive\)/, "Preview readiness waits for an authenticated frame message without inheriting visual artifact staleness");
 assert.match(workbenchPageSource, /event\.source !== frame\.contentWindow \|\| event\.origin !== previewOrigin\) return;[^]*previewInteractive = true/, "only the verified preview frame may report that the interface is interactive");
 assert.match(workbenchPageSource, /function announcePreviewAvailability[^]*selectedVisualSourceId[^]*workspace\?\.preview[^]*Preview server is ready\. Waiting for the interface to connect\./, "a provisioned Preview reports the client hydration wait honestly");
 assert.equal((workbenchPageSource.match(/announcePreviewAvailability\(\);/g) ?? []).length, 2, "start and reconnect both refresh the default Preview status");
