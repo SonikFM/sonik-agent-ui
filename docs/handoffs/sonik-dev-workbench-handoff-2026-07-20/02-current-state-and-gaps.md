@@ -33,7 +33,7 @@ The correct description is **functional sandbox terminal with partial embedded d
 | Changed-files panel | Skeleton | View shape exists; runtime array is empty. | `+page.svelte` |
 | Console panel | Skeleton | View shape exists; runtime array is empty. | `+page.svelte` |
 | Failed-request panel | Skeleton | View shape exists; runtime array is empty. | `+page.svelte` |
-| Pipe B logs | Partial | A tmux logs window is created. Without the server token/configuration, it prints an unconfigured message. It is not the requested automatic structured stream. | `bootstrap-plan.ts`, `.env.example` |
+| Pipe B logs | Unavailable by policy | Direct sandbox tailing is disabled so Cloudflare credentials do not cross the credential firewall. A server-side broker is required before this becomes available. | `bootstrap-plan.ts`, runtime credential tests |
 | Realtime-egress | Skeleton | Serializable seams/contracts exist and README calls it forthcoming; live transport is not wired. | `workbench.ts`, README |
 | Chrome DevTools/CDP | Absent | Screenshot/Playwright support is not a DevTools console/network/DOM/performance integration. | No operative CDP path found |
 | MCP | Deferred/absent | Explicitly deferred from the first Workbench slice. | Workbench README |

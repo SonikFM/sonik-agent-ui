@@ -125,6 +125,7 @@ Rules:
 - Mark credentials sensitive and scope them to the minimum environment and permissions.
 - Never forward Vercel, GitHub, Cloudflare, database, host-authority, or visual-grounding control-plane credentials to browser JavaScript or sandbox processes.
 - The sandbox receives only explicitly allowlisted, non-control-plane variables required by its selected profile. Approved privileged operations use server-side brokers or short-lived, least-privilege tokens.
+- Direct Pipe B tailing from the sandbox is disabled until a server-side broker exists; Cloudflare credentials never enter tmux commands.
 - Environment changes require a new Workbench deployment and a fresh sandbox.
 - Startup commands are checked-in profile data, not arbitrary environment-variable or browser input.
 
