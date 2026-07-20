@@ -24,6 +24,7 @@ import { createAsyncWorkspacePersistenceAdapter, createInMemoryWorkspacePersiste
 const sampleVercelKey = ["v", "ck", "_", "TESTREDACTME123"].join("");
 const sampleBearer = `Bearer ${["super", "secret", "value", "123456789"].join("-")}`;
 const rawProviderError = "Google provider files/raw-ref at https://example.invalid/private said arbitrary model text";
+const privateThought = "raw private thought";
 
 {
   const persistence = createAsyncWorkspacePersistenceAdapter(createInMemoryWorkspacePersistence());
@@ -146,6 +147,26 @@ const rawProviderError = "Google provider files/raw-ref at https://example.inval
     payload: { nested: { provider_reference: "files/opaque-secret-ref", "provider-metadata": { request_url: "https://provider.invalid/private", access_token: "secret-token" }, model_id: "private-model-id", providerPreference: "direct", providerLabel: "Google" } },
   });
   assert.deepEqual(event.payload.nested, { providerPreference: "direct", providerLabel: "Google" });
+}
+
+{
+  const event = sanitizeTelemetryEvent({
+    source: "client",
+    event: "telemetry.private-thought",
+    payload: {
+      nested: {
+        reasoning: privateThought,
+        Thinking: privateThought,
+        scratchPad: privateThought,
+        chainOfThought: privateThought,
+        chain_of_thought: privateThought,
+        "chain-of-thought": privateThought,
+        "chain.of.thought": privateThought,
+        "chain of thought": privateThought,
+      },
+    },
+  });
+  assert.equal(JSON.stringify(event).includes(privateThought), false, "private-thought keys must be redacted at the shared telemetry boundary");
 }
 
 {
