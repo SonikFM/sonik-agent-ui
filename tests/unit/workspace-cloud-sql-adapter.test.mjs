@@ -4,6 +4,9 @@ import {
   CloudWorkspacePersistenceError,
   createCloudWorkspacePersistenceAdapter,
 } from "../../packages/workspace-session/src/index.ts";
+import { writeAgentTelemetry } from "../../apps/standalone-sveltekit/src/lib/server/agent-telemetry.ts";
+import { tapSpecStreamForTelemetry } from "../../apps/standalone-sveltekit/src/lib/server/spec-stream-tap-telemetry.ts";
+import { instrumentGenerateStream } from "../../apps/standalone-sveltekit/src/lib/server/stream-telemetry.ts";
 
 function createAuthorizedRuntime(input) {
   return {
@@ -708,6 +711,39 @@ async function runWorkspaceCloudSqlAdapterTests() {
   assert.equal((await adapterA.listTelemetryEvents(session.id)).at(-1)?.id, telemetry.id, "cloud telemetry writes must be readable from the owning session in stable order");
   assert.deepEqual(await adapterB.listTelemetryEvents(session.id), [], "another tenant cannot read guessed session telemetry");
   assert.deepEqual(await adapterOtherUser.listTelemetryEvents(session.id), [], "another user cannot read guessed session telemetry");
+
+  const lifecycleWrites = [];
+  const writeRequestTelemetry = (event) => {
+    const write = writeAgentTelemetry(event, adapterA);
+    lifecycleWrites.push(write);
+    return write;
+  };
+  const lifecycleContext = { requestId: "req-stream-lifecycle", sessionId: session.id, startedAt: Date.now() };
+  const lifecycleChunks = [
+    { type: "tool-createJsonArtifact", toolCallId: "tool-1", state: "output-available" },
+    { type: "data-spec", data: { type: "patch", patch: { op: "add", path: "/elements/main", value: { type: "Text", props: {}, children: [] } } } },
+  ];
+  const lifecycleSource = new ReadableStream({
+    start(controller) {
+      for (const chunk of lifecycleChunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  const lifecycleReader = instrumentGenerateStream(
+    tapSpecStreamForTelemetry(lifecycleSource, lifecycleContext, writeRequestTelemetry),
+    lifecycleContext,
+    writeRequestTelemetry,
+  ).getReader();
+  while (!(await lifecycleReader.read()).done) {}
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await Promise.all(lifecycleWrites);
+
+  const lifecycleEvents = await adapterA.listTelemetryEvents(session.id);
+  assert.equal(lifecycleEvents.some(({ event }) => event === "api.generate.spec_stream_patch"), true, "the owning session reads spec lifecycle telemetry");
+  assert.equal(lifecycleEvents.some(({ event }) => event === "api.generate.stream_first_tool"), true, "the owning session reads tool lifecycle telemetry");
+  assert.equal(lifecycleEvents.some(({ event }) => event === "api.generate.stream_finished"), true, "the owning session reads terminal lifecycle telemetry");
+  assert.deepEqual(await adapterB.listTelemetryEvents(session.id), [], "a foreign tenant cannot read request-aware stream lifecycle telemetry");
+
   await assert.rejects(
     () => adapterA.recordTelemetryEvent({ session_id: "missing-session", source: "client", event: "workspace.telemetry.invalid" }),
     (error) => error instanceof CloudWorkspacePersistenceError && error.code === "missing-request-context",
