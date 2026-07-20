@@ -184,7 +184,7 @@ assert.match(workbenchPageSource, /providerLost[^]*visualExtensionPaired = false
 assert.match(workbenchPageSource, /selectedVisualSourceId !== sourceId[^]*visualExtensionPaired = false/, "source context changes reset the context-bound extension pairing");
 assert.match(workbenchPageSource, /previousRoute[^]*pairingLost = visualExtensionPaired[^]*visualExtensionPaired = false/, "Host navigation resets the active-tab pairing before reporting stale context");
 assert.match(workbenchPageSource, /await restoreVisualContext\(next\.sessionId\)/, "workspace reconnect restores persisted visual state before refreshing providers");
-assert.match(workbenchPageSource, /status: previewInteractive \? "ready" : "connecting"/, "Preview readiness waits for an authenticated message from the hydrated preview frame");
+assert.match(workbenchPageSource, /status: visualSourceId === "preview" && visualStaleReason \? "stale" : previewInteractive \? "ready" : "connecting"/, "Preview readiness rejects stale context and otherwise waits for an authenticated frame message");
 assert.match(workbenchPageSource, /event\.source !== frame\.contentWindow \|\| event\.origin !== previewOrigin\) return;[^]*previewInteractive = true/, "only the verified preview frame may report that the interface is interactive");
 assert.match(workbenchPageSource, /function announcePreviewAvailability[^]*selectedVisualSourceId[^]*workspace\?\.preview[^]*Preview server is ready\. Waiting for the interface to connect\./, "a provisioned Preview reports the client hydration wait honestly");
 assert.equal((workbenchPageSource.match(/announcePreviewAvailability\(\);/g) ?? []).length, 2, "start and reconnect both refresh the default Preview status");
@@ -347,7 +347,7 @@ assert.deepEqual(plan.commands.map((command) => command.id), [
 ]);
 assert.equal(plan.commands[2].args.at(-1), DEV_WORKBENCH_REPOSITORY_ROOT);
 assert.doesNotMatch(plan.windows.flatMap((window) => window.command).join(" "), /HOST_AUTHORITY|CLOUDFLARE|GITHUB|DATABASE|VISUAL_GROUNDING/, "tmux commands exclude control-plane credentials and authority handles");
-assert.equal(plan.windows[3].command.join(" ").includes("Pipe B access is not configured"), true);
+assert.equal(plan.windows[3].command.join(" ").includes("Pipe B access is unavailable"), true);
 assert.equal(plan.windows[3].command.join(" ").includes("Set DEV_WORKBENCH_CLOUDFLARE_API_TOKEN"), false, "the unavailable logs window does not instruct operators to inject a control-plane credential");
 assert.equal(DEFAULT_REPOSITORY_COMMANDS.dev.includes("--"), false, "Vite flags must reach the dev script without a positional delimiter");
 const hostedPlan = createDevWorkbenchBootstrapPlan({
