@@ -877,6 +877,7 @@ export const POST: RequestHandler = async (event) => {
             documentVersion: activeDocument?.version_count,
             startedAt,
           },
+          writeRequestTelemetry,
         );
         const aiStream = pipeUiMessageStreamSafety(
           pipeArtifactToolOutputsToSpecParts(parsedStream),
@@ -925,7 +926,9 @@ export const POST: RequestHandler = async (event) => {
           startedAt,
           waitingMs: 10_000,
           waitingIntervalMs: 20_000,
-        });
+        },
+        writeRequestTelemetry,
+      );
         writer.merge(instrumented as ReadableStream<UIMessageChunk>);
         void writeRequestTelemetry({
           source: "server",

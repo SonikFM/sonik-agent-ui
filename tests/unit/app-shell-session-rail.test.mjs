@@ -371,7 +371,7 @@ const specTelemetryCallStart = generateRoute.indexOf("tapSpecStreamForTelemetry(
 const specTelemetryCall = generateRoute.slice(specTelemetryCallStart, generateRoute.indexOf("\n        );", specTelemetryCallStart) + 11);
 assert.match(specTelemetryCall, /},\n\s+writeRequestTelemetry,\n\s+\);$/, "generate route should persist spec telemetry through the request adapter");
 const streamTelemetryCallStart = generateRoute.indexOf("instrumentGenerateStream(");
-const streamTelemetryCall = generateRoute.slice(streamTelemetryCallStart, generateRoute.indexOf("\n        );", streamTelemetryCallStart) + 11);
+const streamTelemetryCall = generateRoute.slice(streamTelemetryCallStart, generateRoute.indexOf("\n      );", streamTelemetryCallStart) + 9);
 assert.match(streamTelemetryCall, /},\n\s+writeRequestTelemetry,\n\s+\);$/, "generate route should persist terminal stream telemetry through the request adapter");
 assert.equal(streamTelemetrySource.includes("api.generate.stream_finished"), true, "generate stream helper should log normal stream completion");
 assert.equal(streamTelemetrySource.includes("api.generate.stream_failed"), true, "generate stream helper should log stream failures before surfacing them");
