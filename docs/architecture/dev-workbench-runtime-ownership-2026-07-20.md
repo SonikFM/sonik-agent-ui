@@ -20,7 +20,7 @@ Status: implementation handoff for the Agent UI Dev Workbench.
 4. Keep booking and Amplify domain databases compatible with their production contracts. The Workbench memory SQLite database is not a substitute for Postgres.
 5. Subscribe to the Beacon `agentChannel`, persist a bounded local JSONL/SQLite index, and restore from the last cursor.
 6. Consume a normalized visual-grounding response and map its box or point to the existing DOM target registry, source metadata, and repository file.
-7. Inject only a short startup summary plus paths to current page context, OpenAPI, sitemap, screenshot, visual target, logs, and memory search. Host authority remains a server-only handle.
+7. Inject only a short startup summary plus paths to current page context, OpenAPI, sitemap, screenshot, visual target, logs, and memory search. Host authority is browser-relayed and server-consumed for the OpenAPI fetch; it never enters guest sandbox files or sanitized artifacts.
 8. Verify reload, navigation, sandbox resume, hot reload, and teardown behavior before promotion.
 
 ## Operator / companion-agent owns

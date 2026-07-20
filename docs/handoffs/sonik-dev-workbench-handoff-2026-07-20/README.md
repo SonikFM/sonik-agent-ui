@@ -38,7 +38,7 @@ Code presence, a passing unit test, an OMX ledger entry, or a merged pull reques
 1. **Reachability over code presence.** A hidden toolbar does not count as a shipped control.
 2. **One run, multiple surfaces.** Embedded web, standalone Workbench, TUI, voice, and messaging should supervise the same run and history rather than fork backends.
 3. **Truthful capability reporting.** Never display a global tool catalog or a static connected state as current runtime availability.
-4. **Host authority stays server-owned.** Browser context is sanitized evidence, not authority. Tokens and signed host credentials never enter public visual manifests or the guest terminal.
+4. **Host authority stays out of the guest sandbox.** Current authority is browser-relayed and server-consumed for the OpenAPI fetch. It never enters public visual manifests, sanitized artifacts, or the guest terminal.
 5. **Exactness is labeled.** Controlled Playwright preview and the active host tab are different sources with different fidelity.
 6. **Explicit visual capture.** No continuous screenshotting, background tab capture, or silent page recording.
 7. **Terminal is not the whole product.** The terminal is the execution surface; Sonik provides the context, evidence, approval, and recovery shell around it.

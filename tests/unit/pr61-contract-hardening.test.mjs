@@ -10,10 +10,11 @@ const handoff = "docs/handoffs/sonik-dev-workbench-handoff-2026-07-20";
 test("host authority is relayed for server consumption without entering the guest sandbox", () => {
   const requirements = read(`${handoff}/01-product-requirements.md`);
   const architecture = read(`${handoff}/03-architecture.md`);
+  const ownership = read("docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md");
   const page = read("apps/dev-workbench/src/routes/+page.svelte");
 
   assert.match(requirements, /browser-relayed[^\n]*server-consumed/i);
-  assert.doesNotMatch(architecture, /hostAuthorityHandle/);
+  assert.doesNotMatch(`${architecture}\n${ownership}`, /hostAuthorityHandle|server-only handle/i);
   assert.doesNotMatch(architecture, /contextPaths:[^}]*hostAuthority/s);
   assert.match(architecture, /host authority[^\n]*(guest filesystem|sandbox artifacts)/i);
   assert.doesNotMatch(page, /signed authority[^\n]*inside the sandbox/i);
@@ -48,7 +49,8 @@ test("handoff event examples parse through the strict runtime wire contract", ()
   for (const [sequence, payload] of payloads.entries()) {
     assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, sequence, payload }).success, true, payload.type);
   }
-  assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, payload: { type: "preview.available", status: "ready" } }).success, false);
+  assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, payload: { type: "preview.available", expiresAt: "2026-07-20T13:00:00.000Z", status: "ready" } }).success, false);
+  assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, payload: { ...payloads[0], extra: true } }).success, false);
   assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, payload: payloads[0], kind: "status.changed" }).success, false);
   assert.match(architecture, /schemaVersion, eventId, sequence, occurredAt, sessionId, organizationId, channelKey, payload/);
 });
