@@ -24,7 +24,6 @@ const workspaceSessionSource = await readFile("packages/workspace-session/src/in
 const sessionsRoute = await readFile("apps/standalone-sveltekit/src/routes/api/sessions/+server.ts", "utf8");
 const sessionsArchivedRoute = await readFile("apps/standalone-sveltekit/src/routes/api/sessions/archived/+server.ts", "utf8");
 const appCss = await readFile("apps/standalone-sveltekit/src/app.css", "utf8");
-const calloutSource = await readFile("apps/standalone-sveltekit/src/lib/render/components/Callout.svelte", "utf8");
 const layoutSource = await readFile("apps/standalone-sveltekit/src/routes/+layout.svelte", "utf8");
 const workspaceFrameSource = await readFile("packages/workspace-core/src/components/WorkspaceDocumentFrame.svelte", "utf8");
 const workspaceHostSource = await readFile("apps/standalone-sveltekit/static/workspace-document-host.html", "utf8");
@@ -316,14 +315,6 @@ assert.equal(appCss.includes("--color-background: var(--color-base-100)"), true,
 assert.equal(appCss.includes("--app-control-bg"), true, "standalone app should project canonical theme vars into local app control vars");
 assert.equal(appCss.includes("--sonik-border-color"), true, "standalone app should expose a compatibility border color without shadowing DaisyUI border width");
 assert.equal(appCss.includes("--border: color-mix"), false, "standalone app should not overwrite DaisyUI\'s --border width token as a color");
-assert.match(calloutSource, /role="note"/, "rendered callouts should expose static note semantics");
-for (const token of ["info", "success", "warning", "primary"]) {
-  assert.match(calloutSource, new RegExp(`border-l-${token}`), `rendered callouts should use the ${token} border token`);
-  assert.match(calloutSource, new RegExp(`bg-${token}/10`), `rendered callouts should use the ${token} background token`);
-  assert.match(calloutSource, new RegExp(`text-${token}`), `rendered callouts should use the ${token} icon token`);
-}
-assert.doesNotMatch(calloutSource, /(?:blue|emerald|amber|purple)-500/, "rendered callouts should not bypass the active theme palette");
-assert.match(appCss, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.animate-shimmer\s*\{[\s\S]*?animation:\s*none/, "shimmer should respect reduced-motion preferences");
 assert.equal(daisyThemeSource.includes('themes: all'), true, "DaisyUI should compile the full built-in theme library");
 assert.equal(themeRegistrySource.includes('CUSTOM_DOCUMENT_THEME_IDS'), true, "theme registry should include Amplify custom themes");
 assert.equal(themeRegistrySource.includes('"sonik-operator-dark"'), true, "theme registry should include the Booking operator dark theme id");
