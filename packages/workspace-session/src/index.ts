@@ -1748,10 +1748,15 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       if (sessionId && !await this.#selectSession(tx, sessionId)) return [];
       const { rows } = await tx.query<CloudWorkspaceTelemetryRow>(
         `select id, session_id, request_id, source, event, payload, ok, error, created_at
-         from sonik_agent_ui.agent_workspace_telemetry_events
-         where organization_id = $1 and user_id = $2 and ($3::text is null or session_id = $3)
+         from (
+           select id, session_id, request_id, source, event, payload, ok, error, created_at
+           from sonik_agent_ui.agent_workspace_telemetry_events
+           where organization_id = $1 and user_id = $2 and ($3::text is null or session_id = $3)
+           order by created_at desc, id desc
+           limit $4
+         ) as telemetry_events
          order by created_at asc, id asc
-         limit $4`,
+        `,
         [this.#authorized.organizationId, this.#authorized.userId, sessionId ?? null, 500],
       );
       return rows.map(mapCloudTelemetryRow);

@@ -635,11 +635,11 @@ class FakeRlsWorkspaceSqlTransaction {
       return { rows: [clone(row)] };
     }
 
-    if (normalized.startsWith("select id, session_id, request_id, source, event, payload, ok, error, created_at from sonik_agent_ui.agent_workspace_telemetry_events")) {
+    if (normalized.startsWith("select id, session_id, request_id, source, event, payload, ok, error, created_at") && normalized.includes("from sonik_agent_ui.agent_workspace_telemetry_events")) {
       const [organization_id, user_id, session_id, limit] = params;
       this.assertMatchesContext(organization_id, user_id);
       const rows = [...this.tables.telemetry.values()]
-        .filter((row) => row.organization_id === organization_id && row.user_id === user_id && (session_id === undefined || row.session_id === session_id))
+        .filter((row) => row.organization_id === organization_id && row.user_id === user_id && (session_id == null || row.session_id === session_id))
         .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || a.id.localeCompare(b.id))
         .slice(-limit)
         .map(clone);
@@ -713,6 +713,13 @@ async function runWorkspaceCloudSqlAdapterTests() {
     (error) => error instanceof CloudWorkspacePersistenceError && error.code === "missing-request-context",
     "cloud telemetry writes must reject missing or foreign sessions",
   );
+  for (let index = 0; index < 505; index += 1) {
+    await adapterA.recordTelemetryEvent({ session_id: session.id, source: "server", event: `workspace.telemetry.bulk-${index}` });
+  }
+  const boundedTelemetry = await adapterA.listTelemetryEvents(session.id);
+  assert.equal(boundedTelemetry.length, 500, "cloud telemetry reads must remain bounded");
+  assert.equal(boundedTelemetry[0]?.event, "workspace.telemetry.bulk-5", "bounded cloud telemetry reads retain the newest rows in stable chronological order");
+  assert.equal(boundedTelemetry.at(-1)?.event, "workspace.telemetry.bulk-504");
 
   const message = await adapterA.appendMessage({ session_id: session.id, id: "msg-1", role: "user", content: "hello cloud", parts: [{ type: "text", text: "hello cloud" }] });
   assert.equal(message.session_id, session.id);

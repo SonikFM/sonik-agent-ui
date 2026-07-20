@@ -32,9 +32,9 @@ export async function readTelemetryBatch(request: Request): Promise<TelemetryBat
   if (values.length > MAX_TELEMETRY_BATCH_EVENTS) return { ok: false, status: 413, error: "too_many_events" };
   const events: AgentTelemetryEvent[] = [];
   for (const value of values) {
+    if (new TextEncoder().encode(JSON.stringify(value)).byteLength > MAX_TELEMETRY_EVENT_BYTES) return { ok: false, status: 413, error: "telemetry_event_too_large" };
     const event = coerceTelemetryEvent(value);
     if (!event) return { ok: false, status: 400, error: "invalid_telemetry_event" };
-    if (new TextEncoder().encode(JSON.stringify(value)).byteLength > MAX_TELEMETRY_EVENT_BYTES) return { ok: false, status: 413, error: "telemetry_event_too_large" };
     events.push(event);
   }
   return { ok: true, events };
@@ -82,7 +82,7 @@ function coerceTelemetryEvent(value: unknown): AgentTelemetryEvent | null {
   if (!event || event.length > MAX_TELEMETRY_EVENT_NAME_CHARS || !/^[a-zA-Z0-9._:-]+$/.test(event)) return null;
   const source = record.source === `ody${"sseus"}-host` ? "workspace-host" : record.source;
   if (source !== "client" && source !== "workspace-host") return null;
-  return { ...record, source, event } as AgentTelemetryEvent;
+  return sanitizeAgentTelemetry({ ...record, source, event } as AgentTelemetryEvent);
 }
 
 function emitTelemetryToWorkerLogs(payload: AgentTelemetryEvent): void {
