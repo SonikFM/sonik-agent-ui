@@ -2,10 +2,10 @@
 
 **Final evidence package · G001–G007**
 
-**Run window:** 2026-07-20 16:03–19:03 America/New_York, plus final closeout  
-**Product/review head:** `030cdb86eda3aedba326392f1ad4e363cf960b44`  
-**Branch:** `fix/dev-workbench-embedded-context-20260720`  
-**Pull request:** [SonikFM/sonik-agent-ui#61](https://github.com/SonikFM/sonik-agent-ui/pull/61)  
+**Run window:** 2026-07-20 16:03–19:03 America/New_York, plus final closeout
+**Product/review head:** `030cdb86eda3aedba326392f1ad4e363cf960b44`
+**Branch:** `fix/dev-workbench-embedded-context-20260720`
+**Pull request:** [SonikFM/sonik-agent-ui#61](https://github.com/SonikFM/sonik-agent-ui/pull/61)
 **Disposition:** implementation and local quality gates clear; push, remote rereview, CI on the new head, live authenticated operator proof, and durable Ultragoal closeout remain.
 
 > **This is a retrospective, not a promotion claim.** The final product head passed the recorded code and architecture gates, but PR 61 still points to the old head and the durable Ultragoal ledger has not yet been reconciled. Completed engineering evidence and remaining operational work are separated below.
@@ -149,8 +149,8 @@ This sequence cost time, but it prevented the run from shipping durable lifecycl
 
 ## 5. Bounded API reliability
 
-**Target:** `GET https://sonik-booking-service-pipe-b.liam-trampota.workers.dev/api/v1/booking/ping`  
-**Environment:** staging  
+**Target:** `GET https://sonik-booking-service-pipe-b.liam-trampota.workers.dev/api/v1/booking/ping`
+**Environment:** staging
 **Bounds:** 5 virtual users for 30 seconds, GET only, no credentials, writes, fuzzing, production traffic, or Agent UI traffic.
 
 | Measure | Result |
