@@ -12,23 +12,19 @@
 
   const configs = {
     info: {
-      border: "border-l-info",
-      bg: "bg-info/10",
-      iconColor: "text-info",
+      surface: "alert-info",
+      iconColor: "text-info-content",
     },
     tip: {
-      border: "border-l-success",
-      bg: "bg-success/10",
-      iconColor: "text-success",
+      surface: "alert-success",
+      iconColor: "text-success-content",
     },
     warning: {
-      border: "border-l-warning",
-      bg: "bg-warning/10",
-      iconColor: "text-warning",
+      surface: "alert-warning",
+      iconColor: "text-warning-content",
     },
     important: {
-      border: "border-l-primary",
-      bg: "bg-primary/10",
+      surface: "border-primary bg-primary/10",
       iconColor: "text-primary",
     },
   };
@@ -36,7 +32,7 @@
   const config = $derived(configs[props.type ?? "info"] ?? configs.info);
 </script>
 
-<div role="note" class="border-l-4 {config.border} {config.bg} rounded-r-lg p-4">
+<div role="note" class="alert border {config.surface} rounded-lg p-4">
   <div class="flex items-start gap-3">
     {#if props.type === "tip"}
       <Lightbulb class="h-5 w-5 mt-0.5 shrink-0 {config.iconColor}" />
@@ -51,7 +47,7 @@
       {#if props.title}
         <p class="font-semibold text-sm mb-1">{props.title}</p>
       {/if}
-      <p class="text-sm text-muted-foreground">{props.content}</p>
+      <p class="text-sm opacity-80">{props.content}</p>
     </div>
   </div>
 </div>
