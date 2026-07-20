@@ -1,7 +1,7 @@
 # Sonik Agent UI theme and JSON-render audit
 
-**Audit date:** 2026-07-20  
-**Scope:** current `sonik-agent-ui` checkout plus fresh GitHub evidence for `SonikFM/sonik-svelte` PRs [#2](https://github.com/SonikFM/sonik-svelte/pull/2)–[#8](https://github.com/SonikFM/sonik-svelte/pull/8).  
+**Audit date:** 2026-07-20
+**Scope:** current `sonik-agent-ui` checkout plus fresh GitHub evidence for `SonikFM/sonik-svelte` PRs [#2](https://github.com/SonikFM/sonik-svelte/pull/2)–[#8](https://github.com/SonikFM/sonik-svelte/pull/8).
 **Labels:** **complete** = implemented and covered in this repository; **partial** = useful implementation with a named gap; **stub** = demonstrator or inventory without a production path; **missing** = no current implementation.
 
 ## Executive status

@@ -1,11 +1,11 @@
 # Sonik Agent UI completion contract
 
-**Agreement-first baseline · Ultragoal G001**  
-**Run started:** 2026-07-20T20:03:01Z  
-**Baseline snapshot:** 2026-07-20T20:08:56Z  
-**Branch:** `fix/dev-workbench-embedded-context-20260720`  
-**Head at baseline:** `036f713`  
-**Pull request:** [SonikFM/sonik-agent-ui#61](https://github.com/SonikFM/sonik-agent-ui/pull/61)  
+**Agreement-first baseline · Ultragoal G001**
+**Run started:** 2026-07-20T20:03:01Z
+**Baseline snapshot:** 2026-07-20T20:08:56Z
+**Branch:** `fix/dev-workbench-embedded-context-20260720`
+**Head at baseline:** `036f713`
+**Pull request:** [SonikFM/sonik-agent-ui#61](https://github.com/SonikFM/sonik-agent-ui/pull/61)
 **Existing protected preview:** `https://dev-workbench-80wqt9cpg-danletterio-5975s-projects.vercel.app`
 
 > **Contract, not a completion claim.** This document defines what this Ultragoal run will prove, repair, audit, deploy, and report. Statuses distinguish implemented behavior from deployed, freshly verified behavior. Anything lacking current-run evidence remains partial, skeleton, or missing.
