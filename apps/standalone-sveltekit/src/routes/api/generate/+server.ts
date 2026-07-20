@@ -926,7 +926,9 @@ export const POST: RequestHandler = async (event) => {
           startedAt,
           waitingMs: 10_000,
           waitingIntervalMs: 20_000,
-        }, writeRequestTelemetry);
+        },
+        writeRequestTelemetry,
+      );
         writer.merge(instrumented as ReadableStream<UIMessageChunk>);
         void writeRequestTelemetry({
           source: "server",
