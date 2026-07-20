@@ -72,6 +72,7 @@
   import { fetchComposerCatalog } from "$lib/composer-catalog";
   import { formatDateDisplay, formatSessionOptionTitle } from "$lib/date-display";
   import { createQuestionErrorStatePath, createQuestionLifecycleStatePath, escapeJsonPointerSegment } from "$lib/render/question-card-state";
+  import { explorerCatalog } from "$lib/render/catalog";
   import { registry } from "$lib/render/registry";
   import {
     applyJsonRenderStateChanges,
@@ -4654,7 +4655,7 @@
              artifact (streamed or complete) first appeared. Share the same state store
              so the devtools state tab reflects the live artifact, not a shadow copy. -->
         <JsonUIProvider initialState={activeArtifact.content.state} store={activeArtifactStateStore}>
-          <JsonRenderDevtools spec={activeArtifact.content} catalog={null} position="right" />
+          <JsonRenderDevtools spec={activeArtifact.content} catalog={explorerCatalog} position="right" />
         </JsonUIProvider>
       {/if}
     </CanvasViewport>
