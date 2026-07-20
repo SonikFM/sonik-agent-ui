@@ -183,6 +183,9 @@ assert.match(workbenchPageSource, /return \(\) => \{[^]*cancelHostPicker\(\)[^]*
 assert.match(workbenchPageSource, /providerLost[^]*visualExtensionPaired = false[^]*"provider-lost"/, "provider or pairing loss resets paired capability and invalidates current context");
 assert.match(workbenchPageSource, /selectedVisualSourceId !== sourceId[^]*visualExtensionPaired = false/, "source context changes reset the context-bound extension pairing");
 assert.match(workbenchPageSource, /previousRoute[^]*pairingLost = visualExtensionPaired[^]*visualExtensionPaired = false/, "Host navigation resets the active-tab pairing before reporting stale context");
+assert.match(workbenchPageSource, /await restoreVisualContext\(next\.sessionId\)/, "workspace reconnect restores persisted visual state before refreshing providers");
+assert.match(workbenchPageSource, /fetch\("\/api\/workspaces\/visual-context"\)[^]*visualContextReadResponseSchema\.safeParse[^]*sourceContextRevision = snapshot\.sourceContextRevision[^]*routeRevision = snapshot\.routeRevision/, "persisted visual revisions and source are restored from the strict snapshot response");
+assert.match(workbenchPageSource, /const previousRoute = restoredHostRoute[^]*restoredHostRoute = nextRoute \?\? null[^]*previousRoute !== nextRoute[^]*invalidateVisualContext/, "the first host donation after remount compares against the restored route and invalidates stale context");
 assert.match(workbenchPageSource, /method: "PUT"[^]*body: JSON\.stringify\(request\)[^]*visualContextRequestSchema\.safeParse/, "host operations await a strict server-registered request before postMessage");
 assert.match(workbenchPageSource, /submitVisualResult\(request, result\)/, "pairing results reach the existing server telemetry route");
 assert.match(workbenchPageSource, /payload\.accepted === true[^]*"Preview Capture is current\."/, "Preview success requires server acceptance, not provider completion alone");

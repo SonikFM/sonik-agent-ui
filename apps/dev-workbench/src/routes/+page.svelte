@@ -58,6 +58,9 @@
     accepted: z.boolean(),
     snapshot: visualContextSnapshotSchema.nullable(),
   });
+  const visualContextReadResponseSchema = z.strictObject({
+    snapshot: visualContextSnapshotSchema.nullable(),
+  });
 
   let workspace = $state<DevWorkbenchSessionDescriptor | null>(null);
   let operation = $state<Operation>("resuming");
@@ -70,6 +73,7 @@
   let workbenchOrigin = $state<string | null>(null);
   let hostColorScheme = $state<"light" | "dark" | null>(null);
   let hostContextRefreshTimer: number | null = null;
+  let restoredHostRoute = $state<string | null>(null);
   let selectedVisualSourceId = $state<"preview" | "host" | null>(null);
   let sourceContextRevision = $state(0);
   let routeRevision = $state(0);
@@ -342,9 +346,11 @@
   function handleBridgeMessage(event: MessageEvent): void {
     if (event.source === window.parent && event.origin === embeddedHostOrigin) {
       if (isAgentHostPageContextMessage(event.data)) {
-        const previousRoute = discoveredVisualSources().find((source) => source.id === "host")?.route;
+        const previousRoute = restoredHostRoute
+          ?? discoveredVisualSources().find((source) => source.id === "host")?.route;
         hostContextMessage = event.data;
         const nextRoute = discoveredVisualSources().find((source) => source.id === "host")?.route;
+        restoredHostRoute = nextRoute ?? null;
         if (previousRoute && nextRoute && previousRoute !== nextRoute) {
           routeRevision += 1;
           const pairingLost = visualExtensionPaired;
@@ -641,11 +647,39 @@
     const next = await requestWorkspace("GET");
     if (next) {
       workspace = next;
+      await restoreVisualContext(next.sessionId);
       void requestVisualBrowser("get-capabilities");
       if (hostContextMessage) void synchronizePageContext();
     }
     else if (startIfMissing && !visibleError) await startWorkspaceRequest();
     else terminalState = "error";
+  }
+
+  async function restoreVisualContext(sessionId: string): Promise<void> {
+    try {
+      const response = await fetch("/api/workspaces/visual-context");
+      if (response.status === 404) return;
+      if (!response.ok) throw new Error(await publicError(response));
+      const parsed = visualContextReadResponseSchema.safeParse(await response.json());
+      if (!parsed.success) throw new Error("The server returned invalid saved visual context.");
+      if (workspace?.sessionId !== sessionId || !parsed.data.snapshot) return;
+      const snapshot = parsed.data.snapshot;
+      selectedVisualSourceId = snapshot.source.id;
+      sourceContextRevision = snapshot.sourceContextRevision;
+      routeRevision = snapshot.routeRevision;
+      restoredHostRoute = snapshot.source.id === "host" ? snapshot.source.route : null;
+      visualStatus = snapshot.status === "current" ? "idle" : "invalidated";
+      visualStaleReason = snapshot.staleReason;
+      visualStatusMessage = snapshot.status === "current"
+        ? `${snapshot.source.label} visual context restored.`
+        : "Saved visual context is stale. Capture it again when the source is ready.";
+      announcement = visualStatusMessage;
+    } catch (error) {
+      if (workspace?.sessionId !== sessionId) return;
+      visualStatus = "error";
+      visualStatusMessage = safeMessage(error, "Saved visual context could not be restored.");
+      announcement = visualStatusMessage;
+    }
   }
 
   async function synchronizePageContext(): Promise<void> {
