@@ -529,7 +529,7 @@ assert.equal(observabilityPackageSource.includes("Runtime-safe page-control surf
 assert.equal(observabilityPackageSource.includes("sanitizeTelemetryValue"), true, "shared observability core should provide redaction before logs become machine evidence");
 assert.equal(agentTelemetrySource.includes("sanitizeTelemetryEvent"), true, "server telemetry writer should use shared observability sanitization");
 assert.equal(telemetryRouteSource.includes('record.source === "' + "ody" + 'sseus-host"'), false, "telemetry API should not keep legacy copied-editor branding as a first-class source name");
-assert.equal(telemetryRouteSource.includes('return "workspace-host"'), true, "telemetry API should normalize legacy host source names to workspace-host");
+assert.equal(agentTelemetrySource.includes('? "workspace-host"'), true, "server telemetry should normalize legacy host source names to workspace-host");
 assert.equal(telemetryRouteSource.includes('value === "server"'), false, "browser telemetry route should not accept forged privileged server source events");
 assert.equal(telemetryRouteSource.includes('value === "system"'), false, "browser telemetry route should not accept forged privileged system source events");
 assert.equal(generateRoute.includes("createTelemetryCorrelation"), true, "generate route should create or trust correlation headers per request");
