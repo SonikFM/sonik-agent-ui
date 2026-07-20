@@ -250,4 +250,3 @@ Time begins at **2026-07-20T20:03:01Z**. The final report will record elapsed wa
 ## 15. Source of truth
 
 This baseline was assembled from `.omx/ultragoal/brief.md`, the canonical Dev Workbench handoff package, `docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md`, current repository source and scripts, PR 61 metadata/checks/reviews, and the user's amended requirements. Later evidence may change a status, but it must do so through the acceptance and release gates above.
-
