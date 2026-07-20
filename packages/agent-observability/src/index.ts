@@ -312,6 +312,7 @@ const MAX_LIST_ITEMS = 8;
 const SECRET_KEY_PATTERN = /(authorization|api[-_]?key|token|secret|password|cookie|set-cookie|credential|session[_-]?token|vck_[a-z0-9]+)/i;
 const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
 const PROVIDER_PRIVATE_KEY_PATTERN = /^(?:provider(?:metadata|data|options|request|response|id|name|ref|reference|references)?|model(?:metadata|data|options|request|response|id|name)?)$/;
+const PRIVATE_THOUGHT_KEY_PATTERN = /^(?:reasoning|thinking|scratchpad|chainofthought)$/;
 const FAILURE_KEY_PATTERN = /(error|failure|exception)/i;
 const SAFE_FAILURE_STRING_KEYS = /^(schemaVersion|eventId|source|event|runId|workflowRunId|phase|requestId|traceId|traceparent|sessionId|messageId|toolCallId|toolName|artifactId|documentId|commandId|familyId|operationId|stableInputHash|code|error_code|status|kind|type|manifestType|severity|effect|approval|method|at|surface|commandFamily|commandSource|commandEffect|runtimeStatus|hostSessionSource|loadMode|contextSource|mode|activeSessionId|activeArtifactId|activeDocumentId|pageType|conversationStatus)$/i;
 const SAFE_FAILURE_REASON_CODES = new Set(["duplicate", "busy", "blocked", "ledger_read_failed", "ledger_write_failed"]);
@@ -572,7 +573,7 @@ export function sanitizeTelemetryValue(value: unknown, depth = 0, errorBearing =
     if (depth > 4) return "[MaxDepth]";
     const output: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>).slice(0, 48)) {
-      if (PROVIDER_PRIVATE_KEY_PATTERN.test(key.replace(/[_-]/g, "").toLowerCase())) continue;
+      if (PROVIDER_PRIVATE_KEY_PATTERN.test(key.replace(/[_-]/g, "").toLowerCase()) || PRIVATE_THOUGHT_KEY_PATTERN.test(key.replace(/[^a-z0-9]/gi, "").toLowerCase())) continue;
       output[redactTelemetryString(key)] = SECRET_KEY_PATTERN.test(key) ? "[REDACTED]" : sanitizeTelemetryValue(entry, depth + 1, errorBearing, key);
     }
     return output;
