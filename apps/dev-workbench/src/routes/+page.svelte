@@ -65,6 +65,7 @@
   let workspace = $state<DevWorkbenchSessionDescriptor | null>(null);
   let operation = $state<Operation>("resuming");
   let terminalState = $state<TerminalState>("connecting");
+  let previewInteractive = $state(false);
   let activeDetail = $state<WorkbenchDetail>(devWorkbenchStartingFixture.activeDetail);
   let announcement = $state("");
   let visibleError = $state<string | null>(null);
@@ -156,7 +157,7 @@
       },
       preview: workspace.preview
         ? {
-            status: "ready",
+            status: previewInteractive ? "ready" : "connecting",
             url: createEmbeddedPreviewUrl({
               previewUrl: workspace.preview.url,
               workbenchOrigin,
@@ -380,6 +381,13 @@
     const frame = previewFrame();
     const previewOrigin = currentPreviewOrigin();
     if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== previewOrigin) return;
+    if (!previewInteractive) {
+      previewInteractive = true;
+      if (!selectedVisualSourceId) {
+        visualStatusMessage = "Preview is ready. Capture it to attach current visual context.";
+      }
+      announcement = "Preview interface connected.";
+    }
     if (isAgentPageContextRequestMessage(event.data)) {
       if (hostContextMessage) postHostContextToPreview();
       else requestHostContext("sandbox_preview_requested_context");
@@ -631,9 +639,11 @@
   async function startWorkspaceRequest(): Promise<void> {
     operation = "starting";
     visibleError = null;
+    previewInteractive = false;
     const next = await requestWorkspace("POST");
     if (next) {
       workspace = next;
+      announcePreviewAvailability();
       terminalState = "connecting";
       announcement = "Workspace ready.";
       void requestVisualBrowser("get-capabilities");
@@ -644,15 +654,22 @@
 
   async function reconnectWorkspaceRequest(startIfMissing = false): Promise<void> {
     visibleError = null;
+    previewInteractive = false;
     const next = await requestWorkspace("GET");
     if (next) {
       workspace = next;
       await restoreVisualContext(next.sessionId);
+      announcePreviewAvailability();
       void requestVisualBrowser("get-capabilities");
       if (hostContextMessage) void synchronizePageContext();
     }
     else if (startIfMissing && !visibleError) await startWorkspaceRequest();
     else terminalState = "error";
+  }
+
+  function announcePreviewAvailability(): void {
+    if (selectedVisualSourceId || !workspace?.preview) return;
+    visualStatusMessage = "Preview server is ready. Waiting for the interface to connect.";
   }
 
   async function restoreVisualContext(sessionId: string): Promise<void> {

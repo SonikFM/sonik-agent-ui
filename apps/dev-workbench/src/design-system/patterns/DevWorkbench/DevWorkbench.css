@@ -380,6 +380,7 @@
 }
 
 .dev-workbench__panel-body {
+  position: relative;
   min-height: 0;
   overflow: hidden;
 }
@@ -390,6 +391,28 @@
   height: 100%;
   border: 0;
   background: Canvas;
+}
+
+.dev-workbench__preview-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 0.45rem;
+  padding: 1.5rem;
+  text-align: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--dw-panel) 92%, transparent);
+}
+
+.dev-workbench__preview-loading strong {
+  font-size: 0.9rem;
+}
+
+.dev-workbench__preview-loading p {
+  max-width: 28rem;
+  color: var(--dw-muted);
+  font-size: 0.78rem;
 }
 
 .dev-workbench__empty {

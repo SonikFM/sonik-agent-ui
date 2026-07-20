@@ -351,7 +351,7 @@
       </header>
 
       <div class="dev-workbench__panel-body">
-        {#if preview.status === "ready" && preview.url}
+        {#if preview.url}
           <iframe
             class="dev-workbench__preview-frame"
             src={preview.url}
@@ -360,6 +360,12 @@
             sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
             referrerpolicy="no-referrer"
           ></iframe>
+          {#if preview.status === "connecting"}
+            <div class="dev-workbench__preview-loading" role="status" aria-live="polite">
+              <strong>Starting the preview interface</strong>
+              <p>The first client compile can take about a minute. The terminal remains available while it loads.</p>
+            </div>
+          {/if}
         {:else}
           <div class="dev-workbench__empty" role="status">
             <strong>Preview unavailable</strong>
