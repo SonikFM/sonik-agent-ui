@@ -48,10 +48,10 @@ An older completion claim never overrides current code or observed behavior.
 
 ## 4. Historical conversation source
 
-The full conversation is preserved outside the repository at:
+The full conversation is preserved outside the repository under redacted session identifier:
 
 ```text
-/Users/danielletterio/.codex/sessions/2026/07/14/rollout-2026-07-14T07-23-17-019f605d-f105-75f0-a4d4-1f24a04333ea.jsonl
+019f605d-f105-75f0-a4d4-1f24a04333ea
 ```
 
 At audit time it was approximately 161 MB and 56,720 lines. It is intentionally **not copied** into this handoff. This package consolidates operative requirements while keeping the transcript as provenance.

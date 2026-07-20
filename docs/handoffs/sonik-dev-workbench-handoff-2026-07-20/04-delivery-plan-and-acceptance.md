@@ -12,7 +12,7 @@ Execute one integrated vertical slice at a time. Do not reopen broad parallel im
 
 ## 2. Sequence
 
-### Gate 0 — Restore truth and reachability (P0)
+### Gate 0 — Restore truth and reachability (P0) — repository implementation completed
 
 **Goal:** make the current implementation honest and reachable before adding features.
 
@@ -39,6 +39,8 @@ Verification:
 - Component/accessibility tests for terminal strip and menus.
 - Embedded Booking Playwright test at representative narrow and wide widths.
 - Visual regression evidence for right, bottom, and fullscreen.
+
+Repository evidence: `DevWorkbench.contract.test.ts` and `embedded-workbench.spec.ts` cover restored controls, persistence, and remount behavior. Deployed Booking and visual-regression receipts remain promotion evidence.
 
 ### Gate 1 — Authenticated Booking context (P0)
 

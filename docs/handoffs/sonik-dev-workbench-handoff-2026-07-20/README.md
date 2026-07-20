@@ -48,8 +48,8 @@ Code presence, a passing unit test, an OMX ledger entry, or a merged pull reques
 
 - Vercel Sandbox, repository bootstrap, `tmux`, raw Codex CLI, direct xterm PTY, and a hot frontend preview exist.
 - The Booking embed can open a terminal-only Workbench surface.
-- The terminal-only query mode hides the toolbar and dock controls that contain source selection, element picking, capture, and diagnostic affordances.
-- Preview capture and host picker implementations exist, but the intended Booking UI cannot currently reach them through the terminal-only embed.
+- The terminal-only embed now retains a compact, restored toolbar and dock controls for source selection, element picking, capture, and layout.
+- Component contracts and the embedded Playwright journey cover control reachability and layout persistence; deployed Booking proof remains a separate release gate.
 - Exact active-tab extension code exists, but current Workbench code disables pairing/capture because the trust proof is not considered sufficient.
 - Realtime egress, live console/network/file streams, Chrome DevTools integration, MCP, deploy authority, and teardown-surviving Codex authentication are not complete.
 

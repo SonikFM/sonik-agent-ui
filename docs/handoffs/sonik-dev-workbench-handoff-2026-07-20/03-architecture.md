@@ -106,16 +106,18 @@ flowchart TB
 ### 3.1 Workspace attachment
 
 ```ts
+type PreviewStatus = "connecting" | "ready" | "stale" | "unavailable" | "error";
+
 type WorkspaceAttachment = {
   workspaceId: string;
   provider: "vercel-sandbox";
   repository: { slug: string; revision: string; root: string };
   tmuxSession: string;
-  preview: { status: "booting" | "ready" | "failed"; url?: string };
+  preview: { status: PreviewStatus; url?: string };
+  hostAuthorityHandle?: string;
   contextPaths: {
     page: string;
     visual: string;
-    hostAuthority: string;
     sitemap: string;
     commandCatalog: string;
   };
@@ -123,7 +125,7 @@ type WorkspaceAttachment = {
 };
 ```
 
-This is data, not a live SDK object. Provider clients are reconstructed on the server.
+This is data, not a live SDK object. Provider clients are reconstructed on the server. `hostAuthorityHandle` is an expiring, revocable server-only reference with explicit access control; host authority is excluded from the guest filesystem and client state.
 
 ### 3.2 Capability readiness
 
@@ -147,29 +149,29 @@ The same structure should drive buttons, Codex context, tool discovery, and diag
 Terminal bytes remain on the direct PTY connection. Product state uses bounded events:
 
 ```ts
-type WorkbenchEvent = {
+type WorkbenchEventPayloads = {
+  "status.changed": { status: "provisioning" | "cloning" | "installing" | "starting" | "ready" | "suspending" | "suspended" | "stopping" | "stopped" | "failed" };
+  "preview.available": { expiresAt: string };
+  "terminal.available": { sandboxExpiresAt: string };
+  "page-context.updated": { path: string };
+  "repository.changed": { paths: string[] };
+  error: { code: string; message: string };
+};
+
+type WorkbenchEvent<K extends keyof WorkbenchEventPayloads = keyof WorkbenchEventPayloads> = {
   id: string;
   workspaceId: string;
   sequence: number;
   at: string;
-  kind:
-    | "workspace.phase"
-    | "process.output"
-    | "file.changed"
-    | "preview.status"
-    | "network.failed"
-    | "verification.result"
-    | "context.updated"
-    | "tool.started"
-    | "tool.finished"
-    | "approval.requested"
-    | "deployment.status";
+  kind: K;
   correlationId?: string;
-  payload: unknown; // kind-specific, bounded schema
+  payload: WorkbenchEventPayloads[K];
 };
 ```
 
 Realtime egress transports these events and cursors; it does not proxy the terminal.
+
+Planned event kinds such as process output, verification, approval, deployment, and network failure are not part of the current wire contract until their bounded schemas and runtime producers ship.
 
 ## 4. Page-context flow
 
