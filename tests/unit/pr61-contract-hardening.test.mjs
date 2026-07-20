@@ -15,20 +15,41 @@ test("host authority stays server-only", () => {
   assert.match(architecture, /host authority[^\n]*(guest filesystem|client state)/i);
 });
 
-test("preview status and event payloads are bounded contracts", () => {
+test("preview status and event payloads match runtime contracts", () => {
   const architecture = read(`${handoff}/03-architecture.md`);
 
-  assert.match(architecture, /type PreviewStatus =[^;]*"booting"[^;]*"ready"[^;]*"failed"[^;]*"stale"/);
+  assert.match(architecture, /type PreviewStatus =[^;]*"connecting"[^;]*"ready"[^;]*"stale"[^;]*"unavailable"[^;]*"error"/);
   assert.match(architecture, /type WorkbenchEventPayloads =/);
   assert.match(architecture, /type WorkbenchEvent<K extends keyof WorkbenchEventPayloads>/);
   assert.match(architecture, /payload: WorkbenchEventPayloads\[K\]/);
+  for (const kind of [
+    "status.changed",
+    "preview.available",
+    "terminal.available",
+    "page-context.updated",
+    "repository.changed",
+    "error",
+  ]) assert.match(architecture, new RegExp(`"${kind.replace(".", "\\.")}"`));
+  assert.match(architecture, /planned event kinds/i);
   assert.doesNotMatch(architecture, /payload: unknown/);
 });
 
 test("handoff provenance is portable", () => {
+  const paths = [
+    `${handoff}/README.md`,
+    ...[1, 2, 3, 4, 5].map((number) => `${handoff}/0${number}-${[
+      "product-requirements",
+      "current-state-and-gaps",
+      "architecture",
+      "delivery-plan-and-acceptance",
+      "source-index",
+    ][number - 1]}.md`),
+    `${handoff}/handoff-manifest.json`,
+    "docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md",
+  ];
   const sourceIndex = read(`${handoff}/05-source-index.md`);
 
-  assert.doesNotMatch(sourceIndex, /\/Users\/[A-Za-z0-9._-]+\//);
+  for (const path of paths) assert.doesNotMatch(read(path), /\/Users\/[A-Za-z0-9._-]+\//, path);
   assert.match(sourceIndex, /session[^\n]*(019f605d|redacted)/i);
   assert.match(sourceIndex, /outside the repository|external/i);
 });
