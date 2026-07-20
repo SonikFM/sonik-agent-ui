@@ -277,4 +277,3 @@ At narrow width, controls collapse into labeled menus but remain keyboard reacha
 - No global tool catalog represented as live availability.
 - No background browsing or continuous screenshot recording.
 - No separate chat/history backend for web, terminal, voice, or WhatsApp.
-

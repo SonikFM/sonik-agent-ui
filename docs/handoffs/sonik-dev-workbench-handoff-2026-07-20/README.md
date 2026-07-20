@@ -1,7 +1,7 @@
 # Sonik Dev Workbench Handoff
 
-**Snapshot date:** 2026-07-20  
-**Scope:** the repository-aware Codex sandbox, its embedded Agent UI experience, host page context, visual selection and capture, operational telemetry, tools, and safe deployment.  
+**Snapshot date:** 2026-07-20
+**Scope:** the repository-aware Codex sandbox, its embedded Agent UI experience, host page context, visual selection and capture, operational telemetry, tools, and safe deployment.
 **Status:** implementation exists, but the end-to-end product promise is **not complete**. The embedded terminal is usable; several important capabilities are hidden, partial, disabled, or only represented by contracts and tests.
 
 This directory is the canonical handoff for the work. A successor should be able to understand the product request, current truth, architecture, remaining sequence, and validation gates without reading the full historical conversation.
@@ -58,4 +58,3 @@ See [02-current-state-and-gaps.md](./02-current-state-and-gaps.md) for evidence 
 ## Definition of done for the package's scope
 
 The package scope is complete only when all **P0** and **P1** gates in [04-delivery-plan-and-acceptance.md](./04-delivery-plan-and-acceptance.md) pass on a deployed Booking integration, remaining P2 work is explicitly accepted as deferred, and the capability matrix is updated with fresh evidence.
-

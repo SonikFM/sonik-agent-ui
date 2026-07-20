@@ -246,4 +246,3 @@ At the end of each gate:
 4. list any unavailable credentials or environment prerequisites;
 5. mark deferred behavior explicitly; and
 6. never promote a ledger item solely from a worker message or source-code assertion.
-

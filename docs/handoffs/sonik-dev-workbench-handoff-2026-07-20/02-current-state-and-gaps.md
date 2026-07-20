@@ -114,4 +114,3 @@ The extension README describes a pairing flow that current Workbench actions dis
 | Credentials are treated as sandbox durability | Repeated Codex login or secret exposure | Define suspend/delete behavior and use an encrypted restoration design. |
 | Shell access is mistaken for governed deploy | Unauthorized or untraceable production changes | Add scoped provider capability and explicit approval before productizing deploy. |
 | Large contract/test volume masks journey failure | False confidence and token waste | Gate from user journey backward; stop parallel lanes when one integrated path is failing. |
-
