@@ -437,6 +437,9 @@ export const POST: RequestHandler = async (event) => {
   const startedAt = Date.now();
   const ip = event.getClientAddress();
   let runRecorder: RunRecorder | null = null;
+  let telemetryPersistence: ReturnType<typeof getRequestWorkspacePersistence> | null = null;
+  let durableRunId: string | undefined;
+  const writeRequestTelemetry = (telemetryEvent: Parameters<typeof writeAgentTelemetry>[0]) => writeAgentTelemetry(telemetryEvent, telemetryPersistence);
 
   try {
   const body = await request.json().catch((error) => {
@@ -489,12 +492,14 @@ export const POST: RequestHandler = async (event) => {
   }
   const workspaceSessionId = trustedWorkspace?.sessionId ?? requestedWorkspaceSessionId;
   const requestPersistence = trustedWorkspace?.persistence ?? getRequestWorkspacePersistence(event);
+  telemetryPersistence = requestPersistence;
   if (hasSelectedWorkspaceContext && !workspaceSessionId) {
     throw new AgentUiFileError(400, "Selected file and document context requires a workspace session", { code: "invalid_request", phase: "pre_stream" });
   }
   const activeDocument = await resolveActiveDocumentForRequest(event, body?.workspace?.activeDocument, hasSelectedWorkspaceContext ? workspaceSessionId : undefined);
   const telemetrySessionId = hasSelectedWorkspaceContext ? workspaceSessionId : activeDocument?.session_id ?? workspaceSessionId;
   const smokeRunId = readDevSmokeRunId(request);
+  durableRunId = smokeRunId;
   const hostSession = createAgentHostSessionEnvelope(event);
   const trustedHostSession = trustedWorkspace?.auth ?? resolveTrustedHostSessionSnapshot(event);
   // Explicit composer context selection wins over implicit host/page context.
@@ -658,7 +663,7 @@ export const POST: RequestHandler = async (event) => {
     ok: true,
   };
   logArtifactTelemetry(startEvent);
-  void writeAgentTelemetry(startEvent).catch(() => undefined);
+  void writeRequestTelemetry(startEvent).catch(() => undefined);
 
   const modelMessages = await convertToModelMessages(uiMessages);
   const selectedFileIds = authorizedSelectionResolution.fileIds;
@@ -725,7 +730,7 @@ export const POST: RequestHandler = async (event) => {
   const contextualModelMessages = systemContext
     ? [{ role: "system" as const, content: systemContext }, ...messagesWithFiles]
     : messagesWithFiles;
-  void writeAgentTelemetry({
+  void writeRequestTelemetry({
     source: "server",
     event: "api.generate.command_index_context",
     requestId,
@@ -763,7 +768,7 @@ export const POST: RequestHandler = async (event) => {
     ok: true,
   }).catch(() => undefined);
   if (hostContextHeaderRejected) {
-    void writeAgentTelemetry({
+    void writeRequestTelemetry({
       source: "server",
       event: "api.generate.host_context_header_rejected",
       requestId,
@@ -775,7 +780,7 @@ export const POST: RequestHandler = async (event) => {
       reason: "signed_host_context_header_present_but_rejected",
     }).catch(() => undefined);
   }
-  void writeAgentTelemetry({
+  void writeRequestTelemetry({
     source: "server",
     event: "api.generate.skill_index_context",
     requestId,
@@ -807,13 +812,25 @@ export const POST: RequestHandler = async (event) => {
       analyticsHints: analyticsHints ?? null,
     });
   }
+  durableRunId = runRecorder?.runId ?? smokeRunId;
+  void writeRequestTelemetry({
+    source: "server",
+    event: "api.generate.run_started",
+    requestId,
+    traceId,
+    traceparent,
+    runId: durableRunId,
+    sessionId: telemetrySessionId,
+    messageId: lastMessage?.id,
+    ok: true,
+  }).catch(() => undefined);
 
   if (shouldUseDevSmokeStream(request)) {
     const smokeInput = {
       requestId,
       traceId,
       traceparent,
-      runId: smokeRunId,
+      runId: durableRunId,
       sessionId: telemetrySessionId,
       messageId: lastMessage?.id,
       startedAt,
@@ -840,7 +857,7 @@ export const POST: RequestHandler = async (event) => {
     return response;
   }
 
-  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent, model: google && directGoogleModelId ? google(directGoogleModelId) : undefined, aiTelemetry: { requestId, traceId, traceparent, sessionId: telemetrySessionId, runId: runRecorder?.runId ?? smokeRunId } });
+  const agent = createAgent({ activeDocument: effectiveActiveDocument, sessionId: telemetrySessionId, pageContext, hostSession, approvedCommandIds, bookingServiceBaseUrl, bookingRuntimeAuth, bookingRuntimeFetcher, persistence: requestPersistence, skillIds, agentSettings: agentRuntimeSettings, currentIntakeArtifactSpec, toolsetContinuitySkillIds: implicitSkillSelection.continuitySkillIds, workspaceDocumentIntent, productTourIntent, model: google && directGoogleModelId ? google(directGoogleModelId) : undefined, aiTelemetry: { requestId, traceId, traceparent, sessionId: telemetrySessionId, runId: durableRunId } });
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });
@@ -853,7 +870,7 @@ export const POST: RequestHandler = async (event) => {
             requestId,
             traceId,
             traceparent,
-            runId: smokeRunId,
+            runId: durableRunId,
             sessionId: telemetrySessionId,
             messageId: lastMessage?.id,
             documentId: activeDocument?.id,
@@ -865,13 +882,13 @@ export const POST: RequestHandler = async (event) => {
           pipeArtifactToolOutputsToSpecParts(parsedStream),
           {
             onStats: (stats) => {
-              void writeAgentTelemetry({
+              void writeRequestTelemetry({
                 source: "server",
                 event: "api.generate.stream_safety",
                 requestId,
                 traceId,
                 traceparent,
-                runId: smokeRunId,
+                runId: durableRunId,
                 sessionId: telemetrySessionId,
                 messageId: lastMessage?.id,
                 durationMs: Date.now() - startedAt,
@@ -900,7 +917,7 @@ export const POST: RequestHandler = async (event) => {
           requestId,
           traceId,
           traceparent,
-          runId: smokeRunId,
+          runId: durableRunId,
           sessionId: telemetrySessionId,
           messageId: lastMessage?.id,
           documentId: activeDocument?.id,
@@ -910,13 +927,13 @@ export const POST: RequestHandler = async (event) => {
           waitingIntervalMs: 20_000,
         });
         writer.merge(instrumented as ReadableStream<UIMessageChunk>);
-        void writeAgentTelemetry({
+        void writeRequestTelemetry({
           source: "server",
           event: "api.generate.stream_attached",
           requestId,
           traceId,
           traceparent,
-          runId: smokeRunId,
+          runId: durableRunId,
           sessionId: telemetrySessionId,
           messageId: lastMessage?.id,
           documentId: activeDocument?.id,
@@ -927,13 +944,13 @@ export const POST: RequestHandler = async (event) => {
       },
       onError: (error) => {
         const failure = sanitizeRunFailure(error, { fallbackCode: "AGENT_STREAM_FAILED", resumable: true });
-        void writeAgentTelemetry({
+        void writeRequestTelemetry({
           source: "server",
           event: "api.generate.stream_error",
           requestId,
           traceId,
           traceparent,
-          runId: smokeRunId,
+          runId: durableRunId,
           sessionId: telemetrySessionId,
           messageId: lastMessage?.id,
           durationMs: Date.now() - startedAt,
@@ -951,13 +968,13 @@ export const POST: RequestHandler = async (event) => {
   } catch (error) {
     const failure = sanitizeRunFailure(error, { resumable: true });
     await finalizeRunFailure(runRecorder, error);
-    void writeAgentTelemetry({
+    void writeRequestTelemetry({
       source: "server",
       event: "api.generate.error",
       requestId,
       traceId,
       traceparent,
-      runId: smokeRunId,
+      runId: durableRunId,
       sessionId: telemetrySessionId,
       messageId: lastMessage?.id,
       durationMs: Date.now() - startedAt,
@@ -969,12 +986,13 @@ export const POST: RequestHandler = async (event) => {
   } catch (error) {
     const failure = sanitizeRunFailure(error, { resumable: true });
     await finalizeRunFailure(runRecorder, error);
-    void writeAgentTelemetry({
+    void writeRequestTelemetry({
       source: "server",
       event: "api.generate.error",
       requestId,
       traceId,
       traceparent,
+      runId: durableRunId,
       durationMs: Date.now() - startedAt,
       ok: false,
       error: failure.message,

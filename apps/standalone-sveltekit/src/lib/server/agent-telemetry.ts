@@ -8,10 +8,37 @@ import {
   type AgentTelemetrySource,
 } from "@sonik-agent-ui/agent-observability";
 import { activeWorkflowRunId } from "@sonik-agent-ui/tool-contracts/workflow-controller";
+import type { AsyncWorkspacePersistenceAdapter } from "@sonik-agent-ui/workspace-session";
 import { recordWorkspaceTelemetryEvent } from "./workspace-store.ts";
+import { readJsonBodyWithSizeCap } from "./request-abuse-guard.ts";
 import { sanitizeFailureRecord } from "./run-error-safety.ts";
 
 export type { AgentTelemetryEvent, AgentTelemetrySource } from "@sonik-agent-ui/agent-observability";
+
+export const MAX_TELEMETRY_REQUEST_BYTES = 64 * 1024;
+export const MAX_TELEMETRY_BATCH_EVENTS = 32;
+export const MAX_TELEMETRY_EVENT_NAME_CHARS = 128;
+export const MAX_TELEMETRY_EVENT_BYTES = 16 * 1024;
+
+export type TelemetryBatchResult =
+  | { ok: true; events: AgentTelemetryEvent[] }
+  | { ok: false; status: number; error: string };
+
+export async function readTelemetryBatch(request: Request): Promise<TelemetryBatchResult> {
+  const parsed = await readJsonBodyWithSizeCap(request, MAX_TELEMETRY_REQUEST_BYTES);
+  if (!parsed.ok) return parsed;
+  const body = parsed.body && typeof parsed.body === "object" && !Array.isArray(parsed.body) ? parsed.body as Record<string, unknown> : null;
+  const values = Array.isArray(body?.events) ? body.events : body?.event ? [body.event] : [];
+  if (values.length > MAX_TELEMETRY_BATCH_EVENTS) return { ok: false, status: 413, error: "too_many_events" };
+  const events: AgentTelemetryEvent[] = [];
+  for (const value of values) {
+    const event = coerceTelemetryEvent(value);
+    if (!event) return { ok: false, status: 400, error: "invalid_telemetry_event" };
+    if (new TextEncoder().encode(JSON.stringify(value)).byteLength > MAX_TELEMETRY_EVENT_BYTES) return { ok: false, status: 413, error: "telemetry_event_too_large" };
+    events.push(event);
+  }
+  return { ok: true, events };
+}
 
 /**
  * Synchronous, fail-safe telemetry boundary for runtimes that cannot await the
@@ -24,15 +51,14 @@ export function emitAgentTelemetrySync(event: AgentTelemetryEvent): AgentTelemet
   return payload;
 }
 
-export async function writeAgentTelemetry(event: AgentTelemetryEvent): Promise<void> {
+export async function writeAgentTelemetry(event: AgentTelemetryEvent, persistence?: AsyncWorkspacePersistenceAdapter | null): Promise<void> {
   // AC-13 join-key: stamp the active workflow-controller run's runId as workflowRunId, unless the
   // caller already set one explicitly. A no-op outside any controller-driven run (activeWorkflowRunId
   // is undefined there), so every call site that predates this is unchanged.
   const payload = emitAgentTelemetrySync(event);
   const logPath = resolveTelemetryLogPath();
   await appendTelemetryJsonl(logPath, payload);
-  try {
-    recordWorkspaceTelemetryEvent({
+  const record = {
       session_id: payload.sessionId ?? null,
       request_id: payload.requestId ?? null,
       source: payload.source,
@@ -40,10 +66,23 @@ export async function writeAgentTelemetry(event: AgentTelemetryEvent): Promise<v
       payload,
       ok: payload.ok ?? null,
       error: payload.error ?? null,
-    });
+    };
+  try {
+    if (persistence) await persistence.recordTelemetryEvent(record);
+    else recordWorkspaceTelemetryEvent(record);
   } catch {
-    // Intentional fail-safe: workspace telemetry is only a bounded mirror; JSONL above remains the source of evidence.
+    // Intentional fail-safe: process/Worker logs remain non-blocking evidence when durable persistence is unavailable.
   }
+}
+
+function coerceTelemetryEvent(value: unknown): AgentTelemetryEvent | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const event = typeof record.event === "string" ? record.event.trim() : "";
+  if (!event || event.length > MAX_TELEMETRY_EVENT_NAME_CHARS || !/^[a-zA-Z0-9._:-]+$/.test(event)) return null;
+  const source = record.source === `ody${"sseus"}-host` ? "workspace-host" : record.source;
+  if (source !== "client" && source !== "workspace-host") return null;
+  return { ...record, source, event } as AgentTelemetryEvent;
 }
 
 function emitTelemetryToWorkerLogs(payload: AgentTelemetryEvent): void {
