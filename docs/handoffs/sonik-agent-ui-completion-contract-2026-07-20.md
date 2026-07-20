@@ -1,232 +1,253 @@
-# Sonik Agent UI Completion Contract
+# Sonik Agent UI completion contract
 
-**Goal:** G001 — completion contract and PDF baseline  
-**Run start:** 2026-07-20T20:03:01Z  
-**Contract status:** Agreement baseline; implementation work is not accepted by this document alone  
-**Primary delivery branch:** `fix/dev-workbench-embedded-context-20260720`  
-**Primary pull request:** [SonikFM/sonik-agent-ui#61](https://github.com/SonikFM/sonik-agent-ui/pull/61)
+**Agreement-first baseline · Ultragoal G001**  
+**Run started:** 2026-07-20T20:03:01Z  
+**Baseline snapshot:** 2026-07-20T20:08:56Z  
+**Branch:** `fix/dev-workbench-embedded-context-20260720`  
+**Head at baseline:** `036f713`  
+**Pull request:** [SonikFM/sonik-agent-ui#61](https://github.com/SonikFM/sonik-agent-ui/pull/61)  
+**Existing protected preview:** `https://dev-workbench-80wqt9cpg-danletterio-5975s-projects.vercel.app`
 
-## 1. Decision summary
+> **Contract, not a completion claim.** This document defines what this Ultragoal run will prove, repair, audit, deploy, and report. Statuses distinguish implemented behavior from deployed, freshly verified behavior. Anything lacking current-run evidence remains partial, skeleton, or missing.
 
-This run will deliver a deployable, evidence-backed Agent UI and embedded Dev Workbench slice. An authenticated operator must be able to maintain a session-backed conversation across reloads and navigation, submit prompts, observe correlated model/tool lifecycle telemetry, and launch the real sandbox-backed Workbench with correct host context. Completion requires working code, fresh checks, a deployed operator journey, and an auditable rollback path.
+## 1. Outcome and stop gate
 
-This contract deliberately separates **implemented**, **partial**, **skeleton**, and **missing** behavior. Existing code or a passing isolated test is not enough when the intended user journey is unreachable. PR 61 is open and its quality checks were green at this baseline, but CodeRabbit still carried eight actionable contract/documentation findings. Those findings and the six pressure groups below are release work, not footnotes.
+The target is a deployable Sonik Agent UI and Dev Workbench slice where an authenticated operator can:
 
-## 2. Sources and authority
+- open Agent UI from Booking and enter Dev mode;
+- create or resume one repository workspace and one conversation/run identity;
+- keep conversation state across reload and route navigation;
+- submit prompts reliably and receive complete streamed model/tool lifecycle output;
+- inspect sanitized, correlated telemetry without raw chain-of-thought or secrets;
+- receive truthful host evidence, server authority, page context, capabilities, and failure states;
+- use the embedded Workbench controls, real Codex/tmux terminal, hot preview, context selector, and bounded screenshot flow; and
+- validate the result through tests and a non-production deployment receipt.
 
-The baseline reconciles:
+The run stops only when all ledger stories are reconciled; targeted checks and the bounded API exercise are green or externally blocked with evidence; independent code-review and architecture gates are clear; the branch and PR are current; test deployment URLs are reported; and the final retrospective separates completed work from remaining gaps.
 
-- the user-approved `.omx/ultragoal/brief.md`;
-- `docs/handoffs/sonik-dev-workbench-handoff-2026-07-20/`;
-- `docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md`;
-- repository implementation and tests at this worktree revision;
-- current GitHub state for Agent UI PR 61 and Sonik Svelte PRs 2–8.
+## 2. Status vocabulary
 
-When sources disagree, executable repository behavior and fresh verification win. Browser evidence may describe context, but it never grants authority. Server-side contracts remain authoritative for repository selection, credentials, scopes, consequential operations, and release state.
+| Status | Evidence threshold |
+|---|---|
+| **Complete** | Implemented, reachable in the intended surface, and supported by current repository or CI evidence. A live-host claim still requires the deployment gate. |
+| **Partial** | Useful implementation exists, but an integration, reachability, durability, authority, deployment, or current-run verification gap remains. |
+| **Skeleton** | Types, UI shells, adapters, fixtures, or disabled seams exist without useful end-to-end product behavior. |
+| **Missing** | No operative implementation was found, or the capability is expressly excluded from this slice. |
 
-## 3. Completion matrix
+## 3. Agreement-first capability matrix
 
-| Capability | Baseline | Completion gate for this run | Owner |
+| Capability | Baseline status | Evidence and honest boundary | This run's required disposition |
 |---|---|---|---|
-| Session creation and history | Partial | Authenticated session can be created, loaded, and recovered with stable identifiers. | This run |
-| Conversation persistence | Partial | Messages and active session survive reload and route navigation without destructive reset. | This run |
-| Prompt submission | Partial | Valid prompt submits once; failure is actionable; retry does not silently duplicate. | This run |
-| Model/tool streaming | Partial | Model text and tool lifecycle reach a terminal state; no dead or prematurely ended tool call. | This run |
-| Telemetry and correlation | Partial | Bounded, redacted events carry session/run/message/tool correlation identifiers. | This run |
-| Real Workbench terminal | Implemented | Real Codex CLI in named `tmux` windows remains reachable in sandbox. | Existing + this run verifies |
-| Embedded Workbench controls | Implemented, pending release proof | Layout/source/sync/pick/capture controls are visible and keyboard reachable at embedded widths. | PR 61 + this run |
-| Host evidence and authority | Partial | UI distinguishes evidence freshness from server authority and tool readiness; forged client context adds no scope. | This run + host integration |
-| Preview visual context | Partial | Deterministic capture promotes one revision-matched manifest/PNG pair atomically; stale results never become current. | This run |
-| Exact active-host pixels | Skeleton/disabled | Remains unavailable until secure pairing, attestation, redaction, and live E2E pass. | Explicit follow-up |
-| Preview health/restart | Skeleton | No release claim until health and restart are wired and exercised. | Follow-up unless required by repair |
-| Changed files, console, failed requests | Skeleton | No release claim until runtime data populates views and reconnect/replay works. | Follow-up/operational evidence gate |
-| Realtime egress | Skeleton | Kind/payload contract, redaction, cursor, ordering, and replay proven before “live” claim. | This run establishes contract; wiring follows |
-| Governed commit/push/deploy | Missing as product capability | Consequential action uses scoped server capability, explicit approval, provider request ID, and audit record. | Follow-up; shell access is not completion |
-| MCP tool surface | Deferred/missing | Not required for this slice; existing typed contracts and terminal path are reused. | User/parallel follow-up |
-| JSON-render canvas | Implemented | Current 33-component Svelte catalog renders validated specs and preserves state/action receipts. | Existing + this run audits |
-| Theme authority | Implemented | DaisyUI 5.5.23 with Tailwind CSS 4 remains the single product theme authority. | Existing + this run protects |
+| Vercel Sandbox lifecycle | **Complete** | Create/resume/delete, persistent provider mode, bounded snapshots, repository bootstrap, and workspace service exist. Deletion still destroys sandbox files and CLI login. | Re-run focused Workbench checks; do not imply teardown durability. |
+| Server-configured repository bootstrap | **Complete** | Repository/revision and setup commands are server-owned. Browser input is not the command or Git authority. | Preserve allowlisting and verify no review fix weakens it. |
+| Real Codex terminal and tmux | **Complete** | xterm connects to the provider PTY; `codex`, `dev`, `shell`, and `logs` windows exist. Current startup command is raw Codex rather than an OMX profile. | Keep terminal behavior stable; document the profile gap instead of inventing a framework. |
+| Hot frontend preview | **Complete** | Development server and provider preview-domain plumbing exist. | Verify health/recovery paths and one deployed preview. |
+| Embedded right/bottom/fullscreen controls | **Partial** | Current source keeps a compact toolbar visible under `surface=terminal`; PR E2E asserts it. A fresh deployed Booking journey has not been proved in this run. | Exercise narrow and wide embed paths, resize/layout persistence, focus, and exit from fullscreen. |
+| Booking Dev speed-dial entry | **Partial** | Host integration has existed and the Workbench can be launched, but availability depends on Booking deployment/configuration. | Capture live or best-available host evidence and exact deployment prerequisite. |
+| Workspace loading narrative | **Partial** | Bootstrap phases exist; step, elapsed-time, recovery, and degraded-state copy are not fully demonstrated. | Verify failure/loading states; make only surgical copy/state fixes. |
+| Workbench HTTPS login | **Complete** | Basic Auth and Vercel deployment protection are implemented. This is distinct from Booking authority and Codex CLI authentication. | Preserve the separation and avoid exposing secret values. |
+| Session-backed conversation | **Partial** | Session, message, run, and cloud persistence contracts/tests exist, but the non-negotiable deployed reload/navigation journey remains unproved in this run. | Prove one run identity, ordered history, reload, navigation, reconnect, and no duplicate terminal/run. |
+| Prompt submission | **Partial** | Composer and route contracts exist; historical reports included short-ended responses and dead tool states. | Prove idempotent submission and actionable recovery for failure/retry. |
+| Streamed model/tool lifecycle | **Partial** | Stream taps, safety, dynamic tool projection, and telemetry tests exist. A deployed uninterrupted lifecycle is not yet accepted. | Prove start/delta/tool-call/tool-result/finish or explicit failure, with no silent terminal state. |
+| Sanitized correlated telemetry | **Partial** | Observability and run join-key contracts exist. Completeness, redaction, reconnect cursor, and live product visibility require proof. | Validate stable correlation IDs, redaction, ordering, replay, and evidence links. |
+| Exact-origin host relay | **Complete** | Typed relay and exact-origin/source validation exist at the contract boundary. | Preserve as a security invariant. |
+| Authenticated host-session authority | **Partial** | Transport exists, but current runtime/documentation are inconsistent: authority is described as server-only while guest mirroring remains possible. | Repair the boundary; authority must remain server-side or use a brokered, least-privilege handle. |
+| Page context, sitemap, and OpenAPI context | **Partial** | Stable `.sonik` paths and command catalogs exist, but freshness, authority, and automatic consumption are not a proven deployed workflow. | Prove bounded writes, navigation invalidation, agent discoverability, and truthful readiness. |
+| Preview/host source selector | **Partial** | Capability logic and visible current toolbar implementation exist. | Verify embedded reachability and disabled reasons at sidebar width. |
+| Semantic element picker | **Partial** | Impeccable-derived picker, Sonik adapter, messages, host bridge, and tests exist. | Prove a real embedded selection, Escape/cleanup/focus, sanitized descriptor, and stale-context invalidation. |
+| Controlled-preview screenshot | **Partial** | Playwright capture, artifact bounds, locking, hashes, revisions, promotion, and tests exist. | Run bounded preview capture and inspect the stable manifest/PNG for leakage. |
+| Exact active-tab screenshot | **Skeleton** | MV3 extension and tests exist; pairing/capture remain intentionally unavailable without sufficient trust proof. | Keep disabled and label honestly. Not a release dependency for this slice. |
+| Element-to-source mapping | **Missing** | No reliable semantic target → source file/line resolver is accepted. | Record the seam only; the user owns the visual-target model pipeline. |
+| Preview restart | **Skeleton** | A disabled UI action exists without operative recovery wiring. | Do not advertise as ready; fix only if the live-path proof needs a minimal existing seam. |
+| Changed files, console, failed-request views | **Skeleton** | View shapes exist; runtime data remains empty or incomplete. | Audit event boundaries; do not claim panels are live without runtime evidence. |
+| Pipe B/realtime-egress feed | **Skeleton** | A logs tmux window and serializable seams exist; automatic structured realtime feed is not complete. | Preserve Beacon/RivetKit direction; no bespoke SSE, WebSocket, or polling stack. |
+| Chrome DevTools/CDP | **Missing** | Screenshot and Playwright capture are not a full DevTools integration. | Explicitly exclude from this run. |
+| MCP tool surface | **Missing** | Intentionally outside the basic terminal/context slice. | User owns MCP implementation; this run protects the future typed/authority boundary. |
+| Truthful Booking tool availability | **Partial** | Catalogs are extensive, but historical tests showed selectable-looking commands without executable authority. | Verify availability is tenant/session/provider/scope-derived and disabled states name the missing dependency. |
+| Build/test in the sandbox | **Complete** | Real shell and repository commands are available. | Run targeted tests and attach raw command evidence. |
+| Governed commit/push/deploy | **Missing** | Shell mechanics are not an approved Sonik provider capability. | Deploy only through available non-production operator tooling; do not productize broad credentials. |
+| Codex auth after sandbox deletion | **Missing** | Suspension may preserve state; deletion does not preserve the CLI login. | State the limitation; encrypted restoration is follow-up architecture. |
+| JSON-render core runtime | **Complete** | `@json-render/core`, Svelte, devtools, and devtools-svelte are installed; a 33-component registry, `createJsonArtifact` validation, live/complete promotion, and canvas renderer exist. | Prevent regressions and correct the false “Markdown-only” narrative. |
+| JSON-render donor/component breadth | **Partial** | The primary runtime exists; `@json-render/shadcn-svelte` and broader donor adoption are not integrated. | Produce the dependency/adoption map; implement only a clearly justified, low-risk fix. |
+| Sonik component/theming conformance | **Partial** | DaisyUI 5.5.23 + Tailwind 4 are canonical; copied shadcn-style aliases map into Sonik tokens. Operator Dark is registry default, embedded host theme wins, standalone defaults to system. Full component audit remains open. | Prevent a second runtime design system and inventory concrete violations. |
 
-Status meanings:
+## 4. PR 61 baseline
 
-- **Implemented:** operative code exists; release still requires fresh evidence.
-- **Partial:** useful implementation exists but the required end-to-end contract is incomplete.
-- **Skeleton:** types, UI shape, fixtures, or disabled handlers exist without complete runtime behavior.
-- **Missing/deferred:** no release-ready implementation is claimed.
+At the start of this run, PR 61 is **open**, **merge-blocked**, and marked **changes requested**. Its head is `036f713` on `fix/dev-workbench-embedded-context-20260720`.
 
-## 4. Eight unresolved PR 61 findings
+- Existing CI at the baseline head reports success for types/tests/build, embedded Agent UI smoke, Playwright E2E, API reliability tripwire, malware guard, and CodeRabbit status.
+- Green CI does not clear the review gate: **eight unresolved CodeRabbit threads** remain.
+- The unresolved themes are contract defects, not formatting trivia: server-only host authority, sandbox credential brokerage, preview state canonicalization, visual snapshot attestation, discriminated realtime event payloads, release-document truth, and a pinned skills CLI.
+- Three handoff documents still describe restored embedded controls as hidden. Source and E2E currently indicate the toolbar is visible, so documentation must be repaired rather than the regression reintroduced.
+- No oRPC package is installed. Zod 4.3.6 and the repository's existing schemas are the contract authority; this run will not add oRPC.
 
-The following actionable CodeRabbit findings are adopted verbatim in substance as release requirements:
+## 5. Exactly six proposed TDD/API contract pressure cases
 
-1. **Server-only host authority:** define the host-authority attachment as an access-controlled, expiring, revocable server-side handle; remove it from guest filesystem paths and client state.
-2. **Canonical preview status:** use one shared preview-status union covering `booting`, the established canonical ready/healthy term, `failed`, and `stale`; align every UI consumer.
-3. **Realtime discrimination:** replace `payload: unknown` with a discriminated kind-to-payload contract and bounded schema for every declared `WorkbenchEvent` kind.
-4. **Transcript path redaction:** replace the absolute local historical transcript path with a redacted session identifier or repository-relative pointer; keep the transcript external.
-5. **Restored controls truth:** update the handoff, gaps, risk, and delivery documents to describe restored embedded controls as current behavior and attach validation evidence.
-6. **Sandbox credential firewall:** explicitly deny control-plane credentials—including GitHub, Cloudflare, database, host-authority, and visual-grounding secrets—to sandbox processes; use server brokers or short-lived least-privilege tokens.
-7. **Complete visual attestation example:** include `schemaVersion`, `sourceContextRevision`, `routeRevision`, `requestSequence`, `source`, and screenshot metadata, or label the example lossy and link the canonical schema; derive screenshot paths from `DEV_WORKBENCH_STATE_ROOT`.
-8. **Pinned installer:** pin the skills CLI invocation itself (fixed version or vendored installer), while retaining manifest digest comparison and conditional installation.
+These are the six groups this run will drive red → green. Each begins with the smallest regression test that demonstrates the current defect or guards the already-correct boundary.
 
-None may be closed by prose alone where an executable contract or affected consumer exists.
+| ID | Pressure case | Required invariant | Safe exercise |
+|---|---|---|---|
+| **TC-01** | Server-only authority | Host authority never enters guest filesystem, client state, screenshot artifacts, terminal transcript, or public telemetry. Browser context cannot mint scopes. | Unit/contract test plus preview request inspection; no production credential. |
+| **TC-02** | Sandbox credential denylist and broker | GitHub, Cloudflare, database, host-authority, and visual-grounding control-plane secrets are denied by default. Approved operations use a server broker or short-lived least-privilege token. | Environment-construction tests with sentinel values; no real secret output. |
+| **TC-03** | Canonical preview state including stale | One shared preview-state schema covers booting, ready/healthy canonical naming, failed, and stale; UI and events reject unknown/drifted states. | Schema tests and bounded preview health call. |
+| **TC-04** | Canonical visual snapshot attestation | Capture requires schema version, source and screenshot metadata, source-context revision, route revision, request sequence, digest, and workspace/request identity; stale or mismatched evidence cannot promote. | Fixture-driven coordinator/API tests with synthetic metadata and image bytes. |
+| **TC-05** | Discriminated realtime event payloads | Every event kind has a bounded validated payload, stable correlation/run identifiers, redaction, and replay-safe ordering; `payload: unknown` cannot cross the product boundary. | Parser/replay tests with malformed, reordered, duplicated, and redacted fixtures. |
+| **TC-06** | Release-document truth gate | Release docs contain no absolute `/Users` paths, pin the skills CLI version, describe current reachable controls, and never promote skeletons or stale claims. | Repository-native document assertion run in CI. |
 
-## 5. Six contract pressure groups
+The API reliability exercise remains conservative: preview/staging only, observable endpoints only, no production fuzzing, no unsafe writes, and immediate stop on an unexpected 5xx, authority-boundary violation, or evidence of a consequential mutation.
 
-### P1 — Server-only authority
+## 6. Acceptance contract
 
-- Browser page context is sanitized evidence only.
-- The sandbox and client receive an opaque reference, never reusable signed authority.
-- Wrong tenant, expiry, revocation, wrong origin, or replay must fail closed.
-- Readiness reports evidence, authority, and provider/tool scope independently.
+### 6.1 Conversation and run durability
 
-### P2 — Sandbox credential firewall
+- An authenticated operator opens one workspace and one run.
+- A prompt is accepted once, persisted in order, and returns a terminal model/tool state.
+- Reload and route navigation reattach to the same run and history without duplicate prompts, duplicate terminal sessions, or missing attachments.
+- A transport interruption resumes from an event cursor or presents an explicit recoverable failure.
+- File/session records remain scoped to the authenticated tenant and are not exposed through page context.
 
-- Long-lived GitHub, Cloudflare, database, host-authority, deployment, and visual-grounding secrets remain in the control plane.
-- Approved operations use a server-side broker or a short-lived, least-privilege, audience-bound token.
-- Secrets must not appear in `.sonik`, process listings, terminal transcripts, telemetry, screenshots, diffs, or client JavaScript.
-- Suspension and deletion semantics are explicit; filesystem persistence is never presented as secure credential restoration.
+### 6.2 Streaming and telemetry
 
-### P3 — Canonical preview stale state
+- Model and tool lifecycle output has explicit start, progress, completion, and error semantics.
+- Tool calls never remain indefinitely selectable/pending after a terminal failure.
+- Events carry stable run/request/tool correlation identifiers and ordering data.
+- Telemetry excludes credentials, cookies, raw HTML, screenshot bytes, bearer tokens, signed authority, and private chain-of-thought.
+- Verification claims link to raw command or deployment evidence.
 
-- Preview state uses one shared vocabulary across contract, API, and UI.
-- Route, source, workspace, or revision change invalidates current context immediately.
-- A late result cannot promote over a newer request sequence.
-- Failed capture leaves the prior valid artifact explicitly current or explicitly invalidated; it never creates a mixed manifest/PNG pair.
+### 6.3 Embedded Workbench and host context
 
-### P4 — Visual attestation fixture completeness
+- Booking Dev opens at sidebar and desktop widths with compact, keyboard-reachable source, context, layout, status, and overflow controls.
+- Right, bottom, and fullscreen layouts remain reversible and persist safely.
+- Host evidence, signed server authority, page-context freshness, terminal, preview, logs, and tools are distinct readiness states.
+- Preview capture writes bounded, hash-matched artifacts. Host semantic selection emits only the allowed descriptor.
+- Navigation, source changes, expiry, timeout, cancellation, and unmount invalidate or clean up stale context.
+- A missing or expired authority cannot be replaced by browser-provided claims.
 
-- Every attestation carries schema, source/route revisions, request sequence, source identity, provider, workspace, dimensions, hash, capture time, and declared redactions.
-- Screenshot location is symbolic under `DEV_WORKBENCH_STATE_ROOT`, not a machine-specific absolute path.
-- Wrong origin/tab/revision/nonce, missing redaction, oversized payload, background tab, or hash mismatch rejects promotion.
-- Cross-origin frames and closed shadow roots remain honestly unpickable.
+### 6.4 Quality and accessibility
 
-### P5 — Realtime kind/payload equality
+- Typecheck, targeted tests, relevant smoke/E2E, build, contract drift checks, and bounded API checks pass at final head.
+- Keyboard operation, focus restoration, status announcements, contrast, target size, and reduced motion meet Sonik requirements.
+- Disabled actions explain why; no stub appears executable.
+- Changed product files pass the anti-slop review and independent code-review/architecture gates.
 
-- Each event kind maps to exactly one bounded payload schema.
-- Consumers narrow on `kind`; unknown or mismatched payloads are rejected or quarantined, never guessed.
-- Correlation identifiers, redaction, ordering, resumable cursor, reconnect, duplicate, and out-of-order cases are tested.
-- Normalized events stay separate from raw PTY bytes and provider-specific wire shapes.
+## 7. Theme and component boundary
 
-### P6 — Release-document gate
+### Canonical runtime
 
-- Capability claims match current code and fresh journey evidence.
-- Theme and component authority, JSON-render reality, external PR status, ownership, exclusions, deploy and rollback gates are explicit.
-- Markdown, self-contained HTML, and valid PDF are generated before implementation proceeds.
-- A later retrospective records outcomes separately; this agreement baseline is not rewritten into a success claim.
+- **DaisyUI 5.5.23 and Tailwind 4** remain the production component/token runtime.
+- `app.css` may expose copied shadcn-style aliases only when they resolve into Sonik/Daisy tokens. Those aliases do not establish a second theme authority.
+- **Operator Dark/gunmetal** is the registry default. An embedded host theme wins; standalone mode follows system unless the existing theme contract says otherwise.
+- Hallmark and Impeccable are review lenses for hierarchy, density, copy, interaction, accessibility, and anti-slop quality—not substitute design systems.
 
-## 6. Theme and component boundary
+### Donor PR consolidation boundary
 
-The established Agent UI surface uses **DaisyUI 5.5.23 on Tailwind CSS 4**. The lockfile currently resolves Tailwind 4.2.x across workspace importers; the product contract is Tailwind 4, not a second design system. DaisyUI semantic tokens and existing Sonik/Amplify theme rules remain authoritative. This run will not introduce parallel shadcn styling, raw one-off palettes, or a replacement component library.
+The referenced SonikFM/sonik-svelte PRs are all open and are inventory inputs, not approved dependencies:
 
-`shadcn-svelte` references describe adapted component behavior and JSON-render composition, not permission to mix theme systems. Accessibility basics—keyboard access, focus restoration, status announcements, contrast, target size, and reduced motion—are release requirements and are not optional polish.
-
-## 7. JSON-render architecture
-
-JSON-render is a real current implementation, not a proposal. The repository builds workspace packages for `@json-render/core`, `@json-render/svelte`, devtools, and Svelte devtools. The standalone app validates flat specs, renders through the Svelte registry, supports state updates and action receipts, stores artifacts, and exposes devtools/telemetry seams.
-
-The current human/agent-readable registry contains **33 components**:
-
-`Stack`, `Grid`, `Card`, `Separator`, `Tabs`, `TabContent`, `Heading`, `Text`, `Badge`, `Alert`, `Metric`, `Table`, `BarChart`, `LineChart`, `PieChart`, `Progress`, `Skeleton`, `Callout`, `Accordion`, `Timeline`, `Link`, `TextInput`, `EditableField`, `TextareaField`, `SelectInput`, `RadioGroup`, `ChoiceCards`, `QuestionCard`, `ManifestPreview`, `MissingFieldsList`, `ConfidenceTable`, `ActionRail`, and `Button`.
-
-Architecture rules:
-
-1. `@json-render/core` owns spec validation, stream safety, and state primitives.
-2. The Svelte registry is the only renderer mapping for this product surface.
-3. Specs are execution-inert; effectful actions route through allowlisted commands, policy, approval, and receipts.
-4. JSONL/YAML/directive inputs are adapters into the same validated spec, not alternate runtime authorities.
-5. Devtools observe bounded spec/event state and do not receive secrets or raw chain-of-thought.
-6. Codegen, Ink, MCP, image, React Email, React PDF, and Three Fiber remain secondary inventory unless separately accepted.
-
-## 8. Sonik Svelte PRs 2–8
-
-All seven PRs were **open and unintegrated** at this baseline. “Mergeable” on GitHub is not the same as accepted or released.
-
-| PR | Scope | Baseline risk / gate |
+| PR | Baseline state | Contract decision |
 |---|---|---|
-| [#2](https://github.com/SonikFM/sonik-svelte/pull/2) | Remaining 18 AI Elements | CI `unit + build + size` failing; do not claim available in Agent UI until merged, versioned, adopted, and verified. |
-| [#3](https://github.com/SonikFM/sonik-svelte/pull/3) | Vendored svelte-streamdown and streamed markdown demo | CI failing; provenance, bundle, stream safety, and design-system fit must pass before adoption. |
-| [#4](https://github.com/SonikFM/sonik-svelte/pull/4) | Chat and EmojiPicker donor components | CI failing; donor drift, accessibility, dependency, and theme compatibility remain gates. |
-| [#5](https://github.com/SonikFM/sonik-svelte/pull/5) | FinalChat composer attachments/banner and scroll behavior | CI failing and review changes requested; behavior needs regression proof against the consuming app. |
-| [#6](https://github.com/SonikFM/sonik-svelte/pull/6) | Hooks, Kbd/KbdGroup, Separator | CI failing; path/config baseline and dependency-free claims must be reconciled before integration. |
-| [#7](https://github.com/SonikFM/sonik-svelte/pull/7) | Theme toggle and kitchen-sink pending markers | CI failing and review changes requested; lab theme controls must not redefine Agent UI theme authority. |
-| [#8](https://github.com/SonikFM/sonik-svelte/pull/8) | Sonik Inbox three-pane demo | Open, stacked on #2, mostly local/mock backend behavior; it is a demo, not integrated production capability. |
+| #2 · remaining AI elements | Behind; CI failed; scope polluted | Salvage component-by-component only after authority and theme fit are proven. |
+| #3 · svelte-streamdown | Unstable; CI failed; not integrated | Evaluate streamed-markdown behavior separately from JSON-render. |
+| #4 · Chat + EmojiPicker | Unstable; CI failed; not integrated | Copy only required behavior; remap all styling to Sonik tokens. |
+| #5 · FinalChat composer/scroll | Blocked; changes requested; accessibility issue | Fix the accessibility contract before any adoption. |
+| #6 · hooks + Kbd/Separator | Unstable; CI failed; only an independent Separator exists here | Inventory hooks; avoid duplicate primitives. |
+| #7 · theme toggle/kitchen sink | Blocked; changes requested; conflicts with the stronger current theme runtime | Keep current theme authority; salvage demos only if useful. |
+| #8 · Sonik Inbox | Clean but stacked on #2; mock demo; no substantive review | Treat as product exploration, not a production inbox dependency. |
 
-No code from these PRs is part of this completion baseline unless a later commit explicitly merges/adopts it and passes this repository’s gates.
+No bulk merge of PRs #2–#8 is in this run. The output is a consolidated keep/adapt/reject/follow-up map and, at most, a surgical conformance fix proven by a targeted check.
 
-## 9. Ownership
+## 8. JSON-render architecture contract
 
-### This run owns
+### Primary product path
 
-- PR 61 CodeRabbit/contract hardening with regression-first fixes;
-- session, prompt, stream, telemetry, and host-context proof;
-- embedded Workbench reachability and correct server/client/sandbox boundaries;
-- theme/component/JSON-render audit;
-- bounded preview/staging API checks, verification, PR update, test deployment, and retrospective artifacts.
+```text
+trusted tool / createJsonArtifact
+              │
+              ▼
+     @json-render/core schema
+              │ validate + normalize
+              ▼
+   @json-render/svelte renderer ───► 33-component Sonik registry
+              │                           │
+              │                    Sonik/Daisy tokens
+              ▼                           ▼
+       live artifact state ─────► complete/promotion state
+              │
+              ├──► canvas renderer
+              └──► @json-render/devtools + devtools-svelte
+```
 
-### User or other programs own
+The primary boundary comprises `@json-render/core`, `@json-render/svelte`, the Sonik component registry, directives/action receipts, live-to-complete promotion, JSONL/YAML intake where already supported, and the devtools surfaces. The runtime is not “just Markdown.” Markdown streaming and structured JSON rendering are separate presentation paths.
 
-- LocateAnything/model serving;
-- Hermes post-session memory jobs;
-- Little Eve/AgentOS job-agent design;
-- MCP implementations beyond the accepted slice;
-- secret values and environment assignment;
-- Booking PR merge/promotion outside an explicitly safe preview deployment;
-- merge/adoption decisions for Sonik Svelte PRs 2–8.
+The main known primary gap is donor breadth: `@json-render/shadcn-svelte` is not integrated and broader copied components have not passed Sonik authority, accessibility, and token review. A package name alone is not a reason to add it.
 
-Shared boundaries require a redacted handoff record: contract/version, owner, environment, required scope, expiry, and verification result. This run does not silently absorb external production authority.
+### Secondary inventory only
 
-## 10. Acceptance gates
+Codegen, Ink/TUI, MCP, image rendering, React Email, React PDF, and React Three Fiber may become producers or specialized renderers, but they are not part of this run's core JSON-render implementation unless repository evidence demonstrates a direct blocker. Their contracts must converge on validated artifact data rather than bypassing the primary schema or introducing a second component authority.
 
-### A. Contract and regression gate
+## 9. Ownership split
 
-- Each still-valid CodeRabbit finding has a failing regression check when executable coverage was missing, followed by the smallest root-cause fix.
-- Transport, status, bodylessness, schema, authorization, policy, and derived-surface invariants remain intact.
-- The six pressure groups have targeted positive, negative, stale/replay, and boundary cases.
+| Owner | This run / program responsibility |
+|---|---|
+| **This Ultragoal run** | PR 61 review and contract fixes; tests-first pressure cases; session/prompt/stream/telemetry proof; Workbench startup and host-context proof; component/theme/JSON-render audit; bounded API reliability; verification; non-production test deployment; baseline and final reports. |
+| **User / companion programs** | LocateAnything or other visual model serving; Hermes post-session pruning/memory jobs; Little Eve/AgentOS job-agent design; MCP server implementations; secret values and environment assignment; Booking PR merge and production promotion. |
+| **Shared boundary** | The user supplies or authorizes environment-specific credentials and production decisions. This run must define exact prerequisites, use only available preview/staging authority, and report external blockers rather than bypass them. |
 
-### B. User-journey gate
+## 10. Explicit exclusions
 
-- An authenticated operator creates or resumes a session, reloads/navigates, submits a prompt, observes model/tool completion, and reopens the same history.
-- Booking launches embedded Dev Workbench at wide and sidebar widths with reachable layout and context controls.
-- Host evidence, server authority, preview, terminal, logs, and tool readiness are distinguishable.
-- Controlled-preview selection/capture produces revision-consistent sanitized artifacts readable by Codex.
+- No production load, fuzz, destructive migration, unsafe write, or automatic production deployment.
+- No new oRPC dependency and no replacement of existing Zod/schema authority.
+- No full MCP implementation, Little Eve/AgentOS orchestration, Hermes memory worker, or LocateAnything inference pipeline.
+- No enabling exact active-tab capture before attestation, redaction, pairing, and live security review pass.
+- No promise of sandbox files or Codex login surviving explicit sandbox deletion.
+- No full Chrome DevTools/CDP product and no claim that Playwright screenshot capture provides it.
+- No bulk adoption of open donor PRs and no DaisyUI/shadcn runtime mixing.
+- No new realtime transport beside the existing Beacon/RivetKit/realtime-egress direction.
+- No broad codegen, Ink, image, React Email/PDF/Three Fiber integration without a measured core-path need.
 
-### C. Quality gate
+## 11. Test, deployment, and release gates
 
-- Targeted tests, full typecheck, lint/static checks, and builds pass from a clean dependency state.
-- Changed files pass anti-slop review and are reverified.
-- Independent code reviewer returns APPROVE and architect returns CLEAR, or any exception is explicitly recorded as a stop.
-- No credential, raw chain-of-thought, unsafe telemetry, or sensitive screenshot content is exposed.
+| Gate | Evidence required | Stop condition |
+|---|---|---|
+| Contract red | New tests fail for still-valid review defects or demonstrate the existing invariant. | Do not edit production behavior without a reproducible claim. |
+| Surgical green | Targeted tests pass after minimal shared-boundary repair. | Stop expanding once the root contract holds. |
+| Repository quality | Relevant typecheck, tests, contract drift checks, static checks, and builds pass. | Any new regression returns the story to implementation. |
+| Embedded journey | Narrow/wide Booking or best-available host embed proves controls, session, prompt, stream, context, navigation/reload, and recovery. | Source assertions alone cannot promote a product-facing capability. |
+| Bounded API | Preview/staging exercise completes with redacted receipts and no unexpected 5xx/auth/write violation. | Stop immediately on safety tripwire. |
+| Review | Changed files pass anti-slop review; independent code reviewer approves and architect clears invariants. | Unresolved material finding blocks final completion. |
+| Deployment | Final commit SHA, protected preview URL, deployment receipt, configuration prerequisites, and operator steps are recorded. | Production remains out of scope without explicit authority. |
 
-### D. Deploy gate
+## 12. Insurance and rollback
 
-- Branch is pushed and PR 61 reflects final commits and verification.
-- Preview/staging deployment is successful; URLs and operator instructions are recorded.
-- Bounded API reliability checks stop on unexpected 5xx, auth-boundary violation, or unsafe write behavior.
-- Production fuzz/load and unsafe writes are prohibited.
-- Production promotion requires explicit external approval and correct scoped authority; it is not implied by a green preview.
+- **Small reversible diffs:** fix shared contract boundaries; avoid new dependency and framework migrations.
+- **Tests before behavior changes:** retain a runnable regression for each non-trivial fix.
+- **Secret sentinels:** test redaction/denylisting with inert markers, never actual values.
+- **Preview first:** deploy only to a protected preview or named staging target during the run.
+- **Safety tripwire:** stop API activity on unexpected 5xx, authority violation, credential exposure, or consequential mutation.
+- **Known-good anchor:** preserve `036f713` and the existing deployment receipt as the pre-run comparison point; rollback is a branch revert or preview promotion reversal, not live patching.
+- **Artifact truth:** record exact commands, exit status, SHA, URLs, and external gaps. A worker message, green isolated unit test, or file presence alone is not release evidence.
+- **State safety:** preserve one run/workspace identity; make stale context explicit; never trade data-loss protection for a smoother UI.
 
-## 11. Rollback and insurance
+## 13. Prior-run accounting vs this Ultragoal
 
-1. Preserve the pre-run PR head and deployed preview identifier.
-2. Keep changes surgical and commit by verified slice so a failing slice can be reverted without discarding unrelated work.
-3. Do not mutate production data during reliability checks.
-4. On auth, secret, tenant, or policy failure: stop, revoke/expire issued capability, invalidate affected sessions/artifacts, and retain redacted evidence.
-5. On session/stream regression: disable the new path or revert its commit while preserving the prior known-good session behavior.
-6. On visual-context mismatch: invalidate current context and remove the stable promotion; never retain an unmatched PNG/manifest pair.
-7. On deploy failure: restore the last known-good preview/production deployment and report the provider request/deployment identifiers.
+### Prior work — excluded from this run's time and token totals
 
-## 12. Explicit exclusions
+Before 2026-07-20T20:03:01Z, the branch already contained the Sandbox/tmux/Codex foundation, embedded-control repair, visual-context implementation and hardening, extensive contract/test infrastructure, handoff documents, commit `036f713`, and a protected Vercel preview. PR 61's baseline checks were green, while review remained blocked. Those commits and any previous multi-day/token usage are historical inputs, not accomplishments or cost attributed to this Ultragoal.
 
-- No new dependency without explicit approval.
-- No oRPC introduction when the installed contract stack does not use it.
-- No bespoke polling, SSE, or WebSocket infrastructure; reuse the established realtime-egress/Beacon/RivetKit direction.
-- No production fuzzing, load testing, unsafe write testing, or credential injection into a sandbox.
-- No claim that exact host pixels, MCP, governed deploy, preview restart, console/network panels, or durable AgentOS orchestration are complete without implementation and fresh proof.
-- No merge of Sonik Svelte PRs 2–8 as an incidental part of this run.
-- No theme replacement or design-system mixing.
+### Current Ultragoal — accounting starts here
 
-## 13. Run accounting
+Time begins at **2026-07-20T20:03:01Z**. The final report will record elapsed wall time, available Codex/OMX token accounting, story checkpoints, retries, delegated lanes, verification receipts, and any gaps in measurement. If a metric is unavailable from runtime evidence, it will be labeled unavailable rather than estimated or blended with prior work.
 
-This run began at **2026-07-20T20:03:01Z** with a **zero-token accounting baseline for this run**. The previously reported **15,067,785 tokens** belong to a prior run and are historical comparison data only. They must not be added to, presented as, or used to imply work performed by this run. The final retrospective will report this run’s actual elapsed time and token use from its own checkpoints.
+## 14. Checkpoint ledger for the final retrospective
 
-## 14. Contract sign-off rule
+| Checkpoint | Expected artifact |
+|---|---|
+| G001 · Agreement baseline | This Markdown/HTML/PDF contract, validated and committed without product-source edits. |
+| G002 · Contract hardening | Review-thread reconciliation, red/green tests, minimal fixes, targeted verification. |
+| G003 · Live-path proof | Session/prompt/stream/telemetry/host-context evidence and any surgical repairs. |
+| G004 · UX and rendering audit | Theme/component/PR #2–#8/JSON-render gap map with bounded fixes or explicit follow-ups. |
+| G005 · Final assurance | Bounded API evidence, complete verification, independent reviews, deployment receipt, final retrospective PDF, and user test instructions. |
 
-This baseline is accepted when the Markdown, self-contained HTML, and valid PDF agree on the material terms above and the PDF opens successfully. It authorizes implementation within the stated scope; it does not declare the product complete. Product completion occurs only after every required story and gate has fresh evidence, the PR and deployment are updated, and remaining external gaps are named without inflation.
+## 15. Source of truth
+
+This baseline was assembled from `.omx/ultragoal/brief.md`, the canonical Dev Workbench handoff package, `docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md`, current repository source and scripts, PR 61 metadata/checks/reviews, and the user's amended requirements. Later evidence may change a status, but it must do so through the acceptance and release gates above.
+
