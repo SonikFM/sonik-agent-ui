@@ -45,6 +45,7 @@ function createFakeWorkspaceTables() {
     runEvents: new Map(),
     layouts: new Map(),
     pageContexts: new Map(),
+    telemetry: new Map(),
     sequence: 0,
   };
 }
@@ -625,6 +626,26 @@ class FakeRlsWorkspaceSqlTransaction {
       return { rows };
     }
 
+    if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_telemetry_events")) {
+      const [organization_id, user_id, id, session_id, request_id, source, event, payload, ok, error] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      if (session_id && !this.tables.sessions.has(this.scopedKey(session_id))) return { rows: [] };
+      const row = { id, organization_id, user_id, session_id, request_id, source, event, payload: parseJsonParam(payload), ok, error, created_at: this.now() };
+      this.tables.telemetry.set(this.scopedKey(id), row);
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("select id, session_id, request_id, source, event, payload, ok, error, created_at from sonik_agent_ui.agent_workspace_telemetry_events")) {
+      const [organization_id, user_id, session_id, limit] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const rows = [...this.tables.telemetry.values()]
+        .filter((row) => row.organization_id === organization_id && row.user_id === user_id && (session_id === undefined || row.session_id === session_id))
+        .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || a.id.localeCompare(b.id))
+        .slice(-limit)
+        .map(clone);
+      return { rows };
+    }
+
     throw new Error(`Unhandled fake SQL: ${normalized}`);
   }
 
@@ -682,6 +703,16 @@ async function runWorkspaceCloudSqlAdapterTests() {
   assert.equal((await adapterOtherHost.getSession("session-rls"))?.id, session.id, "the same org/user keeps workspace ownership when the host session rotates");
   assert.equal((await adapterOtherHost.listSessions()).some((row) => row.id === session.id), true, "rotated host sessions list the stable owner's history");
   assert.equal(await adapterOtherUser.getSession("session-rls"), null, "same-org different-user authority cannot read a guessed workspace");
+
+  const telemetry = await adapterA.recordTelemetryEvent({ session_id: session.id, request_id: "req-telemetry", source: "client", event: "workspace.telemetry.persisted", payload: { count: 1 }, ok: true });
+  assert.equal((await adapterA.listTelemetryEvents(session.id)).at(-1)?.id, telemetry.id, "cloud telemetry writes must be readable from the owning session in stable order");
+  assert.deepEqual(await adapterB.listTelemetryEvents(session.id), [], "another tenant cannot read guessed session telemetry");
+  assert.deepEqual(await adapterOtherUser.listTelemetryEvents(session.id), [], "another user cannot read guessed session telemetry");
+  await assert.rejects(
+    () => adapterA.recordTelemetryEvent({ session_id: "missing-session", source: "client", event: "workspace.telemetry.invalid" }),
+    (error) => error instanceof CloudWorkspacePersistenceError && error.code === "missing-request-context",
+    "cloud telemetry writes must reject missing or foreign sessions",
+  );
 
   const message = await adapterA.appendMessage({ session_id: session.id, id: "msg-1", role: "user", content: "hello cloud", parts: [{ type: "text", text: "hello cloud" }] });
   assert.equal(message.session_id, session.id);
