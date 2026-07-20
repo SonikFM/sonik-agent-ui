@@ -2,7 +2,7 @@
 
 ## 1. Executive assessment
 
-The repository contains substantial real implementation, but the work was completed in infrastructure-heavy slices and reported through contract/test/ledger gates that did not consistently prove the intended user journey. The largest user-visible regression is simple: Booking opens the Workbench with `surface=terminal`, and terminal-only CSS hides the toolbar and dock controls where visual context and layout features live.
+The repository contains substantial real implementation, but the work was completed in infrastructure-heavy slices and reported through contract/test/ledger gates that did not consistently prove the intended user journey. The embedded-control regression has been repaired in source and covered by component and embedded-browser tests; deployed Booking proof remains outstanding.
 
 The correct description is **functional sandbox terminal with partial embedded developer harness**, not a complete “see what I see, diagnose, fix, and deploy” experience.
 
@@ -15,7 +15,7 @@ The correct description is **functional sandbox terminal with partial embedded d
 | Real Codex terminal | Complete | xterm connects to Vercel interactive PTY and enters a real tmux/Codex environment. | `apps/dev-workbench/src/lib/client/terminal.ts`, Workbench README |
 | Tmux workspace | Complete | Named `codex`, `dev`, `shell`, and `logs` windows are bootstrapped. | `apps/dev-workbench/src/lib/server/bootstrap-plan.ts` |
 | Frontend hot preview | Complete | A sandbox development server is started and exposed through a provider preview domain. | `apps/dev-workbench/src/lib/server/workspace-service.ts` |
-| Standalone layout | Partial | Right/bottom/fullscreen and resize implementation exists. Embedded `surface=terminal` forces fullscreen-like terminal-only behavior and hides controls. | `DevWorkbench.svelte`, `DevWorkbench.css` |
+| Standalone layout | Complete in repository | Right/bottom/fullscreen and resize implementation exists, and embedded `surface=terminal` retains compact controls. | `DevWorkbench.svelte`, `DevWorkbench.css`, `DevWorkbench.contract.test.ts`, `embedded-workbench.spec.ts` |
 | Embedded Booking Dev launcher | Partial | Booking integration can launch the Workbench sidecar, but availability depends on deployed host configuration and the embed forces terminal surface. | Booking host adapter/PR; `647ce5d` |
 | Verbose workspace startup | Partial | Bootstrap phases exist, but the operator experience does not yet provide the complete step/elapsed/recovery narrative requested. | Workbench route and components |
 | Basic Workbench login | Complete | Workbench supports HTTPS Basic Auth and Vercel deployment protection. This is separate from Booking host authority and Codex CLI auth. | `apps/dev-workbench/src/hooks.server.ts`, README |
@@ -23,9 +23,9 @@ The correct description is **functional sandbox terminal with partial embedded d
 | Authenticated host-session context | Partial | Signed host-context transport exists across Agent UI/hosts, but the observed product journey still reports unresolved/missing host authority. Deployment and host-proxy configuration remain part of the gate. | Agent embed/host-context files; historical diagnostics |
 | Page-context mirror | Partial | `.sonik/page-context.json`, sitemap, and environment paths exist. Codex can read them, but context arrival is not a complete automatic tool/instruction workflow. | Workbench context APIs/bootstrap plan |
 | OpenAPI/command context | Partial | Contracts and generated command catalogs are extensive; availability and active host authority are still disconnected in the user experience. | `packages/tool-contracts`, Booking host integration |
-| Source selector | Partial | Preview/host capability logic exists in the Workbench. The intended embedded toolbar is hidden by terminal-only CSS. | `+page.svelte`, `DevWorkbench.svelte`, CSS |
-| Semantic element picker | Partial | A real Impeccable-derived picker, Sonik adapter, typed messages, host bridge, and tests exist. The trigger is inaccessible in the Booking terminal-only embed. | `packages/agent-embed/src/vendor/impeccable`, `packages/agent-embed/src/index.ts`, `+page.svelte` |
-| Preview screenshot | Partial | Playwright capture, bounded artifacts, manifest promotion, locking, revisions, and tests exist. The control is hidden in the intended embedded UI. | `playwright-preview-capture.ts`, visual-context APIs/tests |
+| Source selector | Complete in repository | Preview/host capability logic and its embedded control are reachable; deployed Booking validation remains a release gate. | `+page.svelte`, `DevWorkbench.svelte`, `DevWorkbench.contract.test.ts`, `embedded-workbench.spec.ts` |
+| Semantic element picker | Complete in repository | The picker, adapter, typed relay, and restored embedded trigger are covered; host deployment proof remains outstanding. | `packages/agent-embed/src/vendor/impeccable`, `packages/agent-embed/src/index.ts`, `+page.svelte`, `embedded-workbench.spec.ts` |
+| Preview screenshot | Complete in repository | Playwright capture, bounded artifacts, locking/revisions, and a reachable embedded control are implemented and tested. | `playwright-preview-capture.ts`, visual-context APIs/tests, `embedded-workbench.spec.ts` |
 | Exact active-tab screenshot | Skeleton/disabled | MV3 extension code and tests exist, but Workbench's pair/capture actions currently return an unavailable reason. It must not be described as shipped. | `apps/dev-workbench-extension`, `+page.svelte` |
 | Screenshot-to-Codex handoff | Partial | `SONIK_VISUAL_CONTEXT_PATH` and stable `.sonik` artifact paths exist. Automatic “new context available” signaling and a polished consumption flow are incomplete. | `bootstrap-plan.ts`, visual-context coordinator |
 | Element-to-source mapping | Absent | Sitemap/source repository exists, but no reliable DOM/semantic target to source-file/line resolver was found. | No operative mapping path found |
@@ -44,7 +44,7 @@ The correct description is **functional sandbox terminal with partial embedded d
 | Codex auth after teardown | Absent | Live sandbox state can persist across suspension. Deletion destroys the sandbox filesystem and CLI login. | provider lifecycle/README |
 | Durable agent orchestration | Absent | Current execution is raw Codex CLI in tmux, not an AI SDK WorkflowAgent/AgentOS run journal. | runtime architecture vs implementation |
 
-## 3. Why visible features disappeared
+## 3. Why visible features disappeared, and how they were restored
 
 Commit `647ce5d` introduced terminal-first embedding. The route derives:
 
@@ -52,7 +52,7 @@ Commit `647ce5d` introduced terminal-first embedding. The route derives:
 const terminalOnly = page.url.searchParams.get("surface") === "terminal";
 ```
 
-`DevWorkbench.svelte` treats terminal-only as fullscreen for layout. CSS then removes both relevant control regions:
+`DevWorkbench.svelte` previously treated terminal-only as fullscreen for layout. CSS removed both relevant control regions:
 
 ```css
 .dev-workbench[data-terminal-only="true"] .dev-workbench__toolbar,
@@ -61,7 +61,7 @@ const terminalOnly = page.url.searchParams.get("surface") === "terminal";
 }
 ```
 
-The picker and capture work landed after the terminal-first surface. Their buttons were added to the toolbar, but the Booking embed continued requesting `surface=terminal`. The result is implemented handlers behind an intentionally hidden command surface.
+The picker and capture work landed after the terminal-first surface. Their buttons were added to the toolbar, but the Booking embed continued requesting `surface=terminal`. The hidden command surface was repaired by retaining a compact toolbar and dock controls in terminal mode.
 
 This was not a missing xterm feature; it was an integration and acceptance failure between the terminal presentation mode and the later context-control work.
 
@@ -108,7 +108,7 @@ The extension README describes a pairing flow that current Workbench actions dis
 
 | Risk | Impact | Control |
 |---|---|---|
-| Hidden control regression repeats | User cannot access implemented capability | Embedded E2E must activate every P0 control at sidebar width. |
+| Hidden control regression repeats | User cannot access implemented capability | `DevWorkbench.contract.test.ts` and `embedded-workbench.spec.ts` guard the restored controls; deployed sidebar-width proof remains required. |
 | Host context looks connected but lacks authority | Dead tools and confusing failures | Display evidence, authority, and capability as separate states; test real signed attachment. |
 | Exact screenshot claims exceed browser privilege | Privacy/security failure | Keep active-tab capture disabled until explicit attestation and redaction E2E pass. |
 | Credentials are treated as sandbox durability | Repeated Codex login or secret exposure | Define suspend/delete behavior and use an encrypted restoration design. |

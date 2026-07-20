@@ -5,7 +5,7 @@ Status: implementation handoff for the Agent UI Dev Workbench.
 ## Decisions
 
 - Keep executable skills and JavaScript on the filesystem. SQLite may store blobs, but it stores only the installed version, digest, enabled state, onboarding completion, event index, and derived memories.
-- Install skills from a pinned manifest. On startup, compare the installed digest and run `npx skills add` only when the manifest changed; persistent sandbox snapshots make reinstalling every boot unnecessary.
+- Install skills from a pinned manifest. On startup, compare the installed digest and run `npx skills@1.5.19 add` only when the manifest changed; persistent sandbox snapshots make reinstalling every boot unnecessary.
 - Launch OMX inside the Workbench-owned tmux session with `omx --direct`; do not launch a second nested tmux session.
 - Treat the sandbox SQLite database as rebuildable local state. Beacon actor `c.db`, Postgres, and private object storage own state that must survive sandbox deletion.
 - Persist observable traces and explicit session summaries, not private chain-of-thought.
@@ -20,7 +20,7 @@ Status: implementation handoff for the Agent UI Dev Workbench.
 4. Keep booking and Amplify domain databases compatible with their production contracts. The Workbench memory SQLite database is not a substitute for Postgres.
 5. Subscribe to the Beacon `agentChannel`, persist a bounded local JSONL/SQLite index, and restore from the last cursor.
 6. Consume a normalized visual-grounding response and map its box or point to the existing DOM target registry, source metadata, and repository file.
-7. Inject only a short startup summary plus paths to current page context, host authority, OpenAPI, sitemap, screenshot, visual target, logs, and memory search.
+7. Inject only a short startup summary plus paths to current page context, OpenAPI, sitemap, screenshot, visual target, logs, and memory search. Host authority remains a server-only handle.
 8. Verify reload, navigation, sandbox resume, hot reload, and teardown behavior before promotion.
 
 ## Operator / companion-agent owns
@@ -39,8 +39,32 @@ The operator-owned service returns:
 
 ```json
 {
+  "schemaVersion": "sonik.visual-context.v1",
   "requestId": "uuid",
+  "requestSequence": 9,
+  "sourceContextRevision": 4,
+  "routeRevision": 7,
+  "source": {
+    "id": "preview",
+    "label": "Preview",
+    "surface": "workbench-preview",
+    "route": "/reservations"
+  },
   "screenshotDigest": "sha256:...",
+  "screenshot": {
+    "path": "${DEV_WORKBENCH_STATE_ROOT}/screenshots/latest.png",
+    "mime": "image/png",
+    "width": 1280,
+    "height": 720,
+    "bytes": 4096,
+    "sha256": "sha256:...",
+    "provider": "playwright",
+    "fidelity": "controlled-preview",
+    "captureBasis": "fresh-playwright-navigation",
+    "viewport": { "width": 1280, "height": 720, "deviceScaleFactor": 1 },
+    "redactionsApplied": [],
+    "capturedAt": "2026-07-20T12:00:00.000Z"
+  },
   "query": "reorganize this segment",
   "targets": [
     {
@@ -65,7 +89,7 @@ Workbench validates the screenshot digest and page revision, intersects the resu
     "file": "apps/booking/src/lib/ReservationToolbar.svelte",
     "line": 48
   },
-  "screenshotPath": "/vercel/sandbox/workspace/.sonik/screenshots/latest.png"
+  "screenshotPath": "${DEV_WORKBENCH_STATE_ROOT}/screenshots/latest.png"
 }
 ```
 
@@ -99,8 +123,8 @@ DEV_WORKBENCH_PIPE_B_WORKER
 Rules:
 
 - Mark credentials sensitive and scope them to the minimum environment and permissions.
-- Never forward Vercel, GitHub, Cloudflare, host-authority, or database credentials to browser JavaScript.
-- The sandbox receives only the variables required by its selected profile.
+- Never forward Vercel, GitHub, Cloudflare, database, host-authority, or visual-grounding control-plane credentials to browser JavaScript or sandbox processes.
+- The sandbox receives only explicitly allowlisted, non-control-plane variables required by its selected profile. Approved privileged operations use server-side brokers or short-lived, least-privilege tokens.
 - Environment changes require a new Workbench deployment and a fresh sandbox.
 - Startup commands are checked-in profile data, not arbitrary environment-variable or browser input.
 

@@ -20,7 +20,7 @@ test("preview status and event payloads match runtime contracts", () => {
 
   assert.match(architecture, /type PreviewStatus =[^;]*"connecting"[^;]*"ready"[^;]*"stale"[^;]*"unavailable"[^;]*"error"/);
   assert.match(architecture, /type WorkbenchEventPayloads =/);
-  assert.match(architecture, /type WorkbenchEvent<K extends keyof WorkbenchEventPayloads>/);
+  assert.match(architecture, /type WorkbenchEvent<K extends keyof WorkbenchEventPayloads[^>]*>/);
   assert.match(architecture, /payload: WorkbenchEventPayloads\[K\]/);
   for (const kind of [
     "status.changed",
@@ -50,7 +50,7 @@ test("handoff provenance is portable", () => {
   const sourceIndex = read(`${handoff}/05-source-index.md`);
 
   for (const path of paths) assert.doesNotMatch(read(path), /\/Users\/[A-Za-z0-9._-]+\//, path);
-  assert.match(sourceIndex, /session[^\n]*(019f605d|redacted)/i);
+  assert.match(sourceIndex, /session identifier:[^]*019f605d/i);
   assert.match(sourceIndex, /outside the repository|external/i);
 });
 
@@ -83,10 +83,18 @@ test("runtime ownership pins installers and documents attested visual context", 
   assert.match(ownership, /\$\{DEV_WORKBENCH_STATE_ROOT\}\/screenshots\/latest\.png/);
 });
 
+test("canonical visual fixture carries explicit replay attestation", () => {
+  const fixture = JSON.parse(read("packages/tool-contracts/fixtures/visual-context-v1.json"));
+
+  assert.equal(fixture.snapshot.requestSequence, 2);
+  assert.equal(fixture.snapshot.sourceContextRevision, 4);
+  assert.equal(fixture.snapshot.routeRevision, 8);
+});
+
 test("sandbox processes cannot receive control-plane credentials", () => {
   const ownership = read("docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md");
 
-  assert.match(ownership, /sandbox processes[^\n]*(GitHub|control-plane)/i);
+  assert.match(ownership, /control-plane credentials[^\n]*sandbox processes/i);
   for (const credential of ["GitHub", "Cloudflare", "database", "host-authority", "visual-grounding"])
     assert.match(ownership, new RegExp(credential, "i"));
   assert.match(ownership, /server-side brokers|short-lived, least-privilege tokens/i);
