@@ -101,7 +101,7 @@ await assert.rejects(() => persistInitiatingUserMessage({ persistence: { getSess
 const generateExecutionOrder = generateSource.slice(generateSource.indexOf("let runRecorder"), generateSource.indexOf("const result = await agent.stream"));
 assert.equal(generateExecutionOrder.indexOf("startRunRecorder") < generateExecutionOrder.indexOf("const agent = createAgent"), true, "run creation completes before createAgent executes");
 assert.match(generateExecutionOrder, /let runRecorder:[^;]+null;[\s\S]*if \(telemetrySessionId\)/, "requests without a session preserve the null-recorder streaming path");
-assert.match(generateExecutionOrder, /const durableRunId = runRecorder\?\.runId \?\? smokeRunId/, "post-create lifecycle telemetry must select the durable run id once");
+assert.match(generateExecutionOrder, /durableRunId = runRecorder\?\.runId \?\? smokeRunId/, "post-create lifecycle telemetry must select the durable run id once");
 for (const eventName of ["api.generate.run_started", "api.generate.stream_attached", "api.generate.stream_error", "api.generate.error"]) {
   const eventBlock = generateSource.match(new RegExp(`event: "${eventName.replaceAll(".", "\\.")}"[\\s\\S]{0,500}`))?.[0] ?? "";
   assert.match(eventBlock, /runId: durableRunId/, `${eventName} telemetry must correlate to the durable run id`);
