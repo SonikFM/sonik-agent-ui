@@ -22,7 +22,9 @@ export const handle: Handle = async ({ event, resolve }) => {
   if (isAmplifyLoginProxyEnabled(env) && !event.request.headers.get(AGENT_UI_HOST_CONTEXT_HEADER)) {
     const header = await resolveLoginProxyHostContextHeader(event.cookies, env);
     if (header) {
-      event.request.headers.set(AGENT_UI_HOST_CONTEXT_HEADER, header);
+      const headers = new Headers(event.request.headers);
+      headers.set(AGENT_UI_HOST_CONTEXT_HEADER, header);
+      event.request = new Request(event.request, { headers });
     }
   }
   return resolve(event);
