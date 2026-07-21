@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, type Snippet } from "svelte";
+  import { onMount, untrack, type Snippet } from "svelte";
   import "./DevWorkbench.css";
   import { runEnabledAction, type DevWorkbenchCallbacks } from "./actions";
   import {
@@ -54,12 +54,13 @@
   let splitElement: HTMLDivElement;
   let terminalDock = $state<TerminalDock>(DEFAULT_TERMINAL_LAYOUT.dock);
   let terminalSize = $state(DEFAULT_TERMINAL_LAYOUT.size);
+  let terminalFocused = $state(untrack(() => terminalOnly));
   let narrowViewport = $state(false);
   let resizing = $state(false);
 
   const revisionLabel = $derived(repository.revision.length > 12 ? repository.revision.slice(0, 12) : repository.revision);
   const effectiveDock = $derived<TerminalDock>(
-    terminalOnly || terminalDock === "fullscreen" ? "fullscreen" : narrowViewport ? "bottom" : terminalDock,
+    terminalFocused || terminalDock === "fullscreen" ? "fullscreen" : narrowViewport ? "bottom" : terminalDock,
   );
   const terminalSizePercent = $derived(Math.round(terminalSize * 100));
   const splitStyle = $derived(`--dw-terminal-size: ${terminalSizePercent}%;`);
@@ -77,7 +78,9 @@
   onMount(() => {
     let preference = DEFAULT_TERMINAL_LAYOUT;
     try {
-      preference = parseTerminalLayoutPreference(window.localStorage.getItem(TERMINAL_LAYOUT_STORAGE_KEY));
+      const storedPreference = window.localStorage.getItem(TERMINAL_LAYOUT_STORAGE_KEY);
+      preference = parseTerminalLayoutPreference(storedPreference);
+      terminalFocused = terminalOnly && storedPreference === null;
     } catch {
       // Browsers can deny storage access while still allowing the workbench to run.
     }
@@ -103,6 +106,7 @@
   }
 
   function setTerminalDock(dock: TerminalDock): void {
+    terminalFocused = false;
     terminalDock = dock;
     persistLayout();
   }
@@ -347,7 +351,7 @@
       </header>
 
       <div class="dev-workbench__panel-body">
-        {#if preview.status === "ready" && preview.url}
+        {#if preview.url}
           <iframe
             class="dev-workbench__preview-frame"
             src={preview.url}
@@ -356,6 +360,12 @@
             sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
             referrerpolicy="no-referrer"
           ></iframe>
+          {#if preview.status === "connecting"}
+            <div class="dev-workbench__preview-loading" role="status" aria-live="polite">
+              <strong>Starting the preview interface</strong>
+              <p>The first client compile can take about a minute. The terminal remains available while it loads.</p>
+            </div>
+          {/if}
         {:else}
           <div class="dev-workbench__empty" role="status">
             <strong>Preview unavailable</strong>

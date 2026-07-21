@@ -24,7 +24,7 @@ export const devWorkbenchSchema = z.strictObject({
     message: z.string().min(1),
   }),
   preview: z.strictObject({
-    status: z.enum(["connecting", "ready", "unavailable", "error"]),
+    status: z.enum(["connecting", "ready", "stale", "unavailable", "error"]),
     url: z.string().url().nullable(),
     path: z.string().min(1),
     viewportLabel: z.string().min(1),

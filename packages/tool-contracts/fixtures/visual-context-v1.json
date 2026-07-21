@@ -60,6 +60,7 @@
     "status": "current",
     "generation": "generation-1",
     "requestId": "visual-request-2",
+    "requestSequence": 2,
     "sourceContextRevision": 4,
     "routeRevision": 8,
     "source": {

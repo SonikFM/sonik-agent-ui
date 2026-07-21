@@ -183,6 +183,15 @@ assert.match(workbenchPageSource, /return \(\) => \{[^]*cancelHostPicker\(\)[^]*
 assert.match(workbenchPageSource, /providerLost[^]*visualExtensionPaired = false[^]*"provider-lost"/, "provider or pairing loss resets paired capability and invalidates current context");
 assert.match(workbenchPageSource, /selectedVisualSourceId !== sourceId[^]*visualExtensionPaired = false/, "source context changes reset the context-bound extension pairing");
 assert.match(workbenchPageSource, /previousRoute[^]*pairingLost = visualExtensionPaired[^]*visualExtensionPaired = false/, "Host navigation resets the active-tab pairing before reporting stale context");
+assert.match(workbenchPageSource, /await restoreVisualContext\(next\.sessionId\)/, "workspace reconnect restores persisted visual state before refreshing providers");
+assert.match(workbenchPageSource, /status: derivePreviewStatus\(true, previewInteractive\)/, "Preview readiness waits for an authenticated frame message without inheriting visual artifact staleness");
+assert.match(workbenchPageSource, /event\.source !== frame\.contentWindow \|\| event\.origin !== previewOrigin\) return;[^]*previewInteractive = true/, "only the verified preview frame may report that the interface is interactive");
+assert.match(workbenchPageSource, /function announcePreviewAvailability[^]*selectedVisualSourceId[^]*workspace\?\.preview[^]*Preview server is ready\. Waiting for the interface to connect\./, "a provisioned Preview reports the client hydration wait honestly");
+assert.equal((workbenchPageSource.match(/announcePreviewAvailability\(\);/g) ?? []).length, 2, "start and reconnect both refresh the default Preview status");
+const workbenchComponentSource = readFileSync("apps/dev-workbench/src/design-system/patterns/DevWorkbench/DevWorkbench.svelte", "utf8");
+assert.match(workbenchComponentSource, /\{#if preview\.url\}[^]*<iframe[^]*\{#if preview\.status === "connecting"\}[^]*Starting the preview interface/, "the iframe stays mounted while an explicit client-compile loading state is visible");
+assert.match(workbenchPageSource, /fetch\("\/api\/workspaces\/visual-context"\)[^]*visualContextReadResponseSchema\.safeParse[^]*sourceContextRevision = snapshot\.sourceContextRevision[^]*routeRevision = snapshot\.routeRevision/, "persisted visual revisions and source are restored from the strict snapshot response");
+assert.match(workbenchPageSource, /const previousRoute = restoredHostRoute[^]*restoredHostRoute = nextRoute \?\? null[^]*previousRoute !== nextRoute[^]*invalidateVisualContext/, "the first host donation after remount compares against the restored route and invalidates stale context");
 assert.match(workbenchPageSource, /method: "PUT"[^]*body: JSON\.stringify\(request\)[^]*visualContextRequestSchema\.safeParse/, "host operations await a strict server-registered request before postMessage");
 assert.match(workbenchPageSource, /submitVisualResult\(request, result\)/, "pairing results reach the existing server telemetry route");
 assert.match(workbenchPageSource, /payload\.accepted === true[^]*"Preview Capture is current\."/, "Preview success requires server acceptance, not provider completion alone");
@@ -196,9 +205,14 @@ assert.match(visualBrowserRouteSource, /runWorkspacePlaywrightVisualContext/, "t
 assert.match(visualBrowserRouteSource, /emitVisualBrowserTelemetry[^]*phase: "started"[^]*phase: "failed"[^]*phase: accepted \? "completed" : "failed"/, "Preview browser requests emit start and terminal telemetry through the privacy-allowlisted seam");
 assert.match(visualBrowserRouteSource, /result\.value\.accepted[^]*status: accepted \? 200 : 202/, "the Preview route propagates stale coordinator outcomes without reporting current success");
 const workspaceServiceSource = readFileSync("apps/dev-workbench/src/lib/server/workspace-service.ts", "utf8");
+const vercelSandboxSource = readFileSync("apps/dev-workbench/src/lib/server/vercel-sandbox.ts", "utf8");
 assert.match(workspaceServiceSource, /host-context\.json.*host origin plus redacted page context/i);
 assert.match(workspaceServiceSource, /openapi\.json.*host OpenAPI document fetched with that authority/i);
 assert.doesNotMatch(workspaceServiceSource, /booking-host origin|booking host OpenAPI/i);
+assert.equal("hostAuthority" in DEV_WORKBENCH_MIRROR_PATHS, false, "host authority stays server-side instead of entering the guest mirror namespace");
+assert.doesNotMatch(workspaceServiceSource, /host-authority\.json/, "the sandbox guide and file writer never expose host authority");
+assert.doesNotMatch(workspaceServiceSource, /function sandboxEnvironment/, "workspace provisioning cannot construct a control-plane credential environment");
+assert.doesNotMatch(vercelSandboxSource, /input\.env|env:\s*input\.env/, "Sandbox.create has no generic environment passthrough");
 
 const contextSandboxFiles = new Map([
   [DEV_WORKBENCH_MIRROR_PATHS.workspace, Buffer.from(JSON.stringify({
@@ -332,8 +346,9 @@ assert.deepEqual(plan.commands.map((command) => command.id), [
   "select-codex-window",
 ]);
 assert.equal(plan.commands[2].args.at(-1), DEV_WORKBENCH_REPOSITORY_ROOT);
-assert.equal(plan.windows[0].command.includes(`SONIK_HOST_AUTHORITY_PATH=${DEV_WORKBENCH_MIRROR_PATHS.hostAuthority}`), true);
-assert.equal(plan.windows[3].command.join(" ").includes("Pipe B access is not configured"), true);
+assert.doesNotMatch(plan.windows.flatMap((window) => window.command).join(" "), /HOST_AUTHORITY|CLOUDFLARE|GITHUB|DATABASE|VISUAL_GROUNDING/, "tmux commands exclude control-plane credentials and authority handles");
+assert.equal(plan.windows[3].command.join(" ").includes("Pipe B access is unavailable"), true);
+assert.equal(plan.windows[3].command.join(" ").includes("Set DEV_WORKBENCH_CLOUDFLARE_API_TOKEN"), false, "the unavailable logs window does not instruct operators to inject a control-plane credential");
 assert.equal(DEFAULT_REPOSITORY_COMMANDS.dev.includes("--"), false, "Vite flags must reach the dev script without a positional delimiter");
 const hostedPlan = createDevWorkbenchBootstrapPlan({
   sessionId: "session_123",
@@ -428,8 +443,6 @@ if (configured.ok) {
   assert.equal(configured.value.repository.repositoryId, "github.com.sonikfm.sonik-agent-ui");
   assert.deepEqual(configured.value.repository.commands.codex, ["npx", "--yes", "@openai/codex@0.144.5"]);
   assert.equal(configured.value.agentApiOrigin, "https://sonik-agent-ui.liam-trampota.workers.dev");
-  assert.equal(configured.value.pipeBWorker, "sonik-dev-observability-pipe-b");
-  assert.equal(configured.value.cloudflareApiToken, null);
 }
 assert.deepEqual(devWorkbenchSessionCookieOptions(new URL("https://workbench.example.com")), {
   httpOnly: true,
@@ -545,6 +558,7 @@ try {
   Sandbox.get = originalSandboxGet;
 }
 assert.equal(syncedContext.host?.authority?.header, "opaque_signed_host_authority");
+assert.equal([...contextSandboxFiles.keys()].some((path) => /host-authority/i.test(path)), false, "context synchronization never writes authority into the sandbox");
 assert.throws(
   () => workspaceContextSyncSchema.parse({ ...syncedContext, host: { ...syncedContext.host, origin: "http://localhost:3000" } }),
   /Expected an HTTPS URL/,

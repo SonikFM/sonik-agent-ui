@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "sonik.handoff.v1",
+  "title": "Sonik Dev Workbench Handoff",
+  "snapshotDate": "2026-07-20",
+  "scope": "Repository-aware Codex sandbox, embedded Agent UI developer mode, host and visual context, observability, tools, and governed deployment",
+  "status": "partial",
+  "entrypoint": "README.md",
+  "documents": [
+    {
+      "path": "README.md",
+      "purpose": "Entry point, product outcome, status vocabulary, and immediate truth"
+    },
+    {
+      "path": "01-product-requirements.md",
+      "purpose": "Consolidated functional, non-functional, and journey requirements"
+    },
+    {
+      "path": "02-current-state-and-gaps.md",
+      "purpose": "Evidence-backed complete, partial, skeleton, and absent capability audit"
+    },
+    {
+      "path": "03-architecture.md",
+      "purpose": "Existing and target architecture, trust boundaries, data flows, and ownership"
+    },
+    {
+      "path": "04-delivery-plan-and-acceptance.md",
+      "purpose": "Ordered delivery gates, test matrix, and global stop gate"
+    },
+    {
+      "path": "05-source-index.md",
+      "purpose": "Source precedence, repository evidence, historical provenance, and dependency index"
+    }
+  ],
+  "primarySources": [
+    ".omx/plans/prd-visual-page-context.md",
+    ".omx/plans/test-spec-visual-page-context.md",
+    ".omx/context/visual-page-context-20260717T181951Z.md",
+    ".omx/state/visual-page-context-ralplan-handoff.json",
+    "docs/architecture/sonik-agent-runtime-architecture-2026-07-16.html",
+    "apps/dev-workbench/README.md",
+    "apps/dev-workbench-extension/README.md"
+  ],
+  "statusDefinitions": {
+    "complete": "Implemented, reachable in the intended UI, exercised through the intended integration, and freshly verified",
+    "partial": "Useful implementation exists but the intended journey, integration, visibility, durability, or validation is incomplete",
+    "skeleton": "Types, UI shells, adapters, tests, or seams exist without useful end-to-end behavior",
+    "absent": "No operative implementation found",
+    "deferred": "Intentionally outside the next release gate and not complete"
+  },
+  "completionGate": "All P0 and P1 gates in 04-delivery-plan-and-acceptance.md pass on a deployed Booking integration, remaining P2 work is explicitly accepted as deferred, and the capability matrix is updated with fresh evidence"
+}

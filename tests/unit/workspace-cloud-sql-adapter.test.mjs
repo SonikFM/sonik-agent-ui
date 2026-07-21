@@ -4,6 +4,9 @@ import {
   CloudWorkspacePersistenceError,
   createCloudWorkspacePersistenceAdapter,
 } from "../../packages/workspace-session/src/index.ts";
+import { writeAgentTelemetry } from "../../apps/standalone-sveltekit/src/lib/server/agent-telemetry.ts";
+import { tapSpecStreamForTelemetry } from "../../apps/standalone-sveltekit/src/lib/server/spec-stream-tap-telemetry.ts";
+import { instrumentGenerateStream } from "../../apps/standalone-sveltekit/src/lib/server/stream-telemetry.ts";
 
 function createAuthorizedRuntime(input) {
   return {
@@ -45,6 +48,7 @@ function createFakeWorkspaceTables() {
     runEvents: new Map(),
     layouts: new Map(),
     pageContexts: new Map(),
+    telemetry: new Map(),
     sequence: 0,
   };
 }
@@ -625,6 +629,26 @@ class FakeRlsWorkspaceSqlTransaction {
       return { rows };
     }
 
+    if (normalized.startsWith("insert into sonik_agent_ui.agent_workspace_telemetry_events")) {
+      const [organization_id, user_id, id, session_id, request_id, source, event, payload, ok, error] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      if (session_id && !this.tables.sessions.has(this.scopedKey(session_id))) return { rows: [] };
+      const row = { id, organization_id, user_id, session_id, request_id, source, event, payload: parseJsonParam(payload), ok, error, created_at: this.now() };
+      this.tables.telemetry.set(this.scopedKey(id), row);
+      return { rows: [clone(row)] };
+    }
+
+    if (normalized.startsWith("select id, session_id, request_id, source, event, payload, ok, error, created_at") && normalized.includes("from sonik_agent_ui.agent_workspace_telemetry_events")) {
+      const [organization_id, user_id, session_id, limit] = params;
+      this.assertMatchesContext(organization_id, user_id);
+      const rows = [...this.tables.telemetry.values()]
+        .filter((row) => row.organization_id === organization_id && row.user_id === user_id && (session_id == null || row.session_id === session_id))
+        .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || a.id.localeCompare(b.id))
+        .slice(-limit)
+        .map(clone);
+      return { rows };
+    }
+
     throw new Error(`Unhandled fake SQL: ${normalized}`);
   }
 
@@ -682,6 +706,56 @@ async function runWorkspaceCloudSqlAdapterTests() {
   assert.equal((await adapterOtherHost.getSession("session-rls"))?.id, session.id, "the same org/user keeps workspace ownership when the host session rotates");
   assert.equal((await adapterOtherHost.listSessions()).some((row) => row.id === session.id), true, "rotated host sessions list the stable owner's history");
   assert.equal(await adapterOtherUser.getSession("session-rls"), null, "same-org different-user authority cannot read a guessed workspace");
+
+  const telemetry = await adapterA.recordTelemetryEvent({ session_id: session.id, request_id: "req-telemetry", source: "client", event: "workspace.telemetry.persisted", payload: { count: 1 }, ok: true });
+  assert.equal((await adapterA.listTelemetryEvents(session.id)).at(-1)?.id, telemetry.id, "cloud telemetry writes must be readable from the owning session in stable order");
+  assert.deepEqual(await adapterB.listTelemetryEvents(session.id), [], "another tenant cannot read guessed session telemetry");
+  assert.deepEqual(await adapterOtherUser.listTelemetryEvents(session.id), [], "another user cannot read guessed session telemetry");
+
+  const lifecycleWrites = [];
+  const writeRequestTelemetry = (event) => {
+    const write = writeAgentTelemetry(event, adapterA);
+    lifecycleWrites.push(write);
+    return write;
+  };
+  const lifecycleContext = { requestId: "req-stream-lifecycle", sessionId: session.id, startedAt: Date.now() };
+  const lifecycleChunks = [
+    { type: "tool-createJsonArtifact", toolCallId: "tool-1", state: "output-available" },
+    { type: "data-spec", data: { type: "patch", patch: { op: "add", path: "/elements/main", value: { type: "Text", props: {}, children: [] } } } },
+  ];
+  const lifecycleSource = new ReadableStream({
+    start(controller) {
+      for (const chunk of lifecycleChunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  const lifecycleReader = instrumentGenerateStream(
+    tapSpecStreamForTelemetry(lifecycleSource, lifecycleContext, writeRequestTelemetry),
+    lifecycleContext,
+    writeRequestTelemetry,
+  ).getReader();
+  while (!(await lifecycleReader.read()).done) {}
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await Promise.all(lifecycleWrites);
+
+  const lifecycleEvents = await adapterA.listTelemetryEvents(session.id);
+  assert.equal(lifecycleEvents.some(({ event }) => event === "api.generate.spec_stream_patch"), true, "the owning session reads spec lifecycle telemetry");
+  assert.equal(lifecycleEvents.some(({ event }) => event === "api.generate.stream_first_tool"), true, "the owning session reads tool lifecycle telemetry");
+  assert.equal(lifecycleEvents.some(({ event }) => event === "api.generate.stream_finished"), true, "the owning session reads terminal lifecycle telemetry");
+  assert.deepEqual(await adapterB.listTelemetryEvents(session.id), [], "a foreign tenant cannot read request-aware stream lifecycle telemetry");
+
+  await assert.rejects(
+    () => adapterA.recordTelemetryEvent({ session_id: "missing-session", source: "client", event: "workspace.telemetry.invalid" }),
+    (error) => error instanceof CloudWorkspacePersistenceError && error.code === "missing-request-context",
+    "cloud telemetry writes must reject missing or foreign sessions",
+  );
+  for (let index = 0; index < 505; index += 1) {
+    await adapterA.recordTelemetryEvent({ session_id: session.id, source: "server", event: `workspace.telemetry.bulk-${index}` });
+  }
+  const boundedTelemetry = await adapterA.listTelemetryEvents(session.id);
+  assert.equal(boundedTelemetry.length, 500, "cloud telemetry reads must remain bounded");
+  assert.equal(boundedTelemetry[0]?.event, "workspace.telemetry.bulk-5", "bounded cloud telemetry reads retain the newest rows in stable chronological order");
+  assert.equal(boundedTelemetry.at(-1)?.event, "workspace.telemetry.bulk-504");
 
   const message = await adapterA.appendMessage({ session_id: session.id, id: "msg-1", role: "user", content: "hello cloud", parts: [{ type: "text", text: "hello cloud" }] });
   assert.equal(message.session_id, session.id);

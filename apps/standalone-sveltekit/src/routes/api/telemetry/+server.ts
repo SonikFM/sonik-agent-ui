@@ -1,37 +1,18 @@
 import { json } from "@sveltejs/kit";
-import { sanitizePageContext, type AgentTelemetryEvent, type AgentTelemetrySource } from "@sonik-agent-ui/agent-observability";
-import { writeAgentTelemetry } from "$lib/server/agent-telemetry";
+import { readTelemetryBatch, writeAgentTelemetry } from "$lib/server/agent-telemetry";
+import { getRequestWorkspacePersistence } from "$lib/server/workspace-request-store";
+import type { RequestHandler } from "./$types";
 
-export async function POST({ request }) {
-  const body = await request.json().catch(() => null);
-  const events = Array.isArray(body?.events) ? body.events : body?.event ? [body.event] : [];
-  const accepted: AgentTelemetryEvent[] = [];
+export const POST: RequestHandler = async (event) => {
+  const batch = await readTelemetryBatch(event.request);
+  if (!batch.ok) return json({ ok: false, error: batch.error }, { status: batch.status });
+  const persistence = getRequestWorkspacePersistence(event);
+  const sessionIds = [...new Set(batch.events.map((item) => item.sessionId).filter((id): id is string => Boolean(id)))];
 
-  for (const event of events) {
-    const telemetryEvent = coerceTelemetryEvent(event);
-    if (!telemetryEvent) continue;
-    accepted.push(telemetryEvent);
+  for (const sessionId of sessionIds) {
+    if (!await persistence.getSession(sessionId)) return json({ ok: false, error: "session_not_found" }, { status: 404 });
   }
 
-  await Promise.all(accepted.map((event) => writeAgentTelemetry(event)));
-  return json({ ok: true, accepted: accepted.length });
-}
-
-function coerceTelemetryEvent(value: unknown): AgentTelemetryEvent | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record.event !== "string") return null;
-  const source = normalizeTelemetrySource(record.source);
-  if (!source) return null;
-  return {
-    ...(record as Record<string, unknown>),
-    source,
-    event: record.event,
-    pageContext: sanitizePageContext(record.pageContext),
-  } as AgentTelemetryEvent;
-}
-
-function normalizeTelemetrySource(value: unknown): AgentTelemetrySource | null {
-  if (value === `ody${"sseus"}-host`) return "workspace-host";
-  return value === "client" || value === "workspace-host" ? value : null;
-}
+  await Promise.all(batch.events.map((item) => writeAgentTelemetry(item, persistence)));
+  return json({ ok: true, accepted: batch.events.length });
+};

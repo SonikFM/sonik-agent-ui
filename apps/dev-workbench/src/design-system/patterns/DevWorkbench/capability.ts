@@ -1,5 +1,9 @@
 import type { DevWorkbenchViewProps } from "./schema";
 
+export function derivePreviewStatus(available: boolean, interactive: boolean): "connecting" | "ready" | "unavailable" {
+  return !available ? "unavailable" : interactive ? "ready" : "connecting";
+}
+
 export function createDevWorkbenchCapability(props: DevWorkbenchViewProps) {
   const state = props.workspace.status === "starting" || props.workspace.status === "stopping"
     ? "loading"

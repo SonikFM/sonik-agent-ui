@@ -108,7 +108,6 @@ export type TmuxWindow = z.infer<typeof tmuxWindowSchema>;
 export const pageContextMirrorPathsSchema = z.object({
   pageContext: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/page-context.json`),
   hostContext: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/host-context.json`),
-  hostAuthority: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/host-authority.json`),
   openApi: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/openapi.json`),
   guide: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/README.md`),
   consoleEvents: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/console.jsonl`),
@@ -122,7 +121,6 @@ export type PageContextMirrorPaths = z.infer<typeof pageContextMirrorPathsSchema
 export const DEV_WORKBENCH_MIRROR_PATHS = pageContextMirrorPathsSchema.parse({
   pageContext: `${DEV_WORKBENCH_STATE_ROOT}/page-context.json`,
   hostContext: `${DEV_WORKBENCH_STATE_ROOT}/host-context.json`,
-  hostAuthority: `${DEV_WORKBENCH_STATE_ROOT}/host-authority.json`,
   openApi: `${DEV_WORKBENCH_STATE_ROOT}/openapi.json`,
   guide: `${DEV_WORKBENCH_STATE_ROOT}/README.md`,
   consoleEvents: `${DEV_WORKBENCH_STATE_ROOT}/console.jsonl`,

@@ -11,11 +11,39 @@ import {
   traceIdFromTraceparent,
 } from "../../packages/agent-observability/src/index.ts";
 import { logArtifactTelemetry } from "../../apps/standalone-sveltekit/src/lib/artifacts/artifact-telemetry.ts";
-import { sanitizeAgentTelemetry } from "../../apps/standalone-sveltekit/src/lib/server/agent-telemetry.ts";
+import {
+  MAX_TELEMETRY_BATCH_EVENTS,
+  MAX_TELEMETRY_EVENT_NAME_CHARS,
+  MAX_TELEMETRY_REQUEST_BYTES,
+  readTelemetryBatch,
+  sanitizeAgentTelemetry,
+  writeAgentTelemetry,
+} from "../../apps/standalone-sveltekit/src/lib/server/agent-telemetry.ts";
+import { createAsyncWorkspacePersistenceAdapter, createInMemoryWorkspacePersistence } from "../../packages/workspace-session/src/index.ts";
 
 const sampleVercelKey = ["v", "ck", "_", "TESTREDACTME123"].join("");
 const sampleBearer = `Bearer ${["super", "secret", "value", "123456789"].join("-")}`;
 const rawProviderError = "Google provider files/raw-ref at https://example.invalid/private said arbitrary model text";
+const privateThought = "raw private thought";
+
+{
+  const persistence = createAsyncWorkspacePersistenceAdapter(createInMemoryWorkspacePersistence());
+  await persistence.createSession({ id: "telemetry-session" });
+  await writeAgentTelemetry({ source: "client", event: "telemetry.persisted", sessionId: "telemetry-session", payload: { apiKey: sampleVercelKey }, ok: true }, persistence);
+  const persisted = (await persistence.listTelemetryEvents("telemetry-session")).at(-1);
+  assert.equal(persisted?.event, "telemetry.persisted", "request-aware telemetry uses the supplied persistence adapter");
+  assert.equal(persisted?.payload.payload.apiKey, "[REDACTED]", "durable telemetry preserves secret sanitization");
+
+  const valid = await readTelemetryBatch(new Request("https://agent-ui.local/api/telemetry", { method: "POST", body: JSON.stringify({ event: { source: "client", event: "telemetry.valid" } }) }));
+  assert.equal(valid.ok, true);
+  assert.equal(valid.events.length, 1);
+  const oversized = await readTelemetryBatch(new Request("https://agent-ui.local/api/telemetry", { method: "POST", body: "x".repeat(MAX_TELEMETRY_REQUEST_BYTES + 1) }));
+  assert.deepEqual(oversized, { ok: false, status: 413, error: "payload_too_large" });
+  const flooded = await readTelemetryBatch(new Request("https://agent-ui.local/api/telemetry", { method: "POST", body: JSON.stringify({ events: Array.from({ length: MAX_TELEMETRY_BATCH_EVENTS + 1 }, () => ({ source: "client", event: "telemetry.valid" })) }) }));
+  assert.deepEqual(flooded, { ok: false, status: 413, error: "too_many_events" });
+  const invalidName = await readTelemetryBatch(new Request("https://agent-ui.local/api/telemetry", { method: "POST", body: JSON.stringify({ event: { source: "client", event: "x".repeat(MAX_TELEMETRY_EVENT_NAME_CHARS + 1) } }) }));
+  assert.deepEqual(invalidName, { ok: false, status: 400, error: "invalid_telemetry_event" });
+}
 
 {
   const event = sanitizeTelemetryEvent({
@@ -119,6 +147,28 @@ const rawProviderError = "Google provider files/raw-ref at https://example.inval
     payload: { nested: { provider_reference: "files/opaque-secret-ref", "provider-metadata": { request_url: "https://provider.invalid/private", access_token: "secret-token" }, model_id: "private-model-id", providerPreference: "direct", providerLabel: "Google" } },
   });
   assert.deepEqual(event.payload.nested, { providerPreference: "direct", providerLabel: "Google" });
+}
+
+{
+  const event = sanitizeTelemetryEvent({
+    source: "client",
+    event: "telemetry.private-thought",
+    payload: {
+      safe: "kept",
+      nested: {
+        reasoning: privateThought,
+        Thinking: privateThought,
+        scratchPad: privateThought,
+        chainOfThought: privateThought,
+        chain_of_thought: privateThought,
+        "chain-of-thought": privateThought,
+        "chain.of.thought": privateThought,
+        "chain of thought": privateThought,
+      },
+    },
+  });
+  assert.equal(JSON.stringify(event).includes(privateThought), false, "private-thought keys must be redacted at the shared telemetry boundary");
+  assert.deepEqual(event.payload, { safe: "kept", nested: {} }, "private-thought keys are removed without dropping safe siblings");
 }
 
 {

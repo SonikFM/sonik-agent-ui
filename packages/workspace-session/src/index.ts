@@ -838,6 +838,10 @@ type CloudWorkspacePageContextSnapshotRow<TContext = unknown> = {
   created_at: string | Date;
 };
 
+type CloudWorkspaceTelemetryRow<TPayload = unknown> = Omit<WorkspaceTelemetryEventRecord<TPayload>, "created_at"> & {
+  created_at: string | Date;
+};
+
 type CloudWorkspaceRunRow = {
   id: string;
   session_id: string;
@@ -1722,11 +1726,41 @@ class CloudWorkspacePersistence implements AsyncWorkspacePersistenceAdapter {
       return rows.map(mapCloudPageContextSnapshotRow<TContext>);
     });
   }
-  recordTelemetryEvent<TPayload = unknown>(): Promise<WorkspaceTelemetryEventRecord<TPayload>> {
-    return unsupportedCloudWorkspaceOperation("recordTelemetryEvent");
+  recordTelemetryEvent<TPayload = unknown>(input: { session_id?: string | null; request_id?: string | null; source: WorkspaceTelemetryEventRecord<TPayload>["source"]; event: string; payload?: TPayload; ok?: boolean | null; error?: string | null }): Promise<WorkspaceTelemetryEventRecord<TPayload>> {
+    return this.#withContext(async (tx) => {
+      if (input.session_id && !await this.#selectSession(tx, input.session_id)) {
+        throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud telemetry session not found for the authorized workspace owner.");
+      }
+      const { rows } = await tx.query<CloudWorkspaceTelemetryRow<TPayload>>(
+        `insert into sonik_agent_ui.agent_workspace_telemetry_events
+          (organization_id, user_id, id, session_id, request_id, source, event, payload, ok, error)
+         values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
+         returning id, session_id, request_id, source, event, payload, ok, error, created_at`,
+        [this.#authorized.organizationId, this.#authorized.userId, this.#nextId("workspace-event"), input.session_id ?? null, input.request_id ?? null, input.source, input.event, JSON.stringify(input.payload ?? null), input.ok ?? null, input.error ?? null],
+      );
+      const row = rows[0];
+      if (!row) throw new CloudWorkspacePersistenceError("missing-request-context", "Cloud telemetry insert returned no row.");
+      return mapCloudTelemetryRow<TPayload>(row);
+    });
   }
-  listTelemetryEvents(): Promise<WorkspaceTelemetryEventRecord[]> {
-    return unsupportedCloudWorkspaceOperation("listTelemetryEvents");
+  listTelemetryEvents(sessionId?: string | null): Promise<WorkspaceTelemetryEventRecord[]> {
+    return this.#withContext(async (tx) => {
+      if (sessionId && !await this.#selectSession(tx, sessionId)) return [];
+      const { rows } = await tx.query<CloudWorkspaceTelemetryRow>(
+        `select id, session_id, request_id, source, event, payload, ok, error, created_at
+         from (
+           select id, session_id, request_id, source, event, payload, ok, error, created_at
+           from sonik_agent_ui.agent_workspace_telemetry_events
+           where organization_id = $1 and user_id = $2 and ($3::text is null or session_id = $3)
+           order by created_at desc, id desc
+           limit $4
+         ) as telemetry_events
+         order by created_at asc, id asc
+        `,
+        [this.#authorized.organizationId, this.#authorized.userId, sessionId ?? null, 500],
+      );
+      return rows.map(mapCloudTelemetryRow);
+    });
   }
 
   getCommitReceipt<TReceipt extends Record<string, unknown> = Record<string, unknown>>(input: WorkspaceCommitLedgerKey): Promise<WorkspaceCommitLedgerRecord<TReceipt> | null> {
@@ -2192,6 +2226,10 @@ function mapCloudPageContextSnapshotRow<TContext = unknown>(row: CloudWorkspaceP
     context: clone(row.context),
     created_at: toIsoTimestamp(row.created_at),
   };
+}
+
+function mapCloudTelemetryRow<TPayload = unknown>(row: CloudWorkspaceTelemetryRow<TPayload>): WorkspaceTelemetryEventRecord<TPayload> {
+  return { ...row, payload: clone(row.payload), created_at: toIsoTimestamp(row.created_at) };
 }
 
 function mapCloudRunRow(row: CloudWorkspaceRunRow): WorkspaceRunRecord {

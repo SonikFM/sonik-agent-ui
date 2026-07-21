@@ -25,14 +25,55 @@
 }
 
 .dev-workbench[data-terminal-only="true"] {
-  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
 }
 
-.dev-workbench[data-terminal-only="true"] .dev-workbench__toolbar,
-.dev-workbench[data-terminal-only="true"] .dev-workbench__dock-controls {
+.dev-workbench[data-terminal-only="true"] .dev-workbench__toolbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 0.4rem;
+  min-height: 2.5rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__identity {
   display: none;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__toolbar > .dev-workbench__status {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__status-copy > span {
+  display: none;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__actions {
+  grid-column: 2;
+  grid-row: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__actions > .dev-workbench__button--primary,
+.dev-workbench[data-terminal-only="true"] .dev-workbench__source-control > span {
+  display: none;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__source-control select,
+.dev-workbench[data-terminal-only="true"] .dev-workbench__actions .dev-workbench__button,
+.dev-workbench[data-terminal-only="true"] .dev-workbench__overflow > summary {
+  min-height: 2rem;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__source-control select {
+  max-width: 8rem;
+}
+
+.dev-workbench[data-terminal-only="true"] .dev-workbench__readiness,
+.dev-workbench[data-terminal-only="true"] .dev-workbench__visual-status {
+  grid-column: 1 / -1;
 }
 
 .dev-workbench[data-terminal-only="true"] .dev-workbench__panel-header {
@@ -339,6 +380,7 @@
 }
 
 .dev-workbench__panel-body {
+  position: relative;
   min-height: 0;
   overflow: hidden;
 }
@@ -349,6 +391,28 @@
   height: 100%;
   border: 0;
   background: Canvas;
+}
+
+.dev-workbench__preview-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 0.45rem;
+  padding: 1.5rem;
+  text-align: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--dw-panel) 92%, transparent);
+}
+
+.dev-workbench__preview-loading strong {
+  font-size: 0.9rem;
+}
+
+.dev-workbench__preview-loading p {
+  max-width: 28rem;
+  color: var(--dw-muted);
+  font-size: 0.78rem;
 }
 
 .dev-workbench__empty {

@@ -75,7 +75,6 @@ export async function provisionWorkspace(
   const created = await createVercelDevWorkbenchSandbox({
     sessionId,
     timeoutMs: config.timeoutMs,
-    env: sandboxEnvironment(config),
     signal,
   });
   if (!created.ok) return created;
@@ -88,8 +87,6 @@ export async function provisionWorkspace(
       repository: config.repository,
       previewHost: sandboxPreviewHost(sandbox),
       agentApiOrigin: config.agentApiOrigin,
-      pipeBWorker: config.pipeBWorker,
-      pipeBLogsEnabled: Boolean(config.cloudflareApiToken),
     });
     const bootstrapped = await runVercelBootstrapPlan({ sandbox, plan, signal });
     if (!bootstrapped.ok) {
@@ -117,9 +114,8 @@ export async function provisionWorkspace(
       { path: DEV_WORKBENCH_MIRROR_PATHS.sitemap, content: JSON.stringify(sitemap, null, 2) },
       { path: DEV_WORKBENCH_MIRROR_PATHS.pageContext, content: JSON.stringify({ authority: "display-only" }, null, 2) },
       { path: DEV_WORKBENCH_MIRROR_PATHS.hostContext, content: JSON.stringify({ status: "awaiting-host-context" }, null, 2) },
-      { path: DEV_WORKBENCH_MIRROR_PATHS.hostAuthority, content: JSON.stringify({ status: "awaiting-host-authority" }, null, 2) },
       { path: DEV_WORKBENCH_MIRROR_PATHS.openApi, content: JSON.stringify({ status: "awaiting-host-openapi" }, null, 2) },
-      { path: DEV_WORKBENCH_MIRROR_PATHS.guide, content: createSandboxContextGuide(config.pipeBWorker, Boolean(config.cloudflareApiToken)) },
+      { path: DEV_WORKBENCH_MIRROR_PATHS.guide, content: createSandboxContextGuide() },
       { path: DEV_WORKBENCH_MIRROR_PATHS.consoleEvents, content: "" },
       { path: DEV_WORKBENCH_MIRROR_PATHS.networkEvents, content: "" },
     ], signal ? { signal } : undefined);
@@ -229,8 +225,6 @@ async function rehydrateRuntime(
         repository: record.repository,
         previewHost: sandboxPreviewHost(sandbox),
         agentApiOrigin: config?.agentApiOrigin,
-        pipeBWorker: config?.pipeBWorker,
-        pipeBLogsEnabled: Boolean(config?.cloudflareApiToken),
       });
       const refreshed = await runVercelBootstrapPlan({ sandbox, plan: refreshPlan, signal });
       if (!refreshed.ok) return refreshed;
@@ -252,8 +246,6 @@ async function rehydrateRuntime(
     repository: record.repository,
     previewHost: sandboxPreviewHost(sandbox),
     agentApiOrigin: config?.agentApiOrigin,
-    pipeBWorker: config?.pipeBWorker,
-    pipeBLogsEnabled: Boolean(config?.cloudflareApiToken),
   });
   const restarted = await runVercelBootstrapPlan({ sandbox, plan: runtimePlan, signal });
   if (!restarted.ok) return restarted;
@@ -301,7 +293,6 @@ export async function writeWorkspacePageContext(
     if (record.sessionId !== sessionId) {
       return { ok: false, error: workspaceError("sandbox_resume_failed", "session-mismatch", false) };
     }
-    const authority = parsed.data.host?.authority ?? null;
     await resumed.value.writeFiles([
       { path: DEV_WORKBENCH_MIRROR_PATHS.pageContext, content: JSON.stringify(parsed.data.pageContext, null, 2) },
       {
@@ -309,10 +300,6 @@ export async function writeWorkspacePageContext(
         content: JSON.stringify(parsed.data.host
           ? { origin: parsed.data.host.origin, pageContext: parsed.data.host.pageContext }
           : { status: "host-context-unavailable" }, null, 2),
-      },
-      {
-        path: DEV_WORKBENCH_MIRROR_PATHS.hostAuthority,
-        content: JSON.stringify(authority ?? { status: "host-authority-unavailable" }, null, 2),
       },
       ...(openApiDocument === null
         ? []
@@ -326,11 +313,6 @@ export async function writeWorkspacePageContext(
       });
       if (removed.exitCode !== 0) throw new Error("Stale OpenAPI removal failed.");
     }
-    await resumed.value.runCommand({
-      cmd: "chmod",
-      args: ["600", DEV_WORKBENCH_MIRROR_PATHS.hostAuthority],
-      ...(signal ? { signal } : {}),
-    });
     return { ok: true, value: { written: true, openApiWritten: openApiDocument !== null } };
   } catch {
     return { ok: false, error: workspaceError("unknown", "page-context-write", true) };
@@ -701,8 +683,6 @@ function descriptorFromRecord(
     sessionId: record.sessionId,
     repository: record.repository,
     agentApiOrigin: config?.agentApiOrigin,
-    pipeBWorker: config?.pipeBWorker,
-    pipeBLogsEnabled: Boolean(config?.cloudflareApiToken),
   });
   return devWorkbenchSessionDescriptorSchema.parse({
     schemaVersion: DEV_WORKBENCH_SCHEMA_VERSION,
@@ -724,26 +704,18 @@ function descriptorFromRecord(
   });
 }
 
-function sandboxEnvironment(config: DevWorkbenchServerConfig): Record<string, string> {
-  return {
-    ...(config.cloudflareApiToken ? { CLOUDFLARE_API_TOKEN: config.cloudflareApiToken } : {}),
-    ...(config.cloudflareAccountId ? { CLOUDFLARE_ACCOUNT_ID: config.cloudflareAccountId } : {}),
-  };
-}
-
-function createSandboxContextGuide(pipeBWorker: string, pipeBEnabled: boolean): string {
+function createSandboxContextGuide(): string {
   return `# Sonik Agent UI Dev Context
 
 This directory is host-written runtime context for the isolated Agent UI checkout.
 
 - \`page-context.json\`: redacted Workbench state.
 - \`host-context.json\`: host origin plus redacted page context.
-- \`host-authority.json\`: short-lived opaque host authorization. Treat it as a credential.
 - \`openapi.json\`: the host OpenAPI document fetched with that authority.
 - \`sitemap.json\`: tracked source and route map for the checkout.
 
 The primary Codex window receives \`SONIK_*_PATH\` environment variables for these files.
-Pipe B uses tmux window \`logs\` (${pipeBWorker}); access is ${pipeBEnabled ? "configured" : "not configured"} for this workspace.
+Pipe B is unavailable inside the sandbox because control-plane credentials remain server-side.
 Use \`tmux capture-pane -p -S -200 -t \"$TMUX_PANE\"\` only for the current pane; switch to the logs window with the normal tmux window controls when evidence is needed.
 `;
 }

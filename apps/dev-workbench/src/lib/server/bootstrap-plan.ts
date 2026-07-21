@@ -49,17 +49,13 @@ export function createTmuxWindows(
   manifest: RepositoryManifest,
   previewHost?: string,
   agentApiOrigin?: string,
-  pipeBWorker = "sonik-dev-observability-pipe-b",
-  pipeBLogsEnabled = false,
 ): TmuxWindow[] {
   const contextEnvironment = [
     `SONIK_DEV_CONTEXT_ROOT=${DEV_WORKBENCH_STATE_ROOT}`,
     `SONIK_PAGE_CONTEXT_PATH=${DEV_WORKBENCH_MIRROR_PATHS.pageContext}`,
     `SONIK_HOST_CONTEXT_PATH=${DEV_WORKBENCH_MIRROR_PATHS.hostContext}`,
-    `SONIK_HOST_AUTHORITY_PATH=${DEV_WORKBENCH_MIRROR_PATHS.hostAuthority}`,
     `SONIK_OPENAPI_PATH=${DEV_WORKBENCH_MIRROR_PATHS.openApi}`,
     `SONIK_VISUAL_CONTEXT_PATH=${VISUAL_CONTEXT_PATH}`,
-    `SONIK_PIPE_B_WORKER=${pipeBWorker}`,
   ];
   const devEnvironment = [
     ...contextEnvironment,
@@ -67,9 +63,7 @@ export function createTmuxWindows(
     ...(agentApiOrigin ? [`SONIK_AGENT_UI_DEV_API_ORIGIN=${agentApiOrigin}`] : []),
   ];
   const withContext = (command: readonly string[]) => ["env", ...contextEnvironment, ...command];
-  const logsCommand = pipeBLogsEnabled
-    ? ["pnpm", "-C", "apps/standalone-sveltekit", "exec", "wrangler", "tail", pipeBWorker, "--format", "json"]
-    : ["bash", "-lc", `printf '%s\\n' 'Pipe B access is not configured for this sandbox.' 'Set DEV_WORKBENCH_CLOUDFLARE_API_TOKEN in Vercel, then create a fresh workspace.'; exec bash --login`];
+  const logsCommand = ["bash", "-lc", `printf '%s\\n' 'Pipe B access is unavailable in the sandbox; control-plane credentials stay server-side.'; exec bash --login`];
   return [
     { name: "codex", index: 0, command: withContext(manifest.commands.codex), workingDirectory: DEV_WORKBENCH_REPOSITORY_ROOT },
     { name: "dev", index: 1, command: ["env", ...devEnvironment, ...manifest.commands.dev], workingDirectory: DEV_WORKBENCH_REPOSITORY_ROOT },
@@ -83,8 +77,6 @@ export function createDevWorkbenchBootstrapPlan(input: {
   repository: RepositoryManifest;
   previewHost?: string;
   agentApiOrigin?: string;
-  pipeBWorker?: string;
-  pipeBLogsEnabled?: boolean;
 }): DevWorkbenchBootstrapPlan {
   const repository = repositoryManifestSchema.parse(input.repository);
   const tmuxSession = createTmuxSessionName(input.sessionId);
@@ -92,8 +84,6 @@ export function createDevWorkbenchBootstrapPlan(input: {
     repository,
     input.previewHost,
     input.agentApiOrigin,
-    input.pipeBWorker,
-    input.pipeBLogsEnabled,
   );
   const commands: SandboxCommand[] = [
     {
@@ -169,8 +159,6 @@ export function createRuntimeRehydrationPlan(input: {
   repository: RepositoryManifest;
   previewHost?: string;
   agentApiOrigin?: string;
-  pipeBWorker?: string;
-  pipeBLogsEnabled?: boolean;
 }): DevWorkbenchBootstrapPlan {
   const fullPlan = createDevWorkbenchBootstrapPlan(input);
   const runtimeCommandIds = new Set([
@@ -192,8 +180,6 @@ export function createDevWindowRefreshPlan(input: {
   repository: RepositoryManifest;
   previewHost?: string;
   agentApiOrigin?: string;
-  pipeBWorker?: string;
-  pipeBLogsEnabled?: boolean;
 }): DevWorkbenchBootstrapPlan {
   const fullPlan = createDevWorkbenchBootstrapPlan(input);
   const startDevWindow = fullPlan.commands.find((command) => command.id === "start-dev-window");

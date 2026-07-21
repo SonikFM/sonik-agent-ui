@@ -1,6 +1,6 @@
 export { default as DevWorkbench } from "./DevWorkbench.svelte";
 export { adaptDevWorkbenchA2ui } from "./a2ui-adapter";
-export { createDevWorkbenchCapability } from "./capability";
+export { createDevWorkbenchCapability, derivePreviewStatus } from "./capability";
 export { devWorkbenchStartingFixture, devWorkbenchReadyFixture } from "./fixtures";
 export { devWorkbenchBuilderAdapter } from "./puck";
 export { devWorkbenchSchema, workbenchDetailSchema } from "./schema";

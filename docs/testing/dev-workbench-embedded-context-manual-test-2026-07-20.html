@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sonik Dev Workbench — Embedded Context Verification</title>
+    <style>
+      :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #1d2433; background: #eef1f5; }
+      body { margin: 0; }
+      main { width: min(1080px, calc(100% - 40px)); margin: 40px auto; }
+      header, section { background: #fff; border: 1px solid #dfe4eb; border-radius: 16px; box-shadow: 0 10px 30px rgb(24 36 54 / 7%); }
+      header { padding: 32px; background: linear-gradient(135deg, #152137, #273a5e); color: #fff; }
+      section { padding: 24px; margin-top: 18px; }
+      h1, h2 { margin-top: 0; }
+      h1 { font-size: clamp(2rem, 5vw, 3.5rem); letter-spacing: -.04em; margin-bottom: 12px; }
+      h2 { font-size: 1.15rem; }
+      p { line-height: 1.6; }
+      .lede { max-width: 760px; color: #dce6f8; }
+      .meta, .grid { display: grid; gap: 14px; }
+      .meta { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-top: 24px; }
+      .grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .card { border: 1px solid #e3e7ed; border-radius: 12px; padding: 18px; }
+      .label { color: #667085; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+      .value { display: block; margin-top: 7px; font-weight: 700; }
+      .pass { color: #167647; }
+      .pending { color: #9a5b00; }
+      ol, ul { padding-left: 22px; }
+      li { margin: 9px 0; line-height: 1.5; }
+      code { background: #f2f4f7; border-radius: 5px; padding: 2px 6px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 12px; border-bottom: 1px solid #e6e9ee; text-align: left; vertical-align: top; }
+      th { color: #667085; font-size: .75rem; letter-spacing: .05em; text-transform: uppercase; }
+      .note { border-left: 4px solid #8b5cf6; background: #f7f4ff; padding: 14px 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="label">Manual verification artifact · 2026-07-20</div>
+        <h1>Embedded Dev Workbench</h1>
+        <p class="lede">Evidence and live acceptance steps for the Booking-hosted terminal, page context, visual capture controls, navigation-safe reconnection, and durable workspace state.</p>
+        <div class="meta">
+          <div><span class="label">Automated suite</span><span class="value">Passing</span></div>
+          <div><span class="label">Workbench build</span><span class="value">Passing</span></div>
+          <div><span class="label">Booking build</span><span class="value">Passing</span></div>
+          <div><span class="label">Live Workbench smoke</span><span class="value pass">Passing</span></div>
+        </div>
+      </header>
+
+      <section>
+        <h2>What changed</h2>
+        <div class="grid">
+          <div class="card"><strong>Visible controls</strong><p>The terminal embed retains Source, Pick, Capture, More, and Right/Bottom/Fullscreen positioning controls instead of hiding the entire toolbar.</p></div>
+          <div class="card"><strong>Layout persistence</strong><p>The selected dock position survives reloads and iframe remounts. The terminal initially focuses fullscreen only when no saved layout exists.</p></div>
+          <div class="card"><strong>Visual context recovery</strong><p>Reconnect reads the saved source, route revision, context revision, status, and invalidation reason from the workspace API.</p></div>
+          <div class="card"><strong>Booking navigation</strong><p>Dev-open intent is stored per browser tab. After a Booking route unmount/remount, the Workbench reopens and reconnects to the same named sandbox and tmux session.</p></div>
+          <div class="card"><strong>Host authorization</strong><p>The exact Booking Pipe B origin is included in the Workbench production allowlist so signed host-context requests can complete.</p></div>
+          <div class="card"><strong>Durability boundary</strong><p>Sandbox files, tmux processes, snapshot, and context survive reconnects. Browser-only xterm scrollback and unsent keystrokes do not survive iframe destruction.</p></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Automated evidence</h2>
+        <table>
+          <thead><tr><th>Check</th><th>Result</th><th>Coverage</th></tr></thead>
+          <tbody>
+            <tr><td><code>pnpm test:workbench</code></td><td class="pass">Pass</td><td>Workbench server, contracts, cookie, sandbox, reconnect, visual context.</td></tr>
+            <tr><td><code>pnpm test:workbench:embedded</code></td><td class="pass">1/1</td><td>Real SvelteKit render, explicit Preview loading-to-ready transition, visible controls, Bottom dock, reload persistence, restored visual state, no page errors.</td></tr>
+            <tr><td><code>pnpm --filter @sonik-agent-ui/dev-workbench check-types</code></td><td class="pass">Pass</td><td>0 errors, 0 warnings.</td></tr>
+            <tr><td><code>pnpm --filter @sonik-agent-ui/dev-workbench build</code></td><td class="pass">Pass</td><td>Production SvelteKit/Vercel build.</td></tr>
+            <tr><td><code>bunx playwright test e2e/agent-ui-launcher.spec.ts --workers=1</code></td><td class="pass">4/4</td><td>Booking launcher, Dev open/close, route navigation reopen, persisted close intent.</td></tr>
+            <tr><td><code>bun run check && bun run build</code></td><td class="pass">Pass</td><td>Booking type/Svelte checks and Cloudflare production build; existing unrelated warnings remain.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Promotion evidence</h2>
+        <ul>
+          <li>Workbench production alias: <code>https://dev-workbench-sooty.vercel.app</code> — deployment <code>dpl_3x9n6QYCVRHcnCi2VvDGZG16jj22</code>.</li>
+          <li>Booking Pipe B: <code>https://sonik-booking-app-pipe-b.liam-trampota.workers.dev</code> — Worker version <code>4e86e877-456d-4c4d-a479-a5197eda0655</code>.</li>
+          <li>Authenticated production smoke returned HTTP 200 with Source, Pick, Capture, Right, Bottom, and Full screen visible and no page errors.</li>
+          <li>Live Bottom-dock selection remained Bottom after reload and its local storage record remained stable.</li>
+          <li>A fresh production sandbox showed the explicit Preview loading state, reached verified interactive readiness in 146.8 seconds including provisioning, then retained the same sandbox, tmux session, and Bottom layout after reload.</li>
+          <li>Rendered evidence is saved under <code>/Users/danielletterio/Desktop/sonik-workbench-verification-2026-07-20/</code>, including <code>05-workbench-preview-connecting.png</code> and <code>06-workbench-preview-ready.png</code>.</li>
+          <li>A cross-origin Booking Pipe B parent/iframe smoke received the Workbench context request and the Workbench reported <code>host-donation</code>, signed-in, organization-present context.</li>
+          <li>All disposable sandboxes created by production smoke isolation were stopped and deleted; no smoke sandbox remains running.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Live acceptance path</h2>
+        <ol>
+          <li>Sign into Booking Pipe B and open <strong>Dev</strong> from the Agent UI speed dial.</li>
+          <li>Confirm the terminal opens and Source, Pick, Capture, More, Right, Bottom, and Fullscreen controls are reachable.</li>
+          <li>Confirm host context resolves to Booking rather than “unresolved host context.”</li>
+          <li>Select <strong>Bottom</strong>, reload, and confirm Bottom remains selected.</li>
+          <li>Create a marker in the terminal: <code>echo durable &gt; /workspace/.sonik/navigation-proof.txt</code>.</li>
+          <li>Navigate from the current Booking page to Reservations. Confirm Dev reopens without crashing.</li>
+          <li>Run <code>cat /workspace/.sonik/navigation-proof.txt</code> and confirm the marker and tmux-backed shell remain available.</li>
+          <li>Confirm page context is current or explicitly marked invalidated after the route change; capture a new screenshot and verify it becomes current.</li>
+          <li>Press Escape to close Dev, reload, and confirm it remains closed.</li>
+        </ol>
+        <p class="note"><strong>Accepted limitation:</strong> route navigation reconnects the durable backend but rebuilds the iframe terminal renderer. Preserving browser scrollback and unsent input with zero socket interruption requires hoisting the embed into a persistent root layout.</p>
+      </section>
+    </main>
+  </body>
+</html>

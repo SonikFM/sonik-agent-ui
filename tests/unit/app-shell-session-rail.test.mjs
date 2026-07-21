@@ -24,6 +24,7 @@ const workspaceSessionSource = await readFile("packages/workspace-session/src/in
 const sessionsRoute = await readFile("apps/standalone-sveltekit/src/routes/api/sessions/+server.ts", "utf8");
 const sessionsArchivedRoute = await readFile("apps/standalone-sveltekit/src/routes/api/sessions/archived/+server.ts", "utf8");
 const appCss = await readFile("apps/standalone-sveltekit/src/app.css", "utf8");
+const calloutSource = await readFile("apps/standalone-sveltekit/src/lib/render/components/Callout.svelte", "utf8");
 const layoutSource = await readFile("apps/standalone-sveltekit/src/routes/+layout.svelte", "utf8");
 const workspaceFrameSource = await readFile("packages/workspace-core/src/components/WorkspaceDocumentFrame.svelte", "utf8");
 const workspaceHostSource = await readFile("apps/standalone-sveltekit/static/workspace-document-host.html", "utf8");
@@ -315,6 +316,16 @@ assert.equal(appCss.includes("--color-background: var(--color-base-100)"), true,
 assert.equal(appCss.includes("--app-control-bg"), true, "standalone app should project canonical theme vars into local app control vars");
 assert.equal(appCss.includes("--sonik-border-color"), true, "standalone app should expose a compatibility border color without shadowing DaisyUI border width");
 assert.equal(appCss.includes("--border: color-mix"), false, "standalone app should not overwrite DaisyUI\'s --border width token as a color");
+assert.match(calloutSource, /role="note"/, "rendered callouts should expose static note semantics");
+assert.match(calloutSource, /class="alert border /, "rendered callouts should use Daisy alert and full-border semantics");
+for (const token of ["info", "success", "warning", "primary"]) {
+  assert.match(calloutSource, new RegExp(token), `rendered callouts should use the ${token} status token`);
+}
+assert.doesNotMatch(calloutSource, /border-l-(?:4|info|success|warning|primary)/, "rendered callouts should never use a side stripe");
+assert.doesNotMatch(calloutSource, /(?:blue|emerald|amber|purple)-500/, "rendered callouts should not bypass the active theme palette");
+assert.doesNotMatch(appCss, /linear-gradient|background-clip|text-fill-color/, "shimmer should not hide text behind a clipped gradient");
+assert.match(appCss, /@keyframes shimmer[\s\S]*?opacity:/, "shimmer should use readable opacity motion");
+assert.match(appCss, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.animate-shimmer\s*\{[\s\S]*?animation:\s*none[\s\S]*?opacity:\s*1/, "shimmer should remain readable with reduced motion");
 assert.equal(daisyThemeSource.includes('themes: all'), true, "DaisyUI should compile the full built-in theme library");
 assert.equal(themeRegistrySource.includes('CUSTOM_DOCUMENT_THEME_IDS'), true, "theme registry should include Amplify custom themes");
 assert.equal(themeRegistrySource.includes('"sonik-operator-dark"'), true, "theme registry should include the Booking operator dark theme id");
@@ -356,6 +367,12 @@ assert.equal(chatTextSource.includes("chat-text__streaming"), true, "streaming a
 assert.equal(canvasViewportSource.includes("documentTitle"), true, "artifact canvas should accept document title metadata for document-only mode");
 assert.equal(canvasViewportSource.includes("Document editor active"), true, "artifact canvas should expose a document-aware subtitle when no JSON artifact is promoted");
 assert.equal(generateRoute.includes("instrumentGenerateStream"), true, "generate route should wrap the AI stream with completion/failure telemetry");
+const specTelemetryCallStart = generateRoute.indexOf("tapSpecStreamForTelemetry(");
+const specTelemetryCall = generateRoute.slice(specTelemetryCallStart, generateRoute.indexOf("\n        );", specTelemetryCallStart) + 11);
+assert.match(specTelemetryCall, /},\n\s+writeRequestTelemetry,\n\s+\);$/, "generate route should persist spec telemetry through the request adapter");
+const streamTelemetryCallStart = generateRoute.indexOf("instrumentGenerateStream(");
+const streamTelemetryCall = generateRoute.slice(streamTelemetryCallStart, generateRoute.indexOf("\n      );", streamTelemetryCallStart) + 9);
+assert.match(streamTelemetryCall, /},\n\s+writeRequestTelemetry,\n\s+\);$/, "generate route should persist terminal stream telemetry through the request adapter");
 assert.equal(streamTelemetrySource.includes("api.generate.stream_finished"), true, "generate stream helper should log normal stream completion");
 assert.equal(streamTelemetrySource.includes("api.generate.stream_failed"), true, "generate stream helper should log stream failures before surfacing them");
 assert.equal(streamTelemetrySource.includes("api.generate.stream_cancelled"), true, "generate stream helper should log stream cancellation for manual stop/debugging");
@@ -518,7 +535,7 @@ assert.equal(observabilityPackageSource.includes("Runtime-safe page-control surf
 assert.equal(observabilityPackageSource.includes("sanitizeTelemetryValue"), true, "shared observability core should provide redaction before logs become machine evidence");
 assert.equal(agentTelemetrySource.includes("sanitizeTelemetryEvent"), true, "server telemetry writer should use shared observability sanitization");
 assert.equal(telemetryRouteSource.includes('record.source === "' + "ody" + 'sseus-host"'), false, "telemetry API should not keep legacy copied-editor branding as a first-class source name");
-assert.equal(telemetryRouteSource.includes('return "workspace-host"'), true, "telemetry API should normalize legacy host source names to workspace-host");
+assert.equal(agentTelemetrySource.includes('? "workspace-host"'), true, "server telemetry should normalize legacy host source names to workspace-host");
 assert.equal(telemetryRouteSource.includes('value === "server"'), false, "browser telemetry route should not accept forged privileged server source events");
 assert.equal(telemetryRouteSource.includes('value === "system"'), false, "browser telemetry route should not accept forged privileged system source events");
 assert.equal(generateRoute.includes("createTelemetryCorrelation"), true, "generate route should create or trust correlation headers per request");

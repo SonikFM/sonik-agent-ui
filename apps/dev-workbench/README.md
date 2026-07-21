@@ -10,7 +10,7 @@ The Dev Workbench is a separate SvelteKit app for running a repository-aware Cod
 - **Context:** the page exposes a sanitized, display-only `window.__sonikAgentUI` snapshot and semantic actions. It never grants browser authority.
 - **Context mirror:** **Sync page context** writes the sanitized snapshot to `.sonik/page-context.json`. Visual capture writes the validated snapshot to `.sonik/visual-context.json` and promotes the latest PNG to `.sonik/screenshots/latest.png`.
 - **Realtime seam:** session and status descriptors are serializable for the forthcoming realtime-egress beacon. Terminal data remains on the provider-native PTY transport.
-- **Retention:** this first slice uses non-persistent sandboxes. Stop permanently deletes the named sandbox; snapshot retention waits for a durable tenant-scoped registry and cleanup job.
+- **Retention:** workspaces use a persistent named sandbox with one provider-managed snapshot and a 30-day partitioned session cookie so a host-page navigation can reconnect to the same repository and `tmux` session. **Stop** permanently deletes the named sandbox and its files; persistent does not mean durable after deletion.
 
 ## Local setup
 

@@ -24,6 +24,7 @@
   import {
     DevWorkbench,
     createDevWorkbenchCapability,
+    derivePreviewStatus,
     devWorkbenchStartingFixture,
     workbenchDetailSchema,
     type DevWorkbenchViewProps,
@@ -58,10 +59,14 @@
     accepted: z.boolean(),
     snapshot: visualContextSnapshotSchema.nullable(),
   });
+  const visualContextReadResponseSchema = z.strictObject({
+    snapshot: visualContextSnapshotSchema.nullable(),
+  });
 
   let workspace = $state<DevWorkbenchSessionDescriptor | null>(null);
   let operation = $state<Operation>("resuming");
   let terminalState = $state<TerminalState>("connecting");
+  let previewInteractive = $state(false);
   let activeDetail = $state<WorkbenchDetail>(devWorkbenchStartingFixture.activeDetail);
   let announcement = $state("");
   let visibleError = $state<string | null>(null);
@@ -70,6 +75,7 @@
   let workbenchOrigin = $state<string | null>(null);
   let hostColorScheme = $state<"light" | "dark" | null>(null);
   let hostContextRefreshTimer: number | null = null;
+  let restoredHostRoute = $state<string | null>(null);
   let selectedVisualSourceId = $state<"preview" | "host" | null>(null);
   let sourceContextRevision = $state(0);
   let routeRevision = $state(0);
@@ -152,7 +158,7 @@
       },
       preview: workspace.preview
         ? {
-            status: "ready",
+            status: derivePreviewStatus(true, previewInteractive),
             url: createEmbeddedPreviewUrl({
               previewUrl: workspace.preview.url,
               workbenchOrigin,
@@ -342,9 +348,11 @@
   function handleBridgeMessage(event: MessageEvent): void {
     if (event.source === window.parent && event.origin === embeddedHostOrigin) {
       if (isAgentHostPageContextMessage(event.data)) {
-        const previousRoute = discoveredVisualSources().find((source) => source.id === "host")?.route;
+        const previousRoute = restoredHostRoute
+          ?? discoveredVisualSources().find((source) => source.id === "host")?.route;
         hostContextMessage = event.data;
         const nextRoute = discoveredVisualSources().find((source) => source.id === "host")?.route;
+        restoredHostRoute = nextRoute ?? null;
         if (previousRoute && nextRoute && previousRoute !== nextRoute) {
           routeRevision += 1;
           const pairingLost = visualExtensionPaired;
@@ -374,6 +382,13 @@
     const frame = previewFrame();
     const previewOrigin = currentPreviewOrigin();
     if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== previewOrigin) return;
+    if (!previewInteractive) {
+      previewInteractive = true;
+      if (!selectedVisualSourceId) {
+        visualStatusMessage = "Preview is ready. Capture it to attach current visual context.";
+      }
+      announcement = "Preview interface connected.";
+    }
     if (isAgentPageContextRequestMessage(event.data)) {
       if (hostContextMessage) postHostContextToPreview();
       else requestHostContext("sandbox_preview_requested_context");
@@ -625,9 +640,11 @@
   async function startWorkspaceRequest(): Promise<void> {
     operation = "starting";
     visibleError = null;
+    previewInteractive = false;
     const next = await requestWorkspace("POST");
     if (next) {
       workspace = next;
+      announcePreviewAvailability();
       terminalState = "connecting";
       announcement = "Workspace ready.";
       void requestVisualBrowser("get-capabilities");
@@ -638,14 +655,49 @@
 
   async function reconnectWorkspaceRequest(startIfMissing = false): Promise<void> {
     visibleError = null;
+    previewInteractive = false;
     const next = await requestWorkspace("GET");
     if (next) {
       workspace = next;
+      await restoreVisualContext(next.sessionId);
+      announcePreviewAvailability();
       void requestVisualBrowser("get-capabilities");
       if (hostContextMessage) void synchronizePageContext();
     }
     else if (startIfMissing && !visibleError) await startWorkspaceRequest();
     else terminalState = "error";
+  }
+
+  function announcePreviewAvailability(): void {
+    if (selectedVisualSourceId || !workspace?.preview) return;
+    visualStatusMessage = "Preview server is ready. Waiting for the interface to connect.";
+  }
+
+  async function restoreVisualContext(sessionId: string): Promise<void> {
+    try {
+      const response = await fetch("/api/workspaces/visual-context");
+      if (response.status === 404) return;
+      if (!response.ok) throw new Error(await publicError(response));
+      const parsed = visualContextReadResponseSchema.safeParse(await response.json());
+      if (!parsed.success) throw new Error("The server returned invalid saved visual context.");
+      if (workspace?.sessionId !== sessionId || !parsed.data.snapshot) return;
+      const snapshot = parsed.data.snapshot;
+      selectedVisualSourceId = snapshot.source.id;
+      sourceContextRevision = snapshot.sourceContextRevision;
+      routeRevision = snapshot.routeRevision;
+      restoredHostRoute = snapshot.source.id === "host" ? snapshot.source.route : null;
+      visualStatus = snapshot.status === "current" ? "idle" : "invalidated";
+      visualStaleReason = snapshot.staleReason;
+      visualStatusMessage = snapshot.status === "current"
+        ? `${snapshot.source.label} visual context restored.`
+        : "Saved visual context is stale. Capture it again when the source is ready.";
+      announcement = visualStatusMessage;
+    } catch (error) {
+      if (workspace?.sessionId !== sessionId) return;
+      visualStatus = "error";
+      visualStatusMessage = safeMessage(error, "Saved visual context could not be restored.");
+      announcement = visualStatusMessage;
+    }
   }
 
   async function synchronizePageContext(): Promise<void> {
@@ -670,7 +722,7 @@
       if (!response.ok) throw new Error(await publicError(response));
       const result = await response.json() as { openApiWritten?: unknown };
       announcement = result.openApiWritten === true
-        ? "Host context, signed authority, and OpenAPI are available inside the sandbox."
+        ? "Sanitized host context and OpenAPI are available inside the sandbox. Signed authority was consumed only by the server."
         : "Host context is available inside the sandbox; OpenAPI could not be refreshed.";
     } catch (error) {
       visibleError = safeMessage(error, "Page context could not be synchronized.");
