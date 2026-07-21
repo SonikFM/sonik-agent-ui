@@ -47,9 +47,9 @@ Code presence, a passing unit test, an OMX ledger entry, or a merged pull reques
 ## Immediate truth
 
 - Vercel Sandbox, repository bootstrap, `tmux`, raw Codex CLI, direct xterm PTY, and a hot frontend preview exist.
-- The Booking embed can open a terminal-only Workbench surface.
+- The current Booking production asset contains the Dev launcher and terminal-only Workbench target; authenticated browser confirmation after reload remains the final deployed acceptance check.
 - The terminal-only embed now retains a compact, restored toolbar and dock controls for source selection, element picking, capture, and layout.
-- Component contracts and the embedded Playwright journey cover control reachability and layout persistence; deployed Booking proof remains a separate release gate.
+- Component contracts, the embedded Playwright journey, and live production asset inspection cover control reachability and layout persistence; the remaining release gate is an authenticated user click-through.
 - Exact active-tab extension code exists, but current Workbench code disables pairing/capture because the trust proof is not considered sufficient.
 - Realtime egress, live console/network/file streams, Chrome DevTools integration, MCP, deploy authority, and teardown-surviving Codex authentication are not complete.
 

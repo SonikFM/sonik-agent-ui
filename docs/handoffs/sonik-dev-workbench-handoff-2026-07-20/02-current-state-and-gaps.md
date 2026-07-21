@@ -2,7 +2,7 @@
 
 ## 1. Executive assessment
 
-The repository contains substantial real implementation, but the work was completed in infrastructure-heavy slices and reported through contract/test/ledger gates that did not consistently prove the intended user journey. The embedded-control regression has been repaired in source and covered by component and embedded-browser tests; deployed Booking proof remains outstanding.
+The repository contains substantial real implementation, but the work was completed in infrastructure-heavy slices and reported through contract/test/ledger gates that did not consistently prove the intended user journey. The embedded-control regression has been repaired and deployed to Booking production. Standalone Agent UI login and Pipe B signed host-context acceptance are freshly verified; the remaining release gate is an authenticated user confirmation of the refreshed production Booking journey.
 
 The correct description is **functional sandbox terminal with partial embedded developer harness**, not a complete “see what I see, diagnose, fix, and deploy” experience.
 
@@ -16,11 +16,12 @@ The correct description is **functional sandbox terminal with partial embedded d
 | Tmux workspace | Complete | Named `codex`, `dev`, `shell`, and `logs` windows are bootstrapped. | `apps/dev-workbench/src/lib/server/bootstrap-plan.ts` |
 | Frontend hot preview | Complete | A sandbox development server is started and exposed through a provider preview domain. | `apps/dev-workbench/src/lib/server/workspace-service.ts` |
 | Standalone layout | Complete in repository | Right/bottom/fullscreen and resize implementation exists, and embedded `surface=terminal` retains compact controls. | `DevWorkbench.svelte`, `DevWorkbench.css`, `DevWorkbench.contract.test.ts`, `embedded-workbench.spec.ts` |
-| Embedded Booking Dev launcher | Partial | Booking integration can launch the Workbench sidecar, but availability depends on deployed host configuration and the embed forces terminal surface. | Booking host adapter/PR; `647ce5d` |
+| Embedded Booking Dev launcher | Partial | Current Booking production assets contain the Dev, Canvas, and Chat controls and the Workbench URL. The remaining gate is an authenticated browser reload/click confirmation. | Booking deployment `51f11d0d-0a81-465f-a0fa-934374eba5be`; live asset smoke |
 | Verbose workspace startup | Partial | Bootstrap phases exist, but the operator experience does not yet provide the complete step/elapsed/recovery narrative requested. | Workbench route and components |
 | Basic Workbench login | Complete | Workbench supports HTTPS Basic Auth and Vercel deployment protection. This is separate from Booking host authority and Codex CLI auth. | `apps/dev-workbench/src/hooks.server.ts`, README |
+| Standalone Agent UI login proxy | Complete | Same-account Amplify service binding, membership compatibility, proxy-cookie minting, immutable-request handling, and authenticated cloud session access are deployed and live-smoked. | Agent UI deployment `d9c2307a-a0eb-49eb-a064-472fcb042024`; commit `2c2ec04` |
 | Host-origin/message validation | Complete at contract level | Exact-origin/source checks and typed host relay code exist. A valid relay does not prove a valid Booking session attachment. | `packages/agent-embed/src/index.ts`, Workbench bridge |
-| Authenticated host-session context | Partial | Signed host-context transport exists across Agent UI/hosts, but the observed product journey still reports unresolved/missing host authority. Deployment and host-proxy configuration remain part of the gate. | Agent embed/host-context files; historical diagnostics |
+| Authenticated host-session context | Partial | Pipe B emits a signed context that Agent UI accepts with HTTP 200, and the shared signing secret is synchronized across Agent UI, Booking production, and Pipe B. An authenticated production Booking browser confirmation remains. | Live signed-context smoke; Cloudflare secret/binding audit |
 | Page-context mirror | Partial | `.sonik/page-context.json`, sitemap, and environment paths exist. Codex can read them, but context arrival is not a complete automatic tool/instruction workflow. | Workbench context APIs/bootstrap plan |
 | OpenAPI/command context | Partial | Contracts and generated command catalogs are extensive; availability and active host authority are still disconnected in the user experience. | `packages/tool-contracts`, Booking host integration |
 | Source selector | Complete in repository | Preview/host capability logic and its embedded control are reachable; deployed Booking validation remains a release gate. | `+page.svelte`, `DevWorkbench.svelte`, `DevWorkbench.contract.test.ts`, `embedded-workbench.spec.ts` |
@@ -114,3 +115,38 @@ The extension README describes a pairing flow that current Workbench actions dis
 | Credentials are treated as sandbox durability | Repeated Codex login or secret exposure | Define suspend/delete behavior and use an encrypted restoration design. |
 | Shell access is mistaken for governed deploy | Unauthorized or untraceable production changes | Add scoped provider capability and explicit approval before productizing deploy. |
 | Large contract/test volume masks journey failure | False confidence and token waste | Gate from user journey backward; stop parallel lanes when one integrated path is failing. |
+
+## 8. Configuration ownership and live state
+
+### Configured by the product owner
+
+- Authenticated the Vercel CLI and selected the `danletterio-5975s-projects` team.
+- Created and linked the `dev-workbench` Vercel project from `apps/dev-workbench`.
+- Pulled the project's development environment and installed the Vercel Codex/Claude tooling integration.
+- Authenticated Codex interactively inside a sandbox session. This login is sandbox-filesystem state and does not survive explicit sandbox deletion.
+- Owns future MCP inventory, visual-target/OCR service, Hermes memory pruning, startup-agent profiles, and external provider credentials. These are product inputs, not completed Workbench configuration.
+
+### Configured by the implementation agent
+
+- Pinned the Vercel production repository revision to the tested Agent UI commit and deployed `dev-workbench-sooty.vercel.app`.
+- Deployed Agent UI with the Amplify service binding, Booking Pipe B service binding, cloud persistence, login-proxy gate, and current organization/principal compatibility flag.
+- Set the canonical Amplify auth base URL and enabled sanitized auth diagnostics for staging operations.
+- Rotated and synchronized `SONIK_AGENT_UI_HOST_CONTEXT_SECRET` across Agent UI, Booking production, and Booking Pipe B without exposing the value.
+- Deployed Booking production from current `main`; its live client asset contains the Dev launcher and Workbench target.
+- Fixed the Cloudflare immutable-header failure by cloning the request before injecting signed host context.
+
+### Still intentionally unconfigured
+
+- Durable Codex credentials after sandbox deletion.
+- Governed GitHub/deploy credentials inside the guest sandbox.
+- MCP servers and selectable startup profiles such as OMX, OMC, Eve, or AgentOS.
+- LocateAnything/OCR, Hermes post-session memory processing, persistent SQLite/vector memory, and realtime-egress consumption in the terminal.
+- Exact active-tab capture, Chrome DevTools/CDP, and production deploy approval UI.
+
+### Fresh live evidence
+
+- Agent UI login minted `sonik_agent_ui_login_proxy`; authenticated `/api/sessions` returned HTTP 200.
+- Pipe B produced a signed host-context envelope; Agent UI accepted the encoded envelope with HTTP 200.
+- Booking production deployment: `51f11d0d-0a81-465f-a0fa-934374eba5be`.
+- Agent UI deployment after shared-secret rotation: `d9c2307a-a0eb-49eb-a064-472fcb042024`.
+- Agent UI fix is pushed to PR 61 at commit `2c2ec04`; CI/review status remains a separate merge gate.
