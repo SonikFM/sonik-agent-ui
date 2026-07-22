@@ -310,7 +310,10 @@ export interface AgentTelemetryCorrelation {
 const MAX_STRING_LENGTH = 2_000;
 const MAX_LIST_ITEMS = 8;
 const SECRET_KEY_PATTERN = /(authorization|api[-_]?key|token|secret|password|cookie|set-cookie|credential|session[_-]?token|vck_[a-z0-9]+)/i;
-const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
+// Kept textually identical to the copy in packages/agent-embed/src/index.ts (search
+// SECRET_VALUE_PATTERN there) and pinned by tests/unit/secret-pattern-hardening.test.mjs —
+// update both together.
+const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
 const PROVIDER_PRIVATE_KEY_PATTERN = /^(?:provider(?:metadata|data|options|request|response|id|name|ref|reference|references)?|model(?:metadata|data|options|request|response|id|name)?)$/;
 const PRIVATE_THOUGHT_KEY_PATTERN = /^(?:reasoning|thinking|scratchpad|chainofthought)$/;
 const FAILURE_KEY_PATTERN = /(error|failure|exception)/i;

@@ -31,6 +31,7 @@ import { createRequestBookingRuntimeFetcher } from "$lib/server/booking-runtime-
 import { tapSpecStreamForTelemetry } from "$lib/server/spec-stream-tap-telemetry";
 import { createDevSmokeStream, readDevSmokeFailMode, readDevSmokeRunId, readDevSmokeScenario, shouldUseDevSmokeStream, writeDevSmokeStreamTelemetry } from "$lib/server/dev-smoke-stream";
 import { persistInitiatingUserMessage, startRunRecorder, teeRunEvents, type RunRecorder } from "$lib/server/run-event-log";
+import { recordUsageFromResult } from "$lib/server/usage-capture";
 import { getRequestWorkspaceDocument, getRequestWorkspacePersistence, syncRequestActiveWorkspaceDocumentSnapshot, type WorkspaceDocumentRecord, type WorkspaceSessionRecord } from "$lib/server/workspace-request-store";
 import { resolveEffectiveContextDocument, syncSessionContextDocument } from "$lib/server/run-context-document";
 import { AGENT_UI_GOOGLE_PREPROCESSING_BUDGET_MS, AgentUiFileError, requireAgentUiFileBucket, resolveAgentUiFileContextSelection, resolveAgentUiWorkspaceSession, resolveGoogleAgentUiFileParts, type AgentUiFileBucket, type AgentUiModelFilePart } from "$lib/server/agent-ui-files";
@@ -861,6 +862,13 @@ export const POST: RequestHandler = async (event) => {
 
   try {
     const result = await agent.stream({ messages: contextualModelMessages });
+    if (runRecorder) {
+      const recorder = runRecorder;
+      recordUsageFromResult(
+        (usageEvent) => requestPersistence.appendRunEvent({ run_id: recorder.runId, session_id: telemetrySessionId, kind: usageEvent.kind, event: usageEvent }),
+        { requestId, totalUsage: result.totalUsage },
+      ).catch(() => undefined);
+    }
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {

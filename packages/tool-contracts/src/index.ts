@@ -2073,6 +2073,8 @@ export function sanitizeAgentAnalyticsHints(value: unknown): AgentAnalyticsHints
 
 export * from "./target-registry.js";
 export * from "./visual-context.js";
+export * from "./observe.js";
+export * from "./capability-matrix.js";
 export * as workflowVNext from "./workflow-vnext.ts";
 export {
   WORKFLOW_VNEXT_SCHEMA_VERSION,

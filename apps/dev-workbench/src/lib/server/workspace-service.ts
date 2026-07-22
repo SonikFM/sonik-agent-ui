@@ -276,6 +276,29 @@ export async function stopWorkspace(
   return { ok: true, value: { stopped: true } };
 }
 
+export async function restartWorkspacePreview(
+  sessionId: string,
+  config?: DevWorkbenchServerConfig,
+  signal?: AbortSignal,
+): Promise<WorkspaceServiceResult<{ restartedAt: string }>> {
+  const resumed = await resumeVercelDevWorkbenchSandbox({ sessionId, signal });
+  if (!resumed.ok) return resumed;
+  try {
+    const record = await readPersistenceRecord(resumed.value, signal);
+    const refreshPlan = createDevWindowRefreshPlan({
+      sessionId: record.sessionId,
+      repository: record.repository,
+      previewHost: sandboxPreviewHost(resumed.value),
+      agentApiOrigin: config?.agentApiOrigin,
+    });
+    const refreshed = await runVercelBootstrapPlan({ sandbox: resumed.value, plan: refreshPlan, signal });
+    if (!refreshed.ok) return refreshed;
+    return { ok: true, value: { restartedAt: new Date().toISOString() } };
+  } catch {
+    return { ok: false, error: workspaceError("sandbox_bootstrap_failed", "restart-preview", false) };
+  }
+}
+
 export async function writeWorkspacePageContext(
   sessionId: string,
   context: WorkspaceContextSync,
