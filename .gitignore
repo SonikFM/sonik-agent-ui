@@ -32,3 +32,5 @@ config.bat
 booking-agent-ui-embed-local-2026-06-25.png
 .gitnexus
 .claude/
+apps/standalone-sveltekit/static/vendor/sonik-agent-ui/agent-embed.bundle.js
+apps/standalone-sveltekit/static/vendor/sonik-agent-ui/agent-embed.bundle.json

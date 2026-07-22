@@ -7,18 +7,30 @@ import { DEV_WORKBENCH_MIRROR_PATHS, DEV_WORKBENCH_SCHEMA_VERSION, devWorkbenchR
 const read = (path) => readFileSync(path, "utf8");
 const handoff = "docs/handoffs/sonik-dev-workbench-handoff-2026-07-20";
 
-test("host authority is relayed for server consumption without entering the guest sandbox", () => {
-  const requirements = read(`${handoff}/01-product-requirements.md`);
-  const architecture = read(`${handoff}/03-architecture.md`);
-  const ownership = read("docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md");
-  const page = read("apps/dev-workbench/src/routes/+page.svelte");
-
-  assert.match(requirements, /browser-relayed[^\n]*server-consumed/i);
-  assert.doesNotMatch(`${architecture}\n${ownership}`, /hostAuthorityHandle|server-only handle/i);
-  assert.doesNotMatch(architecture, /contextPaths:[^}]*hostAuthority/s);
-  assert.match(architecture, /host authority[^\n]*(guest filesystem|sandbox artifacts)/i);
-  assert.doesNotMatch(page, /signed authority[^\n]*inside the sandbox/i);
-});
+// Six of this file's original eight tests were prose/source-regex tautologies (asserted that
+// docs *described* correct behavior, not that the behavior *was* correct). Removed per the E7
+// audit in docs/testing/e7-tautology-inventory-2026-07-22.md, which traced each removed claim to
+// real behavioral coverage that already exists elsewhere:
+//   - "host authority is relayed for server consumption without entering the guest sandbox"
+//     -> tests/unit/host-authority-recovery.test.mjs (real HMAC sign/verify + replay-tamper
+//        rejection) + tests/unit/dev-workbench-server.test.mjs:212-215,561 + dev-workbench-runtime-
+//        security-contract.test.mjs:10-13
+//   - "handoff provenance is portable" -> doc-hygiene/PII check, not product behavior; no code
+//     seam exists or should exist (DELETE, no replacement)
+//   - "handoff reports restored embedded controls as current behavior"
+//     -> apps/dev-workbench/e2e/embedded-workbench.spec.ts:113-132 (real Playwright DOM proof)
+//   - "runtime ownership pins installers and documents attested visual context"
+//     -> tests/unit/dev-workbench-visual-context.test.mjs + dev-workbench-visual-context-telemetry
+//        .test.mjs + dev-workbench-server.test.mjs (real coordinator functions); the one truly
+//        uncovered sub-claim (skills-CLI version pin) became the new red-to-green test E7.1 in
+//        tests/unit/pr61-behavioral-coverage.test.mjs
+//   - "canonical visual fixture carries explicit replay attestation"
+//     -> tests/unit/target-registry-contracts.test.mjs:27-68 (parses the same fixture through the
+//        real Zod schemas and proves enforcement by mutating fields and asserting throws)
+//   - "sandbox processes cannot receive control-plane credentials"
+//     -> tests/unit/dev-workbench-server.test.mjs:264,349,416,561 + dev-workbench-runtime-security-
+//        contract.test.mjs:8-13 (real schema rejection, real generated command/env checks)
+// See the inventory doc for the full disposition table and citations.
 
 test("visual artifact staleness does not make a healthy interactive preview stale", () => {
   assert.equal(derivePreviewStatus(true, true), "ready");
@@ -53,70 +65,4 @@ test("handoff event examples parse through the strict runtime wire contract", ()
   assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, payload: { ...payloads[0], extra: true } }).success, false);
   assert.equal(devWorkbenchRealtimeEnvelopeSchema.safeParse({ ...base, payload: payloads[0], kind: "status.changed" }).success, false);
   assert.match(architecture, /schemaVersion, eventId, sequence, occurredAt, sessionId, organizationId, channelKey, payload/);
-});
-
-test("handoff provenance is portable", () => {
-  const paths = [
-    `${handoff}/README.md`,
-    ...[1, 2, 3, 4, 5].map((number) => `${handoff}/0${number}-${[
-      "product-requirements",
-      "current-state-and-gaps",
-      "architecture",
-      "delivery-plan-and-acceptance",
-      "source-index",
-    ][number - 1]}.md`),
-    `${handoff}/handoff-manifest.json`,
-    "docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md",
-  ];
-  const sourceIndex = read(`${handoff}/05-source-index.md`);
-
-  for (const path of paths) assert.doesNotMatch(read(path), /\/Users\/[A-Za-z0-9._-]+\//, path);
-  assert.match(sourceIndex, /session identifier:[^]*019f605d/i);
-  assert.match(sourceIndex, /outside the repository|external/i);
-});
-
-test("handoff reports restored embedded controls as current behavior", () => {
-  const readme = read(`${handoff}/README.md`);
-  const currentState = read(`${handoff}/02-current-state-and-gaps.md`);
-  const delivery = read(`${handoff}/04-delivery-plan-and-acceptance.md`);
-  const combined = `${readme}\n${currentState}\n${delivery}`;
-
-  assert.doesNotMatch(combined, /terminal-only (query mode|CSS) hides the toolbar/i);
-  assert.doesNotMatch(combined, /intended embedded toolbar is hidden/i);
-  assert.match(readme, /restored[^\n]*(toolbar|controls|command strip)/i);
-  assert.match(currentState, /DevWorkbench\.contract\.test\.ts/);
-  assert.match(currentState, /embedded-workbench\.spec\.ts/);
-  assert.match(delivery, /Gate 0[^]*?(complete|completed)/i);
-});
-
-test("runtime ownership pins installers and documents attested visual context", () => {
-  const ownership = read("docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md");
-
-  assert.match(ownership, /npx skills@\d+\.\d+\.\d+ add/);
-  for (const field of [
-    "schemaVersion",
-    "sourceContextRevision",
-    "routeRevision",
-    "requestSequence",
-    "source",
-    "screenshot",
-  ]) assert.match(ownership, new RegExp(`"${field}"`));
-  assert.match(ownership, /\$\{DEV_WORKBENCH_STATE_ROOT\}\/screenshots\/latest\.png/);
-});
-
-test("canonical visual fixture carries explicit replay attestation", () => {
-  const fixture = JSON.parse(read("packages/tool-contracts/fixtures/visual-context-v1.json"));
-
-  assert.equal(fixture.snapshot.requestSequence, 2);
-  assert.equal(fixture.snapshot.sourceContextRevision, 4);
-  assert.equal(fixture.snapshot.routeRevision, 8);
-});
-
-test("sandbox processes cannot receive control-plane credentials", () => {
-  const ownership = read("docs/architecture/dev-workbench-runtime-ownership-2026-07-20.md");
-
-  assert.match(ownership, /control-plane credentials[^\n]*sandbox processes/i);
-  for (const credential of ["GitHub", "Cloudflare", "database", "host-authority", "visual-grounding"])
-    assert.match(ownership, new RegExp(credential, "i"));
-  assert.match(ownership, /server-side brokers|short-lived, least-privilege tokens/i);
 });

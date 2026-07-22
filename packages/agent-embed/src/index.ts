@@ -22,6 +22,8 @@ import {
 import { mountVisualContextPicker, type VisualContextPickerController } from "./visual-context-picker.ts";
 
 export * from "./visual-context-picker.ts";
+export * from "./observation-capture.ts";
+export * from "./control-surface.ts";
 
 export const SONIK_AGENT_UI_HOST_MESSAGE_SOURCE = "sonik-agent-ui-host";
 export const SONIK_AGENT_UI_PAGE_CONTEXT_MESSAGE = "sonik:agent-ui:page-context";
@@ -232,7 +234,10 @@ const ALLOWED_CONTEXT_KEYS = new Set([
   "hostSession",
   "at",
 ]);
-const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
+// Kept textually identical to the copy in packages/agent-observability/src/index.ts (search
+// SECRET_VALUE_PATTERN there) and pinned by tests/unit/secret-pattern-hardening.test.mjs —
+// update both together.
+const SECRET_VALUE_PATTERN = /\b(vck_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
 
 export function isAgentHostPageContextMessage(value: unknown): value is AgentHostPageContextMessage {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;

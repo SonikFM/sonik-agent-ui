@@ -203,7 +203,11 @@
         reconnectTerminal: operation === "idle"
           ? { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
-        restartPreview: { enabled: false, disabledReason: "Preview restart wiring is not connected yet." },
+        restartPreview: !workspace.preview
+          ? { enabled: false, disabledReason: "No preview URL is available." }
+          : operation === "idle"
+          ? { enabled: true, disabledReason: null }
+          : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
         captureSnapshot: operation === "idle"
           ? { enabled: true, disabledReason: null }
           : { enabled: false, disabledReason: "Wait for the current workspace operation to finish." },
@@ -479,7 +483,21 @@
   }
 
   function restartPreview(): WorkbenchSemanticActionResult {
-    return unavailable("restartPreview");
+    if (!workspace?.preview) return unavailable("restartPreview");
+    void restartPreviewRequest();
+    return accepted("Preview restart started.");
+  }
+
+  async function restartPreviewRequest(): Promise<void> {
+    previewInteractive = false;
+    try {
+      const response = await fetch("/api/workspaces/preview", { method: "POST" });
+      if (!response.ok) throw new Error(await publicError(response));
+      announcement = "Preview restarted.";
+    } catch (error) {
+      visibleError = safeMessage(error, "The preview could not be restarted.");
+      announcement = visibleError;
+    }
   }
 
   function captureSnapshot(): WorkbenchSemanticActionResult {

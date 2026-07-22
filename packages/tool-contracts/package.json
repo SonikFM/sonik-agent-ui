@@ -23,6 +23,14 @@
       "types": "./dist/visual-context.d.ts",
       "default": "./dist/visual-context.js"
     },
+    "./observe": {
+      "types": "./dist/observe.d.ts",
+      "default": "./dist/observe.js"
+    },
+    "./capability-matrix": {
+      "types": "./dist/capability-matrix.d.ts",
+      "default": "./dist/capability-matrix.js"
+    },
     "./fixtures/visual-context-v1.json": "./fixtures/visual-context-v1.json",
     "./capability-registry": {
       "types": "./dist/capability-registry.d.ts",
