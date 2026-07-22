@@ -1,9 +1,19 @@
 import {
   DEFAULT_REPOSITORY_COMMANDS,
+  DEV_WORKBENCH_ROOT,
   DEV_WORKBENCH_SCHEMA_VERSION,
   repositoryManifestSchema,
+  repositoryProfileSchema,
   type RepositoryManifest,
+  type RepositoryProfile,
+  type RepositoryProfileId,
 } from "../contracts/workbench";
+
+export type DevWorkbenchGitHubAppConfig = {
+  appId: string;
+  privateKey: string;
+  installationId: string;
+};
 
 export type DevWorkbenchServerConfig = {
   enabled: true;
@@ -11,6 +21,16 @@ export type DevWorkbenchServerConfig = {
   timeoutMs: number;
   repository: RepositoryManifest;
   agentApiOrigin: string;
+  // Read-write sandbox checkouts beyond the primary agent-ui repo. Empty/null until a
+  // GitHub App is registered and its env vars are provisioned (see .env.example).
+  additionalRepositories: RepositoryProfile[];
+  githubApp: DevWorkbenchGitHubAppConfig | null;
+};
+
+// profileId -> env var prefix for that profile's clone URL / revision.
+const ADDITIONAL_REPOSITORY_PROFILE_ENV_PREFIXES: Record<Exclude<RepositoryProfileId, "agent-ui">, string> = {
+  "booking-service": "DEV_WORKBENCH_BOOKING_SERVICE",
+  amplify: "DEV_WORKBENCH_AMPLIFY",
 };
 
 export type DevWorkbenchConfigResult =
@@ -55,6 +75,15 @@ export function readDevWorkbenchConfig(env: Record<string, string | undefined>):
     return { ok: false, reason: "The configured repository manifest is invalid." };
   }
 
+  const additionalRepositories = readAdditionalRepositoryProfiles(env);
+  if (!additionalRepositories.ok) {
+    return additionalRepositories;
+  }
+  const githubApp = readGitHubAppConfig(env);
+  if (additionalRepositories.value.length > 0 && !githubApp) {
+    return { ok: false, reason: "DEV_WORKBENCH_GITHUB_APP_ID, DEV_WORKBENCH_GITHUB_APP_PRIVATE_KEY, and DEV_WORKBENCH_GITHUB_APP_INSTALLATION_ID are required when additional repository profiles are configured." };
+  }
+
   return {
     ok: true,
     value: {
@@ -63,8 +92,43 @@ export function readDevWorkbenchConfig(env: Record<string, string | undefined>):
       timeoutMs,
       repository: repository.data,
       agentApiOrigin,
+      additionalRepositories: additionalRepositories.value,
+      githubApp,
     },
   };
+}
+
+function readAdditionalRepositoryProfiles(
+  env: Record<string, string | undefined>,
+): { ok: true; value: RepositoryProfile[] } | { ok: false; reason: string } {
+  const profiles: RepositoryProfile[] = [];
+  for (const [profileId, envPrefix] of Object.entries(ADDITIONAL_REPOSITORY_PROFILE_ENV_PREFIXES) as [Exclude<RepositoryProfileId, "agent-ui">, string][]) {
+    const cloneUrl = env[`${envPrefix}_REPOSITORY_URL`]?.trim();
+    const revision = env[`${envPrefix}_REPOSITORY_REVISION`]?.trim();
+    if (!cloneUrl && !revision) continue;
+    if (!cloneUrl || !revision) {
+      return { ok: false, reason: `${envPrefix}_REPOSITORY_URL and ${envPrefix}_REPOSITORY_REVISION must both be set to enable the ${profileId} repository profile.` };
+    }
+    const profile = repositoryProfileSchema.safeParse({
+      profileId,
+      cloneUrl,
+      revision,
+      checkoutPath: `${DEV_WORKBENCH_ROOT}/repos/${profileId}`,
+    });
+    if (!profile.success) {
+      return { ok: false, reason: `The configured ${profileId} repository profile is invalid.` };
+    }
+    profiles.push(profile.data);
+  }
+  return { ok: true, value: profiles };
+}
+
+function readGitHubAppConfig(env: Record<string, string | undefined>): DevWorkbenchGitHubAppConfig | null {
+  const appId = env.DEV_WORKBENCH_GITHUB_APP_ID?.trim();
+  const privateKey = env.DEV_WORKBENCH_GITHUB_APP_PRIVATE_KEY;
+  const installationId = env.DEV_WORKBENCH_GITHUB_APP_INSTALLATION_ID?.trim();
+  if (!appId || !privateKey || !installationId) return null;
+  return { appId, privateKey, installationId };
 }
 
 function parseOrigin(value: string): string | null {

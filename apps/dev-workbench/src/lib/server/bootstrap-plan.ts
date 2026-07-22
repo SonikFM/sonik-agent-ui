@@ -6,8 +6,10 @@ import {
   DEV_WORKBENCH_ROOT,
   DEV_WORKBENCH_STATE_ROOT,
   repositoryManifestSchema,
+  repositoryProfileSchema,
   tmuxWindowSchema,
   type RepositoryManifest,
+  type RepositoryProfile,
   type TmuxWindow,
 } from "../contracts/workbench";
 import { VISUAL_CONTEXT_PATH, VISUAL_CONTEXT_STAGE_ROOT } from "./visual-context-coordinator";
@@ -57,6 +59,8 @@ export function createTmuxWindows(
     `SONIK_OPENAPI_PATH=${DEV_WORKBENCH_MIRROR_PATHS.openApi}`,
     `SONIK_CONSOLE_LOG_PATH=${DEV_WORKBENCH_MIRROR_PATHS.consoleEvents}`,
     `SONIK_NETWORK_LOG_PATH=${DEV_WORKBENCH_MIRROR_PATHS.networkEvents}`,
+    `SONIK_CAPABILITY_MATRIX_PATH=${DEV_WORKBENCH_MIRROR_PATHS.capabilityMatrix}`,
+    `SONIK_SKILLS_MANIFEST_PATH=${DEV_WORKBENCH_MIRROR_PATHS.skillsManifest}`,
     `SONIK_VISUAL_CONTEXT_PATH=${VISUAL_CONTEXT_PATH}`,
   ];
   const devEnvironment = [
@@ -74,11 +78,43 @@ export function createTmuxWindows(
   ].map((window) => tmuxWindowSchema.parse(window));
 }
 
+function requireGitCredentialFilePath(gitCredentialFilePath: string | undefined): string {
+  if (!gitCredentialFilePath) throw new Error("gitCredentialFilePath is required when additionalRepositories are provided");
+  return gitCredentialFilePath;
+}
+
+/** Clone + checkout steps for read-write repo profiles beyond the primary agent-ui repo
+ * (booking-service, amplify). Auth rides the pre-written git-credentials file via a
+ * per-command `-c credential.helper`; the clone URL and command argv stay bare/credential-free. */
+function createAdditionalRepositoryCommands(
+  additionalRepositories: readonly RepositoryProfile[],
+  gitCredentialFilePath: string,
+): SandboxCommand[] {
+  return additionalRepositories.flatMap((repo) => {
+    const profile = repositoryProfileSchema.parse(repo);
+    return [
+      {
+        id: `clone-${profile.profileId}`,
+        cmd: "git",
+        args: ["-c", `credential.helper=store --file=${gitCredentialFilePath}`, "clone", "--filter=blob:none", profile.cloneUrl, profile.checkoutPath],
+      },
+      {
+        id: `checkout-${profile.profileId}`,
+        cmd: "git",
+        args: ["checkout", "--detach", profile.revision],
+        cwd: profile.checkoutPath,
+      },
+    ];
+  });
+}
+
 export function createDevWorkbenchBootstrapPlan(input: {
   sessionId: string;
   repository: RepositoryManifest;
   previewHost?: string;
   agentApiOrigin?: string;
+  additionalRepositories?: RepositoryProfile[];
+  gitCredentialFilePath?: string;
 }): DevWorkbenchBootstrapPlan {
   const repository = repositoryManifestSchema.parse(input.repository);
   const tmuxSession = createTmuxSessionName(input.sessionId);
@@ -110,6 +146,9 @@ export function createDevWorkbenchBootstrapPlan(input: {
       args: ["checkout", "--detach", repository.revision],
       cwd: DEV_WORKBENCH_REPOSITORY_ROOT,
     },
+    ...(input.additionalRepositories?.length
+      ? createAdditionalRepositoryCommands(input.additionalRepositories, requireGitCredentialFilePath(input.gitCredentialFilePath))
+      : []),
     {
       id: "install-dependencies",
       cmd: repository.commands.install[0]!,

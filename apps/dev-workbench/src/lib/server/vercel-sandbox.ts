@@ -258,7 +258,7 @@ function safeDiagnostic(error: unknown): string {
   return error instanceof Error ? redactDiagnostic(`${error.name}: ${error.message}`.slice(0, 2_000)) : "Unknown error";
 }
 
-function redactDiagnostic(value: string): string {
+export function redactDiagnostic(value: string): string {
   return value
     .replace(/(https?:\/\/)[^\s/@]+@/gi, "$1[redacted]@")
     .replace(/((?:authorization|password|secret|token)[=:]\s*)[^\s]+/gi, "$1[redacted]");

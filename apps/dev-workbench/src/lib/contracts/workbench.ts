@@ -54,6 +54,19 @@ export const repositoryManifestSchema = z.object({
 }).strict();
 export type RepositoryManifest = z.infer<typeof repositoryManifestSchema>;
 
+export const repositoryProfileIdSchema = z.enum(["agent-ui", "booking-service", "amplify"]);
+export type RepositoryProfileId = z.infer<typeof repositoryProfileIdSchema>;
+
+// Read-write sandbox checkouts beyond the primary agent-ui repo (booking-service, amplify).
+// Auth for these rides the git-credentials file (see github-app-token-broker), never the URL.
+export const repositoryProfileSchema = z.object({
+  profileId: repositoryProfileIdSchema,
+  cloneUrl: httpsUrlSchema,
+  revision: gitRevisionSchema,
+  checkoutPath: z.string().min(1).max(2_048),
+}).strict();
+export type RepositoryProfile = z.infer<typeof repositoryProfileSchema>;
+
 export const repositoryFileInputSchema = z.object({
   path: z.string().min(1).max(2_048),
   bytes: z.number().int().nonnegative().optional(),
@@ -115,6 +128,8 @@ export const pageContextMirrorPathsSchema = z.object({
   latestScreenshot: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/screenshots/latest.png`),
   sitemap: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/sitemap.json`),
   workspace: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/workspace.json`),
+  capabilityMatrix: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/capability-matrix.json`),
+  skillsManifest: z.literal(`${DEV_WORKBENCH_STATE_ROOT}/skills-manifest.json`),
 }).strict();
 export type PageContextMirrorPaths = z.infer<typeof pageContextMirrorPathsSchema>;
 
@@ -128,6 +143,8 @@ export const DEV_WORKBENCH_MIRROR_PATHS = pageContextMirrorPathsSchema.parse({
   latestScreenshot: `${DEV_WORKBENCH_STATE_ROOT}/screenshots/latest.png`,
   sitemap: `${DEV_WORKBENCH_STATE_ROOT}/sitemap.json`,
   workspace: `${DEV_WORKBENCH_STATE_ROOT}/workspace.json`,
+  capabilityMatrix: `${DEV_WORKBENCH_STATE_ROOT}/capability-matrix.json`,
+  skillsManifest: `${DEV_WORKBENCH_STATE_ROOT}/skills-manifest.json`,
 });
 
 export const devWorkbenchLifecycleStatusSchema = z.enum([
