@@ -64,9 +64,13 @@ test("missing host context / unavailable persistence degrades to a structured no
     throw new WorkspaceRuntimeResolutionError("missing-host-context", "Cannot resolve workspace persistence without a trusted host context.");
   };
   const response = await POST(postRequest({ event: { source: "client", event: "telemetry.anonymous.probe" } }));
-  assert.notEqual(response.status, 500, "anonymous/missing-host-context mode must not surface as a raw 500");
+  assert.equal(response.status, 503, "anonymous/missing-host-context mode must degrade to the documented 503, not a raw 500");
   const body = await response.json();
-  assert.equal(body.ok, false);
+  assert.deepEqual(body, {
+    ok: false,
+    error: "Workspace cloud runtime is not available.",
+    code: "missing-host-context",
+  }, "the degrade response shape must be locked exactly, matching GET /api/sessions's contract");
 });
 
 test("happy path: valid batch against an existing session still returns {ok:true, accepted:N}", async () => {

@@ -60,7 +60,10 @@ test("mintInstallationToken requests a repo-scoped installation token with a Bea
   assert.equal(requests[0].url, "https://api.github.com/app/installations/install-456/access_tokens");
   assert.equal(requests[0].init.method, "POST");
   assert.equal(requests[0].init.headers.Authorization, "Bearer fake-jwt-for-app-123");
-  assert.deepEqual(JSON.parse(requests[0].init.body), { repositories: ["booking-service", "amplify"] });
+  assert.deepEqual(JSON.parse(requests[0].init.body), {
+    repositories: ["booking-service", "amplify"],
+    permissions: { contents: "write" },
+  }, "the request must ask GitHub for a least-privilege token (contents:write only), not the App's full permission set");
   assert.deepEqual(result, { token: "ghs_minted-token-value", expiresAt: "2026-07-22T00:10:00Z" });
 });
 
@@ -145,6 +148,31 @@ test("a non-2xx GitHub response is surfaced without leaking response body secret
     (error) => {
       assert.ok(error instanceof Error);
       assert.equal(error.message.includes("ghs_leaked-body-secret"), false);
+      return true;
+    },
+  );
+});
+
+test("a JWT signing failure never leaks key material via the thrown message", async () => {
+  const badSignJwt = () => {
+    throw new Error(`unsupported key format: ${TEST_PRIVATE_KEY_PEM}`);
+  };
+  const fetchImpl = async () => {
+    throw new Error("fetchImpl must not be called when JWT signing fails");
+  };
+  await assert.rejects(
+    () => mintInstallationToken({
+      appId: "app-123",
+      privateKey: TEST_PRIVATE_KEY_PEM,
+      installationId: "install-456",
+      repositories: ["booking-service"],
+      signJwt: badSignJwt,
+      fetchImpl,
+    }),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message.includes("PRIVATE KEY"), false, "the rejection must not carry raw PEM key material");
+      assert.equal(error.message.includes(TEST_PRIVATE_KEY_PEM), false);
       return true;
     },
   );
@@ -266,6 +294,37 @@ test("workbench-config supports multiple repository profiles (agent-ui + booking
   for (const profile of withBothProfiles.value.additionalRepositories) {
     assert.doesNotThrow(() => repositoryProfileSchema.parse(profile), "config-derived profiles must satisfy the same strict contract as hand-built ones");
   }
+});
+
+test("workbench-config treats a literal \"undefined\" repository profile URL/revision as unset, not as an enabled profile", () => {
+  const baseEnv = {
+    DEV_WORKBENCH_ENABLED: "true",
+    DEV_WORKBENCH_REPOSITORY_URL: "https://github.com/sonikfm/sonik-agent-ui.git",
+    DEV_WORKBENCH_REPOSITORY_REVISION: "main",
+    DEV_WORKBENCH_ORGANIZATION_ID: "sonikfm",
+    // Simulates the real-world footgun: a platform serializes an unset env var
+    // as the literal string "undefined" rather than omitting the key.
+    DEV_WORKBENCH_BOOKING_SERVICE_REPOSITORY_URL: "undefined",
+    DEV_WORKBENCH_BOOKING_SERVICE_REPOSITORY_REVISION: "undefined",
+  };
+  const result = readDevWorkbenchConfig(baseEnv);
+  assert.equal(result.ok, true, "a literal 'undefined' url/revision pair must be treated as the profile being absent, not as an invalid config");
+  assert.deepEqual(result.value.additionalRepositories, [], "no repository profile may be enabled from 'undefined' env values");
+  assert.equal(result.value.githubApp, null);
+});
+
+test("workbench-config treats literal \"undefined\" GitHub App credentials as unset, not as valid App wiring", () => {
+  const result = readDevWorkbenchConfig({
+    DEV_WORKBENCH_ENABLED: "true",
+    DEV_WORKBENCH_REPOSITORY_URL: "https://github.com/sonikfm/sonik-agent-ui.git",
+    DEV_WORKBENCH_REPOSITORY_REVISION: "main",
+    DEV_WORKBENCH_ORGANIZATION_ID: "sonikfm",
+    DEV_WORKBENCH_GITHUB_APP_ID: "undefined",
+    DEV_WORKBENCH_GITHUB_APP_PRIVATE_KEY: "undefined",
+    DEV_WORKBENCH_GITHUB_APP_INSTALLATION_ID: "undefined",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.value.githubApp, null, "an all-'undefined' GitHub App credential set must be treated as absent, never wired in as a real App config");
 });
 
 test("createTmuxWindows is unaffected by repository profiles (sanity: existing behavior untouched)", () => {

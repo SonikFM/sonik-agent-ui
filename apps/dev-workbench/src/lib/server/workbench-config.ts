@@ -37,6 +37,23 @@ export type DevWorkbenchConfigResult =
   | { ok: true; value: DevWorkbenchServerConfig }
   | { ok: false; reason: string };
 
+// Some platforms serialize an unset env var as the literal string
+// "undefined" rather than omitting the key; treat that (and blank/whitespace)
+// as unset so it can't pass a truthy check and enable an invalid profile or
+// App credential.
+function optionalEnvValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed !== "undefined" ? trimmed : undefined;
+}
+
+// Same "unset" detection as optionalEnvValue, but for values (like a PEM
+// private key) whose exact original formatting -- including any trailing
+// newline -- must be preserved rather than trimmed.
+function isUnsetEnvValue(value: string | undefined): boolean {
+  const trimmed = value?.trim();
+  return !trimmed || trimmed === "undefined";
+}
+
 const DEFAULT_TIMEOUT_MS = 45 * 60 * 1_000;
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_AGENT_API_ORIGIN = "https://sonik-agent-ui.liam-trampota.workers.dev";
@@ -46,9 +63,9 @@ export function readDevWorkbenchConfig(env: Record<string, string | undefined>):
     return { ok: false, reason: "Dev Workbench is disabled by server configuration." };
   }
 
-  const cloneUrl = env.DEV_WORKBENCH_REPOSITORY_URL?.trim();
-  const revision = env.DEV_WORKBENCH_REPOSITORY_REVISION?.trim();
-  const organizationId = env.DEV_WORKBENCH_ORGANIZATION_ID?.trim();
+  const cloneUrl = optionalEnvValue(env.DEV_WORKBENCH_REPOSITORY_URL);
+  const revision = optionalEnvValue(env.DEV_WORKBENCH_REPOSITORY_REVISION);
+  const organizationId = optionalEnvValue(env.DEV_WORKBENCH_ORGANIZATION_ID);
   if (!cloneUrl || !revision || !organizationId) {
     return { ok: false, reason: "Repository, revision, and organization configuration are required." };
   }
@@ -103,8 +120,8 @@ function readAdditionalRepositoryProfiles(
 ): { ok: true; value: RepositoryProfile[] } | { ok: false; reason: string } {
   const profiles: RepositoryProfile[] = [];
   for (const [profileId, envPrefix] of Object.entries(ADDITIONAL_REPOSITORY_PROFILE_ENV_PREFIXES) as [Exclude<RepositoryProfileId, "agent-ui">, string][]) {
-    const cloneUrl = env[`${envPrefix}_REPOSITORY_URL`]?.trim();
-    const revision = env[`${envPrefix}_REPOSITORY_REVISION`]?.trim();
+    const cloneUrl = optionalEnvValue(env[`${envPrefix}_REPOSITORY_URL`]);
+    const revision = optionalEnvValue(env[`${envPrefix}_REPOSITORY_REVISION`]);
     if (!cloneUrl && !revision) continue;
     if (!cloneUrl || !revision) {
       return { ok: false, reason: `${envPrefix}_REPOSITORY_URL and ${envPrefix}_REPOSITORY_REVISION must both be set to enable the ${profileId} repository profile.` };
@@ -124,10 +141,11 @@ function readAdditionalRepositoryProfiles(
 }
 
 function readGitHubAppConfig(env: Record<string, string | undefined>): DevWorkbenchGitHubAppConfig | null {
-  const appId = env.DEV_WORKBENCH_GITHUB_APP_ID?.trim();
-  const privateKey = env.DEV_WORKBENCH_GITHUB_APP_PRIVATE_KEY;
-  const installationId = env.DEV_WORKBENCH_GITHUB_APP_INSTALLATION_ID?.trim();
-  if (!appId || !privateKey || !installationId) return null;
+  const appId = optionalEnvValue(env.DEV_WORKBENCH_GITHUB_APP_ID);
+  const installationId = optionalEnvValue(env.DEV_WORKBENCH_GITHUB_APP_INSTALLATION_ID);
+  const privateKeyEnv = env.DEV_WORKBENCH_GITHUB_APP_PRIVATE_KEY;
+  if (!appId || !installationId || isUnsetEnvValue(privateKeyEnv)) return null;
+  const privateKey = privateKeyEnv as string;
   return { appId, privateKey, installationId };
 }
 

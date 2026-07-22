@@ -6,7 +6,7 @@ import { observeConsoleEntrySchema, observeNetworkEntrySchema } from "@sonik-age
 import { redactTelemetryString } from "@sonik-agent-ui/agent-observability";
 import { DEV_WORKBENCH_SESSION_COOKIE } from "$lib/server/session-cookie";
 import { readDevWorkbenchConfig } from "$lib/server/workbench-config";
-import { recordSessionObservationBatch } from "$lib/server/observation-mirror";
+import { recordSessionObservationBatch, InvalidSessionIdError } from "$lib/server/observation-mirror";
 
 const NO_STORE = { "cache-control": "no-store, max-age=0" };
 const MAX_BATCH_EVENTS = 100;
@@ -71,7 +71,22 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
       : { ...event, url: redactTelemetryString(event.url) },
   );
 
-  const result = await recordSessionObservationBatch(sessionId, redactedEvents);
-  for (const event of freshEvents) seen.add(`${event.kind}:${event.seq}`);
+  // Mark seqs as seen BEFORE the write, not after: two concurrent identical
+  // batches would otherwise both pass the `seen.has` filter above and both
+  // append. On a failed write, roll the seqs back out of `seen` so the batch
+  // remains retryable rather than being silently swallowed.
+  const freshKeys = freshEvents.map((event) => `${event.kind}:${event.seq}`);
+  for (const key of freshKeys) seen.add(key);
+
+  let result: { accepted: number };
+  try {
+    result = await recordSessionObservationBatch(sessionId, redactedEvents);
+  } catch (error) {
+    for (const key of freshKeys) seen.delete(key);
+    if (error instanceof InvalidSessionIdError) {
+      return json({ ok: false, reason: "Dev Workbench session is invalid." }, { status: 400, headers: NO_STORE });
+    }
+    return json({ ok: false, reason: "Failed to record the observation batch." }, { status: 503, headers: NO_STORE });
+  }
   return json({ ok: true, accepted: result.accepted }, { headers: NO_STORE });
 };

@@ -40,7 +40,16 @@ export async function mintInstallationToken(input: {
   const now = (input.now ?? (() => new Date()))();
   const signJwt = input.signJwt ?? signAppJwt;
   const fetchImpl = input.fetchImpl ?? fetch;
-  const jwt = signJwt({ appId: input.appId, privateKey: input.privateKey, now });
+
+  let jwt: string;
+  try {
+    jwt = signJwt({ appId: input.appId, privateKey: input.privateKey, now });
+  } catch {
+    // Never interpolate the underlying error here: a crypto/PEM-parsing
+    // failure can embed the raw private key in its message, and
+    // redactDiagnostic's token/url patterns don't cover PEM material.
+    throw new Error("GitHub App JWT signing failed.");
+  }
 
   let response: Response;
   try {
@@ -53,7 +62,9 @@ export async function mintInstallationToken(input: {
           Accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
         },
-        body: JSON.stringify({ repositories: input.repositories }),
+        // Least privilege: scope the minted token to contents:write, never
+        // the App's full permission set (GitHub's default when omitted).
+        body: JSON.stringify({ repositories: input.repositories, permissions: { contents: "write" } }),
       },
     );
   } catch (error) {

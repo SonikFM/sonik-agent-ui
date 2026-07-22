@@ -53,7 +53,10 @@ globalThis.__observationMirrorImpl = (...args) => mirrorImpl(...args);
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "$lib/server/observation-mirror") {
-      return stub(`export const recordSessionObservationBatch = (...args) => globalThis.__observationMirrorImpl(...args);`);
+      return stub(`
+        export const recordSessionObservationBatch = (...args) => globalThis.__observationMirrorImpl(...args);
+        export class InvalidSessionIdError extends Error {}
+      `);
     }
     if (specifier === "$env/dynamic/private") {
       return stub(`export const env = {
@@ -199,6 +202,53 @@ test("R2-B.5: an unredacted secret in a console entry is redacted server-side be
     false,
     "the raw secret must never reach the JSONL-writing seam, even when the capture layer failed to redact it first — the server must re-run redaction as defense-in-depth",
   );
+});
+
+test("R2C.5: two concurrent identical batches for the same session only append once (TOCTOU dedup race)", async () => {
+  const { POST } = await loadRoute();
+  const appendedBatches = [];
+  mirrorImpl = async (sessionId, events) => {
+    // Simulate real fs latency so both requests' synchronous dedupe-check
+    // step (which today only reads `seen`, and mutates it only after this
+    // await resolves) overlaps before either write completes.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    appendedBatches.push(events);
+    return { accepted: events.length };
+  };
+  const events = [consoleEvent(20), consoleEvent(21)];
+  const makeRequest = () => POST(requestEvent({ cookie: "workspace-race", body: { events } }));
+
+  const [firstResponse, secondResponse] = await Promise.all([makeRequest(), makeRequest()]);
+  const firstBody = await firstResponse.json();
+  const secondBody = await secondResponse.json();
+  const acceptedCounts = [firstBody.accepted, secondBody.accepted].sort((a, b) => a - b);
+  assert.deepEqual(acceptedCounts, [0, 2], "exactly one of the two overlapping identical requests must accept the batch; the other must see every seq as already-seen");
+  assert.equal(appendedBatches.length, 1, "the observation-mirror seam must only be invoked once for two concurrent identical batches");
+});
+
+test("R2C.6: a failed observation-mirror write returns a structured 5xx (never a raw 500) and the failed seqs remain retryable", async () => {
+  const { POST } = await loadRoute();
+  mirrorImpl = async () => {
+    throw new Error("ENOSPC: no space left on device");
+  };
+  const response = await POST(requestEvent({ cookie: "workspace-write-failure", body: { events: [consoleEvent(30)] } }));
+  assert.equal(response.status, 503, "an fs/seam failure must degrade to a structured 503, not an uncaught raw 500");
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.ok(typeof body.reason === "string" && body.reason.length > 0);
+
+  // retry after the seam recovers: the earlier failed write must not have been
+  // marked as "seen", so the same seq can still be accepted.
+  let recovered = null;
+  mirrorImpl = async (sessionId, events) => {
+    recovered = events;
+    return { accepted: events.length };
+  };
+  const retry = await POST(requestEvent({ cookie: "workspace-write-failure", body: { events: [consoleEvent(30)] } }));
+  assert.equal(retry.status, 200);
+  const retryBody = await retry.json();
+  assert.equal(retryBody.accepted, 1, "a seq whose write previously failed must remain retryable, not be silently swallowed by the dedupe set");
+  assert.ok(recovered, "the retried batch must reach the seam");
 });
 
 console.log("observation-feed tests: ok");
