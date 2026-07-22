@@ -14,7 +14,7 @@ registerHooks({
       export const listRequestWorkspaceDocuments=async()=>[],listRequestWorkspaceMessages=async()=>[],listRequestWorkspaceLayoutSnapshots=async()=>[],listRequestWorkspaceRuns=async()=>[],listRequestWorkspaceRunEvents=async()=>[],listRequestWorkspaceArtifactVersions=async()=>[],getRequestWorkspaceDocument=async()=>null,getRequestWorkspaceArtifact=async()=>null;
       export const ensureRequestWorkspaceSession=(_event,id)=>persistence().ensureSession(id),patchRequestWorkspaceSession=()=>null;
     `);
-    if (specifier === "$lib/server/workspace-services") return stub(`export const AGENT_UI_WORKSPACE_SESSION_CONTEXT_HEADER="x-session";export const createSignedWorkspaceSessionContextHeader=()=>null,resolveTrustedHostSessionSnapshot=()=>({});`);
+    if (specifier === "$lib/server/workspace-services") return stub(`export const AGENT_UI_WORKSPACE_SESSION_CONTEXT_HEADER="x-session";export const createSignedWorkspaceSessionContextHeader=()=>null,resolveTrustedHostSessionSnapshot=()=>({});export class WorkspaceRuntimeResolutionError extends Error{constructor(code,message){super(message);this.name="WorkspaceRuntimeResolutionError";this.code=code;}};`);
     if (specifier === "$lib/server/agent-ui-files") return stub(`export class AgentUiFileError extends Error{};export const deleteAgentUiFile=async()=>{},requireAgentUiFileBucket=()=>({});`);
     if (specifier === "$lib/server/run-event-log") return stub(`export const buildRunReattachMessage=()=>null,runAssistantTurnPersisted=()=>true;`);
     if (specifier === "$lib/server/run-error-safety") return stub(`export const sanitizeFailureRecord=(value)=>value,sanitizeSessionFailureProjection=(value)=>value;`);

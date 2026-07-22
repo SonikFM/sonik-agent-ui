@@ -22,6 +22,8 @@ import {
   createRuntimeRehydrationPlan,
 } from "./bootstrap-plan";
 import { createRepositorySitemapFromTrackedFiles } from "./repository-sitemap";
+import { GIT_CREDENTIAL_FILE_PATH, buildGitCredentialWriteFile, mintInstallationToken } from "./github-app-token-broker";
+import { buildSkillsManifest } from "./skills-manifest";
 import {
   createVercelDevWorkbenchSandbox,
   createVercelWorkbenchConnections,
@@ -82,11 +84,22 @@ export async function provisionWorkspace(
   const createdAt = new Date().toISOString();
 
   try {
+    if (config.additionalRepositories.length > 0 && config.githubApp) {
+      const minted = await mintInstallationToken({
+        appId: config.githubApp.appId,
+        privateKey: config.githubApp.privateKey,
+        installationId: config.githubApp.installationId,
+        repositories: config.additionalRepositories.map((profile) => repositoryNameFromCloneUrl(profile.cloneUrl)),
+      });
+      await sandbox.writeFiles([buildGitCredentialWriteFile({ token: minted.token })], signal ? { signal } : undefined);
+    }
     const plan = createDevWorkbenchBootstrapPlan({
       sessionId,
       repository: config.repository,
       previewHost: sandboxPreviewHost(sandbox),
       agentApiOrigin: config.agentApiOrigin,
+      additionalRepositories: config.additionalRepositories,
+      gitCredentialFilePath: GIT_CREDENTIAL_FILE_PATH,
     });
     const bootstrapped = await runVercelBootstrapPlan({ sandbox, plan, signal });
     if (!bootstrapped.ok) {
@@ -118,6 +131,10 @@ export async function provisionWorkspace(
       { path: DEV_WORKBENCH_MIRROR_PATHS.guide, content: createSandboxContextGuide() },
       { path: DEV_WORKBENCH_MIRROR_PATHS.consoleEvents, content: "" },
       { path: DEV_WORKBENCH_MIRROR_PATHS.networkEvents, content: "" },
+      // capability-matrix.json needs the dev-agent command registry (separate wave); seed a
+      // placeholder in the same idiom as hostContext/openApi above until that registry exists.
+      { path: DEV_WORKBENCH_MIRROR_PATHS.capabilityMatrix, content: JSON.stringify({ status: "awaiting-command-registry" }, null, 2) },
+      { path: DEV_WORKBENCH_MIRROR_PATHS.skillsManifest, content: JSON.stringify({ capturedAt: createdAt, skillsCliVersion: buildSkillsManifest().skillsCliVersion }, null, 2) },
     ], signal ? { signal } : undefined);
 
     const connections = await createVercelWorkbenchConnections({ sandbox, tmuxSession: plan.tmuxSession, signal });
@@ -727,15 +744,33 @@ function descriptorFromRecord(
   });
 }
 
-function createSandboxContextGuide(): string {
+// Guide entry descriptions, one per DEV_WORKBENCH_MIRROR_PATHS key:
+// host-context.json: host origin plus redacted page context.
+// openapi.json: the host OpenAPI document fetched with that authority.
+const MIRROR_PATH_DESCRIPTIONS: Record<keyof typeof DEV_WORKBENCH_MIRROR_PATHS, string> = {
+  pageContext: "redacted Workbench state.",
+  hostContext: "host origin plus redacted page context.",
+  openApi: "the host OpenAPI document fetched with that authority.",
+  guide: "this file.",
+  consoleEvents: "mirrored console ring-buffer entries (JSONL).",
+  networkEvents: "mirrored network ring-buffer entries (JSONL).",
+  latestScreenshot: "the most recent captured screenshot.",
+  sitemap: "tracked source and route map for the checkout.",
+  workspace: "the persisted workspace session record.",
+  capabilityMatrix: "the registry-generated command capability matrix.",
+  skillsManifest: "the pinned skills-CLI version manifest.",
+};
+
+/** Generated from DEV_WORKBENCH_MIRROR_PATHS so the guide can never drift from the real paths. */
+export function createSandboxContextGuide(): string {
+  const entries = (Object.keys(DEV_WORKBENCH_MIRROR_PATHS) as Array<keyof typeof DEV_WORKBENCH_MIRROR_PATHS>)
+    .map((key) => `- \`${DEV_WORKBENCH_MIRROR_PATHS[key]}\`: ${MIRROR_PATH_DESCRIPTIONS[key]}`)
+    .join("\n");
   return `# Sonik Agent UI Dev Context
 
 This directory is host-written runtime context for the isolated Agent UI checkout.
 
-- \`page-context.json\`: redacted Workbench state.
-- \`host-context.json\`: host origin plus redacted page context.
-- \`openapi.json\`: the host OpenAPI document fetched with that authority.
-- \`sitemap.json\`: tracked source and route map for the checkout.
+${entries}
 
 The primary Codex window receives \`SONIK_*_PATH\` environment variables for these files.
 Pipe B is unavailable inside the sandbox because control-plane credentials remain server-side.
@@ -745,6 +780,11 @@ Use \`tmux capture-pane -p -S -200 -t \"$TMUX_PANE\"\` only for the current pane
 
 function sandboxPreviewHost(sandbox: Sandbox): string {
   return new URL(sandbox.domain(DEV_WORKBENCH_PREVIEW_PORT)).hostname;
+}
+
+function repositoryNameFromCloneUrl(cloneUrl: string): string {
+  const path = new URL(cloneUrl).pathname.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
+  return path.split("/").at(-1) ?? path;
 }
 
 function workspaceError(
