@@ -651,6 +651,78 @@ assert.equal(staticVendorEmbedSource.includes('if (iframe.getAttribute("src") !=
 assert.equal(staticVendorEmbedSource.includes("onRequestHostAction"), true, "static vendor embed should handle iframe host-action requests in the fake browser host");
 assert.equal(staticVendorEmbedSource.includes('request.actionKey === "canvas.open"'), true, "static vendor embed should execute safe canvas.open requests in the fake browser host");
 assert.equal(staticVendorEmbedSource.includes("slot.moveBefore(iframe, null)"), true, "static vendor embed should use state-preserving iframe moves when the browser supports moveBefore");
+assert.equal(staticVendorEmbedSource.includes('iframe.isConnected && typeof slot.moveBefore === "function"'), true, "static vendor embed must gate moveBefore on iframe.isConnected: Chrome 133+ throws HierarchyRequestError when atomically moving a disconnected node");
+assert.equal(staticVendorEmbedSource.includes('if (typeof slot.moveBefore === "function")'), false, "static vendor embed must not retain the unguarded moveBefore branch that crashes first mount on Chrome 133+");
+
+// Regression (Chrome 133+): Element.moveBefore is a state-preserving atomic move and throws
+// HierarchyRequestError when the moved node is disconnected. The first mount always hands a
+// freshly created (disconnected) iframe, so it must insert via appendChild; a later slot-to-slot
+// move of the connected iframe must still use moveBefore so iframe state survives mode switches.
+{
+  class AtomicMoveSlot extends FakeElement {
+    moveBeforeCalls = 0;
+    moveBefore(node, child) {
+      if (!node.isConnected) throw new Error("HierarchyRequestError: State-preserving atomic move cannot be performed on nodes participating in an invalid hierarchy.");
+      this.moveBeforeCalls += 1;
+      if (node.parentElement) {
+        const siblings = node.parentElement.children;
+        const at = siblings.indexOf(node);
+        if (at >= 0) siblings.splice(at, 1);
+      }
+      node.parentElement = this;
+      this.children.push(node);
+      void child;
+    }
+  }
+  class ConnectableIframe extends FakeIframe {
+    get isConnected() { return this.parentElement !== null; }
+  }
+  const iframe = new ConnectableIframe("agent-frame");
+  const chatSlot = new AtomicMoveSlot("chat-slot");
+  const canvasSlot = new AtomicMoveSlot("canvas-slot");
+  const sidecar = new FakeElement("sidecar");
+  const canvas = new FakeElement("canvas");
+  const documentElement = new FakeElement("html");
+  const body = new FakeElement("body");
+  const win = {
+    location: { origin: "https://booking.sonik.local" },
+    document: null,
+    innerWidth: 1280,
+    setTimeout: (fn) => { fn(); return 1; },
+    clearTimeout: () => undefined,
+    requestAnimationFrame: (fn) => { fn(); return 1; },
+    cancelAnimationFrame: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    getComputedStyle: () => ({ getPropertyValue: () => "520" }),
+  };
+  const doc = {
+    body,
+    documentElement,
+    querySelector: (selector) => ({
+      "#agent-frame": iframe,
+      "#chat-slot": chatSlot,
+      "#canvas-slot": canvasSlot,
+      "#sidecar": sidecar,
+      "#canvas": canvas,
+    })[selector] ?? null,
+  };
+  win.document = doc;
+  const moveController = mountSonikAgentUI({
+    agentUrl: "https://agent.sonik.local/",
+    hostOrigin: "https://booking.sonik.local",
+    getPageContext: () => ({ pageContext: { surface: "booking-console" } }),
+    elements: { iframe: "#agent-frame", chatSlot: "#chat-slot", canvasSlot: "#canvas-slot", sidecar: "#sidecar", canvasWindow: "#canvas" },
+    window: win,
+    document: doc,
+  });
+  assert.equal(iframe.parentElement, chatSlot, "first mount of a disconnected iframe must succeed on a moveBefore-capable slot");
+  assert.equal(chatSlot.moveBeforeCalls, 0, "first mount must insert via appendChild because moveBefore throws on disconnected nodes");
+  moveController.open("canvas");
+  assert.equal(iframe.parentElement, canvasSlot, "canvas mode should move the iframe into the canvas slot");
+  assert.equal(canvasSlot.moveBeforeCalls, 1, "connected slot-to-slot moves must keep using moveBefore so iframe state survives mode switches");
+  moveController.close();
+}
 
 class PickerElement {
   constructor(tagName = "DIV", attributes = {}, rect = { x: 10, y: 20, left: 10, top: 20, right: 210, bottom: 80, width: 200, height: 60 }) {
