@@ -39,8 +39,8 @@ If installed and relevant, also load:
 
 `/Users/danielletterio/emdash/worktrees/sonik-agent-ui/emdash/yellow-zebras-smell-txxjz`
 
-**Branch:** `docs/host-embedding-parity-handoff-20260721`  
-**Prior handoff commit:** `70e58923c3a9b64bf30c933841dcb98fdf4766a6`  
+**Branch:** `docs/host-embedding-parity-handoff-20260721`
+**Prior handoff commit:** `70e58923c3a9b64bf30c933841dcb98fdf4766a6`
 **PR:** <https://github.com/SonikFM/sonik-agent-ui/pull/62>
 
 This PR is documentation-only and contains the authoritative promotion, capability, security, and verification handoff.
@@ -51,9 +51,9 @@ This PR is documentation-only and contains the authoritative promotion, capabili
 
 `/private/tmp/amplify-agent-ui-embed-parity-20260721`
 
-**Branch:** `feat/amplify-dev-workbench-parity-20260721`  
-**Base:** `main@3afe5f17a616442985c73337aed2ea950499abe4`  
-**Commit:** `d80a838340b044a1df68bad122b6d418468d6cac`  
+**Branch:** `feat/amplify-dev-workbench-parity-20260721`
+**Base:** `main@3afe5f17a616442985c73337aed2ea950499abe4`
+**Commit:** `d80a838340b044a1df68bad122b6d418468d6cac`
 **PR:** <https://github.com/SonikFM/amplify/pull/565>
 
 ### Implemented
@@ -128,7 +128,7 @@ node .codex/skills/analyze-copy-retrofit/scripts/verify-source-drift.mjs \
 
 `/private/tmp/booking-agent-ui-embed-parity-20260721`
 
-**Branch:** `fix/booking-agent-ui-embed-parity-20260721`  
+**Branch:** `fix/booking-agent-ui-embed-parity-20260721`
 **Current main:** `9083d4f53de946b3da0a479d68fbbc3a0cf01444`
 
 The branch intentionally equals current Booking `main` and has no new commit.

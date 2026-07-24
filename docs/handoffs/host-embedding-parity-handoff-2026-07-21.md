@@ -1,7 +1,7 @@
 # Sonik Agent UI host embedding parity handoff
 
-**Date:** 2026-07-21  
-**Agent UI donor:** `SonikFM/sonik-agent-ui@0db59bab44fe79785f18e2616aedf5012d82e8ec`  
+**Date:** 2026-07-21
+**Agent UI donor:** `SonikFM/sonik-agent-ui@0db59bab44fe79785f18e2616aedf5012d82e8ec`
 **Dev Workbench:** `https://dev-workbench-sooty.vercel.app/`
 
 ## Outcome
