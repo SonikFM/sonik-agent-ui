@@ -131,7 +131,7 @@ export function mountSonikAgentUI(options) {
 
   const mountFrame = (slot) => {
     if (iframe.parentElement === slot) return;
-    if (typeof slot.moveBefore === "function") {
+    if (iframe.isConnected && typeof slot.moveBefore === "function") {
       slot.moveBefore(iframe, null);
       return;
     }

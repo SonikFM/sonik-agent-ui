@@ -662,7 +662,8 @@ export function mountSonikAgentUI(options: AgentEmbedMountOptions): AgentEmbedCo
   const mountFrame = (slot: HTMLElement) => {
     if (iframe.parentElement === slot) return;
     const moveBefore = (slot as HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void }).moveBefore;
-    if (typeof moveBefore === "function") {
+    // moveBefore is a state-preserving atomic move: Chrome 133+ throws HierarchyRequestError for disconnected nodes, so first insert must go through appendChild.
+    if (iframe.isConnected && typeof moveBefore === "function") {
       moveBefore.call(slot, iframe, null);
       return;
     }
